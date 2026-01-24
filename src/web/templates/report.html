@@ -1,0 +1,49 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <h2>Workout Report</h2>
+    </div>
+
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Exercise</th>
+                    <th>Sets</th>
+                    <th>Reps</th>
+                    <th>Weight</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>{{ row[0] }}</td>
+                    <td><span class="badge">{{ row[1] }}</span></td>
+                    <td>
+                        {% if row[6] == 'cardio' %}
+                        🏃 {{ row[2] }}
+                        {% else %}
+                        {{ row[2] }}
+                        {% endif %}
+                    </td>
+                    {% if row[6] == 'cardio' %}
+                    <!-- Cardio Format: Show Duration/Dist in Sets/Reps columns -->
+                    <td colspan="3" style="text-align:left; color:#555;">
+                        {{ row[7] or '' }} {{ row[8] or '' }} {{ row[9] or '' }}
+                    </td>
+                    {% else %}
+                    <td>{{ row[3] or '-' }}</td>
+                    <td>{{ row[4] or '-' }}</td>
+                    <td>{{ row[5] or '-' }}</td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

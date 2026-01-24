@@ -1,0 +1,609 @@
+{
+    "exercises": [
+        {
+            "name": "Barbell Bench Press",
+            "aliases": [
+                "flat bench",
+                "bb bench",
+                "bench press"
+            ],
+            "primary_muscle": "Mid Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Lateral Head Tricep",
+                "Medial Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Incline Barbell Bench Press",
+            "aliases": [
+                "incline bench",
+                "incline bb bench"
+            ],
+            "primary_muscle": "Upper Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Lateral Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Decline Barbell Bench Press",
+            "aliases": [
+                "decline bench",
+                "decline bb bench"
+            ],
+            "primary_muscle": "Lower Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Medial Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Dumbbell Bench Press",
+            "aliases": [
+                "db bench",
+                "flat db press"
+            ],
+            "primary_muscle": "Mid Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Lateral Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Incline Dumbbell Press",
+            "aliases": [
+                "incline db",
+                "incline db press"
+            ],
+            "primary_muscle": "Upper Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Lateral Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Decline Dumbbell Press",
+            "aliases": [
+                "decline db",
+                "decline db press"
+            ],
+            "primary_muscle": "Lower Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Medial Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Cable Crossover (High to Low)",
+            "aliases": [
+                "low cable fly",
+                "lower chest fly"
+            ],
+            "primary_muscle": "Lower Pecs",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Cable Crossover (Low to High)",
+            "aliases": [
+                "upper chest fly",
+                "low pulley crossover"
+            ],
+            "primary_muscle": "Upper Pecs",
+            "secondary_muscles": [
+                "Front Delts"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Cable Fly (Middle)",
+            "aliases": [
+                "cable fly",
+                "pec fly"
+            ],
+            "primary_muscle": "Mid Pecs",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Pec Deck Machine",
+            "aliases": [
+                "butterfly",
+                "machine fly"
+            ],
+            "primary_muscle": "Mid Pecs",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Push Up",
+            "aliases": [
+                "pushups",
+                "push-up"
+            ],
+            "primary_muscle": "Mid Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Triceps"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Dips (Chest Focus)",
+            "aliases": [
+                "chest dips",
+                "weighted dips"
+            ],
+            "primary_muscle": "Lower Pecs",
+            "secondary_muscles": [
+                "Front Delts",
+                "Long Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Overhead Press",
+            "aliases": [
+                "ohp",
+                "military press",
+                "standing barbell press",
+                "shoulder press"
+            ],
+            "primary_muscle": "Front Delts",
+            "secondary_muscles": [
+                "Lateral Head Tricep",
+                "Long Head Tricep",
+                "Upper Pecs"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Seated Dumbbell Shoulder Press",
+            "aliases": [
+                "seated db press",
+                "dumbbell shoulder press"
+            ],
+            "primary_muscle": "Front Delts",
+            "secondary_muscles": [
+                "Lateral Head Tricep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Arnold Press",
+            "aliases": [
+                "arnolds"
+            ],
+            "primary_muscle": "Front Delts",
+            "secondary_muscles": [
+                "Lateral Delts",
+                "Triceps"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Lateral Raise",
+            "aliases": [
+                "lat raise",
+                "side raise",
+                "db lateral raise"
+            ],
+            "primary_muscle": "Lateral Delts",
+            "secondary_muscles": [
+                "Traps"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Cable Lateral Raise",
+            "aliases": [
+                "cable side raise"
+            ],
+            "primary_muscle": "Lateral Delts",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Front Raise",
+            "aliases": [
+                "db front raise",
+                "plate raise"
+            ],
+            "primary_muscle": "Front Delts",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Rear Delt Fly",
+            "aliases": [
+                "bent over fly",
+                "reverse fly"
+            ],
+            "primary_muscle": "Rear Delts",
+            "secondary_muscles": [
+                "Rhomboids"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Face Pull",
+            "aliases": [
+                "facepulls"
+            ],
+            "primary_muscle": "Rear Delts",
+            "secondary_muscles": [
+                "Rhomboids",
+                "Traps",
+                "Lateral Delts"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Tricep Rope Pushdown",
+            "aliases": [
+                "rope pushdown",
+                "tricep pushdown"
+            ],
+            "primary_muscle": "Lateral Head Tricep",
+            "secondary_muscles": [
+                "Medial Head Tricep"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Tricep Bar Pushdown",
+            "aliases": [
+                "straight bar pushdown"
+            ],
+            "primary_muscle": "Lateral Head Tricep",
+            "secondary_muscles": [
+                "Medial Head Tricep"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Skull Crushers",
+            "aliases": [
+                "lying tricep extension",
+                "french press"
+            ],
+            "primary_muscle": "Long Head Tricep",
+            "secondary_muscles": [
+                "Medial Head Tricep"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Overhead Tricep Extension",
+            "aliases": [
+                "overhead extension",
+                "db overhead"
+            ],
+            "primary_muscle": "Long Head Tricep",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Close Grip Bench Press",
+            "aliases": [
+                "cg bench",
+                "close grip"
+            ],
+            "primary_muscle": "Medial Head Tricep",
+            "secondary_muscles": [
+                "Lateral Head Tricep",
+                "Mid Pecs",
+                "Front Delts"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Pull Up",
+            "aliases": [
+                "pullup",
+                "wide grip pull up"
+            ],
+            "primary_muscle": "Outer Lats",
+            "secondary_muscles": [
+                "Lower Lats",
+                "Rhomboids",
+                "Short Head Bicep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Chin Up",
+            "aliases": [
+                "chinup",
+                "chins"
+            ],
+            "primary_muscle": "Lower Lats",
+            "secondary_muscles": [
+                "Short Head Bicep",
+                "Long Head Bicep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Lat Pulldown",
+            "aliases": [
+                "pulldown",
+                "wide grip pulldown"
+            ],
+            "primary_muscle": "Outer Lats",
+            "secondary_muscles": [
+                "Lower Lats",
+                "Rhomboids",
+                "Short Head Bicep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Seated Cable Row",
+            "aliases": [
+                "cable row",
+                "seated row"
+            ],
+            "primary_muscle": "Inner Lats",
+            "secondary_muscles": [
+                "Rhomboids",
+                "Traps",
+                "Rear Delts",
+                "Long Head Bicep"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Barbell Row",
+            "aliases": [
+                "bb row",
+                "bent over row"
+            ],
+            "primary_muscle": "Inner Lats",
+            "secondary_muscles": [
+                "Rhomboids",
+                "Traps",
+                "Rear Delts",
+                "Long Head Bicep",
+                "Lower Back"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "T-Bar Row",
+            "aliases": [
+                "tbar row"
+            ],
+            "primary_muscle": "Inner Lats",
+            "secondary_muscles": [
+                "Rhomboids",
+                "Traps",
+                "Rear Delts"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Deadlift",
+            "aliases": [
+                "conventional deadlift",
+                "dl"
+            ],
+            "primary_muscle": "Gluteus Maximus",
+            "secondary_muscles": [
+                "Hamstrings",
+                "Quads",
+                "Traps",
+                "Lower Back",
+                "Forearms"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Review Delt Machine",
+            "aliases": [
+                "reverse pec deck"
+            ],
+            "primary_muscle": "Rear Delts",
+            "secondary_muscles": [
+                "Rhomboids"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Dumbbell Shrugs",
+            "aliases": [
+                "shrugs"
+            ],
+            "primary_muscle": "Traps",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Barbell Curl",
+            "aliases": [
+                "bb curl",
+                "standing curl"
+            ],
+            "primary_muscle": "Short Head Bicep",
+            "secondary_muscles": [
+                "Long Head Bicep"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Hammer Curl",
+            "aliases": [
+                "db hammer curl"
+            ],
+            "primary_muscle": "Long Head Bicep",
+            "secondary_muscles": [
+                "Forearms"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Incline Dumbbell Curl",
+            "aliases": [
+                "incline curl"
+            ],
+            "primary_muscle": "Long Head Bicep",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Preacher Curl",
+            "aliases": [
+                "machine curl",
+                "ez bar preacher"
+            ],
+            "primary_muscle": "Short Head Bicep",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Concentration Curl",
+            "aliases": [
+                "concentration"
+            ],
+            "primary_muscle": "Short Head Bicep",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Barbell Squat",
+            "aliases": [
+                "back squat",
+                "squat",
+                "low bar squat"
+            ],
+            "primary_muscle": "Quads",
+            "secondary_muscles": [
+                "Gluteus Maximus",
+                "Hamstrings",
+                "Lower Back"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Front Squat",
+            "aliases": [],
+            "primary_muscle": "Quads",
+            "secondary_muscles": [
+                "Glutes",
+                "Core"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Leg Press",
+            "aliases": [
+                "machine leg press"
+            ],
+            "primary_muscle": "Quads",
+            "secondary_muscles": [
+                "Glutes",
+                "Hamstrings"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Leg Extension",
+            "aliases": [
+                "quad extension",
+                "leg ext"
+            ],
+            "primary_muscle": "Rectus Femoris",
+            "secondary_muscles": [
+                "Vastus Lateralis",
+                "Vastus Medialis",
+                "Vastus Intermedius"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Romanian Deadlift",
+            "aliases": [
+                "rdl",
+                "stiff leg deadlift"
+            ],
+            "primary_muscle": "Hamstrings",
+            "secondary_muscles": [
+                "Gluteus Maximus",
+                "Lower Back"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Leg Curl (Seated)",
+            "aliases": [
+                "seated leg curl",
+                "hamstring curl"
+            ],
+            "primary_muscle": "Hamstrings",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Leg Curl (Lying)",
+            "aliases": [
+                "lying leg curl"
+            ],
+            "primary_muscle": "Hamstrings",
+            "secondary_muscles": [],
+            "type": "isolation"
+        },
+        {
+            "name": "Bulgarian Split Squat",
+            "aliases": [
+                "split squat",
+                "bss"
+            ],
+            "primary_muscle": "Quads",
+            "secondary_muscles": [
+                "Gluteus Maximus",
+                "Hamstrings"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Lunges",
+            "aliases": [
+                "walking lunges",
+                "db lunges"
+            ],
+            "primary_muscle": "Quads",
+            "secondary_muscles": [
+                "Gluteus Maximus",
+                "Hamstrings"
+            ],
+            "type": "compound"
+        },
+        {
+            "name": "Calf Raise (Standing)",
+            "aliases": [
+                "standing calf"
+            ],
+            "primary_muscle": "Gastrocnemius",
+            "secondary_muscles": [
+                "Soleus"
+            ],
+            "type": "isolation"
+        },
+        {
+            "name": "Calf Raise (Seated)",
+            "aliases": [
+                "seated calf"
+            ],
+            "primary_muscle": "Soleus",
+            "secondary_muscles": [],
+            "type": "isolation"
+        }
+    ]
+}

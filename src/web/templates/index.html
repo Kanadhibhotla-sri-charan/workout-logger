@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="card">
+    <h2>Log Workout</h2>
+    <p class="text-gray-600">Type your workout below using natural language.</p>
+
+    <form action="/" method="POST">
+        <label style="display:block; margin-bottom:8px; font-weight:500;">Your Workout:</label>
+        <textarea name="raw_input" rows="6"
+            placeholder="Example: Bench press 3 sets 100, 110kg then squats 5x5">{{ previous_input }}</textarea>
+
+        <label style="display:block; margin-bottom:8px; font-weight:500;">Date:</label>
+        <input type="date" name="date" value="{{ today }}"
+            style="padding:8px; border:1px solid #ccc; border-radius:4px; margin-bottom:20px;">
+
+        <button type="submit" class="btn">Analyze & Log</button>
+    </form>
+</div>
+
+{% if report %}
+<div class="card">
+    <h3>Summary: {{ report.day_type }} Day</h3>
+    <ul>
+        {% for ex in display_exercises %}
+        <li>
+            {% if ex.type == 'cardio' %}
+            <!-- CARDIO ITEM -->
+            <strong>🏃 {{ ex.name }}</strong>
+            <span class="text-sm text-gray-500">
+                {{ ex.duration or '' }} {{ ex.distance or '' }} {{ ex.speed or '' }}
+            </span>
+            <span class="badge" style="background:#e0f2fe; color:#0369a1;">Cardio</span>
+            {% else %}
+            <!-- LIFT ITEM -->
+            <strong>{{ ex.name }}</strong>
+            <span class="text-sm text-gray-500">
+                ({{ ex.sets }} sets) {{ ex.weight }}
+            </span>
+            <span class="badge">{{ ex.muscle }}</span>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+
+    {% if ai_analysis %}
+    <div style="margin-top:20px; padding:15px; background:#f0fdf4; border-radius:6px; border:1px solid #bbf7d0;">
+        <h4 style="margin-top:0; color:#166534;">AI Coach Says:</h4>
+        <div style="white-space: pre-wrap;">{{ ai_analysis }}</div>
+    </div>
+    {% endif %}
+
+    <form action="/confirm" method="POST" style="margin-top:20px;">
+        <!-- Hidden inputs to pass data to confirm step -->
+        <input type="hidden" name="raw_input" value="{{ raw_input }}">
+        <input type="hidden" name="date" value="{{ date }}">
+        <input type="hidden" name="day_type" value="{{ report.day_type }}">
+        <input type="hidden" name="exercises_json" value="{{ exercises_json }}">
+
+        <button type="submit" class="btn" style="background:#16a34a;">Confirm & Save</button>
+        <a href="/" class="btn" style="background:#dc2626; margin-left:10px;">Cancel</a>
+    </form>
+</div>
+{% endif %}
+{% endblock %}

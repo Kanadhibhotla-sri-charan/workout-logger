@@ -1,0 +1,5 @@
+rapidfuzz
+google-generativeai
+flask
+gunicorn
+psycopg2-binary
