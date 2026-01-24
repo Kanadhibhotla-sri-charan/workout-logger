@@ -72,8 +72,9 @@ def init_database():
                 # MVP: We assume SQLite locally. Providing full Postgres migration script is complex.
                 # HACK: If Postgres, we skip schema creation here and assume user runs SQL manually or we try best effort.
                 if db_url:
-                     # Replace SQLiteisms
-                     stmt = stmt.replace("AUTOINCREMENT", "")
+                     # Replace SQLiteisms for Postgres
+                     stmt = stmt.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+                     stmt = stmt.replace("AUTOINCREMENT", "") # Catch any stragglers if needed, but above handles PKs.
                 
                 try:
                     cursor.execute(stmt)
