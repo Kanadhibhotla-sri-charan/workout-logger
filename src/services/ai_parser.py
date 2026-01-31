@@ -8,7 +8,7 @@ import json
 import os
 
 # API Key (reused from analyzer)
-API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyDaNrZJQIcnQr5H2xOprhn6NwpNNtr33fM")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
 class AIParser:
     def __init__(self):

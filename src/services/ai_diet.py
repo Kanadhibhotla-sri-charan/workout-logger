@@ -7,11 +7,15 @@ import json
 import google.generativeai as genai
 
 # API Key (reused)
-API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyDaNrZJQIcnQr5H2xOprhn6NwpNNtr33fM")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
 class AIDietParser:
     def __init__(self):
         try:
+            if not API_KEY:
+                self.available = False
+                return
+
             genai.configure(api_key=API_KEY)
             self.model = genai.GenerativeModel('gemini-2.5-flash')
             self.available = True

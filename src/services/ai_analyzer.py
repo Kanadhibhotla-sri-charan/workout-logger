@@ -7,11 +7,16 @@ import google.generativeai as genai
 from collections import Counter
 
 # Set API Key (Prioritize Env Var for Production)
-API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyDaNrZJQIcnQr5H2xOprhn6NwpNNtr33fM")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
 class AIAnalyzer:
     def __init__(self):
         try:
+            if not API_KEY:
+                print("[WARN] GEMINI_API_KEY not set.")
+                self.available = False
+                return
+                
             genai.configure(api_key=API_KEY)
             # Use 'gemini-2.5-flash' model (as found in list)
             self.model = genai.GenerativeModel('gemini-2.5-flash')
