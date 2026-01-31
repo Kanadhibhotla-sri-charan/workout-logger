@@ -51,9 +51,13 @@ def get_connection():
 
 def init_database():
     """Initialize DB (Supports both)."""
+    logs = []
     db_url = os.getenv("DATABASE_URL")
-    print(f"Initializing database (Mode: {'Postgres' if db_url else 'SQLite'})")
+    logs.append(f"Initializing database (Mode: {'Postgres' if db_url else 'SQLite'})")
     
+    if not os.path.exists(SCHEMA_PATH):
+        return f"Error: Schema file not found at {SCHEMA_PATH}"
+
     with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
         schema_sql = f.read()
         
@@ -63,33 +67,30 @@ def init_database():
     try:
         # Split schema by semi-colon since executemany/script varies
         statements = schema_sql.split(';')
+        count = 0
         for stmt in statements:
             if stmt.strip():
-                # Postgres cleanup: Remove "AUTOINCREMENT" (uses SERIAL/IDENTITY implicity or different syntax)
-                # But our schema uses INTEGER PRIMARY KEY AUTOINCREMENT which is SQLite specific.
-                # For Postgres compatibility, simple INTEGER PRIMARY KEY is often mapped to SERIAL if using SQLAlchemy,
-                # but raw SQL is harder.
-                # MVP: We assume SQLite locally. Providing full Postgres migration script is complex.
-                # HACK: If Postgres, we skip schema creation here and assume user runs SQL manually or we try best effort.
                 if db_url:
                      # Replace SQLiteisms for Postgres
                      stmt = stmt.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
-                     stmt = stmt.replace("AUTOINCREMENT", "") # Catch any stragglers if needed, but above handles PKs.
+                     stmt = stmt.replace("AUTOINCREMENT", "") 
                 
                 try:
                     cursor.execute(stmt)
+                    count += 1
                 except Exception as e:
-                    # Ignore "relation exists" errors
-                    print(f"Warning executing statement: {e}")
+                    logs.append(f"Warning executing statement: {e}")
                     
         conn.commit()
-        print("[OK] Database initialized.")
+        logs.append(f"[OK] Database initialized. Executed {count} statements.")
     except Exception as e:
-        print(f"[ERROR] {e}")
+        logs.append(f"[ERROR] {e}")
         conn.rollback()
         raise e
     finally:
         conn.close()
+        
+    return "<br>".join(logs)
 
 if __name__ == "__main__":
     init_database()

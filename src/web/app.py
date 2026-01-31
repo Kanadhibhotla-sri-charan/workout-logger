@@ -200,8 +200,8 @@ def confirm_diet():
 def init_db_route():
     try:
         from src.models.database import init_database
-        init_database()
-        return "<h1>Database Initialized Successfully! 🚀</h1><p>You can now go back to <a href='/'>Home</a> and start logging.</p>"
+        logs = init_database()
+        return f"<h1>Database Initialization Report</h1><pre>{logs}</pre><p><a href='/'>Go Home</a></p>"
     except Exception as e:
         return f"<h1>Initialization Failed</h1><p>{e}</p>"
 
