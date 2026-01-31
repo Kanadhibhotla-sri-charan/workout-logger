@@ -87,6 +87,7 @@ def init_database():
     except Exception as e:
         print(f"[ERROR] {e}")
         conn.rollback()
+        raise e
     finally:
         conn.close()
 

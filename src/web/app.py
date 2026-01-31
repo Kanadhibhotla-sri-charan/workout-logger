@@ -196,5 +196,14 @@ def confirm_diet():
     
     return redirect(url_for('diet'))
 
+@app.route('/init-db')
+def init_db_route():
+    try:
+        from src.models.database import init_database
+        init_database()
+        return "<h1>Database Initialized Successfully! 🚀</h1><p>You can now go back to <a href='/'>Home</a> and start logging.</p>"
+    except Exception as e:
+        return f"<h1>Initialization Failed</h1><p>{e}</p>"
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
