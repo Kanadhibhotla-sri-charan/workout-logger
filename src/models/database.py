@@ -54,13 +54,33 @@ def init_database():
     logs = []
     db_url = os.getenv("DATABASE_URL")
     logs.append(f"Initializing database (Mode: {'Postgres' if db_url else 'SQLite'})")
+    logs.append(f"CWD: {os.getcwd()}")
     
-    if not os.path.exists(SCHEMA_PATH):
-        return f"Error: Schema file not found at {SCHEMA_PATH}"
+    # Try multiple paths for schema.sql
+    possible_paths = [
+        Path(__file__).parent.parent.parent / "sql" / "schema.sql",       # Relative to this file
+        Path(os.getcwd()) / "sql" / "schema.sql",                         # Relative to CWD
+        Path("/opt/render/project/src/sql/schema.sql")                    # Absolute Render path
+    ]
+    
+    schema_sql = None
+    used_path = None
+    
+    for p in possible_paths:
+        logs.append(f"Checking path: {p}")
+        if p.exists():
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    schema_sql = f.read()
+                used_path = p
+                logs.append(f"FOUND schema at: {p}")
+                break
+            except Exception as e:
+                logs.append(f"Found but failed to read {p}: {e}")
+    
+    if not schema_sql:
+        return "<br>".join(logs) + "<br>[FATAL] Could not find schema.sql in any expected location."
 
-    with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
-        schema_sql = f.read()
-        
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -79,14 +99,14 @@ def init_database():
                     cursor.execute(stmt)
                     count += 1
                 except Exception as e:
-                    logs.append(f"Warning executing statement: {e}")
+                    logs.append(f"Warning executing statement: {str(e)[:100]}...") # Truncate long errors
                     
         conn.commit()
         logs.append(f"[OK] Database initialized. Executed {count} statements.")
     except Exception as e:
         logs.append(f"[ERROR] {e}")
         conn.rollback()
-        raise e
+        # Do not raise, return logs so user sees them
     finally:
         conn.close()
         
