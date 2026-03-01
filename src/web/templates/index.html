@@ -1,65 +1,254 @@
 {% extends "layout.html" %}
 
 {% block content %}
+
+<!-- ── QUICK TEMPLATES ──────────────────────────────────────────────────── -->
 <div class="card">
-    <h2>Log Workout</h2>
-    <p class="text-gray-600">Type your workout below using natural language.</p>
+    <p class="card-title">⚡ Quick Templates — one click to fill your workout</p>
+    <div class="chip-group">
+        <button class="chip push" onclick="useTemplate('push')">💪 Push Day</button>
+        <button class="chip pull" onclick="useTemplate('pull')">🏋 Pull Day</button>
+        <button class="chip legs" onclick="useTemplate('legs')">🦵 Legs Day</button>
+        <button class="chip cardio" onclick="useTemplate('cardio')">🏃 Cardio</button>
+        <button class="chip" onclick="useTemplate('fullbody')">🔄 Full Body</button>
+        <button class="chip" onclick="useTemplate('upper')">⬆️ Upper Body</button>
+    </div>
+</div>
 
-    <form action="/" method="POST">
-        <label style="display:block; margin-bottom:8px; font-weight:500;">Your Workout:</label>
-        <textarea name="raw_input" rows="6"
-            placeholder="Example: Bench press 3 sets 100, 110kg then squats 5x5">{{ previous_input }}</textarea>
+<!-- ── LOG FORM ─────────────────────────────────────────────────────────── -->
+<div class="card">
+    <p class="card-title">📝 Log Workout</p>
 
-        <label style="display:block; margin-bottom:8px; font-weight:500;">Date:</label>
-        <input type="date" name="date" value="{{ today }}"
-            style="padding:8px; border:1px solid #ccc; border-radius:4px; margin-bottom:20px;">
+    <form id="workout-form" action="/" method="POST">
+        <label for="raw-input">Your workout <span class="muted text-sm">(natural language — e.g. "Bench 4x8 80kg, OHP 3x10 50kg")</span></label>
+        <textarea id="raw-input" name="raw_input" rows="4"
+            placeholder="Bench press 4x8 80kg, Incline DB 3x10 24kg, Lateral raise 4x15 10kg"
+            autofocus>{{ raw_input or '' }}</textarea>
 
-        <button type="submit" class="btn">Analyze & Log</button>
+        <div class="flex gap-2 mt-2" style="align-items:center; flex-wrap:wrap;">
+            <div>
+                <label for="workout-date" style="margin-bottom:3px;">Date</label>
+                <input type="date" id="workout-date" name="date"
+                    value="{{ today }}" style="width:auto;">
+            </div>
+            <div style="flex:1; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+                <button type="submit" class="btn btn-primary" title="Ctrl+Enter">
+                    🔍 Analyze &amp; Log
+                </button>
+                <button type="button" class="btn btn-success" onclick="quickSave()" title="Save directly, no analysis">
+                    ⚡ Quick Save
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="clearForm()">Clear</button>
+            </div>
+        </div>
+        <p class="muted text-sm mt-2" style="margin-bottom:0;">
+            Tip: <kbd style="background:var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Enter</kbd> to analyze &nbsp;|&nbsp;
+            <kbd style="background:var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Shift+Enter</kbd> to quick-save
+        </p>
     </form>
 </div>
 
-{% if report %}
+<!-- ── EXERCISE CHIPS ────────────────────────────────────────────────────── -->
 <div class="card">
-    <h3>Summary: {{ report.day_type }} Day</h3>
-    <ul>
-        {% for ex in display_exercises %}
-        <li>
-            {% if ex.type == 'cardio' %}
-            <!-- CARDIO ITEM -->
-            <strong>🏃 {{ ex.name }}</strong>
-            <span class="text-sm text-gray-500">
-                {{ ex.duration or '' }} {{ ex.distance or '' }} {{ ex.speed or '' }}
-            </span>
-            <span class="badge" style="background:#e0f2fe; color:#0369a1;">Cardio</span>
-            {% else %}
-            <!-- LIFT ITEM -->
-            <strong>{{ ex.name }}</strong>
-            <span class="text-sm text-gray-500">
-                ({{ ex.sets }} sets) {{ ex.weight }}
-            </span>
-            <span class="badge">{{ ex.muscle }}</span>
-            {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
+    <p class="card-title">➕ Quick-Add Exercise — click to append to your workout</p>
+
+    <div class="section-label">Push</div>
+    <div class="chip-group">
+        <button class="chip push" onclick="addExercise('Bench Press 4x8 0kg')">Bench Press</button>
+        <button class="chip push" onclick="addExercise('Incline DB Press 3x10 0kg')">Incline DB</button>
+        <button class="chip push" onclick="addExercise('Overhead Press 3x10 0kg')">OHP</button>
+        <button class="chip push" onclick="addExercise('Dips 3x12')">Dips</button>
+        <button class="chip push" onclick="addExercise('Lateral Raise 4x15 0kg')">Lateral Raise</button>
+        <button class="chip push" onclick="addExercise('Tricep Pushdown 3x15 0kg')">Tricep Pushdown</button>
+        <button class="chip push" onclick="addExercise('Cable Fly 3x15 0kg')">Cable Fly</button>
+        <button class="chip push" onclick="addExercise('Chest Dip 3x12')">Chest Dips</button>
+        <button class="chip push" onclick="addExercise('Pec Deck 3x15 0kg')">Pec Deck</button>
+        <button class="chip push" onclick="addExercise('Arnold Press 3x12 0kg')">Arnold Press</button>
+    </div>
+
+    <div class="section-label">Pull</div>
+    <div class="chip-group">
+        <button class="chip pull" onclick="addExercise('Deadlift 4x5 0kg')">Deadlift</button>
+        <button class="chip pull" onclick="addExercise('Pull Ups 4x8')">Pull Ups</button>
+        <button class="chip pull" onclick="addExercise('Lat Pulldown 3x12 0kg')">Lat Pulldown</button>
+        <button class="chip pull" onclick="addExercise('Barbell Row 3x10 0kg')">Barbell Row</button>
+        <button class="chip pull" onclick="addExercise('Seated Cable Row 3x12 0kg')">Cable Row</button>
+        <button class="chip pull" onclick="addExercise('Face Pull 3x15 0kg')">Face Pull</button>
+        <button class="chip pull" onclick="addExercise('Preacher Curl 3x12 0kg')">Preacher Curl</button>
+        <button class="chip pull" onclick="addExercise('Hammer Curl 3x12 0kg')">Hammer Curl</button>
+        <button class="chip pull" onclick="addExercise('Incline DB Curl 3x12 0kg')">Incline Curl</button>
+        <button class="chip pull" onclick="addExercise('Reverse Pec Deck 3x15 0kg')">Rear Delt</button>
+    </div>
+
+    <div class="section-label">Legs</div>
+    <div class="chip-group">
+        <button class="chip legs" onclick="addExercise('Squat 4x6 0kg')">Squat</button>
+        <button class="chip legs" onclick="addExercise('Leg Press 3x12 0kg')">Leg Press</button>
+        <button class="chip legs" onclick="addExercise('Romanian Deadlift 3x10 0kg')">RDL</button>
+        <button class="chip legs" onclick="addExercise('Leg Curl 3x15 0kg')">Leg Curl</button>
+        <button class="chip legs" onclick="addExercise('Leg Extension 3x15 0kg')">Leg Extension</button>
+        <button class="chip legs" onclick="addExercise('Calf Raise 4x20 0kg')">Calf Raise</button>
+        <button class="chip legs" onclick="addExercise('Hip Thrust 3x12 0kg')">Hip Thrust</button>
+        <button class="chip legs" onclick="addExercise('Bulgarian Split Squat 3x10 0kg')">Bulgarian Split</button>
+    </div>
+
+    <div class="section-label">Cardio</div>
+    <div class="chip-group">
+        <button class="chip cardio" onclick="addExercise('Running 30min')">Running 30m</button>
+        <button class="chip cardio" onclick="addExercise('Running 45min')">Running 45m</button>
+        <button class="chip cardio" onclick="addExercise('Cycling 20min')">Cycling 20m</button>
+        <button class="chip cardio" onclick="addExercise('Jump Rope 15min')">Jump Rope</button>
+        <button class="chip cardio" onclick="addExercise('HIIT 20min')">HIIT 20m</button>
+        <button class="chip cardio" onclick="addExercise('Walking 30min')">Walking 30m</button>
+    </div>
+</div>
+
+<!-- ── LAST WORKOUT REPEAT ────────────────────────────────────────────────── -->
+{% if last_workout %}
+<div class="card">
+    <p class="card-title">🔁 Last Workout — {{ last_workout[1] }} &nbsp;
+        <span class="badge badge-{% if last_workout[2] == 'PUSH' %}push{% elif last_workout[2] == 'PULL' %}pull{% elif last_workout[2] == 'LEGS' %}legs{% elif last_workout[2] == 'CARDIO' %}cardio{% else %}default{% endif %}">{{ last_workout[2] }}</span>
+    </p>
+    <p class="muted text-sm" style="margin:0 0 10px; white-space:pre-wrap; word-break:break-word;">{{ last_workout[3] }}</p>
+    <button class="btn btn-outline btn-sm"
+        onclick="repeatWorkout({{ last_workout[3]|tojson }})">
+        🔁 Repeat This Workout
+    </button>
+</div>
+{% endif %}
+
+<!-- ── ANALYSIS RESULTS ───────────────────────────────────────────────────── -->
+{% if report %}
+<div class="card" style="border-color: var(--primary); border-width: 2px;">
+    <p class="card-title">
+        📊 Analysis —
+        <span class="badge badge-{% if report.day_type == 'PUSH' %}push{% elif report.day_type == 'PULL' %}pull{% elif report.day_type == 'LEGS' %}legs{% elif report.day_type == 'CARDIO' %}cardio{% else %}default{% endif %}">
+            {{ report.day_type }} Day
+        </span>
+    </p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Exercise</th>
+                <th>Sets</th>
+                <th>Reps</th>
+                <th>Weight</th>
+                <th>Muscle</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ex in display_exercises %}
+            <tr>
+                {% if ex.type == 'cardio' %}
+                <td>🏃 <strong>{{ ex.name }}</strong></td>
+                <td colspan="3" class="muted">{{ ex.duration or '' }} {{ ex.distance or '' }} {{ ex.speed or '' }}</td>
+                <td><span class="badge badge-cardio">Cardio</span></td>
+                {% else %}
+                <td><strong>{{ ex.name }}</strong></td>
+                <td>{{ ex.sets or '—' }}</td>
+                <td>{{ ex.reps or '—' }}</td>
+                <td>{{ ex.weight or '—' }}</td>
+                <td><span class="badge badge-default">{{ ex.muscle or '—' }}</span></td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 
     {% if ai_analysis %}
-    <div style="margin-top:20px; padding:15px; background:#f0fdf4; border-radius:6px; border:1px solid #bbf7d0;">
-        <h4 style="margin-top:0; color:#166534;">AI Coach Says:</h4>
-        <div style="white-space: pre-wrap;">{{ ai_analysis }}</div>
+    <div style="margin-top:14px; padding:14px; background:var(--surface2); border-radius:8px; border-left:3px solid var(--success);">
+        <p style="margin:0 0 6px; font-size:.8rem; font-weight:700; color:var(--success); text-transform:uppercase; letter-spacing:.05em;">🤖 AI Coach</p>
+        <div style="white-space: pre-wrap; font-size:.9rem;">{{ ai_analysis }}</div>
     </div>
     {% endif %}
 
-    <form action="/confirm" method="POST" style="margin-top:20px;">
-        <!-- Hidden inputs to pass data to confirm step -->
-        <input type="hidden" name="raw_input" value="{{ raw_input }}">
-        <input type="hidden" name="date" value="{{ date }}">
-        <input type="hidden" name="day_type" value="{{ report.day_type }}">
-        <input type="hidden" name="exercises_json" value="{{ exercises_json }}">
-
-        <button type="submit" class="btn" style="background:#16a34a;">Confirm & Save</button>
-        <a href="/" class="btn" style="background:#dc2626; margin-left:10px;">Cancel</a>
-    </form>
+    <div class="flex gap-2 mt-4" style="flex-wrap:wrap;">
+        <form action="/confirm" method="POST" style="display:inline;">
+            <input type="hidden" name="raw_input"      value="{{ raw_input }}">
+            <input type="hidden" name="date"           value="{{ date }}">
+            <input type="hidden" name="day_type"       value="{{ report.day_type }}">
+            <input type="hidden" name="exercises_json" value="{{ exercises_json }}">
+            <button type="submit" class="btn btn-success">✓ Save Workout</button>
+        </form>
+        <a href="/" class="btn btn-danger">✕ Discard</a>
+    </div>
 </div>
 {% endif %}
+
+<script>
+    // ── Workout Templates ──────────────────────────────────────────────────
+    const TEMPLATES = {
+        push:     'Bench Press 4x8 0kg, Incline DB Press 3x10 0kg, Overhead Press 3x10 0kg, Lateral Raise 4x15 0kg, Tricep Pushdown 3x15 0kg',
+        pull:     'Deadlift 4x5 0kg, Pull Ups 4x8, Lat Pulldown 3x12 0kg, Barbell Row 3x10 0kg, Preacher Curl 3x12 0kg, Face Pull 3x15 0kg',
+        legs:     'Squat 4x6 0kg, Leg Press 3x12 0kg, Romanian Deadlift 3x10 0kg, Leg Curl 3x15 0kg, Leg Extension 3x15 0kg, Calf Raise 4x20 0kg',
+        cardio:   'Running 30min',
+        fullbody: 'Bench Press 3x8 0kg, Pull Ups 3x8, Squat 3x8 0kg, Overhead Press 3x10 0kg, Romanian Deadlift 3x10 0kg',
+        upper:    'Bench Press 4x8 0kg, Barbell Row 3x10 0kg, Overhead Press 3x10 0kg, Lat Pulldown 3x12 0kg, Lateral Raise 3x15 0kg, Tricep Pushdown 3x12 0kg',
+    };
+
+    function useTemplate(key) {
+        document.getElementById('raw-input').value = TEMPLATES[key];
+        document.getElementById('raw-input').focus();
+        showToast('Template loaded — replace 0kg with your weights!', '#2563eb');
+    }
+
+    // ── Append exercise chip ───────────────────────────────────────────────
+    function addExercise(text) {
+        appendToTextarea('raw-input', text);
+    }
+
+    // ── Repeat last workout ────────────────────────────────────────────────
+    function repeatWorkout(text) {
+        document.getElementById('raw-input').value = text;
+        document.getElementById('raw-input').focus();
+        showToast('Workout loaded — update weights if needed!', '#2563eb');
+    }
+
+    // ── Quick Save (no analysis step) ─────────────────────────────────────
+    function quickSave() {
+        const ta = document.getElementById('raw-input');
+        if (!ta.value.trim()) {
+            showToast('Please enter your workout first.', '#dc2626');
+            return;
+        }
+        const form = document.getElementById('workout-form');
+        form.action = '/quick_log';
+        showToast('⚡ Saving…', '#16a34a');
+        form.submit();
+    }
+
+    // ── Clear ──────────────────────────────────────────────────────────────
+    function clearForm() {
+        document.getElementById('raw-input').value = '';
+        document.getElementById('raw-input').focus();
+    }
+
+    // ── Keyboard shortcuts ─────────────────────────────────────────────────
+    document.addEventListener('keydown', function(e) {
+        if (e.ctrlKey && e.shiftKey && e.key === 'Enter') {
+            e.preventDefault();
+            quickSave();
+        } else if (e.ctrlKey && e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('workout-form').action = '/';
+            document.getElementById('workout-form').submit();
+        }
+    });
+
+    // ── Load repeat workout from dashboard ────────────────────────────────
+    (function() {
+        const stored = sessionStorage.getItem('repeatWorkout');
+        if (stored) {
+            sessionStorage.removeItem('repeatWorkout');
+            const ta = document.getElementById('raw-input');
+            if (ta && !ta.value.trim()) {
+                ta.value = stored;
+                ta.focus();
+                showToast('Workout loaded — update weights if needed!', '#2563eb');
+            }
+        }
+    })();
+</script>
+
 {% endblock %}

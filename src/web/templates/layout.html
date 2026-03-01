@@ -1,151 +1,289 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Workout Logger</title>
+    <title>FitLog — Fast Fitness Tracker</title>
     <style>
+        /* ── CSS Variables ─────────────────────────────────────────────── */
         :root {
-            --primary: #2563eb;
-            --bg: #f8fafc;
-            --surface: #ffffff;
-            --text: #1e293b;
+            --bg:        #f1f5f9;
+            --surface:   #ffffff;
+            --surface2:  #f8fafc;
+            --border:    #e2e8f0;
+            --text:      #0f172a;
+            --muted:     #64748b;
+            --primary:   #2563eb;
+            --primary-h: #1d4ed8;
+            --success:   #16a34a;
+            --danger:    #dc2626;
+            --warning:   #d97706;
+            --push:      #ef4444;
+            --pull:      #3b82f6;
+            --legs:      #22c55e;
+            --cardio:    #f59e0b;
+            --radius:    10px;
+            --shadow:    0 1px 4px rgba(0,0,0,.08);
+        }
+        body.dark {
+            --bg:       #0f172a;
+            --surface:  #1e293b;
+            --surface2: #0f172a;
+            --border:   #334155;
+            --text:     #f1f5f9;
+            --muted:    #94a3b8;
+            --shadow:   0 1px 4px rgba(0,0,0,.4);
         }
 
+        /* ── Reset / Base ──────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
             color: var(--text);
-            margin: 0;
-            padding: 0;
+            margin: 0; padding: 0;
             line-height: 1.5;
+            transition: background .2s, color .2s;
         }
+        a { color: var(--primary); }
 
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
+        /* ── Navigation ────────────────────────────────────────────────── */
         nav {
             background: var(--surface);
-            padding: 15px 0;
-            margin-bottom: 30px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        }
-
-        nav .container {
+            border-bottom: 1px solid var(--border);
             padding: 0 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            position: sticky; top: 0; z-index: 100;
+            display: flex; align-items: center; justify-content: space-between;
+            height: 52px;
         }
-
+        .nav-logo {
+            font-weight: 700; font-size: 1.1rem;
+            text-decoration: none; color: var(--primary);
+            letter-spacing: -.5px;
+        }
+        .nav-links { display: flex; align-items: center; gap: 4px; }
         .nav-links a {
-            text-decoration: none;
-            color: var(--text);
-            margin-left: 20px;
-            font-weight: 500;
+            text-decoration: none; color: var(--muted);
+            padding: 6px 12px; border-radius: 6px;
+            font-weight: 500; font-size: .9rem;
+            transition: background .15s, color .15s;
         }
-
-        .nav-links a:hover {
-            color: var(--primary);
+        .nav-links a:hover, .nav-links a.active {
+            background: var(--primary); color: #fff;
         }
-
-        .logo {
-            font-weight: bold;
-            font-size: 1.2rem;
-            text-decoration: none;
-            color: var(--primary);
+        .dark-toggle {
+            background: none; border: 1px solid var(--border);
+            color: var(--muted); cursor: pointer;
+            padding: 5px 10px; border-radius: 6px; font-size: .85rem;
+            transition: all .15s;
         }
+        .dark-toggle:hover { background: var(--border); }
 
+        /* ── Layout ────────────────────────────────────────────────────── */
+        .container { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+
+        /* ── Cards ─────────────────────────────────────────────────────── */
         .card {
             background: var(--surface);
-            border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-
-        h1,
-        h2 {
-            margin-top: 0;
-        }
-
-        /* Form Styles */
-        textarea {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            font-family: inherit;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
             margin-bottom: 16px;
-            resize: vertical;
+            box-shadow: var(--shadow);
+        }
+        .card-title {
+            margin: 0 0 14px;
+            font-size: 1rem; font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase; letter-spacing: .05em;
+            font-size: .78rem;
         }
 
-        .btn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 500;
-            display: inline-block;
-            text-decoration: none;
-        }
-
-        .btn:hover {
-            opacity: 0.9;
-        }
-
-        /* Table Styles */
-        table {
+        /* ── Form Elements ─────────────────────────────────────────────── */
+        textarea, input[type="date"], input[type="text"] {
             width: 100%;
-            border-collapse: collapse;
+            padding: 10px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: 7px;
+            font-family: inherit; font-size: .95rem;
+            background: var(--surface2);
+            color: var(--text);
+            transition: border-color .15s;
+            outline: none;
+        }
+        textarea:focus, input:focus { border-color: var(--primary); }
+        textarea { resize: vertical; }
+
+        label {
+            display: block;
+            font-weight: 600; font-size: .85rem;
+            margin-bottom: 6px; color: var(--muted);
         }
 
-        th,
-        td {
-            text-align: left;
-            padding: 12px;
-            border-bottom: 1px solid #e2e8f0;
+        /* ── Buttons ───────────────────────────────────────────────────── */
+        .btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 9px 18px; border-radius: 7px; border: none;
+            font-size: .9rem; font-weight: 600;
+            cursor: pointer; text-decoration: none;
+            transition: opacity .15s, transform .1s;
+            white-space: nowrap;
         }
-
-        th {
-            font-weight: 600;
-            color: #64748b;
+        .btn:active { transform: scale(.97); }
+        .btn-primary  { background: var(--primary);  color: #fff; }
+        .btn-success  { background: var(--success);  color: #fff; }
+        .btn-danger   { background: var(--danger);   color: #fff; }
+        .btn-warning  { background: var(--warning);  color: #fff; }
+        .btn-outline  {
+            background: transparent;
+            border: 1.5px solid var(--border);
+            color: var(--text);
         }
+        .btn:hover { opacity: .88; }
+        .btn-sm { padding: 5px 12px; font-size: .8rem; }
+        .btn-icon { padding: 8px; }
 
-        tr:last-child td {
-            border-bottom: none;
+        /* ── Chips / Quick-Add Pills ────────────────────────────────────── */
+        .chip-group { display: flex; flex-wrap: wrap; gap: 7px; }
+        .chip {
+            padding: 5px 11px; border-radius: 20px;
+            border: 1.5px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            font-size: .8rem; font-weight: 600;
+            cursor: pointer;
+            transition: background .15s, border-color .15s, color .15s;
+            white-space: nowrap;
         }
+        .chip:hover  { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .chip.push   { border-color: var(--push);   color: var(--push); }
+        .chip.push:hover   { background: var(--push);   color: #fff; }
+        .chip.pull   { border-color: var(--pull);   color: var(--pull); }
+        .chip.pull:hover   { background: var(--pull);   color: #fff; }
+        .chip.legs   { border-color: var(--legs);   color: var(--legs); }
+        .chip.legs:hover   { background: var(--legs);   color: #fff; }
+        .chip.cardio { border-color: var(--cardio); color: var(--cardio); }
+        .chip.cardio:hover { background: var(--cardio); color: #fff; }
 
+        /* ── Badges ────────────────────────────────────────────────────── */
         .badge {
-            background: #e2e8f0;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.85rem;
-            font-weight: 500;
+            display: inline-block;
+            padding: 2px 8px; border-radius: 20px; font-size: .75rem; font-weight: 600;
         }
+        .badge-push    { background: #fee2e2; color: var(--push); }
+        .badge-pull    { background: #dbeafe; color: var(--pull); }
+        .badge-legs    { background: #dcfce7; color: var(--legs); }
+        .badge-cardio  { background: #fef3c7; color: var(--cardio); }
+        .badge-default { background: var(--border); color: var(--muted); }
+        body.dark .badge-push    { background: #450a0a; }
+        body.dark .badge-pull    { background: #1e3a5f; }
+        body.dark .badge-legs    { background: #14532d; }
+        body.dark .badge-cardio  { background: #451a03; }
+        body.dark .badge-default { background: #334155; color: var(--muted); }
+
+        /* ── Tables ────────────────────────────────────────────────────── */
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: .875rem; }
+        th { font-weight: 600; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+        tr:last-child td { border-bottom: none; }
+
+        /* ── Progress Bars ─────────────────────────────────────────────── */
+        .progress-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .progress-label { font-size: .8rem; font-weight: 600; color: var(--muted); width: 70px; flex-shrink: 0; }
+        .progress-bar-wrap {
+            flex: 1; height: 8px; background: var(--border);
+            border-radius: 4px; overflow: hidden;
+        }
+        .progress-bar-fill { height: 100%; border-radius: 4px; transition: width .4s; }
+        .progress-value { font-size: .8rem; font-weight: 700; width: 80px; text-align: right; flex-shrink: 0; }
+
+        /* ── Section Dividers ──────────────────────────────────────────── */
+        .section-label {
+            font-size: .72rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .08em; color: var(--muted);
+            margin: 12px 0 7px; display: flex; align-items: center; gap: 8px;
+        }
+        .section-label::after {
+            content: ''; flex: 1; height: 1px; background: var(--border);
+        }
+
+        /* ── Toast notification ────────────────────────────────────────── */
+        #toast {
+            position: fixed; bottom: 20px; right: 20px;
+            background: var(--success); color: #fff;
+            padding: 12px 20px; border-radius: 8px;
+            font-weight: 600; font-size: .9rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,.2);
+            transform: translateY(80px); opacity: 0;
+            transition: all .3s; z-index: 9999;
+        }
+        #toast.show { transform: translateY(0); opacity: 1; }
+
+        /* ── Utilities ─────────────────────────────────────────────────── */
+        .flex { display: flex; }
+        .gap-2 { gap: 8px; }
+        .gap-3 { gap: 12px; }
+        .mt-2 { margin-top: 8px; }
+        .mt-3 { margin-top: 12px; }
+        .mt-4 { margin-top: 16px; }
+        .muted { color: var(--muted); }
+        .bold { font-weight: 700; }
+        .text-sm { font-size: .85rem; }
     </style>
 </head>
-
 <body>
     <nav>
-        <div class="container">
-            <a href="/" class="logo">💪 Workout Logger</a>
-            <div class="nav-links">
-                <a href="/">Log</a>
-                <a href="/diet">Diet</a>
-                <a href="/report">Report</a>
-            </div>
+        <a href="/" class="nav-logo">⚡ FitLog</a>
+        <div class="nav-links">
+            <a href="/dashboard" id="nav-dashboard">Dashboard</a>
+            <a href="/"         id="nav-log">Workout</a>
+            <a href="/diet"     id="nav-diet">Diet</a>
+            <a href="/report"   id="nav-report">History</a>
+            <button class="dark-toggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
         </div>
     </nav>
+
     <div class="container">
         {% block content %}{% endblock %}
     </div>
-</body>
 
+    <div id="toast">✓ Saved!</div>
+
+    <script>
+        // ── Dark mode ──────────────────────────────────────────────────────
+        function toggleDark() {
+            document.body.classList.toggle('dark');
+            localStorage.setItem('dark', document.body.classList.contains('dark'));
+        }
+        if (localStorage.getItem('dark') === 'true') document.body.classList.add('dark');
+
+        // ── Active nav link ────────────────────────────────────────────────
+        (function() {
+            const path = window.location.pathname;
+            const map = {'/dashboard': 'nav-dashboard', '/': 'nav-log',
+                         '/diet': 'nav-diet', '/report': 'nav-report'};
+            const id = map[path] || (path.startsWith('/diet') ? 'nav-diet' : null);
+            if (id) document.getElementById(id)?.classList.add('active');
+        })();
+
+        // ── Toast helper ───────────────────────────────────────────────────
+        function showToast(msg, color) {
+            const t = document.getElementById('toast');
+            t.textContent = msg || '✓ Saved!';
+            if (color) t.style.background = color;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        // ── Chip → textarea append ─────────────────────────────────────────
+        function appendToTextarea(id, text) {
+            const ta = document.getElementById(id);
+            if (!ta) return;
+            const val = ta.value.trimEnd();
+            ta.value = val ? val + ', ' + text : text;
+            ta.focus();
+            ta.scrollTop = ta.scrollHeight;
+        }
+    </script>
+</body>
 </html>

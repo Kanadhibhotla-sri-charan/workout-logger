@@ -1,50 +1,153 @@
 {% extends "layout.html" %}
 
 {% block content %}
+
+<!-- ── TODAY'S MACRO PROGRESS ─────────────────────────────────────────────── -->
+{% set goals = {'calories': 2500, 'protein': 180, 'carbs': 250, 'fats': 80} %}
+{% if today_macros %}
 <div class="card">
-    <h2>Log Diet 🍎</h2>
-    <p class="text-gray-600">Enter your meals naturally (e.g., "Bf - 2 eggs... Lunch - chicken rice").</p>
+    <p class="card-title">📊 Today's Progress
+        <span class="muted text-sm" style="text-transform:none; letter-spacing:0; font-weight:400;">
+            — {{ today_macros.calories }} / {{ goals.calories }} kcal logged
+        </span>
+    </p>
 
+    {% set macros_data = [
+        ('Calories', today_macros.calories, goals.calories, '#f59e0b', 'kcal'),
+        ('Protein',  today_macros.protein,  goals.protein,  '#3b82f6', 'g'),
+        ('Carbs',    today_macros.carbs,    goals.carbs,    '#22c55e', 'g'),
+        ('Fats',     today_macros.fats,     goals.fats,     '#ef4444', 'g'),
+    ] %}
+    {% for label, val, goal, color, unit in macros_data %}
+    {% set pct = [((val / goal * 100) if goal > 0 else 0)|int, 100]|min %}
+    <div class="progress-row">
+        <span class="progress-label">{{ label }}</span>
+        <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" style="width:{{ pct }}%; background:{{ color }};"></div>
+        </div>
+        <span class="progress-value" style="color:{{ color }};">{{ val }}{{ unit }}</span>
+    </div>
+    {% endfor %}
+
+    {% if today_macros.calories == 0 %}
+    <p class="muted text-sm" style="margin:8px 0 0;">Nothing logged yet today. Use the form below to start!</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── QUICK MEAL CHIPS ───────────────────────────────────────────────────── -->
+<div class="card">
+    <p class="card-title">⚡ Quick-Add Meals — click to append to your log</p>
+
+    <div class="section-label">🌅 Breakfast</div>
+    <div class="chip-group">
+        <button class="chip" onclick="addMeal('Bf - 2 eggs + 2 toast')">Eggs + Toast</button>
+        <button class="chip" onclick="addMeal('Bf - Oatmeal 1 cup with milk')">Oatmeal</button>
+        <button class="chip" onclick="addMeal('Bf - Protein shake 1 scoop 250ml milk')">Protein Shake</button>
+        <button class="chip" onclick="addMeal('Bf - Idli 3pc + Sambar 1 cup')">Idli Sambar</button>
+        <button class="chip" onclick="addMeal('Bf - Upma 1 cup')">Upma</button>
+        <button class="chip" onclick="addMeal('Bf - Bread 2 slices + peanut butter 2 tbsp')">Bread + PB</button>
+        <button class="chip" onclick="addMeal('Bf - Banana 1pc + milk 250ml')">Banana + Milk</button>
+        <button class="chip" onclick="addMeal('Bf - Poha 1 cup')">Poha</button>
+        <button class="chip" onclick="addMeal('Bf - Dosa 2pc + chutney')">Dosa</button>
+    </div>
+
+    <div class="section-label">☀️ Lunch</div>
+    <div class="chip-group">
+        <button class="chip" onclick="addMeal('Lunch - Chicken 150g + Rice 1 cup')">Chicken Rice</button>
+        <button class="chip" onclick="addMeal('Lunch - Roti 3pc + Dal 1 cup')">Roti + Dal</button>
+        <button class="chip" onclick="addMeal('Lunch - Paneer sabzi 1 cup + Roti 2pc')">Paneer Sabzi</button>
+        <button class="chip" onclick="addMeal('Lunch - Curd rice 1 cup')">Curd Rice</button>
+        <button class="chip" onclick="addMeal('Lunch - Rajma chawal 1 cup')">Rajma Chawal</button>
+        <button class="chip" onclick="addMeal('Lunch - Egg curry 2 eggs + Rice 1 cup')">Egg Curry</button>
+        <button class="chip" onclick="addMeal('Lunch - Chicken salad large bowl')">Chicken Salad</button>
+        <button class="chip" onclick="addMeal('Lunch - Sambar rice 1 cup')">Sambar Rice</button>
+    </div>
+
+    <div class="section-label">🌙 Dinner</div>
+    <div class="chip-group">
+        <button class="chip" onclick="addMeal('Dinner - Dal 1 cup + Rice 1 cup')">Dal Rice</button>
+        <button class="chip" onclick="addMeal('Dinner - Roti 3pc + Sabzi 1 cup')">Roti Sabzi</button>
+        <button class="chip" onclick="addMeal('Dinner - Chicken curry 1 cup + Rice 1 cup')">Chicken Curry</button>
+        <button class="chip" onclick="addMeal('Dinner - Khichdi 1 cup')">Khichdi</button>
+        <button class="chip" onclick="addMeal('Dinner - Paneer paratha 2pc + curd')">Paneer Paratha</button>
+        <button class="chip" onclick="addMeal('Dinner - Fish curry 150g + Rice 1 cup')">Fish Curry</button>
+        <button class="chip" onclick="addMeal('Dinner - Egg bhurji 3 eggs + Roti 2pc')">Egg Bhurji</button>
+    </div>
+
+    <div class="section-label">🍎 Snacks</div>
+    <div class="chip-group">
+        <button class="chip" onclick="addMeal('Snack - Mixed fruits 1 cup')">Fruits</button>
+        <button class="chip" onclick="addMeal('Snack - Mixed nuts 30g')">Nuts 30g</button>
+        <button class="chip" onclick="addMeal('Snack - Protein bar 1pc')">Protein Bar</button>
+        <button class="chip" onclick="addMeal('Snack - Curd 1 cup')">Curd</button>
+        <button class="chip" onclick="addMeal('Snack - Banana 1pc')">Banana</button>
+        <button class="chip" onclick="addMeal('Snack - Tea with milk 200ml 1 tsp sugar')">Tea</button>
+        <button class="chip" onclick="addMeal('Snack - Peanuts 30g')">Peanuts</button>
+        <button class="chip" onclick="addMeal('Snack - Protein shake 1 scoop water')">Protein Shake</button>
+        <button class="chip" onclick="addMeal('Snack - Boiled eggs 2pc')">Boiled Eggs</button>
+        <button class="chip" onclick="addMeal('Snack - Sprouts 1 cup')">Sprouts</button>
+    </div>
+</div>
+
+<!-- ── LOG FORM ─────────────────────────────────────────────────────────── -->
+<div class="card">
+    <p class="card-title">📝 Log Food</p>
     <form action="/diet" method="POST">
-        <textarea name="raw_input" rows="6"
-            placeholder="Bf - Oatmeal and banana&#10;Lunch - Chicken salad&#10;Snack - Apple">{{ raw_input }}</textarea>
+        <label for="diet-input">What did you eat?
+            <span class="muted text-sm">(e.g. "Bf - 2 eggs + toast, Lunch - chicken rice 150g")</span>
+        </label>
+        <textarea id="diet-input" name="raw_input" rows="4"
+            placeholder="Bf - 2 eggs + toast&#10;Lunch - Chicken 150g + Rice 1 cup&#10;Eve - Protein shake">{{ raw_input or '' }}</textarea>
 
-        <label style="display:block; margin-bottom:8px; font-weight:500;">Date:</label>
-        <input type="date" name="date" value="{{ today }}"
-            style="padding:8px; border:1px solid #ccc; border-radius:4px; margin-bottom:20px;">
-
-        <button type="submit" class="btn">Estimate Calories</button>
+        <div class="flex gap-2 mt-2" style="align-items:center; flex-wrap:wrap;">
+            <div>
+                <label for="diet-date" style="margin-bottom:3px;">Date</label>
+                <input type="date" id="diet-date" name="date" value="{{ today }}" style="width:auto;">
+            </div>
+            <div style="flex:1; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+                <button type="submit" class="btn btn-primary">🔍 Estimate Calories</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="clearDiet()">Clear</button>
+            </div>
+        </div>
+        <p class="muted text-sm mt-2" style="margin-bottom:0;">
+            Tip: Uses a <strong>450ml Magnus container</strong> as the default "cup" measurement.
+        </p>
     </form>
 </div>
 
+<!-- ── PREVIEW / CONFIRM ─────────────────────────────────────────────────── -->
 {% if preview_items %}
-<div class="card" style="background:#f0f9ff; border:1px solid #bae6fd;">
-    <h3>Stats Estimation</h3>
+<div class="card" style="border-color:var(--primary); border-width:2px;">
+    <p class="card-title">📊 Nutrition Estimate</p>
+
     <table>
         <thead>
             <tr>
                 <th>Meal</th>
-                <th>Item</th>
+                <th>Food</th>
                 <th>Cals</th>
-                <th>P</th>
-                <th>C</th>
-                <th>F</th>
+                <th>Protein</th>
+                <th>Carbs</th>
+                <th>Fats</th>
             </tr>
         </thead>
         <tbody>
             {% for item in preview_items %}
             <tr>
-                <td><span class="badge">{{ item.meal_type }}</span></td>
+                <td>
+                    <span class="badge badge-default">{{ item.meal_type }}</span>
+                </td>
                 <td>{{ item.food_raw }}</td>
-                <td>{{ item.calories }}</td>
+                <td><strong>{{ item.calories }}</strong></td>
                 <td>{{ item.protein }}g</td>
                 <td>{{ item.carbs }}g</td>
                 <td>{{ item.fats }}g</td>
             </tr>
             {% endfor %}
-            <tr style="font-weight:bold; background:#e0f2fe;">
-                <td colspan="2">TOTAL</td>
-                <td>{{ total_cals }}</td>
+            <tr style="background:var(--surface2); font-weight:700;">
+                <td colspan="2" style="font-size:.85rem; text-transform:uppercase; letter-spacing:.04em;">Total</td>
+                <td>{{ total_cals }} kcal</td>
                 <td>{{ total_p }}g</td>
                 <td>{{ total_c }}g</td>
                 <td>{{ total_f }}g</td>
@@ -52,17 +155,35 @@
         </tbody>
     </table>
 
-    <form action="/confirm_diet" method="POST" style="margin-top:20px;">
-        <input type="hidden" name="date" value="{{ date }}">
+    <!-- Running total including today's already-logged macros -->
+    {% if today_macros and today_macros.calories > 0 %}
+    {% set goals = {'calories': 2500, 'protein': 180, 'carbs': 250, 'fats': 80} %}
+    <div style="margin-top:12px; padding:12px; background:var(--surface2); border-radius:8px;">
+        <p style="margin:0 0 6px; font-size:.8rem; font-weight:700; color:var(--muted); text-transform:uppercase;">After saving, today's total will be:</p>
+        <div class="flex gap-3" style="flex-wrap:wrap; font-size:.9rem; font-weight:600;">
+            <span>🔥 {{ today_macros.calories + total_cals }} / {{ goals.calories }} kcal</span>
+            <span>🥩 {{ today_macros.protein + total_p }}g / {{ goals.protein }}g protein</span>
+            <span>🌾 {{ today_macros.carbs + total_c }}g / {{ goals.carbs }}g carbs</span>
+            <span>🥑 {{ today_macros.fats + total_f }}g / {{ goals.fats }}g fats</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <form action="/confirm_diet" method="POST" style="margin-top:14px;">
+        <input type="hidden" name="date"       value="{{ date }}">
         <input type="hidden" name="items_json" value="{{ items_json }}">
-        <button type="submit" class="btn" style="background:#16a34a;">Save Log</button>
-        <a href="/diet" class="btn" style="background:#dc2626; margin-left:10px;">Cancel</a>
+        <div class="flex gap-2">
+            <button type="submit" class="btn btn-success">✓ Save Log</button>
+            <a href="/diet" class="btn btn-danger">✕ Discard</a>
+        </div>
     </form>
 </div>
 {% endif %}
 
+<!-- ── RECENT HISTORY ─────────────────────────────────────────────────────── -->
 <div class="card">
-    <h3>Recent Diet History</h3>
+    <p class="card-title">📅 Recent Diet History</p>
+    {% if history %}
     <table>
         <thead>
             <tr>
@@ -70,18 +191,51 @@
                 <th>Meal</th>
                 <th>Food</th>
                 <th>Cals</th>
+                <th>P</th>
+                <th>C</th>
+                <th>F</th>
             </tr>
         </thead>
         <tbody>
             {% for row in history %}
             <tr>
-                <td>{{ row[1] }}</td>
-                <td><span class="badge">{{ row[2] }}</span></td>
+                <td class="muted text-sm">{{ row[1] }}</td>
+                <td><span class="badge badge-default">{{ row[2] }}</span></td>
                 <td>{{ row[3] }}</td>
-                <td>{{ row[4] }}</td>
+                <td><strong>{{ row[4] }}</strong></td>
+                <td>{{ row[5] }}g</td>
+                <td>{{ row[6] }}g</td>
+                <td>{{ row[7] }}g</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    {% else %}
+    <p class="muted text-sm">No diet logs yet. Start logging above!</p>
+    {% endif %}
 </div>
+
+<script>
+    function addMeal(text) {
+        const ta = document.getElementById('diet-input');
+        const val = ta.value.trimEnd();
+        ta.value = val ? val + '\n' + text : text;
+        ta.focus();
+        ta.scrollTop = ta.scrollHeight;
+    }
+
+    function clearDiet() {
+        document.getElementById('diet-input').value = '';
+        document.getElementById('diet-input').focus();
+    }
+
+    // Ctrl+Enter submits the diet form
+    document.addEventListener('keydown', function(e) {
+        if (e.ctrlKey && e.key === 'Enter') {
+            e.preventDefault();
+            document.querySelector('form[action="/diet"]').submit();
+        }
+    });
+</script>
+
 {% endblock %}

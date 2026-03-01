@@ -1,0 +1,140 @@
+{% extends "layout.html" %}
+
+{% block content %}
+
+<!-- ── HEADER ────────────────────────────────────────────────────────────── -->
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+    <div>
+        <h2 style="margin:0; font-size:1.4rem;">Good {% if today[11:13]|int < 12 %}Morning{% elif today[11:13]|int < 17 %}Afternoon{% else %}Evening{% endif %} 👋</h2>
+        <p class="muted text-sm" style="margin:2px 0 0;">{{ today }}</p>
+    </div>
+    <div class="flex gap-2" style="flex-wrap:wrap;">
+        <a href="/"     class="btn btn-primary btn-sm">⚡ Log Workout</a>
+        <a href="/diet" class="btn btn-outline btn-sm">🍎 Log Food</a>
+    </div>
+</div>
+
+<!-- ── TODAY'S OVERVIEW GRID ─────────────────────────────────────────────── -->
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:16px;">
+
+    <!-- Today's Workout Widget -->
+    <div class="card" style="margin-bottom:0;">
+        <p class="card-title">💪 Today's Workout</p>
+        {% if today_workout %}
+        <div style="margin-bottom:10px;">
+            <span class="badge badge-{% if today_workout[2] == 'PUSH' %}push{% elif today_workout[2] == 'PULL' %}pull{% elif today_workout[2] == 'LEGS' %}legs{% elif today_workout[2] == 'CARDIO' %}cardio{% else %}default{% endif %}" style="margin-bottom:8px; display:inline-block;">
+                {{ today_workout[2] }} Day
+            </span>
+            {% if today_exercises %}
+            <ul style="margin:8px 0 0; padding-left:18px; font-size:.85rem;">
+                {% for ex in today_exercises %}
+                <li style="margin-bottom:3px;">
+                    <strong>{{ ex[0] }}</strong>
+                    {% if ex[1] or ex[2] %}
+                    <span class="muted"> — {{ ex[1] or '' }}{% if ex[2] %}x{{ ex[2] }}{% endif %}{% if ex[3] %} {{ ex[3] }}{% endif %}</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="muted text-sm" style="margin:6px 0 0;">Cardio or raw log — no structured exercises.</p>
+            {% endif %}
+        </div>
+        <a href="/report" class="btn btn-outline btn-sm">View Full History →</a>
+        {% else %}
+        <div style="text-align:center; padding:20px 0;">
+            <div style="font-size:2rem; margin-bottom:8px;">🏋</div>
+            <p class="muted text-sm" style="margin:0 0 12px;">No workout logged today yet.</p>
+            <a href="/" class="btn btn-primary btn-sm">Log Workout Now</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Today's Macros Widget -->
+    <div class="card" style="margin-bottom:0;">
+        <p class="card-title">🍎 Today's Nutrition</p>
+        {% set goals = {'calories': 2500, 'protein': 180, 'carbs': 250, 'fats': 80} %}
+        {% if today_macros and today_macros.calories > 0 %}
+        {% set macros_data = [
+            ('🔥 Cal',   today_macros.calories, goals.calories, '#f59e0b', 'kcal'),
+            ('🥩 Pro',   today_macros.protein,  goals.protein,  '#3b82f6', 'g'),
+            ('🌾 Carbs', today_macros.carbs,    goals.carbs,    '#22c55e', 'g'),
+            ('🥑 Fats',  today_macros.fats,     goals.fats,     '#ef4444', 'g'),
+        ] %}
+        {% for label, val, goal, color, unit in macros_data %}
+        {% set pct = [((val / goal * 100) if goal > 0 else 0)|int, 100]|min %}
+        <div class="progress-row" style="margin-bottom:8px;">
+            <span class="progress-label" style="font-size:.75rem;">{{ label }}</span>
+            <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" style="width:{{ pct }}%; background:{{ color }};"></div>
+            </div>
+            <span class="progress-value" style="color:{{ color }}; font-size:.75rem;">{{ val }}{{ unit }}</span>
+        </div>
+        {% endfor %}
+        <a href="/diet" class="btn btn-outline btn-sm mt-2">Add More Food →</a>
+        {% else %}
+        <div style="text-align:center; padding:20px 0;">
+            <div style="font-size:2rem; margin-bottom:8px;">🥗</div>
+            <p class="muted text-sm" style="margin:0 0 12px;">No food logged today yet.</p>
+            <a href="/diet" class="btn btn-primary btn-sm">Log Food Now</a>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- ── RECENT WORKOUTS (REPEAT) ───────────────────────────────────────────── -->
+{% if recent_workouts %}
+<div class="card">
+    <p class="card-title">🔁 Recent Workouts — one click to repeat</p>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+        {% for w in recent_workouts %}
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--surface2); border-radius:8px; border:1px solid var(--border); flex-wrap:wrap;">
+            <span class="badge badge-{% if w[2] == 'PUSH' %}push{% elif w[2] == 'PULL' %}pull{% elif w[2] == 'LEGS' %}legs{% elif w[2] == 'CARDIO' %}cardio{% else %}default{% endif %}">
+                {{ w[2] }}
+            </span>
+            <span class="muted text-sm" style="flex-shrink:0;">{{ w[1] }}</span>
+            <span class="text-sm" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ w[3] }}</span>
+            <button class="btn btn-outline btn-sm"
+                onclick="repeatOnWorkoutPage({{ w[3]|tojson }})">
+                🔁 Repeat
+            </button>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ── QUICK ACTIONS ───────────────────────────────────────────────────────── -->
+<div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
+
+    <a href="/" class="card" style="text-align:center; text-decoration:none; cursor:pointer; margin-bottom:0; transition:transform .15s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+        <div style="font-size:1.8rem; margin-bottom:6px;">💪</div>
+        <div style="font-weight:700; font-size:.9rem;">Log Workout</div>
+        <div class="muted text-sm">Quick-add with chips</div>
+    </a>
+
+    <a href="/diet" class="card" style="text-align:center; text-decoration:none; cursor:pointer; margin-bottom:0; transition:transform .15s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+        <div style="font-size:1.8rem; margin-bottom:6px;">🍎</div>
+        <div style="font-weight:700; font-size:.9rem;">Log Food</div>
+        <div class="muted text-sm">Meal chips + AI macros</div>
+    </a>
+
+    <a href="/report" class="card" style="text-align:center; text-decoration:none; cursor:pointer; margin-bottom:0; transition:transform .15s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+        <div style="font-size:1.8rem; margin-bottom:6px;">📈</div>
+        <div style="font-weight:700; font-size:.9rem;">View History</div>
+        <div class="muted text-sm">All workouts & lifts</div>
+    </a>
+
+</div>
+
+<script>
+    // Redirect to workout page with the raw input pre-filled
+    function repeatOnWorkoutPage(text) {
+        sessionStorage.setItem('repeatWorkout', text);
+        window.location.href = '/';
+    }
+</script>
+
+
+{% endblock %}
