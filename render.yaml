@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: workout-logger
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn src.web.app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.10.0"
+      - key: GEMINI_API_KEY
+        sync: false          # You'll paste this value in the Render dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: workout-db
+          property: connectionString
+
+databases:
+  - name: workout-db
+    plan: free
