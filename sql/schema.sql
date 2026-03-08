@@ -2,11 +2,11 @@
 -- Push/Pull/Legs Split with Detailed Muscle Taxonomy & Diet & Cardio Tracking
 
 -- ============================================
--- MUSCLE GROUPS 
+-- MUSCLE GROUPS
 -- ============================================
 CREATE TABLE IF NOT EXISTS muscle_groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE, 
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
     category TEXT NOT NULL CHECK(category IN ('PUSH', 'PULL', 'LEGS'))
 );
 
@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS muscle_groups (
 -- MUSCLES
 -- ============================================
 CREATE TABLE IF NOT EXISTS muscles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE, 
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
     muscle_group_id INTEGER NOT NULL,
     FOREIGN KEY (muscle_group_id) REFERENCES muscle_groups(id)
 );
@@ -24,11 +24,11 @@ CREATE TABLE IF NOT EXISTS muscles (
 -- EXERCISES
 -- ============================================
 CREATE TABLE IF NOT EXISTS exercises (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE, 
-    aliases TEXT, 
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    aliases TEXT,
     primary_muscle_id INTEGER NOT NULL,
-    secondary_muscles TEXT, 
+    secondary_muscles TEXT,
     exercise_type TEXT CHECK(exercise_type IN ('compound', 'isolation')),
     FOREIGN KEY (primary_muscle_id) REFERENCES muscles(id)
 );
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS exercises (
 -- WORKOUT LOGS
 -- ============================================
 CREATE TABLE IF NOT EXISTS workout_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     workout_date DATE NOT NULL,
     day_type TEXT CHECK(day_type IN ('PUSH', 'PULL', 'LEGS', 'CARDIO', 'HYBRID')),
     exercises_raw TEXT,
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS workout_logs (
 -- WORKOUT EXERCISES
 -- ============================================
 CREATE TABLE IF NOT EXISTS workout_exercises (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     workout_log_id INTEGER NOT NULL,
     exercise_id INTEGER NOT NULL,
     sets TEXT,
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS workout_exercises (
 -- CARDIO LOGS
 -- ============================================
 CREATE TABLE IF NOT EXISTS cardio_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     workout_log_id INTEGER NOT NULL,
     activity_name TEXT NOT NULL,
     duration TEXT,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS cardio_logs (
 -- MUSCLE ACTIVATIONS
 -- ============================================
 CREATE TABLE IF NOT EXISTS muscle_activations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     workout_exercise_id INTEGER NOT NULL,
     muscle_id INTEGER NOT NULL,
     activation_type TEXT NOT NULL CHECK(activation_type IN ('primary', 'secondary')),
@@ -88,9 +88,9 @@ CREATE TABLE IF NOT EXISTS muscle_activations (
 -- DIET LOGS
 -- ============================================
 CREATE TABLE IF NOT EXISTS diet_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     log_date DATE NOT NULL,
-    meal_type TEXT, 
+    meal_type TEXT,
     food_raw TEXT,
     calories INTEGER,
     protein INTEGER,
@@ -112,65 +112,73 @@ CREATE INDEX IF NOT EXISTS idx_cardio_log ON cardio_logs(workout_log_id);
 -- ============================================
 -- SEED DATA: Muscle Groups
 -- ============================================
-INSERT OR IGNORE INTO muscle_groups (name, category) VALUES
+INSERT INTO muscle_groups (name, category) VALUES
     ('Chest', 'PUSH'), ('Shoulders', 'PUSH'), ('Triceps', 'PUSH'),
     ('Back', 'PULL'), ('Biceps', 'PULL'),
-    ('Quads', 'LEGS'), ('Hamstrings', 'LEGS'), ('Glutes', 'LEGS'), ('Calves', 'LEGS');
+    ('Quads', 'LEGS'), ('Hamstrings', 'LEGS'), ('Glutes', 'LEGS'), ('Calves', 'LEGS')
+ON CONFLICT (name) DO NOTHING;
 
 -- ============================================
 -- SEED DATA: Muscles
 -- ============================================
 -- CHEST
-INSERT OR IGNORE INTO muscles (name, muscle_group_id) VALUES
+INSERT INTO muscles (name, muscle_group_id) VALUES
     ('Upper Pecs', (SELECT id FROM muscle_groups WHERE name='Chest')),
     ('Mid Pecs', (SELECT id FROM muscle_groups WHERE name='Chest')),
-    ('Lower Pecs', (SELECT id FROM muscle_groups WHERE name='Chest'));
+    ('Lower Pecs', (SELECT id FROM muscle_groups WHERE name='Chest'))
+ON CONFLICT (name) DO NOTHING;
 -- SHOULDERS
-INSERT OR IGNORE INTO muscles (name, muscle_group_id) VALUES
+INSERT INTO muscles (name, muscle_group_id) VALUES
     ('Front Delts', (SELECT id FROM muscle_groups WHERE name='Shoulders')),
     ('Lateral Delts', (SELECT id FROM muscle_groups WHERE name='Shoulders')),
-    ('Rear Delts', (SELECT id FROM muscle_groups WHERE name='Shoulders'));
+    ('Rear Delts', (SELECT id FROM muscle_groups WHERE name='Shoulders'))
+ON CONFLICT (name) DO NOTHING;
 -- TRICEPS
-INSERT OR IGNORE INTO muscles (name, muscle_group_id) VALUES
+INSERT INTO muscles (name, muscle_group_id) VALUES
     ('Long Head', (SELECT id FROM muscle_groups WHERE name='Triceps')),
     ('Lateral Head', (SELECT id FROM muscle_groups WHERE name='Triceps')),
-    ('Medial Head', (SELECT id FROM muscle_groups WHERE name='Triceps'));
+    ('Medial Head', (SELECT id FROM muscle_groups WHERE name='Triceps'))
+ON CONFLICT (name) DO NOTHING;
 -- BACK
-INSERT OR IGNORE INTO muscles (name, muscle_group_id) VALUES
+INSERT INTO muscles (name, muscle_group_id) VALUES
     ('Outer Lats', (SELECT id FROM muscle_groups WHERE name='Back')),
-    ('Inner Lats', (SELECT id FROM muscle_groups WHERE name='Back')), -- Actually Thickness/Lower Trap/Rhomboid area
+    ('Inner Lats', (SELECT id FROM muscle_groups WHERE name='Back')),
     ('Rhomboids', (SELECT id FROM muscle_groups WHERE name='Back')),
     ('Traps', (SELECT id FROM muscle_groups WHERE name='Back')),
-    ('Lower Back', (SELECT id FROM muscle_groups WHERE name='Back'));
+    ('Lower Back', (SELECT id FROM muscle_groups WHERE name='Back'))
+ON CONFLICT (name) DO NOTHING;
 -- BICEPS
-INSERT OR IGNORE INTO muscles (name, muscle_group_id) VALUES
+INSERT INTO muscles (name, muscle_group_id) VALUES
     ('Long Head Bicep', (SELECT id FROM muscle_groups WHERE name='Biceps')),
     ('Short Head Bicep', (SELECT id FROM muscle_groups WHERE name='Biceps')),
-    ('Brachialis', (SELECT id FROM muscle_groups WHERE name='Biceps'));
+    ('Brachialis', (SELECT id FROM muscle_groups WHERE name='Biceps'))
+ON CONFLICT (name) DO NOTHING;
 -- LEGS
-INSERT OR IGNORE INTO muscles (name, muscle_group_id) VALUES
+INSERT INTO muscles (name, muscle_group_id) VALUES
     ('Rectus Femoris', (SELECT id FROM muscle_groups WHERE name='Quads')),
     ('Vastus Lateralis', (SELECT id FROM muscle_groups WHERE name='Quads')),
     ('Vastus Medialis', (SELECT id FROM muscle_groups WHERE name='Quads')),
     ('Hamstrings', (SELECT id FROM muscle_groups WHERE name='Hamstrings')),
     ('Glutes', (SELECT id FROM muscle_groups WHERE name='Glutes')),
-    ('Calves', (SELECT id FROM muscle_groups WHERE name='Calves'));
+    ('Calves', (SELECT id FROM muscle_groups WHERE name='Calves'))
+ON CONFLICT (name) DO NOTHING;
 
 -- ============================================
--- SEED DATA: EXERCISES (The Missing Part!)
+-- SEED DATA: EXERCISES
 -- ============================================
 
 -- PUSH EXERCISES
-INSERT OR IGNORE INTO exercises (name, aliases, primary_muscle_id, secondary_muscles, exercise_type) VALUES
+INSERT INTO exercises (name, aliases, primary_muscle_id, secondary_muscles, exercise_type) VALUES
     ('Bench Press', '["flat bench", "barbell bench"]', (SELECT id FROM muscles WHERE name='Mid Pecs'), '[]', 'compound'),
     ('Incline Dumbbell Press', '["incline db", "incline press"]', (SELECT id FROM muscles WHERE name='Upper Pecs'), '[]', 'compound'),
     ('Overhead Press', '["ohp", "military press", "shoulder press"]', (SELECT id FROM muscles WHERE name='Front Delts'), '[]', 'compound'),
     ('Lateral Raises', '["lat raises", "side raises"]', (SELECT id FROM muscles WHERE name='Lateral Delts'), '[]', 'isolation'),
     ('Tricep Pushdowns', '["rope pushdowns", "pushdowns"]', (SELECT id FROM muscles WHERE name='Lateral Head'), '[]', 'isolation'),
-    ('Reverse Pec Deck', '["reverse fly", "rear delt fly"]', (SELECT id FROM muscles WHERE name='Rear Delts'), '[]', 'isolation');
+    ('Reverse Pec Deck', '["reverse fly", "rear delt fly"]', (SELECT id FROM muscles WHERE name='Rear Delts'), '[]', 'isolation')
+ON CONFLICT (name) DO NOTHING;
 
 -- PULL EXERCISES
-INSERT OR IGNORE INTO exercises (name, aliases, primary_muscle_id, secondary_muscles, exercise_type) VALUES
+INSERT INTO exercises (name, aliases, primary_muscle_id, secondary_muscles, exercise_type) VALUES
     ('Deadlift', '["conventional deadlift"]', (SELECT id FROM muscles WHERE name='Lower Back'), '[]', 'compound'),
     ('Pull Up', '["pullups", "pull-up"]', (SELECT id FROM muscles WHERE name='Outer Lats'), '[]', 'compound'),
     ('Assisted Pull Up', '["assisted pullups", "machine pullup"]', (SELECT id FROM muscles WHERE name='Outer Lats'), '[]', 'compound'),
@@ -181,13 +189,15 @@ INSERT OR IGNORE INTO exercises (name, aliases, primary_muscle_id, secondary_mus
     ('Preacher Curl', '["machine curl", "preacher"]', (SELECT id FROM muscles WHERE name='Short Head Bicep'), '[]', 'isolation'),
     ('Incline Dumbbell Curl', '["incline curl"]', (SELECT id FROM muscles WHERE name='Long Head Bicep'), '[]', 'isolation'),
     ('Hammer Curl', '["rope curl"]', (SELECT id FROM muscles WHERE name='Brachialis'), '[]', 'isolation'),
-    ('Face Pull', '["facepulls"]', (SELECT id FROM muscles WHERE name='Rear Delts'), '[]', 'isolation');
+    ('Face Pull', '["facepulls"]', (SELECT id FROM muscles WHERE name='Rear Delts'), '[]', 'isolation')
+ON CONFLICT (name) DO NOTHING;
 
 -- LEG EXERCISES
-INSERT OR IGNORE INTO exercises (name, aliases, primary_muscle_id, secondary_muscles, exercise_type) VALUES
+INSERT INTO exercises (name, aliases, primary_muscle_id, secondary_muscles, exercise_type) VALUES
     ('Squat', '["back squat", "low bar squat"]', (SELECT id FROM muscles WHERE name='Rectus Femoris'), '[]', 'compound'),
     ('Leg Press', '["machine leg press"]', (SELECT id FROM muscles WHERE name='Rectus Femoris'), '[]', 'compound'),
     ('Leg Extension', '["quad extension"]', (SELECT id FROM muscles WHERE name='Vastus Medialis'), '[]', 'isolation'),
     ('RDL', '["romanian deadlift"]', (SELECT id FROM muscles WHERE name='Hamstrings'), '[]', 'compound'),
     ('Leg Curl', '["hamstring curl", "seated leg curl"]', (SELECT id FROM muscles WHERE name='Hamstrings'), '[]', 'isolation'),
-    ('Calf Raise', '["standing calf raise"]', (SELECT id FROM muscles WHERE name='Calves'), '[]', 'isolation');
+    ('Calf Raise', '["standing calf raise"]', (SELECT id FROM muscles WHERE name='Calves'), '[]', 'isolation')
+ON CONFLICT (name) DO NOTHING;
