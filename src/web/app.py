@@ -104,14 +104,29 @@ def index():
         matched_exercises = _parse_and_match(raw_input)
 
         ex_names = [m['name'] for m in matched_exercises if m.get('type') != 'cardio']
+        cardio_items = [m for m in matched_exercises if m.get('type') == 'cardio']
+
         if ex_names:
             report = categorizer.categorize(ex_names)
-
+            if cardio_items:
+                report['day_type'] = 'HYBRID'
             display_exercises = []
-            for i, ex_info in enumerate(report['exercises']):
-                match_info = matched_exercises[i]
-                display_exercises.append({**ex_info, **match_info})
+            lift_idx = 0
+            for m in matched_exercises:
+                if m.get('type') == 'cardio':
+                    display_exercises.append(m)
+                else:
+                    if lift_idx < len(report['exercises']):
+                        display_exercises.append({**report['exercises'][lift_idx], **m})
+                        lift_idx += 1
+        elif cardio_items:
+            report = {'day_type': 'CARDIO', 'exercises': []}
+            display_exercises = cardio_items
+        else:
+            report = None
+            display_exercises = None
 
+        if report:
             try:
                 analyzer = AIAnalyzer()
                 ai_analysis = analyzer.analyze(report)
@@ -147,13 +162,20 @@ def quick_log():
     matched_exercises = _parse_and_match(raw_input)
 
     ex_names = [m['name'] for m in matched_exercises if m.get('type') != 'cardio']
-    day_type = 'MIXED'
+    cardio_items = [m for m in matched_exercises if m.get('type') == 'cardio']
+
     if ex_names:
         try:
             report = categorizer.categorize(ex_names)
-            day_type = report.get('day_type', 'MIXED')
+            day_type = report.get('day_type', 'HYBRID')
+            if cardio_items:
+                day_type = 'HYBRID'
         except Exception:
-            pass
+            day_type = 'HYBRID' if cardio_items else 'PUSH'
+    elif cardio_items:
+        day_type = 'CARDIO'
+    else:
+        day_type = 'HYBRID'
 
     if matched_exercises:
         save_workout(date, day_type, raw_input, matched_exercises)
