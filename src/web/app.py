@@ -18,6 +18,13 @@ from src.models.database import get_connection
 
 app = Flask(__name__)
 
+# Auto-initialize DB on startup (creates tables if they don't exist)
+try:
+    from src.models.database import init_database
+    init_database()
+except Exception as _e:
+    print(f"[WARN] DB init at startup failed: {_e}")
+
 # Initialize Services
 matcher = ExerciseMatcher()
 ai_parser = AIParser()

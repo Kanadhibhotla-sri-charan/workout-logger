@@ -3,26 +3,31 @@ Exercise matching service using fuzzy string matching.
 Handles abbreviations, typos, and exact matches.
 """
 import json
-import sqlite3
+import sys
+import os
 from pathlib import Path
 from rapidfuzz import process, fuzz
 
-DB_PATH = Path(__file__).parent.parent.parent / "workout_logger.db"
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+from src.models.database import get_connection
 
 class ExerciseMatcher:
     def __init__(self):
         self.exercises = []  # List of exercise names
         self.aliases = {}    # string alias -> real name
         self.load_exercises()
-        
+
     def load_exercises(self):
         """Load all exercises and aliases from DB into memory for fast matching."""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Get all exercises with their aliases
-        cursor.execute("SELECT name, aliases FROM exercises")
-        rows = cursor.fetchall()
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT name, aliases FROM exercises")
+            rows = cursor.fetchall()
+        except Exception:
+            self.exercises = []
+            self.aliases = {}
+            return
         
         self.exercises = []
         self.aliases = {}
