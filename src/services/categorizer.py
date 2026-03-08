@@ -2,22 +2,23 @@
 Categorizes a list of exercises into a structured workout report.
 Determines Day Type (Push/Pull/Legs) and groups by muscle.
 """
-import sqlite3
-from pathlib import Path
+import sys
+import os
 from collections import Counter
 
-DB_PATH = Path(__file__).parent.parent.parent / "workout_logger.db"
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+from src.models.database import get_connection
 
 class WorkoutCategorizer:
     def __init__(self):
         pass
-        
+
     def categorize(self, exercise_names):
         """
         Input: ["Barbell Bench Press", "Lateral Raise", ...]
         Output: Dictionary with Day Type, Muscle Groups, etc.
         """
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_connection()
         cursor = conn.cursor()
         
         # Prepare report structure
