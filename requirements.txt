@@ -1,5 +1,6 @@
 rapidfuzz
 google-generativeai
+anthropic
 flask
 gunicorn
 psycopg2-binary
