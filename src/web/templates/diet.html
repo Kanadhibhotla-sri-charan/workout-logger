@@ -133,6 +133,7 @@
             <tr>
                 <th>Meal</th>
                 <th>Food</th>
+                <th>Tbsp</th>
                 <th>Cals</th>
                 <th>Protein</th>
                 <th>Carbs</th>
@@ -146,6 +147,7 @@
                     <span class="badge badge-default">{{ item.meal_type }}</span>
                 </td>
                 <td>{{ item.food_raw }}</td>
+                <td class="muted">{% if item.tablespoons %}{{ item.tablespoons }} tbsp{% else %}—{% endif %}</td>
                 <td><strong>{{ item.calories }}</strong></td>
                 <td>{{ item.protein }}g</td>
                 <td>{{ item.carbs }}g</td>
@@ -153,7 +155,7 @@
             </tr>
             {% endfor %}
             <tr style="background:var(--surface2); font-weight:700;">
-                <td colspan="2" style="font-size:.85rem; text-transform:uppercase; letter-spacing:.04em;">Total</td>
+                <td colspan="3" style="font-size:.85rem; text-transform:uppercase; letter-spacing:.04em;">Total</td>
                 <td>{{ total_cals }} kcal</td>
                 <td>{{ total_p }}g</td>
                 <td>{{ total_c }}g</td>

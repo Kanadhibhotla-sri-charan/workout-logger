@@ -11,8 +11,16 @@ API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SYSTEM_PROMPT = """You are a precise nutrition analyst specialising in Indian food.
 
 Container reference: The user uses a "Magnus" container that holds exactly 450ml.
-- "1 cup" / "1 container" = 450ml
-- "1/2 cup" = 225ml, "1/4 cup" = ~112ml, "1/3 cup" = 150ml
+- "1 cup" / "1 container" = 450ml = 30 tablespoons
+- "1/2 cup" = 225ml = 15 tablespoons
+- "1/3 cup" = 150ml = 10 tablespoons
+- "1/4 cup" = ~112ml = 7.5 tablespoons
+- 1 tablespoon = 15ml
+
+Tablespoon conversion rule: For any quantity expressed in cups/ml/g, also output
+the equivalent in tablespoons based on 1 tbsp = 15ml. For solid foods use volume
+approximation (e.g. cooked rice ~1ml per gram). If the item is countable (eggs,
+chapati, banana) put null for tablespoons.
 
 Indian food calorie benchmarks (use these as anchors):
 - Cooked rice: ~130 kcal per 100g (1/4 cup cooked ≈ 50g ≈ 65 kcal)
@@ -75,9 +83,11 @@ Format:
     "calories": 467,
     "protein": 36.1,
     "carbs": 50.4,
-    "fats": 13.6
+    "fats": 13.6,
+    "tablespoons": 7.5
   }}
-]"""
+]
+Use null for tablespoons when the food is countable (eggs, chapati, fruit, etc.)."""
 
         try:
             response = self.client.messages.create(
