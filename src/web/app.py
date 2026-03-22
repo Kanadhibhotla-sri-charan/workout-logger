@@ -7,8 +7,6 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from src.services.exercise_matcher import ExerciseMatcher
-from src.services.categorizer import WorkoutCategorizer
-from src.services.ai_analyzer import AIAnalyzer
 from src.services.workout_service import save_workout
 from src.models.database import get_connection
 
@@ -23,7 +21,6 @@ except Exception as _e:
 
 # Initialize Services
 matcher = ExerciseMatcher()
-categorizer = WorkoutCategorizer()
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
