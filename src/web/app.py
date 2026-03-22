@@ -245,7 +245,7 @@ def diet():
         raw_input = request.form.get('raw_input', '')
         date = request.form.get('date', today)
 
-        preview_items = ai_diet.parse_diet(raw_input)
+        preview_items, diet_error = ai_diet.parse_diet(raw_input)
 
         total_cals = sum(i.get('calories', 0) for i in preview_items)
         total_p    = sum(i.get('protein',  0) for i in preview_items)
@@ -258,6 +258,7 @@ def diet():
                                today=date,
                                raw_input=raw_input,
                                preview_items=preview_items,
+                               diet_error=diet_error,
                                items_json=items_json,
                                total_cals=total_cals,
                                total_p=total_p,

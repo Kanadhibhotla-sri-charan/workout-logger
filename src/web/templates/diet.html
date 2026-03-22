@@ -116,6 +116,13 @@
     </form>
 </div>
 
+<!-- ── ERROR ──────────────────────────────────────────────────────────────── -->
+{% if diet_error %}
+<div class="card" style="border-color:#ef4444; border-width:2px;">
+    <p style="margin:0; color:#ef4444; font-weight:600;">⚠ {{ diet_error }}</p>
+</div>
+{% endif %}
+
 <!-- ── PREVIEW / CONFIRM ─────────────────────────────────────────────────── -->
 {% if preview_items %}
 <div class="card" style="border-color:var(--primary); border-width:2px;">

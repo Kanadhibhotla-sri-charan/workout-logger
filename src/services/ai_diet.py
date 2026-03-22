@@ -49,12 +49,10 @@ class AIDietParser:
     def parse_diet(self, full_text):
         """
         Input:  "Bf - 2 eggs. Lunch - Rice and dal."
-        Output: List of dicts:
-                [{"meal_type": "Breakfast", "food_raw": "2 eggs",
-                  "calories": 140, "protein": 12, "carbs": 1, "fats": 10}, ...]
+        Output: (list_of_dicts, error_string_or_None)
         """
         if not self.client:
-            return []
+            return [], "ANTHROPIC_API_KEY is not set. Add it in your Render environment variables."
 
         prompt = f"""Analyze this food log and return a JSON list of meal entries.
 
@@ -94,7 +92,7 @@ Format:
             data = json.loads(text)
             if isinstance(data, dict):
                 data = [data]
-            return data
+            return data, None
         except Exception as e:
             print(f"[WARN] AI Diet Parse failed: {e}")
-            return []
+            return [], f"Calorie estimation failed: {e}"
