@@ -65,8 +65,10 @@ def index():
                            exercise_names=exercise_names)
 
 
-@app.route('/log_workout', methods=['POST'])
+@app.route('/log_workout', methods=['GET', 'POST'])
 def log_workout():
+    if request.method == 'GET':
+        return redirect(url_for('index'))
     date = request.form.get('date', str(datetime.date.today()))
     day_type = request.form.get('day_type', 'PUSH')
     exercises_json = request.form.get('exercises_json', '[]')
