@@ -4,10 +4,7 @@
 <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
         <p class="card-title" style="margin:0;">📋 Workout History</p>
-        <div class="flex gap-2">
-            <a href="/"     class="btn btn-primary btn-sm">⚡ Log New Workout</a>
-            <a href="/diet" class="btn btn-outline btn-sm">🍎 Log Food</a>
-        </div>
+        <a href="/" class="btn btn-primary btn-sm">⚡ Log New Workout</a>
     </div>
 
     {% if rows %}
@@ -24,8 +21,8 @@
                 </tr>
             </thead>
             <tbody>
-                {% set ns = namespace(prev_date='', prev_type='') %}
                 {% for row in rows %}
+                {# row: workout_date, day_type, exercises_raw, exercise_name, sets, reps, weight, type, duration, distance #}
                 <tr>
                     <td class="muted text-sm">{{ row[0] }}</td>
                     <td>
@@ -33,19 +30,18 @@
                             {{ row[1] }}
                         </span>
                     </td>
-                    <td>
-                        {% if row[6] == 'cardio' %}
-                        🏃 <strong>{{ row[2] }}</strong>
-                        {% else %}
-                        {{ row[2] }}
-                        {% endif %}
-                    </td>
-                    {% if row[6] == 'cardio' %}
-                    <td colspan="3" class="muted">{{ row[7] or '' }} {{ row[8] or '' }} {{ row[9] or '' }}</td>
-                    {% else %}
-                    <td>{{ row[3] or '—' }}</td>
+                    {% if row[7] == 'cardio' %}
+                    <td>🏃 <strong>{{ row[3] }}</strong></td>
+                    <td colspan="3" class="muted">{{ row[8] or '' }}{% if row[9] %} · {{ row[9] }}{% endif %}</td>
+                    {% elif row[3] %}
+                    {# Matched exercise from DB #}
+                    <td><strong>{{ row[3] }}</strong></td>
                     <td>{{ row[4] or '—' }}</td>
                     <td>{{ row[5] or '—' }}</td>
+                    <td>{{ row[6] or '—' }}</td>
+                    {% else %}
+                    {# Unmatched — show raw log #}
+                    <td colspan="4" class="muted text-sm" style="font-style:italic;">{{ row[2] }}</td>
                     {% endif %}
                 </tr>
                 {% endfor %}

@@ -132,30 +132,32 @@ def report():
     conn = get_connection()
     cursor = conn.cursor()
 
+    # LEFT JOIN so workout logs with unmatched exercises still appear (shows exercises_raw)
     sql = """
     SELECT
-        l.workout_date, l.day_type,
-        e.name as item_name,
+        l.workout_date, l.day_type, l.exercises_raw,
+        e.name as exercise_name,
         we.sets, we.reps, we.weight,
         'lift' as type,
-        NULL as duration, NULL as distance, NULL as speed
+        NULL as duration, NULL as distance
     FROM workout_logs l
-    JOIN workout_exercises we ON l.id = we.workout_log_id
-    JOIN exercises e ON we.exercise_id = e.id
+    LEFT JOIN workout_exercises we ON l.id = we.workout_log_id
+    LEFT JOIN exercises e ON we.exercise_id = e.id
+    WHERE l.id NOT IN (SELECT DISTINCT workout_log_id FROM cardio_logs)
 
     UNION ALL
 
     SELECT
-        l.workout_date, l.day_type,
-        cl.activity_name as item_name,
+        l.workout_date, l.day_type, l.exercises_raw,
+        cl.activity_name,
         NULL, NULL, NULL,
-        'cardio' as type,
-        cl.duration, cl.distance, cl.speed
+        'cardio',
+        cl.duration, cl.distance
     FROM workout_logs l
     JOIN cardio_logs cl ON l.id = cl.workout_log_id
 
-    ORDER BY workout_date DESC, item_name ASC
-    LIMIT 100
+    ORDER BY workout_date DESC
+    LIMIT 200
     """
     cursor.execute(sql)
     rows = cursor.fetchall()
