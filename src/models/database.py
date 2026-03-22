@@ -45,7 +45,7 @@ def get_connection():
     """Get a database connection (Postgres or SQLite)."""
     db_url = os.getenv("DATABASE_URL")
     if db_url:
-        real_conn = psycopg2.connect(db_url)
+        real_conn = psycopg2.connect(db_url, connect_timeout=10)
         return PostgresConnection(real_conn)
     return sqlite3.connect(DB_PATH)
 
