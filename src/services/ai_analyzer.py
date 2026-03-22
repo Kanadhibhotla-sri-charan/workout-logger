@@ -33,29 +33,52 @@ class AIAnalyzer:
         if not self.available:
             return "AI Analysis unavailable (API connection failed)."
 
-        # 1. Construct Prompt
-        exercises_text = "\n".join([
-            f"- {ex['name']} (Target: {ex['muscle']})" 
-            for ex in workout_report['exercises']
-        ])
-        
-        prompt = f"""
-        Act as an elite strength and conditioning coach.
-        Analyze this {workout_report['day_type']} workout session:
+        day_type = workout_report['day_type']
 
-        EXERCISES PERFORMED:
-        {exercises_text}
+        # Cardio-only prompt
+        if day_type == 'CARDIO':
+            cardio_items = workout_report.get('exercises', [])
+            cardio_text = "\n".join([
+                f"- {ex.get('name','')} | duration: {ex.get('duration','')} | distance: {ex.get('distance','')} | speed: {ex.get('speed','')}"
+                for ex in cardio_items
+            ]) or "General cardio session"
+            prompt = f"""
+            Act as an elite endurance coach.
+            Analyze this cardio session:
 
-        MUSCLE GROUP VOLUME:
-        {dict(workout_report['muscle_counts'])}
+            ACTIVITIES:
+            {cardio_text}
 
-        Provide a brief, bulleted critique (max 3-4 points):
-        1. Identify any MAJOR missing muscle groups for this specific day type (e.g., if Push day, did they miss rear delts or a specific tricep head?).
-        2. Identify any redundancy (too many exercises for same muscle).
-        3. One actionable tip to improve this specific session.
-        
-        Keep it concise and encouraging. No formatting, just specific advice.
-        """
+            Provide a brief, bulleted critique (max 3 points):
+            1. Comment on intensity/duration balance.
+            2. Suggest one way to improve or vary this session.
+            3. One recovery tip.
+
+            Keep it concise and encouraging. No formatting, just specific advice.
+            """
+        else:
+            # 1. Construct Prompt
+            exercises_text = "\n".join([
+                f"- {ex['name']} (Target: {ex['muscle']})"
+                for ex in workout_report['exercises']
+            ])
+            prompt = f"""
+            Act as an elite strength and conditioning coach.
+            Analyze this {day_type} workout session:
+
+            EXERCISES PERFORMED:
+            {exercises_text}
+
+            MUSCLE GROUP VOLUME:
+            {dict(workout_report.get('muscle_counts', {}))}
+
+            Provide a brief, bulleted critique (max 3-4 points):
+            1. Identify any MAJOR missing muscle groups for this specific day type (e.g., if Push day, did they miss rear delts or a specific tricep head?).
+            2. Identify any redundancy (too many exercises for same muscle).
+            3. One actionable tip to improve this specific session.
+
+            Keep it concise and encouraging. No formatting, just specific advice.
+            """
 
         try:
             # 2. Get Response

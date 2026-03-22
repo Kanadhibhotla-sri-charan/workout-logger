@@ -120,7 +120,7 @@ def index():
                         display_exercises.append({**report['exercises'][lift_idx], **m})
                         lift_idx += 1
         elif cardio_items:
-            report = {'day_type': 'CARDIO', 'exercises': []}
+            report = {'day_type': 'CARDIO', 'exercises': [], 'muscle_counts': {}}
             display_exercises = cardio_items
         else:
             report = None
