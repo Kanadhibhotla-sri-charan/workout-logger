@@ -4,21 +4,17 @@ import json
 import sys
 import os
 
-# Add root folder to sys.path so we can import services
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from src.services.exercise_matcher import ExerciseMatcher
-from src.services.ai_parser import AIParser
 from src.services.categorizer import WorkoutCategorizer
 from src.services.ai_analyzer import AIAnalyzer
-from src.services.ai_diet import AIDietParser
-from src.services.diet_service import save_diet_logs, get_diet_history
 from src.services.workout_service import save_workout
 from src.models.database import get_connection
 
 app = Flask(__name__)
 
-# Auto-initialize DB on startup (creates tables if they don't exist)
+# Auto-initialize DB on startup
 try:
     from src.models.database import init_database
     init_database()
@@ -27,32 +23,12 @@ except Exception as _e:
 
 # Initialize Services
 matcher = ExerciseMatcher()
-ai_parser = AIParser()
 categorizer = WorkoutCategorizer()
-ai_diet = AIDietParser()
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
-def get_today_macros(date):
-    """Returns sum of macros already logged for a given date."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT COALESCE(SUM(calories),0), COALESCE(SUM(protein),0),
-               COALESCE(SUM(carbs),0), COALESCE(SUM(fats),0)
-        FROM diet_logs WHERE log_date = ?
-    """, (date,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {'calories': int(row[0]), 'protein': int(row[1]),
-                'carbs': int(row[2]), 'fats': int(row[3])}
-    return {'calories': 0, 'protein': 0, 'carbs': 0, 'fats': 0}
-
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def get_last_workout():
-    """Returns the most recent workout log row."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -64,134 +40,87 @@ def get_last_workout():
     conn.close()
     return row
 
-
-def _parse_and_match(raw_input):
-    """Shared helper: AI-parse + fuzzy-match a raw workout string."""
-    parsed_list = ai_parser.parse(raw_input)
-    if not parsed_list:
-        parsed_list = [{"name": e.strip()} for e in raw_input.split(",")]
-
-    matched = []
-    for item in parsed_list:
-        if item.get('type') == 'cardio':
-            matched.append(item)
-            continue
-        clean_name = item.get('name') or "Unknown"
-        result = matcher.match(clean_name)
-        if result:
-            result['type'] = 'lift'
-            if item.get('sets'):   result['sets']   = item['sets']
-            if item.get('reps'):   result['reps']   = item['reps']
-            if item.get('weight'): result['weight'] = item['weight']
-            matched.append(result)
-    return matched
+def get_all_exercise_names():
+    """Returns all exercise names from DB for autocomplete."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM exercises ORDER BY name")
+        rows = cursor.fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
 
 
-# ─── Workout Routes ───────────────────────────────────────────────────────────
+# ─── Routes ───────────────────────────────────────────────────────────────────
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/', methods=['GET'])
 def index():
-    report = None
-    display_exercises = None
-    ai_analysis = None
-    exercises_json = None
     last_workout = get_last_workout()
-
-    if request.method == 'POST':
-        raw_input = request.form.get('raw_input', '').strip()
-        date = request.form.get('date')
-
-        matched_exercises = _parse_and_match(raw_input)
-
-        ex_names = [m['name'] for m in matched_exercises if m.get('type') != 'cardio']
-        cardio_items = [m for m in matched_exercises if m.get('type') == 'cardio']
-
-        if ex_names:
-            report = categorizer.categorize(ex_names)
-            if cardio_items:
-                report['day_type'] = 'HYBRID'
-            display_exercises = []
-            lift_idx = 0
-            for m in matched_exercises:
-                if m.get('type') == 'cardio':
-                    display_exercises.append(m)
-                else:
-                    if lift_idx < len(report['exercises']):
-                        display_exercises.append({**report['exercises'][lift_idx], **m})
-                        lift_idx += 1
-        elif cardio_items:
-            report = {'day_type': 'CARDIO', 'exercises': [], 'muscle_counts': {}}
-            display_exercises = cardio_items
-        else:
-            report = None
-            display_exercises = None
-
-        if report:
-            try:
-                analyzer = AIAnalyzer()
-                ai_analysis = analyzer.analyze(report)
-            except Exception:
-                ai_analysis = "AI analysis unavailable."
-
-            exercises_json = json.dumps(matched_exercises)
-
-            return render_template('index.html',
-                                   raw_input=raw_input,
-                                   date=date,
-                                   report=report,
-                                   display_exercises=display_exercises,
-                                   ai_analysis=ai_analysis,
-                                   exercises_json=exercises_json,
-                                   today=date,
-                                   last_workout=last_workout)
-
+    exercise_names = get_all_exercise_names()
     return render_template('index.html',
                            today=str(datetime.date.today()),
-                           last_workout=last_workout)
+                           last_workout=last_workout,
+                           exercise_names=exercise_names)
 
 
-@app.route('/quick_log', methods=['POST'])
-def quick_log():
-    """⚡ Direct save — skips the analysis/confirm step. Maximum speed."""
-    raw_input = request.form.get('raw_input', '').strip()
+@app.route('/log_workout', methods=['POST'])
+def log_workout():
     date = request.form.get('date', str(datetime.date.today()))
+    day_type = request.form.get('day_type', 'PUSH')
+    exercises_json = request.form.get('exercises_json', '[]')
 
-    if not raw_input:
+    try:
+        exercises = json.loads(exercises_json)
+    except Exception:
         return redirect(url_for('index'))
 
-    matched_exercises = _parse_and_match(raw_input)
+    if not exercises:
+        return redirect(url_for('index'))
 
-    ex_names = [m['name'] for m in matched_exercises if m.get('type') != 'cardio']
-    cardio_items = [m for m in matched_exercises if m.get('type') == 'cardio']
+    # Build raw text summary
+    raw_parts = []
+    for ex in exercises:
+        if ex.get('type') == 'cardio':
+            parts = [ex.get('name', '')]
+            if ex.get('duration'): parts.append(ex['duration'])
+            if ex.get('distance'): parts.append(ex['distance'])
+            raw_parts.append(' '.join(parts))
+        else:
+            sets_data = ex.get('sets', [])
+            sets_str = ', '.join(f"{s['reps']}x{s['weight']}kg" for s in sets_data)
+            raw_parts.append(f"{ex['name']}: {sets_str}")
+    raw_input = ' | '.join(raw_parts)
 
-    if ex_names:
-        try:
-            report = categorizer.categorize(ex_names)
-            day_type = report.get('day_type', 'HYBRID')
-            if cardio_items:
-                day_type = 'HYBRID'
-        except Exception:
-            day_type = 'HYBRID' if cardio_items else 'PUSH'
-    elif cardio_items:
-        day_type = 'CARDIO'
-    else:
-        day_type = 'HYBRID'
+    # Build save list
+    save_list = []
+    for ex in exercises:
+        if ex.get('type') == 'cardio':
+            save_list.append({
+                'type': 'cardio',
+                'name': ex.get('name', 'Cardio'),
+                'duration': ex.get('duration'),
+                'distance': ex.get('distance'),
+            })
+        else:
+            sets_data = ex.get('sets', [])
+            if not sets_data:
+                continue
+            result = matcher.match(ex['name'])
+            name = result['name'] if result else ex['name']
+            reps_str   = ','.join(str(s.get('reps', '')) for s in sets_data)
+            weight_str = ','.join(str(s.get('weight', '')) for s in sets_data)
+            save_list.append({
+                'type': 'lift',
+                'name': name,
+                'sets': str(len(sets_data)),
+                'reps': reps_str,
+                'weight': weight_str,
+            })
 
-    if matched_exercises:
-        save_workout(date, day_type, raw_input, matched_exercises)
-
-    return redirect(url_for('report'))
-
-
-@app.route('/confirm', methods=['POST'])
-def confirm():
-    date = request.form.get('date')
-    day_type = request.form.get('day_type')
-    raw_input = request.form.get('raw_input')
-    exercises_json = request.form.get('exercises_json')
-
-    exercises = json.loads(exercises_json)
-    save_workout(date, day_type, raw_input, exercises)
+    if save_list:
+        save_workout(date, day_type, raw_input, save_list)
 
     return redirect(url_for('report'))
 
@@ -233,62 +162,12 @@ def report():
     return render_template('report.html', rows=rows)
 
 
-# ─── Diet Routes ──────────────────────────────────────────────────────────────
-
-@app.route('/diet', methods=['GET', 'POST'])
-def diet():
-    today = str(datetime.date.today())
-    history = get_diet_history()
-    today_macros = get_today_macros(today)
-
-    if request.method == 'POST':
-        raw_input = request.form.get('raw_input', '')
-        date = request.form.get('date', today)
-
-        preview_items, diet_error = ai_diet.parse_diet(raw_input)
-
-        total_cals = sum(i.get('calories', 0) for i in preview_items)
-        total_p    = sum(i.get('protein',  0) for i in preview_items)
-        total_c    = sum(i.get('carbs',    0) for i in preview_items)
-        total_f    = sum(i.get('fats',     0) for i in preview_items)
-
-        items_json = json.dumps(preview_items)
-
-        return render_template('diet.html',
-                               today=date,
-                               raw_input=raw_input,
-                               preview_items=preview_items,
-                               diet_error=diet_error,
-                               items_json=items_json,
-                               total_cals=total_cals,
-                               total_p=total_p,
-                               total_c=total_c,
-                               total_f=total_f,
-                               date=date,
-                               history=history,
-                               today_macros=today_macros)
-
-    return render_template('diet.html', today=today, history=history, today_macros=today_macros)
-
-
-@app.route('/confirm_diet', methods=['POST'])
-def confirm_diet():
-    date = request.form.get('date')
-    items_json = request.form.get('items_json')
-    items = json.loads(items_json)
-    save_diet_logs(date, items)
-    return redirect(url_for('diet'))
-
-
-# ─── Dashboard Route ──────────────────────────────────────────────────────────
-
 @app.route('/dashboard')
 def dashboard():
     today = str(datetime.date.today())
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Today's workout session
     cursor.execute("""
         SELECT id, workout_date, day_type, exercises_raw
         FROM workout_logs
@@ -297,7 +176,6 @@ def dashboard():
     """, (today,))
     today_workout = cursor.fetchone()
 
-    # Exercises within today's workout
     today_exercises = []
     if today_workout:
         cursor.execute("""
@@ -308,7 +186,6 @@ def dashboard():
         """, (today_workout[0],))
         today_exercises = cursor.fetchall()
 
-    # Five most recent past workouts (for quick-repeat)
     cursor.execute("""
         SELECT id, workout_date, day_type, exercises_raw
         FROM workout_logs
@@ -316,16 +193,12 @@ def dashboard():
         LIMIT 5
     """)
     recent_workouts = cursor.fetchall()
-
     conn.close()
-
-    today_macros = get_today_macros(today)
 
     return render_template('dashboard.html',
                            today=today,
                            today_workout=today_workout,
                            today_exercises=today_exercises,
-                           today_macros=today_macros,
                            recent_workouts=recent_workouts)
 
 

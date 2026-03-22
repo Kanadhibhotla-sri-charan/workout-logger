@@ -236,8 +236,7 @@
         <a href="/" class="nav-logo">⚡ FitLog</a>
         <div class="nav-links">
             <a href="/dashboard" id="nav-dashboard">Dashboard</a>
-            <a href="/"         id="nav-log">Workout</a>
-            <a href="/diet"     id="nav-diet">Diet</a>
+            <a href="/"         id="nav-log">Log</a>
             <a href="/report"   id="nav-report">History</a>
             <button class="dark-toggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
         </div>
@@ -260,9 +259,8 @@
         // ── Active nav link ────────────────────────────────────────────────
         (function() {
             const path = window.location.pathname;
-            const map = {'/dashboard': 'nav-dashboard', '/': 'nav-log',
-                         '/diet': 'nav-diet', '/report': 'nav-report'};
-            const id = map[path] || (path.startsWith('/diet') ? 'nav-diet' : null);
+            const map = {'/dashboard': 'nav-dashboard', '/': 'nav-log', '/report': 'nav-report'};
+            const id = map[path] || null;
             if (id) document.getElementById(id)?.classList.add('active');
         })();
 

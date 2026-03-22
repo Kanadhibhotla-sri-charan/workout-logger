@@ -1,254 +1,306 @@
 {% extends "layout.html" %}
-
 {% block content %}
 
-<!-- ── QUICK TEMPLATES ──────────────────────────────────────────────────── -->
-<div class="card">
-    <p class="card-title">⚡ Quick Templates — one click to fill your workout</p>
-    <div class="chip-group">
-        <button class="chip push" onclick="useTemplate('push')">💪 Push Day</button>
-        <button class="chip pull" onclick="useTemplate('pull')">🏋 Pull Day</button>
-        <button class="chip legs" onclick="useTemplate('legs')">🦵 Legs Day</button>
-        <button class="chip cardio" onclick="useTemplate('cardio')">🏃 Cardio</button>
-        <button class="chip" onclick="useTemplate('fullbody')">🔄 Full Body</button>
-        <button class="chip" onclick="useTemplate('upper')">⬆️ Upper Body</button>
+<!-- Exercise name datalist for autocomplete -->
+<datalist id="exercise-list">
+    {% for name in exercise_names %}
+    <option value="{{ name }}">
+    {% endfor %}
+</datalist>
+
+<!-- ── LAST WORKOUT ───────────────────────────────────────────────────────── -->
+{% if last_workout %}
+<div class="card" style="padding:14px 20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <span class="muted text-sm" style="font-weight:600;">
+            LAST — {{ last_workout[1] }}
+            <span class="badge badge-{% if last_workout[2] == 'PUSH' %}push{% elif last_workout[2] == 'PULL' %}pull{% elif last_workout[2] == 'LEGS' %}legs{% elif last_workout[2] == 'CARDIO' %}cardio{% else %}default{% endif %}" style="margin-left:6px;">{{ last_workout[2] }}</span>
+        </span>
+        <span class="muted text-sm" style="white-space:pre-wrap; word-break:break-word; max-width:500px;">{{ last_workout[3] }}</span>
     </div>
 </div>
+{% endif %}
 
-<!-- ── LOG FORM ─────────────────────────────────────────────────────────── -->
+<!-- ── WORKOUT NOTEBOOK ───────────────────────────────────────────────────── -->
 <div class="card">
-    <p class="card-title">📝 Log Workout</p>
 
-    <form id="workout-form" action="/" method="POST">
-        <label for="raw-input">Your workout <span class="muted text-sm">(natural language — e.g. "Bench 4x8 80kg, OHP 3x10 50kg")</span></label>
-        <textarea id="raw-input" name="raw_input" rows="4"
-            placeholder="Bench press 4x8 80kg, Incline DB 3x10 24kg, Lateral raise 4x15 10kg"
-            autofocus>{{ raw_input or '' }}</textarea>
-
-        <div class="flex gap-2 mt-2" style="align-items:center; flex-wrap:wrap;">
-            <div>
-                <label for="workout-date" style="margin-bottom:3px;">Date</label>
-                <input type="date" id="workout-date" name="date"
-                    value="{{ today }}" style="width:auto;">
-            </div>
-            <div style="flex:1; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
-                <button type="submit" class="btn btn-primary" title="Ctrl+Enter">
-                    🔍 Analyze &amp; Log
-                </button>
-                <button type="button" class="btn btn-success" onclick="quickSave()" title="Save directly, no analysis">
-                    ⚡ Quick Save
-                </button>
-                <button type="button" class="btn btn-outline btn-sm" onclick="clearForm()">Clear</button>
+    <!-- Header row: date + day type -->
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px;">
+        <div>
+            <label for="workout-date" style="margin-bottom:3px;">Date</label>
+            <input type="date" id="workout-date" value="{{ today }}" style="width:auto;">
+        </div>
+        <div style="flex:1;">
+            <label style="margin-bottom:3px;">Workout Type</label>
+            <div class="chip-group" id="day-type-chips">
+                <button type="button" class="chip push active-chip"   onclick="setDayType('PUSH',     this)">Push</button>
+                <button type="button" class="chip pull"               onclick="setDayType('PULL',     this)">Pull</button>
+                <button type="button" class="chip legs"               onclick="setDayType('LEGS',     this)">Legs</button>
+                <button type="button" class="chip cardio"             onclick="setDayType('CARDIO',   this)">Cardio</button>
+                <button type="button" class="chip"                    onclick="setDayType('HYBRID',   this)">Full Body</button>
             </div>
         </div>
-        <p class="muted text-sm mt-2" style="margin-bottom:0;">
-            Tip: <kbd style="background:var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Enter</kbd> to analyze &nbsp;|&nbsp;
-            <kbd style="background:var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Shift+Enter</kbd> to quick-save
-        </p>
-    </form>
-</div>
-
-<!-- ── EXERCISE CHIPS ────────────────────────────────────────────────────── -->
-<div class="card">
-    <p class="card-title">➕ Quick-Add Exercise — click to append to your workout</p>
-
-    <div class="section-label">Push</div>
-    <div class="chip-group">
-        <button class="chip push" onclick="addExercise('Bench Press 4x8 0kg')">Bench Press</button>
-        <button class="chip push" onclick="addExercise('Incline DB Press 3x10 0kg')">Incline DB</button>
-        <button class="chip push" onclick="addExercise('Overhead Press 3x10 0kg')">OHP</button>
-        <button class="chip push" onclick="addExercise('Dips 3x12')">Dips</button>
-        <button class="chip push" onclick="addExercise('Lateral Raise 4x15 0kg')">Lateral Raise</button>
-        <button class="chip push" onclick="addExercise('Tricep Pushdown 3x15 0kg')">Tricep Pushdown</button>
-        <button class="chip push" onclick="addExercise('Cable Fly 3x15 0kg')">Cable Fly</button>
-        <button class="chip push" onclick="addExercise('Chest Dip 3x12')">Chest Dips</button>
-        <button class="chip push" onclick="addExercise('Pec Deck 3x15 0kg')">Pec Deck</button>
-        <button class="chip push" onclick="addExercise('Arnold Press 3x12 0kg')">Arnold Press</button>
     </div>
 
-    <div class="section-label">Pull</div>
-    <div class="chip-group">
-        <button class="chip pull" onclick="addExercise('Deadlift 4x5 0kg')">Deadlift</button>
-        <button class="chip pull" onclick="addExercise('Pull Ups 4x8')">Pull Ups</button>
-        <button class="chip pull" onclick="addExercise('Lat Pulldown 3x12 0kg')">Lat Pulldown</button>
-        <button class="chip pull" onclick="addExercise('Barbell Row 3x10 0kg')">Barbell Row</button>
-        <button class="chip pull" onclick="addExercise('Seated Cable Row 3x12 0kg')">Cable Row</button>
-        <button class="chip pull" onclick="addExercise('Face Pull 3x15 0kg')">Face Pull</button>
-        <button class="chip pull" onclick="addExercise('Preacher Curl 3x12 0kg')">Preacher Curl</button>
-        <button class="chip pull" onclick="addExercise('Hammer Curl 3x12 0kg')">Hammer Curl</button>
-        <button class="chip pull" onclick="addExercise('Incline DB Curl 3x12 0kg')">Incline Curl</button>
-        <button class="chip pull" onclick="addExercise('Reverse Pec Deck 3x15 0kg')">Rear Delt</button>
+    <!-- Exercise blocks container -->
+    <div id="exercise-blocks"></div>
+
+    <!-- Add exercise row -->
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:4px;">
+        <input type="text" id="new-exercise-name" list="exercise-list"
+               placeholder="Exercise name…" style="flex:1; min-width:180px;"
+               onkeydown="if(event.key==='Enter'){event.preventDefault(); addExercise('lift');}">
+        <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="addExercise('lift')">+ Lift</button>
+            <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--cardio);color:var(--cardio);" onclick="addExercise('cardio')">+ Cardio</button>
+        </div>
     </div>
 
-    <div class="section-label">Legs</div>
-    <div class="chip-group">
-        <button class="chip legs" onclick="addExercise('Squat 4x6 0kg')">Squat</button>
-        <button class="chip legs" onclick="addExercise('Leg Press 3x12 0kg')">Leg Press</button>
-        <button class="chip legs" onclick="addExercise('Romanian Deadlift 3x10 0kg')">RDL</button>
-        <button class="chip legs" onclick="addExercise('Leg Curl 3x15 0kg')">Leg Curl</button>
-        <button class="chip legs" onclick="addExercise('Leg Extension 3x15 0kg')">Leg Extension</button>
-        <button class="chip legs" onclick="addExercise('Calf Raise 4x20 0kg')">Calf Raise</button>
-        <button class="chip legs" onclick="addExercise('Hip Thrust 3x12 0kg')">Hip Thrust</button>
-        <button class="chip legs" onclick="addExercise('Bulgarian Split Squat 3x10 0kg')">Bulgarian Split</button>
-    </div>
-
-    <div class="section-label">Cardio</div>
-    <div class="chip-group">
-        <button class="chip cardio" onclick="addExercise('Running 30min')">Running 30m</button>
-        <button class="chip cardio" onclick="addExercise('Running 45min')">Running 45m</button>
-        <button class="chip cardio" onclick="addExercise('Cycling 20min')">Cycling 20m</button>
-        <button class="chip cardio" onclick="addExercise('Jump Rope 15min')">Jump Rope</button>
-        <button class="chip cardio" onclick="addExercise('HIIT 20min')">HIIT 20m</button>
-        <button class="chip cardio" onclick="addExercise('Walking 30min')">Walking 30m</button>
+    <!-- Save button -->
+    <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
+        <button type="button" class="btn btn-success" onclick="saveWorkout()" id="save-btn" disabled>Save Workout</button>
+        <span class="muted text-sm" id="exercise-count"></span>
     </div>
 </div>
 
-<!-- ── LAST WORKOUT REPEAT ────────────────────────────────────────────────── -->
-{% if last_workout %}
-<div class="card">
-    <p class="card-title">🔁 Last Workout — {{ last_workout[1] }} &nbsp;
-        <span class="badge badge-{% if last_workout[2] == 'PUSH' %}push{% elif last_workout[2] == 'PULL' %}pull{% elif last_workout[2] == 'LEGS' %}legs{% elif last_workout[2] == 'CARDIO' %}cardio{% else %}default{% endif %}">{{ last_workout[2] }}</span>
-    </p>
-    <p class="muted text-sm" style="margin:0 0 10px; white-space:pre-wrap; word-break:break-word;">{{ last_workout[3] }}</p>
-    <button class="btn btn-outline btn-sm"
-        onclick="repeatWorkout({{ last_workout[3]|tojson }})">
-        🔁 Repeat This Workout
-    </button>
-</div>
-{% endif %}
+<!-- Hidden form for submission -->
+<form id="workout-form" action="/log_workout" method="POST" style="display:none;">
+    <input type="hidden" name="date"           id="form-date">
+    <input type="hidden" name="day_type"       id="form-day-type">
+    <input type="hidden" name="exercises_json" id="form-exercises-json">
+</form>
 
-<!-- ── ANALYSIS RESULTS ───────────────────────────────────────────────────── -->
-{% if report %}
-<div class="card" style="border-color: var(--primary); border-width: 2px;">
-    <p class="card-title">
-        📊 Analysis —
-        <span class="badge badge-{% if report.day_type == 'PUSH' %}push{% elif report.day_type == 'PULL' %}pull{% elif report.day_type == 'LEGS' %}legs{% elif report.day_type == 'CARDIO' %}cardio{% else %}default{% endif %}">
-            {{ report.day_type }} Day
-        </span>
-    </p>
-
-    <table>
-        <thead>
-            <tr>
-                <th>Exercise</th>
-                <th>Sets</th>
-                <th>Reps</th>
-                <th>Weight</th>
-                <th>Muscle</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for ex in display_exercises %}
-            <tr>
-                {% if ex.type == 'cardio' %}
-                <td>🏃 <strong>{{ ex.name }}</strong></td>
-                <td colspan="3" class="muted">{{ ex.duration or '' }} {{ ex.distance or '' }} {{ ex.speed or '' }}</td>
-                <td><span class="badge badge-cardio">Cardio</span></td>
-                {% else %}
-                <td><strong>{{ ex.name }}</strong></td>
-                <td>{{ ex.sets or '—' }}</td>
-                <td>{{ ex.reps or '—' }}</td>
-                <td>{{ ex.weight or '—' }}</td>
-                <td><span class="badge badge-default">{{ ex.muscle or '—' }}</span></td>
-                {% endif %}
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    {% if ai_analysis %}
-    <div style="margin-top:14px; padding:14px; background:var(--surface2); border-radius:8px; border-left:3px solid var(--success);">
-        <p style="margin:0 0 6px; font-size:.8rem; font-weight:700; color:var(--success); text-transform:uppercase; letter-spacing:.05em;">🤖 AI Coach</p>
-        <div style="white-space: pre-wrap; font-size:.9rem;">{{ ai_analysis }}</div>
-    </div>
-    {% endif %}
-
-    <div class="flex gap-2 mt-4" style="flex-wrap:wrap;">
-        <form action="/confirm" method="POST" style="display:inline;">
-            <input type="hidden" name="raw_input"      value="{{ raw_input }}">
-            <input type="hidden" name="date"           value="{{ date }}">
-            <input type="hidden" name="day_type"       value="{{ report.day_type }}">
-            <input type="hidden" name="exercises_json" value="{{ exercises_json }}">
-            <button type="submit" class="btn btn-success">✓ Save Workout</button>
-        </form>
-        <a href="/" class="btn btn-danger">✕ Discard</a>
-    </div>
-</div>
-{% endif %}
+<style>
+    .exercise-block {
+        border: 1.5px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 12px;
+        overflow: hidden;
+    }
+    .exercise-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        background: var(--surface2);
+        border-bottom: 1px solid var(--border);
+        gap: 8px;
+    }
+    .exercise-name-display {
+        font-weight: 700;
+        font-size: .95rem;
+        flex: 1;
+    }
+    .set-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 14px;
+        border-bottom: 1px solid var(--border);
+    }
+    .set-row:last-child { border-bottom: none; }
+    .set-num {
+        font-size: .75rem;
+        font-weight: 700;
+        color: var(--muted);
+        width: 38px;
+        flex-shrink: 0;
+    }
+    .set-row input[type="number"] {
+        width: 72px;
+        padding: 6px 8px;
+        font-size: .9rem;
+        text-align: center;
+    }
+    .set-row label {
+        font-size: .75rem;
+        color: var(--muted);
+        margin: 0;
+        font-weight: 600;
+    }
+    .set-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        background: var(--surface2);
+    }
+    .chip.active-chip {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+    }
+    .chip.push.active-chip   { background: var(--push);   border-color: var(--push); }
+    .chip.pull.active-chip   { background: var(--pull);   border-color: var(--pull); }
+    .chip.legs.active-chip   { background: var(--legs);   border-color: var(--legs); }
+    .chip.cardio.active-chip { background: var(--cardio); border-color: var(--cardio); }
+    .btn-remove {
+        background: none; border: none; cursor: pointer;
+        color: var(--muted); font-size: 1.1rem; padding: 2px 6px;
+        border-radius: 4px; line-height: 1;
+    }
+    .btn-remove:hover { color: var(--danger); background: #fee2e2; }
+    .cardio-fields { padding: 10px 14px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .cardio-fields > div { display: flex; flex-direction: column; gap: 4px; }
+    .cardio-fields input { width: 130px; }
+</style>
 
 <script>
-    // ── Workout Templates ──────────────────────────────────────────────────
-    const TEMPLATES = {
-        push:     'Bench Press 4x8 0kg, Incline DB Press 3x10 0kg, Overhead Press 3x10 0kg, Lateral Raise 4x15 0kg, Tricep Pushdown 3x15 0kg',
-        pull:     'Deadlift 4x5 0kg, Pull Ups 4x8, Lat Pulldown 3x12 0kg, Barbell Row 3x10 0kg, Preacher Curl 3x12 0kg, Face Pull 3x15 0kg',
-        legs:     'Squat 4x6 0kg, Leg Press 3x12 0kg, Romanian Deadlift 3x10 0kg, Leg Curl 3x15 0kg, Leg Extension 3x15 0kg, Calf Raise 4x20 0kg',
-        cardio:   'Running 30min',
-        fullbody: 'Bench Press 3x8 0kg, Pull Ups 3x8, Squat 3x8 0kg, Overhead Press 3x10 0kg, Romanian Deadlift 3x10 0kg',
-        upper:    'Bench Press 4x8 0kg, Barbell Row 3x10 0kg, Overhead Press 3x10 0kg, Lat Pulldown 3x12 0kg, Lateral Raise 3x15 0kg, Tricep Pushdown 3x12 0kg',
-    };
+    // ── State ─────────────────────────────────────────────────────────────────
+    let exercises = [];
+    let dayType   = 'PUSH';
+    let blockIdx  = 0;
 
-    function useTemplate(key) {
-        document.getElementById('raw-input').value = TEMPLATES[key];
-        document.getElementById('raw-input').focus();
-        showToast('Template loaded — replace 0kg with your weights!', '#2563eb');
+    // ── Day type selection ────────────────────────────────────────────────────
+    function setDayType(dt, btn) {
+        dayType = dt;
+        document.querySelectorAll('#day-type-chips .chip').forEach(c => c.classList.remove('active-chip'));
+        btn.classList.add('active-chip');
     }
 
-    // ── Append exercise chip ───────────────────────────────────────────────
-    function addExercise(text) {
-        appendToTextarea('raw-input', text);
+    // ── Add exercise block ────────────────────────────────────────────────────
+    function addExercise(type) {
+        const nameInput = document.getElementById('new-exercise-name');
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+
+        const id = blockIdx++;
+        const ex = type === 'cardio'
+            ? { id, name, type, duration: '', distance: '' }
+            : { id, name, type, sets: [{ reps: '', weight: '' }] };
+
+        exercises.push(ex);
+        nameInput.value = '';
+        renderBlocks();
+        nameInput.focus();
     }
 
-    // ── Repeat last workout ────────────────────────────────────────────────
-    function repeatWorkout(text) {
-        document.getElementById('raw-input').value = text;
-        document.getElementById('raw-input').focus();
-        showToast('Workout loaded — update weights if needed!', '#2563eb');
+    // ── Remove exercise ───────────────────────────────────────────────────────
+    function removeExercise(id) {
+        syncState();
+        exercises = exercises.filter(e => e.id !== id);
+        renderBlocks();
     }
 
-    // ── Quick Save (no analysis step) ─────────────────────────────────────
-    function quickSave() {
-        const ta = document.getElementById('raw-input');
-        if (!ta.value.trim()) {
-            showToast('Please enter your workout first.', '#dc2626');
-            return;
-        }
-        const form = document.getElementById('workout-form');
-        form.action = '/quick_log';
-        showToast('⚡ Saving…', '#16a34a');
-        form.submit();
-    }
-
-    // ── Clear ──────────────────────────────────────────────────────────────
-    function clearForm() {
-        document.getElementById('raw-input').value = '';
-        document.getElementById('raw-input').focus();
-    }
-
-    // ── Keyboard shortcuts ─────────────────────────────────────────────────
-    document.addEventListener('keydown', function(e) {
-        if (e.ctrlKey && e.shiftKey && e.key === 'Enter') {
-            e.preventDefault();
-            quickSave();
-        } else if (e.ctrlKey && e.key === 'Enter') {
-            e.preventDefault();
-            document.getElementById('workout-form').action = '/';
-            document.getElementById('workout-form').submit();
-        }
-    });
-
-    // ── Load repeat workout from dashboard ────────────────────────────────
-    (function() {
-        const stored = sessionStorage.getItem('repeatWorkout');
-        if (stored) {
-            sessionStorage.removeItem('repeatWorkout');
-            const ta = document.getElementById('raw-input');
-            if (ta && !ta.value.trim()) {
-                ta.value = stored;
-                ta.focus();
-                showToast('Workout loaded — update weights if needed!', '#2563eb');
+    // ── Add set ───────────────────────────────────────────────────────────────
+    function addSet(id) {
+        syncState();
+        const ex = exercises.find(e => e.id === id);
+        if (ex) ex.sets.push({ reps: '', weight: '' });
+        renderBlocks();
+        // Focus the new reps input
+        setTimeout(() => {
+            const block = document.querySelector(`[data-id="${id}"]`);
+            if (block) {
+                const inputs = block.querySelectorAll('.set-row input[type="number"]');
+                if (inputs.length >= 2) inputs[inputs.length - 2].focus();
             }
-        }
-    })();
+        }, 30);
+    }
+
+    // ── Remove set ────────────────────────────────────────────────────────────
+    function removeSet(id, setIdx) {
+        syncState();
+        const ex = exercises.find(e => e.id === id);
+        if (ex && ex.sets.length > 1) ex.sets.splice(setIdx, 1);
+        renderBlocks();
+    }
+
+    // ── Read current input values back into state ─────────────────────────────
+    function syncState() {
+        exercises.forEach(ex => {
+            if (ex.type === 'cardio') {
+                const dur  = document.getElementById(`dur-${ex.id}`);
+                const dist = document.getElementById(`dist-${ex.id}`);
+                if (dur)  ex.duration = dur.value.trim();
+                if (dist) ex.distance = dist.value.trim();
+            } else {
+                ex.sets.forEach((s, i) => {
+                    const r = document.getElementById(`reps-${ex.id}-${i}`);
+                    const w = document.getElementById(`wt-${ex.id}-${i}`);
+                    if (r) s.reps   = r.value;
+                    if (w) s.weight = w.value;
+                });
+            }
+        });
+    }
+
+    // ── Render all exercise blocks ────────────────────────────────────────────
+    function renderBlocks() {
+        const container = document.getElementById('exercise-blocks');
+        container.innerHTML = '';
+
+        exercises.forEach(ex => {
+            const div = document.createElement('div');
+            div.className = 'exercise-block';
+            div.dataset.id = ex.id;
+
+            if (ex.type === 'cardio') {
+                div.innerHTML = `
+                    <div class="exercise-header">
+                        <span class="exercise-name-display">🏃 ${ex.name}</span>
+                        <span class="badge badge-cardio">Cardio</span>
+                        <button class="btn-remove" onclick="removeExercise(${ex.id})" title="Remove">×</button>
+                    </div>
+                    <div class="cardio-fields">
+                        <div>
+                            <label>Duration</label>
+                            <input type="text" id="dur-${ex.id}" value="${ex.duration}" placeholder="e.g. 30 mins">
+                        </div>
+                        <div>
+                            <label>Distance (optional)</label>
+                            <input type="text" id="dist-${ex.id}" value="${ex.distance}" placeholder="e.g. 5 km">
+                        </div>
+                    </div>`;
+            } else {
+                const setRows = ex.sets.map((s, i) => `
+                    <div class="set-row">
+                        <span class="set-num">Set ${i + 1}</span>
+                        <label>Reps</label>
+                        <input type="number" id="reps-${ex.id}-${i}" value="${s.reps}" min="1" placeholder="—">
+                        <label>kg</label>
+                        <input type="number" id="wt-${ex.id}-${i}" value="${s.weight}" min="0" step="0.5" placeholder="—">
+                        ${ex.sets.length > 1
+                            ? `<button class="btn-remove" onclick="removeSet(${ex.id},${i})" title="Remove set">×</button>`
+                            : ''}
+                    </div>`).join('');
+
+                div.innerHTML = `
+                    <div class="exercise-header">
+                        <span class="exercise-name-display">${ex.name}</span>
+                        <button class="btn-remove" onclick="removeExercise(${ex.id})" title="Remove">×</button>
+                    </div>
+                    ${setRows}
+                    <div class="set-actions">
+                        <button type="button" class="btn btn-outline btn-sm" onclick="addSet(${ex.id})">+ Add Set</button>
+                    </div>`;
+            }
+            container.appendChild(div);
+        });
+
+        const saveBtn = document.getElementById('save-btn');
+        const countEl = document.getElementById('exercise-count');
+        saveBtn.disabled = exercises.length === 0;
+        countEl.textContent = exercises.length
+            ? `${exercises.length} exercise${exercises.length > 1 ? 's' : ''} added`
+            : '';
+    }
+
+    // ── Save ──────────────────────────────────────────────────────────────────
+    function saveWorkout() {
+        syncState();
+        if (!exercises.length) return;
+
+        document.getElementById('form-date').value           = document.getElementById('workout-date').value;
+        document.getElementById('form-day-type').value       = dayType;
+        document.getElementById('form-exercises-json').value = JSON.stringify(exercises);
+        document.getElementById('workout-form').submit();
+    }
+
+    // Ctrl+Enter to save
+    document.addEventListener('keydown', e => {
+        if (e.ctrlKey && e.key === 'Enter') saveWorkout();
+    });
 </script>
 
 {% endblock %}
