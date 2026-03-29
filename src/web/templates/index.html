@@ -160,6 +160,7 @@
 
     // ── Add exercise block ────────────────────────────────────────────────────
     function addExercise(type) {
+        syncState();  // save current inputs before re-rendering
         const nameInput = document.getElementById('new-exercise-name');
         const name = nameInput.value.trim();
         if (!name) { nameInput.focus(); return; }

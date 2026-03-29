@@ -106,7 +106,7 @@ def log_workout():
             sets_data = ex.get('sets', [])
             if not sets_data:
                 continue
-            result = matcher.match(ex['name'])
+            result = matcher.match(ex['name'], threshold=90)
             name = result['name'] if result else ex['name']
             reps_str   = ','.join(str(s.get('reps', '')) for s in sets_data)
             weight_str = ','.join(str(s.get('weight', '')) for s in sets_data)
