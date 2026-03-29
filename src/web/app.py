@@ -166,27 +166,26 @@ def report():
 
 @app.route('/dashboard')
 def dashboard():
-    today = str(datetime.date.today())
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Most recent workout (no server-date filter — avoids UTC vs IST mismatch)
     cursor.execute("""
         SELECT id, workout_date, day_type, exercises_raw
         FROM workout_logs
-        WHERE workout_date = ?
-        ORDER BY id DESC LIMIT 1
-    """, (today,))
-    today_workout = cursor.fetchone()
+        ORDER BY workout_date DESC, id DESC LIMIT 1
+    """)
+    latest_workout = cursor.fetchone()
 
-    today_exercises = []
-    if today_workout:
+    latest_exercises = []
+    if latest_workout:
         cursor.execute("""
             SELECT e.name, we.sets, we.reps, we.weight
             FROM workout_exercises we
             JOIN exercises e ON we.exercise_id = e.id
             WHERE we.workout_log_id = ?
-        """, (today_workout[0],))
-        today_exercises = cursor.fetchall()
+        """, (latest_workout[0],))
+        latest_exercises = cursor.fetchall()
 
     cursor.execute("""
         SELECT id, workout_date, day_type, exercises_raw
@@ -198,9 +197,8 @@ def dashboard():
     conn.close()
 
     return render_template('dashboard.html',
-                           today=today,
-                           today_workout=today_workout,
-                           today_exercises=today_exercises,
+                           latest_workout=latest_workout,
+                           latest_exercises=latest_exercises,
                            recent_workouts=recent_workouts)
 
 

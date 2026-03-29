@@ -5,23 +5,26 @@
 <!-- ── HEADER ────────────────────────────────────────────────────────────── -->
 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
     <div>
-        <h2 style="margin:0; font-size:1.4rem;">Good {% if today[11:13]|int < 12 %}Morning{% elif today[11:13]|int < 17 %}Afternoon{% else %}Evening{% endif %} 👋</h2>
-        <p class="muted text-sm" style="margin:2px 0 0;">{{ today }}</p>
+        <h2 style="margin:0; font-size:1.4rem;" id="greeting">Good day 👋</h2>
+        <p class="muted text-sm" style="margin:2px 0 0;" id="local-date"></p>
     </div>
     <a href="/" class="btn btn-primary btn-sm">⚡ Log Workout</a>
 </div>
 
-<!-- ── TODAY'S WORKOUT ────────────────────────────────────────────────────── -->
+<!-- ── LATEST WORKOUT ─────────────────────────────────────────────────────── -->
 <div class="card">
-    <p class="card-title">💪 Today's Workout</p>
-    {% if today_workout %}
+    <p class="card-title">💪 Latest Workout</p>
+    {% if latest_workout %}
     <div>
-        <span class="badge badge-{% if today_workout[2] == 'PUSH' %}push{% elif today_workout[2] == 'PULL' %}pull{% elif today_workout[2] == 'LEGS' %}legs{% elif today_workout[2] == 'CARDIO' %}cardio{% else %}default{% endif %}" style="margin-bottom:8px; display:inline-block;">
-            {{ today_workout[2] }} Day
-        </span>
-        {% if today_exercises %}
+        <div style="margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span class="badge badge-{% if latest_workout[2] == 'PUSH' %}push{% elif latest_workout[2] == 'PULL' %}pull{% elif latest_workout[2] == 'LEGS' %}legs{% elif latest_workout[2] == 'CARDIO' %}cardio{% else %}default{% endif %}">
+                {{ latest_workout[2] }}
+            </span>
+            <span class="muted text-sm">{{ latest_workout[1] }}</span>
+        </div>
+        {% if latest_exercises %}
         <ul style="margin:8px 0 0; padding-left:18px; font-size:.85rem;">
-            {% for ex in today_exercises %}
+            {% for ex in latest_exercises %}
             <li style="margin-bottom:3px;">
                 <strong>{{ ex[0] }}</strong>
                 {% if ex[1] or ex[2] %}
@@ -34,14 +37,14 @@
             {% endfor %}
         </ul>
         {% else %}
-        <p class="muted text-sm" style="margin:6px 0 0;">{{ today_workout[3] }}</p>
+        <p class="muted text-sm" style="margin:6px 0 0;">{{ latest_workout[3] }}</p>
         {% endif %}
     </div>
     <a href="/report" class="btn btn-outline btn-sm" style="margin-top:12px;">View Full History →</a>
     {% else %}
     <div style="text-align:center; padding:20px 0;">
         <div style="font-size:2rem; margin-bottom:8px;">🏋</div>
-        <p class="muted text-sm" style="margin:0 0 12px;">No workout logged today yet.</p>
+        <p class="muted text-sm" style="margin:0 0 12px;">No workouts logged yet.</p>
         <a href="/" class="btn btn-primary btn-sm">Log Workout Now</a>
     </div>
     {% endif %}
@@ -81,4 +84,10 @@
     </a>
 </div>
 
+<script>
+    const h = new Date().getHours();
+    document.getElementById('greeting').textContent =
+        (h < 12 ? 'Good Morning' : h < 17 ? 'Good Afternoon' : 'Good Evening') + ' 👋';
+    document.getElementById('local-date').textContent = new Date().toLocaleDateString('en-CA');
+</script>
 {% endblock %}
