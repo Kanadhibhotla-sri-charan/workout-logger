@@ -6,7 +6,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from src.services.exercise_matcher import ExerciseMatcher
+from src.services.exercise_matcher import ExerciseMatcher  # used for .exercises list (exact match)
 from src.services.workout_service import save_workout
 from src.models.database import get_connection
 
@@ -106,8 +106,9 @@ def log_workout():
             sets_data = ex.get('sets', [])
             if not sets_data:
                 continue
-            result = matcher.match(ex['name'], threshold=90)
-            name = result['name'] if result else ex['name']
+            # Exact case-insensitive match against DB exercises
+            typed = ex['name'].strip().lower()
+            name = next((n for n in matcher.exercises if n.lower() == typed), ex['name'])
             reps_str   = ','.join(str(s.get('reps', '')) for s in sets_data)
             weight_str = ','.join(str(s.get('weight', '')) for s in sets_data)
             save_list.append({
