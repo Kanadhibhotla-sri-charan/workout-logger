@@ -1,32 +1,45 @@
-# Workout Programmer — Phase 1
+# Workout Programmer — Phase 1 / 1.5
 
 Infrastructure and contracts for a standalone workout programming and
-logging app: goal/program context, a workout logger, and read-only
-integration with two sibling apps — **workout-blueprint** (the fitness
-knowledge layer) and **Calorie Tracker** (`food_and_workout_tracker`).
+logging app: goal/program context, a training profile, a workout logger,
+and read-only integration with two sibling apps — **workout-blueprint**
+(the fitness knowledge layer) and **Calorie Tracker**
+(`food_and_workout_tracker`).
 
-Phase 1 deliberately does **not** include an AI layer or a
-volume/frequency/recovery decision engine. It builds the contracts and
-storage that engine will plug into later. See `docs/open-decisions.md` for
-what's still unresolved before Phase 2.
+Phase 1/1.5 deliberately does **not** include an AI layer or a
+volume/frequency/recovery decision engine. It builds the contracts,
+storage, and design boundaries that engine will plug into later. See
+`docs/open-decisions.md` for what's still unresolved before Phase 2, and
+`docs/TRAINING_EXPOSURE_MODEL.md` for the specific design boundary the
+future programming engine needs.
 
 ## What this is
 
 - A user records **Goals** (aesthetic or functional, referencing
-  workout-blueprint's own outcome/goal catalog by id), organizes them into
-  **Programs** and **Program Sessions** (planned workouts), and logs
-  **Workout Sessions** (what they actually did — exercises, sets, reps,
-  weight, completion, duration).
+  workout-blueprint's own outcome/goal catalog by id — a Goal's own `id`
+  and its `blueprint_ref` are distinct, never conflated, see
+  `src/contracts/types.ts`), organizes them into **Programs** and
+  **Program Sessions** (planned workouts, each recording the Blueprint
+  snapshot commit that informed it), and logs **Workout Sessions** (what
+  they actually did — exercises, sets, reps, weight, completion,
+  duration).
+- A **Training Profile** (`src/repositories/trainingProfileRepo.ts`,
+  `/profile.html`) holds user-specific constraints — training days,
+  preferred split, session-duration bounds, available equipment, and a
+  recurring activity schedule (gym/badminton/rest/other) — as data a
+  future programming engine reads, never as hard-coded assumptions.
 - Every exercise is referenced by its stable workout-blueprint `id`, never
   by display name, through a single `BlueprintAdapter` (`src/blueprint/`).
   This app never duplicates Blueprint's exercise/muscle/goal/equipment
   taxonomy.
 - A read contract (`getCompletedWorkouts(date)`) lets Calorie Tracker pull
-  actual logged sets/reps/load/duration to produce a **better estimate**
-  of workout expenditure — never an exact calorie figure.
+  actual logged sets/reps/load/duration for **completed sessions only**,
+  to produce a **better estimate** of workout expenditure — never an exact
+  calorie figure. See `docs/CALORIE_TRACKER_INTEGRATION.md`.
 
 See `docs/architecture.md` for the full picture (Blueprint's data model as
-found, Calorie Tracker's existing schema, and how the three apps relate).
+found, Calorie Tracker's existing schema, the responsibility boundary
+between all three apps, and how this app sits between them).
 
 ## Stack
 
@@ -46,7 +59,8 @@ npm test
 
 Open `http://localhost:3000/index.html` for goals/programs,
 `/today.html` to start a workout, `/logger.html?session=<id>` to log sets,
-`/history.html` for past sessions.
+`/profile.html` for the training profile, `/history.html` for past
+sessions.
 
 ### Environment variables
 
@@ -78,19 +92,32 @@ src/
   blueprint/     BlueprintAdapter + types + vendored data snapshot
   contracts/     canonical, versioned data contract (Goal, Program, ...)
   db/            SQLite schema + client
-  repositories/  persistence for goals/programs/workout sessions
+  repositories/  persistence for users/training profiles/goals/programs/
+                 workout sessions
   services/      Calorie Tracker export contract
   server/        Express app, routes
 public/          minimal static UI
-scripts/         sync-blueprint.mts
-tests/           vitest suite
-docs/            architecture note, deployment guide, open decisions
+scripts/         sync-blueprint.mts, migrate-workout-log-dry-run.mts
+tests/           vitest suite (incl. tests/fixtures/ goal-resolution fixture)
+docs/            architecture note, deployment guide, open decisions,
+                 training exposure model, Calorie Tracker integration
+                 contract, migration plan, per-change logs
 ```
 
 ## Docs
 
 - [`docs/architecture.md`](docs/architecture.md) — Blueprint's data model,
-  Calorie Tracker's schema, and how this app sits between them.
+  Calorie Tracker's schema, the three-app responsibility boundary, and how
+  this app sits between them.
+- [`docs/TRAINING_EXPOSURE_MODEL.md`](docs/TRAINING_EXPOSURE_MODEL.md) —
+  design boundary for translating exercise performance into muscle/target
+  training exposure; what's directly supported by Blueprint data today vs.
+  what needs an explicitly approved new rule.
+- [`docs/CALORIE_TRACKER_INTEGRATION.md`](docs/CALORIE_TRACKER_INTEGRATION.md)
+  — the formal one-way export contract to Calorie Tracker.
+- [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md) — field-by-field plan
+  and dry-run tool for a possible future historical-CSV import; no import
+  has been performed.
 - [`docs/deployment.md`](docs/deployment.md) — local vs. production setup.
 - [`docs/open-decisions.md`](docs/open-decisions.md) — what Charan needs to
   decide before Phase 2.

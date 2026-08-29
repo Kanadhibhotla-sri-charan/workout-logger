@@ -87,12 +87,14 @@ data.
   (`src/blueprint/adapter.ts`), the only module in this app that knows
   Blueprint's raw JSON shape.
 - **Its own storage** (`src/db/schema.sql`) holds what Blueprint has no
-  opinion on and Calorie Tracker has no room for: `goals` (a
-  `blueprint_ref` id + priority), `programs`/`program_sessions` (planned
-  training), and `workout_sessions`/`workout_exercises`/`workout_sets`
-  (actual training history, with `session_type` matching Calorie
-  Tracker's own `gym | badminton | other` and kept extensible for the
-  same reason).
+  opinion on and Calorie Tracker has no room for: `users`/
+  `training_profiles` (schedule, session-duration bounds, equipment,
+  recurring non-gym activity — read as data by any future programming
+  engine, never hard-coded), `goals` (a `blueprint_ref` id + priority),
+  `programs`/`program_sessions` (planned training), and
+  `workout_sessions`/`workout_exercises`/`workout_sets` (actual training
+  history, with `session_type` matching Calorie Tracker's own
+  `gym | badminton | other` and kept extensible for the same reason).
 - **To Calorie Tracker**, workout-logger exposes
   `getCompletedWorkouts(date)` (`src/services/calorieTrackerExport.ts`):
   date, session_type, duration_minutes, per-exercise sets/reps/load, and
@@ -101,15 +103,65 @@ data.
   expenditure, never as an exact calorie count; `tdee_final` computation
   stays entirely inside Calorie Tracker's own nightly job.
 
+## 4. Responsibility boundary
+
+Restated explicitly (this is the enforceable version of the table at the
+top of this document):
+
+```text
+PHYSIQUE BLUEPRINT
+───────────────────
+Canonical exercise/goal knowledge. Read-only from workout-logger's side.
+
+WORKOUT PROGRAMMER (this app)
+──────────────────────────────
+User training state. Programs. Goals. Workout sessions. Training history.
+Programming decisions (once built).
+
+CALORIE TRACKER
+────────────────
+Nutrition. Energy balance. Estimated expenditure.
+
+WORKOUT PROGRAMMER → CALORIE TRACKER
+──────────────────────────────────────
+Completed workout/activity data only (getCompletedWorkouts — see
+docs/CALORIE_TRACKER_INTEGRATION.md). One direction. Calorie Tracker never
+writes back into workout-logger's storage, and workout-logger never reads
+Calorie Tracker's storage directly.
+```
+
+**Calorie Tracker must never become responsible for**: exercise selection,
+volume allocation, program generation, or progression. Those are entirely
+this app's job (once the Training Exposure / programming engine work in
+`docs/TRAINING_EXPOSURE_MODEL.md` and `docs/open-decisions.md` lands).
+
+**workout-logger must never become responsible for**: food logging,
+nutrition targets, or TDEE ownership. `tdee_final` is computed exclusively
+by Calorie Tracker's own nightly job from whatever activity data it reads
+via the export contract — this app only ever supplies the inputs to a
+*better estimate*, never the number itself.
+
+**workout-blueprint must never become responsible for**: anything
+user-specific — no per-user state, no training history, no goals-in-
+progress. It stays a static, read-only knowledge source; if that ever
+needs to change, that's a decision for the Blueprint repo, not something
+workout-logger works around by writing into it.
+
 ## Data contract
 
 `src/contracts/types.ts` defines the versioned (`CONTRACT_VERSION`)
-canonical shapes: `User`, `Goal`, `Program`, `ProgramSession`,
-`WorkoutSession`, `ExercisePerformance`, `Set`, `TrainingExposure`. Every
-reference to a Blueprint entity is a plain `BlueprintId` (`string`) —
-resolved for display only through `BlueprintAdapter`, never stored as a
-name. `TrainingExposure` is defined but not yet computed or persisted: it's
-a placeholder for Phase 2's effective-set/volume aggregation.
+canonical shapes: `User`, `TrainingProfile`, `Goal`, `Program`,
+`ProgramSession`, `WorkoutSession`, `ExercisePerformance`, `Set`,
+`TrainingExposure`. Every reference to a Blueprint entity is a plain
+`BlueprintId` (`string`) — resolved for display only through
+`BlueprintAdapter`, never stored as a name. `TrainingExposure` is defined
+but not yet computed or persisted — see `docs/TRAINING_EXPOSURE_MODEL.md`
+for the design boundary Phase 2 will implement against. A `Goal`'s own
+`id` and its `blueprint_ref` are distinct identifiers with a one-way
+resolution path (`GoalsRepo.resolveBlueprint`) — see the `Goal` type's doc
+comment. A `Program`'s `blueprint_commit` is captured once at creation and
+never overwritten, so a historical program stays explainable even after
+Blueprint's data changes under a later commit.
 
 ## Why SQLite for Phase 1
 

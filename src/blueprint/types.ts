@@ -21,8 +21,14 @@ export interface BlueprintExercise {
   body_regions: string[];
   primary_targets: string[];
   secondary_targets: string[] | null;
-  physique_targets: string[] | null;
-  functional_goals: string[] | null;
+  /** Absent entirely (not just null) on ~8% of records — the YAML source
+   * omits the key rather than writing `physique_targets: null` when it
+   * doesn't apply. Always read via `e.physique_targets ?? null`, never
+   * assume the key exists. */
+  physique_targets?: string[] | null;
+  /** Absent entirely on ~94% of records, same reasoning as
+   * physique_targets — read via `e.functional_goals ?? null`. */
+  functional_goals?: string[] | null;
   aesthetic_characteristics: string[] | null;
   movement_patterns: string[];
   equipment: string[];
