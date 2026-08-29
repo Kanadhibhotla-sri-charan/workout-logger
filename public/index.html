@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Workout Programmer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <nav>
+    <a href="/index.html">Goals &amp; Programs</a>
+    <a href="/today.html">Today</a>
+    <a href="/history.html">History</a>
+  </nav>
+
+  <h1>Goals</h1>
+  <section>
+    <div id="goal-list"></div>
+    <form id="goal-form">
+      <label>Type
+        <select id="goal-type">
+          <option value="aesthetic">Aesthetic</option>
+          <option value="functional">Functional</option>
+        </select>
+      </label>
+      <label>Blueprint outcome/goal
+        <select id="goal-ref"></select>
+      </label>
+      <label>Priority (1 = highest)
+        <input id="goal-priority" type="number" value="1" min="1" />
+      </label>
+      <label>Notes
+        <input id="goal-notes" type="text" />
+      </label>
+      <button type="submit">Add goal</button>
+    </form>
+  </section>
+
+  <h1>Programs</h1>
+  <section>
+    <div id="program-list"></div>
+    <form id="program-form">
+      <label>Name
+        <input id="program-name" type="text" required />
+      </label>
+      <label>Goals (select one or more)
+        <select id="program-goals" multiple size="4"></select>
+      </label>
+      <button type="submit">Create program</button>
+    </form>
+  </section>
+
+  <script src="/app.js"></script>
+  <script>
+    async function loadBlueprintGoalOptions() {
+      const type = document.getElementById('goal-type').value;
+      const list = type === 'aesthetic'
+        ? await api('/api/blueprint/aesthetic-goals')
+        : await api('/api/blueprint/functional-goals');
+      const select = document.getElementById('goal-ref');
+      select.innerHTML = '';
+      for (const g of list) {
+        const label = g.display_name || g.name;
+        select.appendChild(el('option', { value: g.id, text: `${label} (${g.id})` }));
+      }
+    }
+
+    async function loadGoals() {
+      const goals = await api('/api/goals');
+      const container = document.getElementById('goal-list');
+      container.innerHTML = '';
+      const programGoalsSelect = document.getElementById('program-goals');
+      programGoalsSelect.innerHTML = '';
+      for (const g of goals) {
+        const card = el('div', { class: 'card' });
+        card.appendChild(el('div', { text: `[${g.goal_type}] ${g.blueprint_ref} — priority ${g.priority}${g.active ? '' : ' (inactive)'}` }));
+        if (g.notes) card.appendChild(el('div', { class: 'muted', text: g.notes }));
+        container.appendChild(card);
+        programGoalsSelect.appendChild(el('option', { value: g.id, text: `[${g.goal_type}] ${g.blueprint_ref}` }));
+      }
+    }
+
+    async function loadPrograms() {
+      const programs = await api('/api/programs');
+      const container = document.getElementById('program-list');
+      container.innerHTML = '';
+      for (const p of programs) {
+        const card = el('div', { class: 'card' });
+        card.appendChild(el('div', { text: `${p.name} — ${p.status}` }));
+        card.appendChild(el('div', { class: 'muted', text: `${p.goal_ids.length} goal(s)` }));
+        container.appendChild(card);
+      }
+    }
+
+    document.getElementById('goal-type').addEventListener('change', loadBlueprintGoalOptions);
+
+    document.getElementById('goal-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await api('/api/goals', {
+        method: 'POST',
+        body: {
+          goal_type: document.getElementById('goal-type').value,
+          blueprint_ref: document.getElementById('goal-ref').value,
+          priority: Number(document.getElementById('goal-priority').value),
+          notes: document.getElementById('goal-notes').value || null,
+        },
+      });
+      document.getElementById('goal-notes').value = '';
+      await loadGoals();
+    });
+
+    document.getElementById('program-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const selected = [...document.getElementById('program-goals').selectedOptions].map((o) => o.value);
+      await api('/api/programs', {
+        method: 'POST',
+        body: { name: document.getElementById('program-name').value, goal_ids: selected },
+      });
+      document.getElementById('program-name').value = '';
+      await loadPrograms();
+    });
+
+    loadBlueprintGoalOptions().then(loadGoals);
+    loadPrograms();
+  </script>
+</body>
+</html>

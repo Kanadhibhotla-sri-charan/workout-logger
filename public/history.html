@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>History - Workout Programmer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <nav>
+    <a href="/index.html">Goals &amp; Programs</a>
+    <a href="/today.html">Today</a>
+    <a href="/history.html">History</a>
+  </nav>
+
+  <h1>History</h1>
+  <div id="history-list"></div>
+
+  <script src="/app.js"></script>
+  <script>
+    async function loadHistory() {
+      const sessions = await api('/api/workouts');
+      const container = document.getElementById('history-list');
+      container.innerHTML = '';
+      if (sessions.length === 0) container.appendChild(el('div', { class: 'muted', text: 'No workouts logged yet.' }));
+      for (const s of sessions) {
+        const card = el('div', { class: 'card' });
+        card.appendChild(el('div', { text: `${s.date} — ${s.session_type} — ${s.status}${s.duration_minutes ? ` (${s.duration_minutes} min)` : ''}` }));
+        if (s.notes) card.appendChild(el('div', { class: 'muted', text: s.notes }));
+        card.appendChild(el('a', { href: `/logger.html?session=${s.session_id}`, text: 'View' }));
+        container.appendChild(card);
+      }
+    }
+    loadHistory();
+  </script>
+</body>
+</html>

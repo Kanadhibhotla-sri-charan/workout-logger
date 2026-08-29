@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Logger - Workout Programmer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <nav>
+    <a href="/index.html">Goals &amp; Programs</a>
+    <a href="/today.html">Today</a>
+    <a href="/history.html">History</a>
+  </nav>
+
+  <h1>Workout logger</h1>
+  <div id="session-summary" class="card"></div>
+
+  <h1>Exercises</h1>
+  <div id="exercise-list"></div>
+
+  <section>
+    <h2>Add exercise</h2>
+    <label>Exercise
+      <input id="exercise-search" list="exercise-options" placeholder="Search Blueprint exercises..." />
+      <datalist id="exercise-options"></datalist>
+    </label>
+    <label>Role
+      <select id="exercise-role">
+        <option value="primary">Primary</option>
+        <option value="secondary">Secondary</option>
+        <option value="accessory">Accessory</option>
+        <option value="finisher">Finisher</option>
+      </select>
+    </label>
+    <div id="sets-editor"></div>
+    <button id="add-set" type="button">Add set</button>
+    <button id="save-exercise" type="button">Save exercise</button>
+  </section>
+
+  <section>
+    <h2>Finish workout</h2>
+    <label>End time
+      <input id="end-time" type="time" />
+    </label>
+    <label>Duration (minutes)
+      <input id="duration" type="number" min="0" />
+    </label>
+    <button id="finish-session" type="button">Mark completed</button>
+  </section>
+
+  <script src="/app.js"></script>
+  <script>
+    const sessionId = new URLSearchParams(window.location.search).get('session');
+    let exercisesById = {};
+    let sets = [];
+
+    function addSetRow(setNumber) {
+      sets.push({ set_number: setNumber, weight: null, reps: null, completed: false });
+      renderSets();
+    }
+
+    function renderSets() {
+      const container = document.getElementById('sets-editor');
+      container.innerHTML = '';
+      sets.forEach((set, i) => {
+        const row = el('div', { class: 'set-row' });
+        row.appendChild(el('span', { text: `#${set.set_number}` }));
+        const weight = el('input', { type: 'number', step: '0.5', placeholder: 'weight' });
+        weight.addEventListener('input', () => (set.weight = weight.value === '' ? null : Number(weight.value)));
+        const reps = el('input', { type: 'number', placeholder: 'reps' });
+        reps.addEventListener('input', () => (set.reps = reps.value === '' ? null : Number(reps.value)));
+        const completedLabel = el('label');
+        const completed = el('input', { type: 'checkbox' });
+        completed.addEventListener('change', () => (set.completed = completed.checked));
+        completedLabel.appendChild(completed);
+        completedLabel.appendChild(document.createTextNode(' done'));
+        const remove = el('button', { type: 'button', text: 'x' });
+        remove.addEventListener('click', () => {
+          sets.splice(i, 1);
+          sets.forEach((s, idx) => (s.set_number = idx + 1));
+          renderSets();
+        });
+        row.append(weight, reps, completedLabel, remove);
+        container.appendChild(row);
+      });
+    }
+
+    async function loadExerciseOptions() {
+      const exercises = await api('/api/blueprint/exercises');
+      const datalist = document.getElementById('exercise-options');
+      for (const ex of exercises) {
+        exercisesById[ex.name] = ex.id;
+        datalist.appendChild(el('option', { value: ex.name }));
+      }
+    }
+
+    async function loadSession() {
+      const session = await api(`/api/workouts/${sessionId}`);
+      const summary = document.getElementById('session-summary');
+      summary.innerHTML = '';
+      summary.appendChild(el('div', { text: `${session.date} — ${session.session_type} — ${session.status}` }));
+      if (session.goal_context) {
+        summary.appendChild(el('div', { class: 'muted', text: `Goal: [${session.goal_context.goal_type}] ${session.goal_context.goal_id}` }));
+      }
+
+      const list = document.getElementById('exercise-list');
+      list.innerHTML = '';
+      for (const perf of session.exercises) {
+        const card = el('div', { class: 'card' });
+        card.appendChild(el('div', { text: `${perf.exercise_id} (${perf.role})` }));
+        const table = el('table');
+        const header = el('tr');
+        for (const h of ['set', 'weight', 'reps', 'done']) header.appendChild(el('th', { text: h }));
+        table.appendChild(header);
+        for (const s of perf.sets) {
+          const row = el('tr');
+          row.appendChild(el('td', { text: String(s.set_number) }));
+          row.appendChild(el('td', { text: s.weight ?? '-' }));
+          row.appendChild(el('td', { text: s.reps ?? '-' }));
+          row.appendChild(el('td', { text: s.completed ? 'yes' : 'no' }));
+          table.appendChild(row);
+        }
+        card.appendChild(table);
+        list.appendChild(card);
+      }
+    }
+
+    document.getElementById('add-set').addEventListener('click', () => addSetRow(sets.length + 1));
+
+    document.getElementById('save-exercise').addEventListener('click', async () => {
+      const name = document.getElementById('exercise-search').value;
+      const exerciseId = exercisesById[name];
+      if (!exerciseId) {
+        alert('Pick a valid Blueprint exercise from the list.');
+        return;
+      }
+      await api(`/api/workouts/${sessionId}/exercises`, {
+        method: 'POST',
+        body: {
+          exercise_id: exerciseId,
+          order: document.getElementById('exercise-list').children.length + 1,
+          role: document.getElementById('exercise-role').value,
+          sets,
+        },
+      });
+      sets = [];
+      renderSets();
+      document.getElementById('exercise-search').value = '';
+      await loadSession();
+    });
+
+    document.getElementById('finish-session').addEventListener('click', async () => {
+      await api(`/api/workouts/${sessionId}`, {
+        method: 'PATCH',
+        body: {
+          end_time: document.getElementById('end-time').value || null,
+          duration_minutes: document.getElementById('duration').value ? Number(document.getElementById('duration').value) : null,
+          status: 'completed',
+        },
+      });
+      await loadSession();
+    });
+
+    if (!sessionId) {
+      document.body.innerHTML = '<p>No session selected. Go to <a href="/today.html">Today</a> to start one.</p>';
+    } else {
+      addSetRow(1);
+      loadExerciseOptions();
+      loadSession();
+    }
+  </script>
+</body>
+</html>

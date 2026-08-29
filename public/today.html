@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Today - Workout Programmer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <nav>
+    <a href="/index.html">Goals &amp; Programs</a>
+    <a href="/today.html">Today</a>
+    <a href="/history.html">History</a>
+  </nav>
+
+  <h1>Today's workouts</h1>
+  <div id="session-list"></div>
+
+  <h1>Start a workout</h1>
+  <section>
+    <form id="session-form">
+      <label>Session type
+        <select id="session-type">
+          <option value="gym">Gym</option>
+          <option value="badminton">Badminton</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <label>Goal
+        <select id="session-goal"><option value="">(none)</option></select>
+      </label>
+      <label>Start time
+        <input id="session-start" type="time" />
+      </label>
+      <label>Notes
+        <input id="session-notes" type="text" />
+      </label>
+      <button type="submit">Start workout</button>
+    </form>
+  </section>
+
+  <script src="/app.js"></script>
+  <script>
+    async function loadGoalOptions() {
+      const goals = await api('/api/goals?active=true');
+      const select = document.getElementById('session-goal');
+      select.innerHTML = '<option value="">(none)</option>';
+      for (const g of goals) {
+        select.appendChild(el('option', { value: g.id, text: `[${g.goal_type}] ${g.blueprint_ref}` }));
+      }
+      select.dataset.goals = JSON.stringify(goals);
+    }
+
+    async function loadSessions() {
+      const sessions = await api(`/api/workouts?date=${todayIso()}`);
+      const container = document.getElementById('session-list');
+      container.innerHTML = '';
+      if (sessions.length === 0) container.appendChild(el('div', { class: 'muted', text: 'No workouts logged for today yet.' }));
+      for (const s of sessions) {
+        const card = el('div', { class: 'card' });
+        card.appendChild(el('div', { text: `${s.session_type} — ${s.status}${s.duration_minutes ? ` (${s.duration_minutes} min)` : ''}` }));
+        const link = el('a', { href: `/logger.html?session=${s.session_id}`, text: 'Open logger' });
+        card.appendChild(link);
+        container.appendChild(card);
+      }
+    }
+
+    document.getElementById('session-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const goalId = document.getElementById('session-goal').value;
+      const goals = JSON.parse(document.getElementById('session-goal').dataset.goals || '[]');
+      const goal = goals.find((g) => g.id === goalId);
+      const session = await api('/api/workouts', {
+        method: 'POST',
+        body: {
+          date: todayIso(),
+          session_type: document.getElementById('session-type').value,
+          start_time: document.getElementById('session-start').value || null,
+          status: 'in_progress',
+          notes: document.getElementById('session-notes').value || null,
+          goal_context: goal
+            ? { goal_type: goal.goal_type, goal_id: goal.id, priority: goal.priority, program_phase: null }
+            : null,
+        },
+      });
+      window.location.href = `/logger.html?session=${session.session_id}`;
+    });
+
+    loadGoalOptions();
+    loadSessions();
+  </script>
+</body>
+</html>

@@ -1,0 +1,2143 @@
+{
+  "physiqueTargets": [
+    {
+      "id": "upper-pec",
+      "name": "Upper Pec",
+      "parent_region": "chest",
+      "definition": "The clavicular (upper) portion of the pectoralis major — the part of the chest closest to the collarbone.",
+      "physique_outcome": "Visually, this reads as the \"upper chest shelf\" filling in: fullness just below the collarbone that closes the gap between shoulder and chest, producing a squared-off upper-chest line in a t-shirt or from the front, rather than the chest appearing to start lower down."
+    },
+    {
+      "id": "mid-pec",
+      "name": "Mid Chest",
+      "parent_region": "chest",
+      "definition": "The sternocostal (mid) portion of the pectoralis major — the largest portion of the muscle, and the part loaded by default in a flat-angle press.",
+      "physique_outcome": "Visually, this is the main slab of chest mass and depth seen from the front — the bulk of what makes the chest look \"full\" and thick in a flat-on view, distinct from the upper-chest shelf or the lower/outer sweep near the armpit."
+    },
+    {
+      "id": "lower-pec",
+      "name": "Lower Pec",
+      "parent_region": "chest",
+      "definition": "The lower/costal portion of the pectoralis major, most commonly biased via a decline angle or a forward-leaning dip.",
+      "physique_outcome": "Visually, this shows up as definition along the lower border of the chest and the transition line into the ribs — most visible from the side or in a lower/decline-angle view, distinct from the upper-chest shelf."
+    },
+    {
+      "id": "front-delt",
+      "name": "Front Delt",
+      "parent_region": "shoulders",
+      "definition": "The anterior (front) head of the deltoid, the primary driver of overhead and forward-pressing movements.",
+      "physique_outcome": "Visually, this adds roundness to the front of the shoulder viewed from the front — though it's already heavily worked by most chest pressing, so it's rarely the limiting factor in shoulder development."
+    },
+    {
+      "id": "side-delt",
+      "name": "Side Delt",
+      "parent_region": "shoulders",
+      "definition": "The lateral (side) head of the deltoid, trained through abduction movements like a lateral raise.",
+      "physique_outcome": "Visually, this is the single biggest lever for apparent shoulder width — the \"cap\" that makes shoulders look wide from the front and creates the visual taper from shoulder to waist."
+    },
+    {
+      "id": "rear-delt",
+      "name": "Rear Delt",
+      "parent_region": "shoulders",
+      "definition": "The posterior (rear) head of the deltoid, trained through horizontal-abduction/reverse-fly-style movements.",
+      "physique_outcome": "Visually, this adds width and roundness to the shoulder as seen from behind or the side, and contributes to a balanced, three-dimensional shoulder shape rather than a front-heavy look."
+    },
+    {
+      "id": "lat-width",
+      "name": "Lat Width",
+      "parent_region": "back",
+      "definition": "The latissimus dorsi, trained primarily through vertical-pull (pull-up/pulldown) movements and some horizontal-pull movements.",
+      "physique_outcome": "Visually, this is the primary driver of back width — the V-taper look from the shoulders down to the waist, most visible from behind or in a relaxed-arm front pose."
+    },
+    {
+      "id": "back-thickness",
+      "name": "Back Thickness",
+      "parent_region": "back",
+      "definition": "The mid-back musculature — rhomboids and mid/lower trapezius — trained primarily through horizontal-pull (row) movements.",
+      "physique_outcome": "Visually, this adds depth and thickness to the back as seen from the side, and definition between the shoulder blades from behind — distinct from lat width, which is about the outline rather than the depth."
+    },
+    {
+      "id": "upper-traps",
+      "name": "Upper Traps",
+      "parent_region": "back",
+      "definition": "The upper trapezius, trained through shrugging and shoulder-elevation movements.",
+      "physique_outcome": "Visually, this adds height and slope to the trapezius where the neck meets the shoulders, contributing to a thicker-necked, more filled- out upper-back silhouette from the front and behind."
+    },
+    {
+      "id": "biceps",
+      "name": "Biceps",
+      "parent_region": "arms",
+      "definition": "The biceps brachii, trained through elbow-flexion movements with the forearm supinated or neutral.",
+      "physique_outcome": "Visually, this is the classic \"arm flex\" muscle — peak height and overall mass on the front of the upper arm, most visible with the elbow bent."
+    },
+    {
+      "id": "brachialis-arm-thickness",
+      "name": "Brachialis / Arm Thickness",
+      "parent_region": "arms",
+      "definition": "The brachialis (and brachioradialis), trained through neutral-grip elbow-flexion movements like a hammer curl.",
+      "physique_outcome": "Visually, this sits underneath the biceps and pushes it outward, adding to overall arm thickness as seen from the side — distinct from biceps peak, which is about the front-on flex."
+    },
+    {
+      "id": "triceps",
+      "name": "Triceps",
+      "parent_region": "arms",
+      "definition": "The triceps brachii (all three heads), trained through elbow-extension movements.",
+      "physique_outcome": "Visually, the triceps make up roughly two-thirds of upper-arm size — more than the biceps — so triceps development has an outsized effect on overall arm thickness, most visible from the side and back of the arm."
+    },
+    {
+      "id": "triceps-long-head",
+      "name": "Triceps — Long-Head Emphasis",
+      "parent_region": "arms",
+      "definition": "The long head of the triceps specifically, which crosses the shoulder joint and is more directly loaded when the arm is trained in an overhead position, not just extended at the side.",
+      "physique_outcome": "Visually, the long head makes up the largest share of triceps mass, running along the inner/rear portion of the upper arm — the part most responsible for the \"horseshoe\" shape some lifters emphasize, and the part most easily under-trained by exercises that never take the shoulder into an overhead position."
+    },
+    {
+      "id": "obliques",
+      "name": "Obliques",
+      "parent_region": "core",
+      "definition": "The internal and external obliques, trained through anti-rotation, rotation, and lateral-flexion-resisting movements.",
+      "physique_outcome": "Visually, developed obliques add definition to the sides of the waist — visible as the diagonal lines framing the abdomen — though this is also strongly influenced by body-fat level, not training alone."
+    },
+    {
+      "id": "rectus-abdominis",
+      "name": "Abs (Rectus Abdominis)",
+      "parent_region": "core",
+      "definition": "The rectus abdominis, the muscle responsible for the \"six-pack\" look, trained through spinal- and hip-flexion movements that shorten the distance between the ribcage and pelvis.",
+      "physique_outcome": "Visually, this is the classic six-pack definition down the front of the midline — though, like obliques, visibility depends heavily on body-fat level, not just how developed the muscle is."
+    },
+    {
+      "id": "gastrocnemius",
+      "name": "Gastrocnemius",
+      "parent_region": "calves",
+      "definition": "The two-headed calf muscle that contributes when the knee is straight, trained through standing-position ankle plantarflexion.",
+      "physique_outcome": "Visually, this is the diamond-shaped bulge and overall width of the calf, most visible from behind or the side when the muscle is flexed with the foot pointed — the raise most people mean when they picture a bigger calf."
+    },
+    {
+      "id": "soleus",
+      "name": "Soleus",
+      "parent_region": "calves",
+      "definition": "The calf muscle beneath the gastrocnemius that stays active even with the knee bent, trained through seated-position ankle plantarflexion.",
+      "physique_outcome": "Visually, this fills out the lower half of the calf's profile, closer to the ankle, rather than the upper bulge the gastrocnemius builds — often the part that stays thin even once the upper calf has already grown."
+    },
+    {
+      "id": "gluteus-maximus",
+      "name": "Gluteus Maximus",
+      "parent_region": "hips",
+      "definition": "The largest glute muscle, trained through hip-extension movements, most directly in a shortened (hip fully extended) position.",
+      "physique_outcome": "Visually, this is glute roundness and a fuller \"shelf\" projecting from the lower back, most noticeable in a standing, hip-extended posture and from behind or the side."
+    },
+    {
+      "id": "gluteus-medius-minimus",
+      "name": "Gluteus Medius / Minimus",
+      "parent_region": "hips",
+      "definition": "The smaller glute muscles on the side of the hip, trained through hip-abduction movements that most bilateral squats and hinges only work as stabilizers.",
+      "physique_outcome": "Visually, this fills in what's sometimes called the \"hip dip\" and adds a rounder side profile to the hip — distinct from the back-of-hip effect gluteus maximus development produces."
+    },
+    {
+      "id": "adductors",
+      "name": "Adductors",
+      "parent_region": "hips",
+      "definition": "The inner-thigh muscle group, trained through hip-adduction movements — a group most squatting patterns only load indirectly.",
+      "physique_outcome": "Visually, this adds inner-thigh fullness, changing the leg's profile from the front — though closing the gap between the thighs is a combination of this muscle's size and body composition, not training alone."
+    },
+    {
+      "id": "quads",
+      "name": "Quads",
+      "parent_region": "quads",
+      "definition": "The quadriceps as a whole (all four heads), trained through knee-extension movements — squats, presses, lunges, and leg-extension work.",
+      "physique_outcome": "Visually, this is overall mass through the front of the thigh — the primary size driver for the whole leg. Kept as one generic target rather than split by head: the data supports one exercise (leg-extension) producing more visible separation/\"sweep\" above the knee than others, but that's noted as a within-target emphasis rather than a separate target, per the taxonomy's no-fake-precision guardrail — see the quad-sweep-separation outcome."
+    },
+    {
+      "id": "hamstrings",
+      "name": "Hamstrings",
+      "parent_region": "hamstrings",
+      "definition": "The hamstring group as a whole, trained through hip-hinge and knee-flexion movements.",
+      "physique_outcome": "Visually, this is overall thickness through the back of the thigh. Kept as one generic target rather than split by exercise (e.g. seated- vs. lying-leg-curl emphasis) — the data itself says the two \"fill out the back of the thigh more evenly, top to bottom\" when combined, which argues against a split, not for one."
+    },
+    {
+      "id": "forearm-flexors",
+      "name": "Forearm Flexors",
+      "parent_region": "forearms",
+      "definition": "The palm-side (wrist-flexor) forearm muscles, trained through wrist-flexion movements — loaded only indirectly by gripping in larger lifts.",
+      "physique_outcome": "Visually, this adds fullness on the palm-side of the forearm, most noticeable near the elbow with the palm facing up."
+    },
+    {
+      "id": "forearm-extensors",
+      "name": "Forearm Extensors",
+      "parent_region": "forearms",
+      "definition": "The back-of-hand-side (wrist-extensor) forearm muscles and the brachioradialis, trained through wrist-extension and neutral/pronated-grip elbow-flexion movements.",
+      "physique_outcome": "Visually, this adds fullness on the back-of-hand side of the forearm — the side visible when the arm hangs relaxed — including the brachioradialis \"peak\" at the elbow crease that shows when the elbow is bent."
+    },
+    {
+      "id": "neck-thickness",
+      "name": "Neck Thickness",
+      "parent_region": "neck",
+      "definition": "The neck extensors (primarily) and flexors, trained through loaded neck-extension and neck-flexion movements.",
+      "physique_outcome": "Visually, this is width and thickness across the neck, most responsible for the \"thick neck\" look — primarily driven by the back and sides (neck extension), with neck flexion rounding out the front profile rather than adding comparable size on its own."
+    }
+  ],
+  "globalPrinciples": {
+    "rir": {
+      "full_range": [
+        0,
+        4
+      ],
+      "typical_working_range": [
+        1,
+        3
+      ],
+      "explanation": "RIR (Reps In Reserve) is a practical way to gauge effort: finish a working set when you feel you could still perform roughly the stated number of additional good-quality reps with the same form.",
+      "guidance": "Most working sets in a typical practical range sit around 1-3 RIR. Training hard is not the same as training to mandatory momentary failure — occasional harder sets closer to failure can have a place, but failure is not required for growth, and treating it as mandatory tends to add fatigue and injury risk without a clear return."
+    },
+    "weekly_volume": {
+      "starting_point_sets": [
+        8,
+        12
+      ],
+      "practical_range_sets": [
+        10,
+        20
+      ],
+      "higher_recovery_dependent_sets": [
+        20,
+        26
+      ],
+      "explanation": "A practical starting range of hard sets per muscle per week, with a broader productive range typical beyond that. Higher amounts within or beyond this range become increasingly dependent on individual recovery, training experience, and how well-managed overall fatigue is — more is not automatically better past the point recovery allows it to be used well. Adjust based on training experience, recovery, current workload, performance, and whether the target is a priority or a maintenance area."
+    },
+    "frequency": {
+      "typical_starting_range_per_week": [
+        2,
+        3
+      ],
+      "explanation": "Distinguishes how often a muscle *can* be trained from how it is typically useful to distribute its weekly volume. Spreading a given weekly volume across more exposures per week is commonly a practical way to keep each session's workload manageable, rather than a claim that more frequency is inherently superior at equal weekly volume."
+    },
+    "progression": {
+      "model": "double-progression",
+      "explanation": "A simple, practical progression model. Pick a target rep range (for example 8-12). Start with a load that allows completing the low end of that range at the target RIR. Over subsequent sessions, add reps at the same load until the top of the range is reached at the target RIR. Once that happens, increase the load slightly, and the rep count typically drops back toward the bottom of the range — then repeat.",
+      "scope_note": "This is the only progression model Phase 4 introduces. Advanced periodization, deload prediction, and recovery prediction are explicitly out of scope (see the Phase 4 architecture spec §29)."
+    },
+    "wording_rules": {
+      "prefer": [
+        "typical range",
+        "practical starting range",
+        "commonly useful range",
+        "starting point",
+        "adjust based on performance and recovery"
+      ],
+      "avoid": [
+        "optimal",
+        "required",
+        "maximum",
+        "exactly N sets",
+        "exactly N reps"
+      ],
+      "note": "The application must never imply a specific number within these ranges is a hard threshold (e.g. that 9 sets is inherently insufficient, or that 10 sets is a magic minimum). Every numeric range here is a practical starting point, not an exact physiological law — see Phase 4 architecture spec §26."
+    }
+  },
+  "repRanges": {
+    "overrides": []
+  },
+  "programmingProfiles": {
+    "profiles": [
+      {
+        "id": "heavy-free-weight-compound",
+        "name": "Heavy free-weight compound",
+        "summary": "A free-weight-loaded compound movement without a fixed stabilizing path — meaningful load can be managed, but stability and technique both matter more than on a fixed-path machine.",
+        "primary_range": [
+          6,
+          12
+        ],
+        "acceptable_range": [
+          5,
+          15
+        ],
+        "rep_range_reason": "Heavy compound movements are commonly trained in a moderate rep range where meaningful load can still be managed with good technique; higher reps remain usable, just less commonly the primary focus for this kind of movement.",
+        "guidance_note": "Technical breakdown risk rises as fatigue accumulates on a movement like this — prioritize crisp reps with good bar/body path over grinding out a final rep with degrading form."
+      },
+      {
+        "id": "stable-compound",
+        "name": "Stable compound",
+        "summary": "A fixed-path or otherwise more stable compound movement — lower stability demand than a free-weight compound, so a somewhat wider rep range is commonly well tolerated.",
+        "primary_range": [
+          8,
+          15
+        ],
+        "acceptable_range": [
+          6,
+          20
+        ],
+        "rep_range_reason": "Fixed-path or otherwise more stable compound movements commonly tolerate a somewhat wider rep range than a heavy free-weight compound, since stability demand is lower.",
+        "guidance_note": "The fixed path removes most of the balancing and stabilizing work a free-weight version would need, so effort can be focused more directly on the working muscle across a wider rep range."
+      },
+      {
+        "id": "lengthened-position-isolation",
+        "name": "Lengthened-position isolation",
+        "summary": "An isolation movement whose hardest point sits at, or near, the stretched end of the range — the position current hypertrophy research most consistently associates with a stretch-mediated growth benefit.",
+        "primary_range": [
+          8,
+          15
+        ],
+        "acceptable_range": [
+          6,
+          20
+        ],
+        "rep_range_reason": "A moderate rep range that still allows real loading of the stretched position — very high reps tend to reduce how much load can be handled at the hardest, most stretched point, which is the point this profile is built around.",
+        "guidance_note": "The stretched position is where this exercise does its most distinctive work — resist the urge to shorten the range of motion just to move more weight, since that range is the reason to choose this exercise over a shorter-range alternative."
+      },
+      {
+        "id": "shortened-position-isolation",
+        "name": "Shortened-position isolation",
+        "summary": "An isolation movement whose hardest point sits at, or near, the shortened/contracted end of the range, rather than the stretch.",
+        "primary_range": [
+          10,
+          20
+        ],
+        "acceptable_range": [
+          8,
+          30
+        ],
+        "rep_range_reason": "Isolation movements biased toward the shortened position commonly tolerate a wide rep range, similar to isolation work generally, since the loading challenge is concentrated away from the joint-stress-sensitive stretched end of the range.",
+        "guidance_note": "Peak tension is concentrated at the top/contracted position on this movement — a deliberate pause or squeeze there is more relevant here than it would be on a lengthened-position exercise."
+      },
+      {
+        "id": "constant-tension-isolation",
+        "name": "Constant-tension isolation",
+        "summary": "A cable-, band-, or otherwise constant-tension isolation movement with low fatigue cost — the working muscle rarely gets a true rest within the rep.",
+        "primary_range": [
+          10,
+          20
+        ],
+        "acceptable_range": [
+          8,
+          30
+        ],
+        "rep_range_reason": "Isolation movements commonly tolerate a wide rep range without losing effectiveness, and constant-tension equipment in particular removes the brief unloaded moments a free weight's resistance curve can create.",
+        "guidance_note": "Because tension rarely fully releases during the rep, this tends to feel harder at a given weight than the number on the stack suggests — judge effort by RIR, not by comparing that number to a free-weight equivalent."
+      },
+      {
+        "id": "elevated-stability-isolation",
+        "name": "Elevated-stability isolation",
+        "summary": "An isolation movement with real balance or stabilization demand beyond the baseline case — genuine body-positioning or control work alongside the target-muscle effort, regardless of the specific equipment used.",
+        "primary_range": [
+          8,
+          15
+        ],
+        "acceptable_range": [
+          6,
+          20
+        ],
+        "rep_range_reason": "An isolation movement with genuine stabilization demand commonly sits closer to a moderate rep range than the widest isolation ranges, since body positioning and control both matter to executing it well, not just the target-muscle effort.",
+        "guidance_note": "This carries more balance and stabilization demand than a typical isolation exercise — form and control matter more here, and pushing the load too aggressively tends to break technique down before the target muscle is genuinely the limiting factor."
+      },
+      {
+        "id": "moderate-hypertrophy-isolation",
+        "name": "Moderate hypertrophy isolation",
+        "summary": "A stable, machine- or cable-based isolation movement without a distinctive lengthened/shortened-position bias or unusually low fatigue cost — the general-purpose isolation case.",
+        "primary_range": [
+          10,
+          20
+        ],
+        "acceptable_range": [
+          8,
+          30
+        ],
+        "rep_range_reason": "Isolation movements commonly tolerate a wide rep range without losing effectiveness, since they typically carry a lower technical-breakdown and joint-loading concern at higher reps than a heavy compound movement does.",
+        "guidance_note": "A stable, general-purpose isolation movement — a reasonable default choice for adding direct volume to a target without much technique risk at higher reps."
+      },
+      {
+        "id": "compound-general",
+        "name": "General compound",
+        "summary": "A compound movement not otherwise carrying the heavy-compound or stable-compound coverage category — most often a unilateral or otherwise structurally distinct compound variation.",
+        "primary_range": [
+          6,
+          15
+        ],
+        "acceptable_range": [
+          5,
+          20
+        ],
+        "rep_range_reason": "A general compound-movement range, used when a compound exercise doesn't carry the heavy-compound or stable-compound coverage category specifically.",
+        "guidance_note": "This doesn't fit neatly into the usual heavy- or stable-compound pattern — treat the ranges here as a reasonable starting point and adjust based on how it actually feels to load and control."
+      }
+    ],
+    "classification": {
+      "defaults": [
+        {
+          "profile_id": "heavy-free-weight-compound",
+          "match": {
+            "exercise_type": "compound",
+            "coverage_categories_any": [
+              "heavy-compound"
+            ]
+          }
+        },
+        {
+          "profile_id": "stable-compound",
+          "match": {
+            "exercise_type": "compound",
+            "coverage_categories_any": [
+              "stable-compound"
+            ]
+          }
+        },
+        {
+          "profile_id": "lengthened-position-isolation",
+          "match": {
+            "exercise_type": "isolation",
+            "coverage_categories_any": [
+              "lengthened-position-emphasis"
+            ]
+          }
+        },
+        {
+          "profile_id": "shortened-position-isolation",
+          "match": {
+            "exercise_type": "isolation",
+            "coverage_categories_any": [
+              "shortened-position-emphasis"
+            ]
+          }
+        },
+        {
+          "profile_id": "constant-tension-isolation",
+          "match": {
+            "exercise_type": "isolation",
+            "coverage_categories_any": [
+              "low-fatigue"
+            ]
+          }
+        },
+        {
+          "profile_id": "elevated-stability-isolation",
+          "match": {
+            "exercise_type": "isolation",
+            "stability_demand_at_least": "medium"
+          }
+        },
+        {
+          "profile_id": "moderate-hypertrophy-isolation",
+          "match": {
+            "exercise_type": "isolation"
+          }
+        },
+        {
+          "profile_id": "compound-general",
+          "match": {
+            "exercise_type": "compound"
+          }
+        }
+      ]
+    }
+  },
+  "intensityTechniques": [
+    {
+      "id": "drop-set",
+      "name": "Drop Set",
+      "what": "After reaching the target rep range (or a hard stopping point), immediately reduce the weight and continue the set for additional reps.",
+      "when_it_may_help": "Useful for increasing work density on an isolation movement without adding a full additional working set — for example, when time efficiency matters, or a muscle needs more stimulus but there isn't room in the session for another complete set.",
+      "when_not_to_use": "On technically demanding or heavy compound movements, where form can break down under the accumulated fatigue of the drop, or when overall session or weekly fatigue is already high — a drop set adds meaningful local fatigue for comparatively little extra time, so it competes with recovery budget.",
+      "fatigue_time_implications": "Adds noticeable local fatigue relative to the small amount of extra time it costs; low equipment-changeover overhead on machines/cables where the weight adjusts quickly, more overhead when it requires reloading a barbell.",
+      "suitable_exercise_types": [
+        "isolation"
+      ],
+      "suitable_when_fatigue_cost_at_most": "medium",
+      "suitable_when_skill_demand_at_most": "medium",
+      "suitable_when_stability_demand_at_most": "medium"
+    },
+    {
+      "id": "rest-pause",
+      "name": "Rest-Pause",
+      "what": "After reaching a hard stopping point, rest a short period (commonly a range around 10-20 seconds), then perform additional reps at the same weight. May repeat for one or two further short clusters.",
+      "when_it_may_help": "A way to accumulate additional quality reps at a given load without loading and unloading equipment, useful when a drop set isn't practical (e.g. a barbell movement without easy load changes) but more work at the same weight is wanted.",
+      "when_not_to_use": "On movements where a brief rest doesn't meaningfully restore the ability to produce more quality reps, or when it would push total session fatigue higher than a constrained schedule or recovery state can accommodate.",
+      "fatigue_time_implications": "Similar local fatigue cost to a drop set; costs some session time for the rest periods, though less than a fully separate set.",
+      "suitable_exercise_types": [
+        "isolation",
+        "compound"
+      ],
+      "suitable_when_fatigue_cost_at_most": "medium",
+      "suitable_when_skill_demand_at_most": "medium",
+      "suitable_when_stability_demand_at_most": "medium"
+    },
+    {
+      "id": "myo-reps",
+      "name": "Myo-Reps",
+      "what": "One activation set taken close to failure, followed by several short clusters of a few reps each, separated by very brief rests, continued until the clusters stop producing quality reps.",
+      "when_it_may_help": "A way to get a substantial amount of near-failure stimulus from a single extended set, useful for isolation work under real time constraints.",
+      "when_not_to_use": "On heavy or technically demanding compound movements, or when the trainee is not already comfortable judging proximity to failure accurately — the technique depends on that judgment more than most.",
+      "fatigue_time_implications": "Meaningfully reduces total time versus several traditional sets at a similar stimulus, at the cost of higher per-set effort and local fatigue.",
+      "suitable_exercise_types": [
+        "isolation"
+      ],
+      "suitable_when_fatigue_cost_at_most": "low",
+      "suitable_when_skill_demand_at_most": "low",
+      "suitable_when_stability_demand_at_most": "low"
+    }
+  ],
+  "aestheticOutcomes": [
+    {
+      "id": "chest-side-projection",
+      "display_name": "Chest looks flat from the side",
+      "region": "chest",
+      "viewpoint": "side",
+      "visual_description": "The chest lacks depth or projection when viewed from the side — it doesn't stand out from the torso the way a fuller chest does, even if it looks reasonably full from straight on.",
+      "primary_targets": [
+        "upper-pec"
+      ],
+      "supporting_targets": [
+        "lower-pec"
+      ],
+      "technical_explanation": "Side-view chest projection comes from how much pectoral mass sits forward of the ribcage across the chest's vertical span, not from any single spot. The upper-chest shelf (just below the collarbone) is the single biggest lever for that forward profile and is what drives the recommendation here; the lower-chest/rib transition also contributes to side-view depth and is worth developing alongside it — the mid-chest mainly adds front-on width and thickness rather than side-view depth.",
+      "preferred_characteristics": [
+        "lengthened-biased",
+        "high-loadable"
+      ],
+      "anatomical_targets": [
+        "pectoralis major, clavicular (upper) head",
+        "pectoralis major, costal (lower) head"
+      ],
+      "common_user_phrasings": [
+        "My chest looks flat from the side.",
+        "My chest doesn't stick out enough.",
+        "My chest has no depth."
+      ]
+    },
+    {
+      "id": "triceps-back-depth",
+      "display_name": "Triceps have no depth from behind",
+      "region": "arms",
+      "viewpoint": "back",
+      "visual_description": "The back of the upper arm looks flat or thin when viewed from behind, rather than showing visible mass and shape — even if the arm looks reasonably full from the front (biceps side).",
+      "primary_targets": [
+        "triceps"
+      ],
+      "supporting_targets": [
+        "triceps-long-head"
+      ],
+      "technical_explanation": "The triceps brachii makes up roughly two-thirds of upper-arm size, more than the biceps, so its development has an outsized effect on how the arm looks from behind — general triceps development is what drives the recommendation here. The long head specifically runs along the inner/rear portion of the upper arm and is the part most easily under-trained by exercises that never take the shoulder into an overhead position; giving it dedicated attention alongside general triceps work is what produces the visible \"horseshoe\" shape some lifters lack when they describe the back of the arm as having no depth.",
+      "anatomical_targets": [
+        "triceps brachii, lateral and medial heads",
+        "triceps brachii, long head"
+      ],
+      "common_user_phrasings": [
+        "My triceps have no depth from behind.",
+        "My arms look thin from behind even though they look okay from the front.",
+        "The back of my arm looks flat."
+      ]
+    },
+    {
+      "id": "arm-side-thickness",
+      "display_name": "Arms look thin from the side",
+      "region": "arms",
+      "viewpoint": "side",
+      "visual_description": "The upper arm looks narrow when viewed from the side — thin front-to-back — even if it looks reasonably full from the front (biceps view) or back (triceps view) alone.",
+      "primary_targets": [
+        "brachialis-arm-thickness"
+      ],
+      "supporting_targets": [
+        "triceps"
+      ],
+      "technical_explanation": "Side-view arm thickness is a front-to-back measurement, not a single muscle's size. The brachialis sits underneath the biceps and pushes it outward — it's the single biggest lever for this specific side-on profile and is what drives the recommendation here, distinct from biceps peak (a front-on flex characteristic). The triceps, which make up roughly two-thirds of upper-arm size, also contribute real thickness visible from the side and are worth developing alongside it — an arm can have a well-developed biceps peak and still look thin from the side if the brachialis and triceps are undertrained.",
+      "anatomical_targets": [
+        "brachialis",
+        "triceps brachii, all three heads"
+      ],
+      "common_user_phrasings": [
+        "My arms look thin from the side.",
+        "My arms look big from the front but not from the side.",
+        "My arms don't look as thick as they should."
+      ]
+    },
+    {
+      "id": "chest-front-width",
+      "display_name": "Chest doesn't look wide enough from the front",
+      "region": "chest",
+      "viewpoint": "front",
+      "visual_description": "The chest looks narrow or thin straight-on, lacking the visible mass across the front that makes a chest look \"full\" in a t-shirt or a relaxed front pose.",
+      "primary_targets": [
+        "mid-pec"
+      ],
+      "supporting_targets": [
+        "upper-pec"
+      ],
+      "technical_explanation": "Front-on chest mass is mostly the sternocostal (mid) portion of the pectoralis major — the largest part of the muscle and the part loaded by default in a flat-angle press — so it's the main driver of this outcome. A filled-in upper-chest shelf also adds to the overall front-on impression of width, without being the primary driver the way it is for side-view projection.",
+      "preferred_characteristics": [
+        "high-loadable"
+      ],
+      "anatomical_targets": [
+        "pectoralis major, sternocostal (mid) head",
+        "pectoralis major, clavicular (upper) head"
+      ],
+      "common_user_phrasings": [
+        "My chest doesn't look wide enough from the front.",
+        "My chest looks small in a t-shirt.",
+        "I don't have much chest mass when I look straight on."
+      ]
+    },
+    {
+      "id": "chest-upper-shelf",
+      "display_name": "Upper chest doesn't stand out",
+      "region": "chest",
+      "viewpoint": "front",
+      "visual_description": "There's no visible fullness just below the collarbone — the chest appears to start lower down rather than forming a squared- off upper-chest line.",
+      "primary_targets": [
+        "upper-pec"
+      ],
+      "technical_explanation": "This is specifically about the clavicular (upper) head of the pectoralis major, the portion closest to the collarbone. It's a distinct region from the mid-chest mass that drives general front-on width, which is why a well-developed chest can still lack this specific shelf if upper-chest work has been skipped.",
+      "anatomical_targets": [
+        "pectoralis major, clavicular (upper) head"
+      ],
+      "common_user_phrasings": [
+        "Upper chest doesn't stand out.",
+        "My chest starts too low.",
+        "No shelf below my collarbone."
+      ]
+    },
+    {
+      "id": "chest-lower-definition",
+      "display_name": "Chest-to-abdominal boundary isn't clear",
+      "region": "chest",
+      "viewpoint": "side",
+      "visual_description": "There's no clear line where the chest ends and the abs begin — most visible from the side or a lower/decline-angle view.",
+      "primary_targets": [
+        "lower-pec"
+      ],
+      "technical_explanation": "This is the lower/costal portion of the pectoralis major, most commonly developed via a decline angle or a forward-leaning dip. It shows up specifically as definition along the lower border of the chest and the transition into the ribs — a distinct region from the upper-chest shelf.",
+      "anatomical_targets": [
+        "pectoralis major, costal (lower) head"
+      ],
+      "common_user_phrasings": [
+        "Chest/abdominal boundary isn't clear.",
+        "My chest and abs blend together.",
+        "No clean line under my chest."
+      ]
+    },
+    {
+      "id": "shoulder-width-front",
+      "display_name": "Shoulders don't look wide enough",
+      "region": "shoulders",
+      "viewpoint": "front",
+      "visual_description": "The shoulders don't create a visible taper from shoulder to waist, especially noticeable from the front.",
+      "primary_targets": [
+        "side-delt"
+      ],
+      "technical_explanation": "The lateral (side) head of the deltoid, trained through abduction movements like a lateral raise, is the single biggest lever for apparent shoulder width — the \"cap\" that creates the front-on taper. It's also the delt head most heavily worked by most chest pressing.",
+      "anatomical_targets": [
+        "deltoid, lateral head"
+      ],
+      "common_user_phrasings": [
+        "Shoulders don't make me look wide.",
+        "No taper from my shoulders to my waist.",
+        "My shoulders look narrow from the front."
+      ]
+    },
+    {
+      "id": "shoulder-3d-shape",
+      "display_name": "Shoulders look front-heavy / flat from behind",
+      "region": "shoulders",
+      "viewpoint": "back",
+      "visual_description": "The shoulders look developed from the front but flat or unfinished from behind or the side, lacking a rounded, three-dimensional shape.",
+      "primary_targets": [
+        "rear-delt"
+      ],
+      "technical_explanation": "The posterior (rear) head of the deltoid is trained through horizontal-abduction/reverse-fly-style movements, which most pressing-heavy routines under-train relative to the front delt (already worked hard by chest pressing). Rear-delt development adds width and roundness as seen from behind or the side.",
+      "anatomical_targets": [
+        "deltoid, posterior head"
+      ],
+      "common_user_phrasings": [
+        "My shoulders look flat from behind.",
+        "My shoulders look front-heavy.",
+        "No roundness to my shoulders from the side."
+      ]
+    },
+    {
+      "id": "back-width-v-taper",
+      "display_name": "Back doesn't look wide enough / weak V-taper",
+      "region": "back",
+      "viewpoint": "back",
+      "visual_description": "The back doesn't create the visible V-shape from shoulders down to the waist — most noticeable from behind or in a relaxed-arm front pose.",
+      "primary_targets": [
+        "lat-width"
+      ],
+      "technical_explanation": "The latissimus dorsi, trained primarily through vertical-pull (pull-up/pulldown) movements, is the primary driver of back width and the V-taper look. This is an outline/silhouette characteristic, distinct from back thickness (depth).",
+      "preferred_characteristics": [
+        "vertical-pull"
+      ],
+      "anatomical_targets": [
+        "latissimus dorsi"
+      ],
+      "common_user_phrasings": [
+        "My back doesn't look wide enough.",
+        "Weak V-taper.",
+        "My lats don't flare enough."
+      ]
+    },
+    {
+      "id": "back-side-thickness",
+      "display_name": "Back looks flat / no depth from the side",
+      "region": "back",
+      "viewpoint": "side",
+      "visual_description": "The back looks wide but flat — it doesn't add visible depth from the side, and there's little definition between the shoulder blades from behind.",
+      "primary_targets": [
+        "back-thickness"
+      ],
+      "technical_explanation": "This is the mid-back musculature — rhomboids and mid/lower trapezius — trained primarily through horizontal-pull (row) movements. It's a distinct characteristic from lat width: about the back's depth and definition, not its outline.",
+      "preferred_characteristics": [
+        "horizontal-pull"
+      ],
+      "anatomical_targets": [
+        "rhomboids",
+        "trapezius, mid and lower fibers"
+      ],
+      "common_user_phrasings": [
+        "My back looks wide but not thick.",
+        "No depth to my back from the side.",
+        "My back looks flat."
+      ]
+    },
+    {
+      "id": "upper-back-fullness",
+      "display_name": "Neck-to-shoulder area doesn't look full",
+      "region": "back",
+      "viewpoint": "front",
+      "visual_description": "The area where the neck meets the shoulders looks thin or undeveloped, rather than sloped and filled-out — visible from the front and behind.",
+      "primary_targets": [
+        "upper-traps"
+      ],
+      "technical_explanation": "The upper trapezius, trained through shrugging and shoulder-elevation movements, adds height and slope specifically at the neck-to-shoulder junction, contributing to a thicker- necked, more filled-out upper-back silhouette.",
+      "exercise_roles": {
+        "direct": [
+          "barbell-dumbbell-shrug"
+        ],
+        "secondary": [
+          "rack-pull"
+        ]
+      },
+      "anatomical_targets": [
+        "trapezius, upper fibers"
+      ],
+      "common_user_phrasings": [
+        "My traps don't stand out.",
+        "Neck-to-shoulder area looks thin.",
+        "No slope from my neck to my shoulders."
+      ]
+    },
+    {
+      "id": "biceps-front-peak",
+      "display_name": "Biceps don't look full from the front",
+      "region": "arms",
+      "viewpoint": "front",
+      "visual_description": "The front of the upper arm lacks visible mass and peak height, especially noticeable with the elbow bent (a \"flex\" pose).",
+      "primary_targets": [
+        "biceps"
+      ],
+      "technical_explanation": "The biceps brachii, trained through elbow-flexion movements with the forearm supinated or neutral, is the classic \"arm flex\" muscle — peak height and overall mass on the front of the upper arm. Distinct from side-view arm thickness, which brachialis and triceps drive more than biceps does.",
+      "anatomical_targets": [
+        "biceps brachii"
+      ],
+      "common_user_phrasings": [
+        "My biceps don't look full.",
+        "No peak when I flex.",
+        "My arms look small from the front."
+      ]
+    },
+    {
+      "id": "ab-front-definition",
+      "display_name": "Abs don't show definition from the front",
+      "region": "core",
+      "viewpoint": "front",
+      "visual_description": "No visible six-pack definition down the front of the midline, even with reasonable overall leanness.",
+      "primary_targets": [
+        "rectus-abdominis"
+      ],
+      "technical_explanation": "The rectus abdominis, trained through spinal- and hip-flexion movements that shorten the distance between the ribcage and pelvis, is the muscle responsible for the classic six-pack look. Visibility depends heavily on body-fat level as well as development — training alone doesn't guarantee this outcome.",
+      "anatomical_targets": [
+        "rectus abdominis"
+      ],
+      "common_user_phrasings": [
+        "No six-pack definition.",
+        "My abs don't show.",
+        "Flat stomach but no visible abs."
+      ]
+    },
+    {
+      "id": "waist-side-definition",
+      "display_name": "Waist/sides don't show definition",
+      "region": "core",
+      "viewpoint": "front",
+      "visual_description": "No visible diagonal lines framing the sides of the abdomen — the waist looks smooth rather than defined.",
+      "primary_targets": [
+        "obliques"
+      ],
+      "technical_explanation": "The internal and external obliques, trained through anti-rotation, rotation, and lateral-flexion-resisting movements, add definition to the sides of the waist. Like rectus-abdominis definition, this is also strongly influenced by body-fat level, not training alone.",
+      "anatomical_targets": [
+        "internal and external obliques"
+      ],
+      "common_user_phrasings": [
+        "No definition on the sides of my waist.",
+        "My obliques don't show.",
+        "No V-lines at my hips."
+      ]
+    },
+    {
+      "id": "glute-roundness",
+      "display_name": "Glutes look flat",
+      "region": "glutes",
+      "viewpoint": "back",
+      "visual_description": "The glutes lack visible roundness from behind — they look flat rather than full, even when the rest of the legs look developed.",
+      "primary_targets": [
+        "gluteus-maximus"
+      ],
+      "technical_explanation": "The gluteus maximus, trained through hip-extension movements most directly in a shortened (hip fully extended) position, drives glute roundness and shape as seen from behind.",
+      "anatomical_targets": [
+        "gluteus maximus"
+      ],
+      "common_user_phrasings": [
+        "My glutes look flat.",
+        "No roundness to my glutes.",
+        "Flat butt from behind."
+      ]
+    },
+    {
+      "id": "glute-side-projection",
+      "display_name": "Glutes don't project from the side",
+      "region": "glutes",
+      "viewpoint": "side",
+      "visual_description": "The glutes don't create a visible \"shelf\" projecting from the lower back when viewed from the side, especially in a standing posture.",
+      "primary_targets": [
+        "gluteus-maximus"
+      ],
+      "technical_explanation": "Same underlying muscle as glute-roundness (gluteus maximus), but this is specifically the side-view projection characteristic — most noticeable in a standing, hip-extended posture rather than only when the glutes are actively flexed.",
+      "anatomical_targets": [
+        "gluteus maximus"
+      ],
+      "common_user_phrasings": [
+        "My glutes don't project from the side.",
+        "No shelf to my glutes.",
+        "Flat from the side, not just from behind."
+      ]
+    },
+    {
+      "id": "hip-width-side",
+      "display_name": "Hips don't look full / 'hip dip' is visible",
+      "region": "glutes",
+      "viewpoint": "side",
+      "visual_description": "There's a visible indentation on the side of the hip (sometimes called a \"hip dip\"), rather than a rounder, fuller side profile.",
+      "primary_targets": [
+        "gluteus-medius-minimus"
+      ],
+      "technical_explanation": "The gluteus medius and minimus, trained through hip-abduction movements that most bilateral squats and hinges only work as stabilizers, fill in this specific side-of-hip area — distinct from gluteus maximus, which drives the back-of-hip effect.",
+      "anatomical_targets": [
+        "gluteus medius",
+        "gluteus minimus"
+      ],
+      "common_user_phrasings": [
+        "I have a hip dip.",
+        "My hips don't look full on the side.",
+        "Indentation on the side of my hip."
+      ]
+    },
+    {
+      "id": "quad-front-mass",
+      "display_name": "Thighs look thin from the front",
+      "region": "quads",
+      "viewpoint": "front",
+      "visual_description": "The front of the thigh lacks visible mass, even when overall leg size looks reasonable from other angles.",
+      "primary_targets": [
+        "quads"
+      ],
+      "technical_explanation": "The quadriceps as a whole, trained through knee-extension movements — squats, presses, lunges, and leg-extension work — are the primary size driver for the front of the thigh and the whole leg.",
+      "preferred_characteristics": [
+        "high-loadable"
+      ],
+      "anatomical_targets": [
+        "quadriceps femoris"
+      ],
+      "common_user_phrasings": [
+        "My thighs look thin from the front.",
+        "Not much quad mass.",
+        "My legs look small from the front."
+      ]
+    },
+    {
+      "id": "inner-thigh-fullness",
+      "display_name": "Inner thigh looks thin",
+      "region": "quads",
+      "viewpoint": "front",
+      "visual_description": "The inner thigh looks flat or thin, changing the leg's overall profile from the front, even when the front of the thigh looks developed.",
+      "primary_targets": [
+        "adductors"
+      ],
+      "technical_explanation": "The adductors, trained through hip-adduction movements that most squatting patterns only load indirectly, add inner-thigh fullness. Closing the visible gap between the thighs is a combination of this muscle's size and body composition, not training alone.",
+      "anatomical_targets": [
+        "hip adductors"
+      ],
+      "common_user_phrasings": [
+        "My inner thigh looks thin.",
+        "Gap between my thighs.",
+        "Not much inner-leg mass."
+      ]
+    },
+    {
+      "id": "quad-sweep-separation",
+      "display_name": "No separation above the knee",
+      "region": "quads",
+      "viewpoint": "front",
+      "visual_description": "The front of the thigh looks like one undifferentiated mass rather than showing visible separation and shape just above the inner knee (sometimes called quad \"sweep\" or \"teardrop\").",
+      "primary_targets": [
+        "quads"
+      ],
+      "technical_explanation": "Flagged during the 4A taxonomy audit as lower-confidence than most other outcomes in this file: the supporting data comes almost entirely from one exercise (leg-extension), whose own mirror_effect describes it as \"the most targeted quad-shaping tool... separation and sweep across the front of the thigh, including the teardrop-shaped muscle just above the inner knee.\" That's real, described data — not invented — but it's a narrower evidence base than the other quad outcome (quad-front-mass), which draws on more than a dozen exercises. No separate physique target was created for this — it resolves to the same generic `quads` target, since the data doesn't support a genuinely independent target, only an emphasis note.",
+      "exercise_roles": {
+        "direct": [
+          "leg-extension"
+        ],
+        "secondary": [
+          "reverse-nordic-curl"
+        ]
+      },
+      "anatomical_targets": [
+        "quadriceps femoris, vastus medialis (visual emphasis only — not a separate target)"
+      ],
+      "common_user_phrasings": [
+        "No separation above my knee.",
+        "My quads look like one blob.",
+        "No teardrop shape to my thigh."
+      ]
+    },
+    {
+      "id": "hamstring-back-fullness",
+      "display_name": "Back of thighs look flat",
+      "region": "hamstrings",
+      "viewpoint": "back",
+      "visual_description": "The back of the thigh lacks visible thickness, even when the front of the leg (quads) looks developed.",
+      "primary_targets": [
+        "hamstrings"
+      ],
+      "technical_explanation": "The hamstring group as a whole, trained through hip-hinge and knee-flexion movements, drives overall thickness through the back of the thigh. Kept as one generic target rather than split by exercise — see physique-targets.yaml's own note on why a seated- vs. lying-leg-curl split isn't supported.",
+      "anatomical_targets": [
+        "hamstrings (biceps femoris, semitendinosus, semimembranosus)"
+      ],
+      "common_user_phrasings": [
+        "Back of my thighs look flat.",
+        "No hamstring development.",
+        "My legs only look good from the front."
+      ]
+    },
+    {
+      "id": "calf-width-shape",
+      "display_name": "Calves look thin / no shape",
+      "region": "calves",
+      "viewpoint": "back",
+      "visual_description": "The calf lacks visible width and the diamond-shaped bulge most people picture when they think of a developed calf — most visible from behind or the side.",
+      "primary_targets": [
+        "gastrocnemius"
+      ],
+      "technical_explanation": "The gastrocnemius, the calf muscle that contributes when the knee is straight, trained through standing-position ankle plantarflexion, is what produces this diamond shape and overall calf width.",
+      "exercise_roles": {
+        "primary": [
+          "standing-calf-raise"
+        ],
+        "secondary": [
+          "leg-press-calf-raise"
+        ]
+      },
+      "anatomical_targets": [
+        "gastrocnemius, medial and lateral heads"
+      ],
+      "common_user_phrasings": [
+        "My calves look thin.",
+        "No shape to my calves.",
+        "Skinny calves no matter what I do."
+      ]
+    },
+    {
+      "id": "calf-lower-fullness",
+      "display_name": "Lower calf near the ankle looks thin",
+      "region": "calves",
+      "viewpoint": "side",
+      "visual_description": "The lower portion of the calf, closer to the ankle, looks thin even when the upper calf has some visible development.",
+      "primary_targets": [
+        "soleus"
+      ],
+      "technical_explanation": "The soleus, the calf muscle beneath the gastrocnemius that stays active even with the knee bent, trained through seated-position ankle plantarflexion, fills out this specific lower portion of the calf's profile — often the part that stays thin even once the upper calf has already grown.",
+      "preferred_characteristics": [
+        "bent-knee"
+      ],
+      "anatomical_targets": [
+        "soleus"
+      ],
+      "common_user_phrasings": [
+        "My calf looks thin near my ankle.",
+        "Lower calf doesn't fill out.",
+        "Upper calf is fine but lower calf is thin."
+      ]
+    },
+    {
+      "id": "forearm-fullness-inner",
+      "display_name": "Forearms look thin (palm side)",
+      "region": "forearms",
+      "viewpoint": "front",
+      "visual_description": "The palm-side of the forearm looks thin, most noticeable near the elbow with the palm facing up.",
+      "primary_targets": [
+        "forearm-flexors"
+      ],
+      "technical_explanation": "The palm-side (wrist-flexor) forearm muscles are loaded only indirectly by gripping in larger lifts, so this side of the forearm often lags without direct wrist-flexion work.",
+      "anatomical_targets": [
+        "wrist flexors"
+      ],
+      "common_user_phrasings": [
+        "Palm side of my forearm looks thin.",
+        "Inner forearm doesn't fill out.",
+        "No mass near my elbow crease."
+      ]
+    },
+    {
+      "id": "forearm-fullness-outer",
+      "display_name": "Forearms look thin (back of hand side)",
+      "region": "forearms",
+      "viewpoint": "side",
+      "visual_description": "The back-of-hand side of the forearm looks thin — the side that's actually visible when the arm hangs relaxed — even when grip strength feels adequate.",
+      "primary_targets": [
+        "forearm-extensors"
+      ],
+      "technical_explanation": "The back-of-hand-side (wrist-extensor) forearm muscles and the brachioradialis are considerably weaker than the flexors and get little direct work in a typical routine, so this side often lags even for lifters with strong grip from pulling work.",
+      "anatomical_targets": [
+        "wrist extensors",
+        "brachioradialis"
+      ],
+      "common_user_phrasings": [
+        "Back of my forearm looks thin.",
+        "No forearm peak when my elbow is bent.",
+        "My forearms look thin when my arm hangs down."
+      ]
+    },
+    {
+      "id": "neck-size",
+      "display_name": "Neck doesn't look thick",
+      "region": "neck",
+      "viewpoint": "side",
+      "visual_description": "The neck looks narrow rather than thick, most noticeable from the side or behind.",
+      "primary_targets": [
+        "neck-thickness"
+      ],
+      "technical_explanation": "Flagged during the 4A taxonomy audit as lower-confidence than most other outcomes in this file: the supporting data itself hedges on it — the lateral-neck-flexion record's own mirror_effect calls that work \"a niche addition for most lifters,\" language the dataset doesn't use for its other exercises. Neck extension is the primary driver of visible neck thickness (back and sides); neck flexion rounds out the front profile but doesn't add comparable size on its own.",
+      "anatomical_targets": [
+        "neck extensors",
+        "neck flexors"
+      ],
+      "common_user_phrasings": [
+        "My neck doesn't look thick.",
+        "Skinny neck.",
+        "No neck size no matter what I do."
+      ]
+    }
+  ],
+  "functionalGoals": [
+    {
+      "id": "rotator-cuff",
+      "name": "Rotator Cuff",
+      "parent_region": "shoulders",
+      "definition": "The external rotators of the shoulder, trained through isolated external-rotation movements that pressing and pulling exercises load only indirectly.",
+      "why_it_matters": "Joint durability and controlled rotation strength for the shoulder — a health-and-resilience role rather than a size driver, most relevant for shoulders under heavy or frequent pressing/pulling load."
+    },
+    {
+      "id": "scapular-stability",
+      "name": "Scapular Stability",
+      "parent_region": "shoulders",
+      "definition": "Scapular protraction control (serratus anterior), trained through movements that add controlled shoulder-blade motion on top of a pressing pattern — something most ordinary pressing does not load directly.",
+      "why_it_matters": "Movement quality and durability for the shoulder blade's position and control during pressing — a warm-up/general-health role rather than a primary size driver."
+    },
+    {
+      "id": "hip-flexors",
+      "name": "Hip Flexors",
+      "parent_region": "hips",
+      "definition": "The hip-flexor muscles, trained through loaded hip-flexion movements that most lower-body routines leave entirely to stretching.",
+      "why_it_matters": "Hip-flexor strength and size for running, kicking, or knee-raise work — a specific, secondary functional role rather than a routine staple."
+    },
+    {
+      "id": "hip-stability",
+      "name": "Hip Stability",
+      "parent_region": "hips",
+      "definition": "Pelvic and hip-joint stability under load, trained through direct hip-abduction and hip-adduction work that bilateral squats and hinges only train indirectly, as stabilizers.",
+      "why_it_matters": "Pelvic control and side-to-side hip stability, relevant to injury resilience and to squatting/hinging technique under fatigue, not just to hip width or inner-thigh appearance (the same exercises also serve those visual outcomes — see hip-width-side and inner-thigh-fullness in the aesthetic taxonomy)."
+    },
+    {
+      "id": "core-anti-extension",
+      "name": "Core Anti-Extension",
+      "parent_region": "core",
+      "definition": "Trunk bracing that resists the lower back arching under load, trained through isometric holds like a plank rather than spinal-flexion movements like a crunch.",
+      "why_it_matters": "Trunk endurance and bracing control, relevant to keeping the spine neutral under load in squats, presses, and carries — a stability role rather than a growth stimulus."
+    },
+    {
+      "id": "core-anti-rotation",
+      "name": "Core Anti-Rotation",
+      "parent_region": "core",
+      "definition": "Trunk bracing that resists rotational force, trained through anti-rotation holds like a Pallof press rather than trunk-rotation movements like a woodchop.",
+      "why_it_matters": "Rotational control and durability, a role crunches and planks do not cover — relevant to single-arm/single-leg work and any lift where an off-center load tries to twist the trunk."
+    },
+    {
+      "id": "core-anti-lateral-flexion",
+      "name": "Core Anti-Lateral-Flexion",
+      "parent_region": "core",
+      "definition": "Trunk bracing that resists sideways bending, trained through unilaterally-loaded carries that make the trunk resist being pulled toward the loaded side.",
+      "why_it_matters": "Lateral trunk control and durability, plus grip endurance as a side effect — relevant to single-side carrying and loading tasks a bilateral, symmetric lift never challenges."
+    }
+  ],
+  "developmentPackages": {
+    "muscle_groups": [
+      {
+        "id": "chest",
+        "name": "Chest",
+        "target_ids": [
+          "upper-pec",
+          "mid-pec",
+          "lower-pec"
+        ]
+      },
+      {
+        "id": "shoulders",
+        "name": "Shoulders",
+        "target_ids": [
+          "front-delt",
+          "side-delt",
+          "rear-delt"
+        ]
+      },
+      {
+        "id": "back",
+        "name": "Back",
+        "target_ids": [
+          "lat-width",
+          "back-thickness",
+          "upper-traps"
+        ]
+      },
+      {
+        "id": "biceps",
+        "name": "Biceps",
+        "target_ids": [
+          "biceps",
+          "brachialis-arm-thickness"
+        ]
+      },
+      {
+        "id": "triceps",
+        "name": "Triceps",
+        "target_ids": [
+          "triceps",
+          "triceps-long-head"
+        ]
+      },
+      {
+        "id": "forearms",
+        "name": "Forearms",
+        "target_ids": [
+          "forearm-flexors",
+          "forearm-extensors"
+        ]
+      },
+      {
+        "id": "quads",
+        "name": "Quads",
+        "target_ids": [
+          "quads"
+        ]
+      },
+      {
+        "id": "hamstrings",
+        "name": "Hamstrings",
+        "target_ids": [
+          "hamstrings"
+        ]
+      },
+      {
+        "id": "glutes",
+        "name": "Glutes",
+        "target_ids": [
+          "gluteus-maximus",
+          "gluteus-medius-minimus"
+        ]
+      },
+      {
+        "id": "calves",
+        "name": "Calves",
+        "target_ids": [
+          "gastrocnemius",
+          "soleus"
+        ]
+      },
+      {
+        "id": "core",
+        "name": "Core",
+        "target_ids": [
+          "rectus-abdominis",
+          "obliques"
+        ]
+      }
+    ],
+    "packages": [
+      {
+        "id": "chest-efficient",
+        "muscle_group": "chest",
+        "level": "efficient",
+        "display_name": "Chest — Efficient",
+        "objective": "Broad, balanced chest development — upper, mid, and lower pec — in the smallest exercise combination that avoids real redundancy.",
+        "exercises": [
+          {
+            "exercise_id": "incline-barbell-press",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Upper-chest shelf and the fullness that closes the gap below the collarbone."
+          },
+          {
+            "exercise_id": "flat-barbell-bench-press",
+            "order": 2,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "The main slab of chest mass and front-on thickness."
+          },
+          {
+            "exercise_id": "cable-fly",
+            "order": 3,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Constant-tension stretch work across the whole pec — including the lower/outer sweep the two presses above don't directly emphasize."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "The two presses are deliberately different angles (upper vs. mid) rather than two versions of the same movement, so neither is redundant with the other. Cable fly adds isolated, constant-tension volume across all three pec regions at once, including the lower pec neither press directly targets — together this covers all three chest targets without adding a fourth exercise that would mostly overlap with what the presses already do."
+      },
+      {
+        "id": "chest-complete",
+        "muscle_group": "chest",
+        "level": "complete",
+        "display_name": "Chest — Complete",
+        "objective": "Full chest development with direct lower-pec loading and extra upper-pec detail work, for chest as a training priority.",
+        "exercises": [
+          {
+            "exercise_id": "incline-barbell-press",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Upper-chest shelf and the fullness that closes the gap below the collarbone."
+          },
+          {
+            "exercise_id": "flat-barbell-bench-press",
+            "order": 2,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "The main slab of chest mass and front-on thickness."
+          },
+          {
+            "exercise_id": "dip-chest-biased",
+            "order": 3,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Direct lower-chest loading and the transition-line definition near the ribs that flat/incline pressing doesn't emphasize."
+          },
+          {
+            "exercise_id": "cable-fly",
+            "order": 4,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Constant-tension stretch work across the whole pec, including the lower/outer sweep."
+          },
+          {
+            "exercise_id": "incline-dumbbell-fly",
+            "order": 5,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Extra stretch-emphasis detail work isolated to the upper-chest shelf, without the shoulder/triceps involvement the incline press brings along."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Builds on the Efficient combination by adding a genuine lower-pec compound movement (the presses above bias upper/mid pec, not lower) and an isolated upper-pec stretch exercise the incline press's pressing pattern doesn't reproduce. Every added exercise targets a region or movement quality the other four don't already cover — none is here simply to make the package longer."
+      },
+      {
+        "id": "shoulders-efficient",
+        "muscle_group": "shoulders",
+        "level": "efficient",
+        "display_name": "Shoulders — Efficient",
+        "objective": "Shoulder width and 3D shape, focused on side and rear delt — the two heads standard pressing work doesn't already train hard.",
+        "exercises": [
+          {
+            "exercise_id": "dumbbell-lateral-raise",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "The single biggest lever for apparent shoulder width — the cap that creates the shoulder-to-waist taper."
+          },
+          {
+            "exercise_id": "cable-lateral-raise",
+            "order": 2,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Stretch-position lateral work, keeping tension on the side delt through the bottom of the range where a dumbbell loses it."
+          },
+          {
+            "exercise_id": "face-pull",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Rear-delt roundness and the back-of-shoulder shape that front and side work don't touch."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Front delt is deliberately left without dedicated volume here — the knowledge base notes it's already heavily loaded by standard chest and shoulder pressing work most training programs include elsewhere, so it's rarely the limiting factor in shoulder development. The two lateral-raise variations differ in resistance profile (free weight vs. cable stretch), not just equipment, and face pull adds the rear head neither reaches."
+      },
+      {
+        "id": "shoulders-complete",
+        "muscle_group": "shoulders",
+        "level": "complete",
+        "display_name": "Shoulders — Complete",
+        "objective": "Maximum side- and rear-delt development for shoulders as a training priority, adding a second angle on each.",
+        "exercises": [
+          {
+            "exercise_id": "dumbbell-lateral-raise",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "The single biggest lever for apparent shoulder width."
+          },
+          {
+            "exercise_id": "cable-lateral-raise",
+            "order": 2,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Stretch-position lateral work the dumbbell version loses tension in at the bottom."
+          },
+          {
+            "exercise_id": "machine-lateral-raise",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Stable side-delt volume without the stabilization demand of the free-weight/cable versions — useful once those sets have added up."
+          },
+          {
+            "exercise_id": "face-pull",
+            "order": 4,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Rear-delt roundness and the back-of-shoulder shape."
+          },
+          {
+            "exercise_id": "rear-delt-row",
+            "order": 5,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "A rowing-pattern rear-delt movement — a different resistance curve and pulling pattern than the fly-style face pull, filling out 3D shoulder shape from another angle."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Adds a third side-delt angle and a second rear-delt movement pattern (pulling vs. flying) rather than another near-identical fly variant — each addition changes either the resistance profile or the movement pattern, not just the equipment. Front delt remains deliberately excluded for the same reason as the Efficient package."
+      },
+      {
+        "id": "back-efficient",
+        "muscle_group": "back",
+        "level": "efficient",
+        "display_name": "Back — Efficient",
+        "objective": "Balanced back width, thickness, and upper-trap development in three exercises, one per target.",
+        "exercises": [
+          {
+            "exercise_id": "lat-pulldown-wide-pronated",
+            "order": 1,
+            "sets": 3,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary lat-width builder — the vertical-pull movement most responsible for the V-taper."
+          },
+          {
+            "exercise_id": "chest-supported-row",
+            "order": 2,
+            "sets": 3,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary back-thickness builder — horizontal-pull depth without spinal-erector fatigue limiting the set."
+          },
+          {
+            "exercise_id": "barbell-dumbbell-shrug",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Upper-trap height and thickness where the neck meets the shoulders — a region the width and thickness work above doesn't reach."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Back width (vertical pull) and back thickness (horizontal pull) are genuinely different movement patterns loading different parts of the back, not interchangeable — this is the same distinction the Decision Maker draws between back-width-v-taper and back-side-thickness. The shrug adds the one target neither pulling pattern trains directly."
+      },
+      {
+        "id": "back-complete",
+        "muscle_group": "back",
+        "level": "complete",
+        "display_name": "Back — Complete",
+        "objective": "Full back development for back as a training priority, adding combined width-and-thickness volume plus isolated lat stretch work.",
+        "exercises": [
+          {
+            "exercise_id": "lat-pulldown-wide-pronated",
+            "order": 1,
+            "sets": 3,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary lat-width builder."
+          },
+          {
+            "exercise_id": "chest-supported-row",
+            "order": 2,
+            "sets": 3,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary back-thickness builder."
+          },
+          {
+            "exercise_id": "barbell-dumbbell-shrug",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Upper-trap height and thickness."
+          },
+          {
+            "exercise_id": "seated-cable-row",
+            "order": 4,
+            "sets": 3,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Combined width-and-thickness row work, adding volume to both targets at once with minimal setup demand."
+          },
+          {
+            "exercise_id": "straight-arm-pulldown",
+            "order": 5,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Isolated lat-width stretch-to-contract work with no elbow-flexor involvement competing for fatigue, unlike every pulldown/row above."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Seated cable row adds a stable, moderate-load pattern that splits volume between both major targets rather than duplicating either dedicated exercise. Straight-arm pulldown is the only isolation movement in the package — pure lat width without any grip/elbow- flexor fatigue, complementing rather than repeating the compound pulling work above it."
+      },
+      {
+        "id": "biceps-efficient",
+        "muscle_group": "biceps",
+        "level": "efficient",
+        "display_name": "Biceps — Efficient",
+        "objective": "Overall front-of-arm development — biceps peak and brachialis thickness — in two exercises.",
+        "exercises": [
+          {
+            "exercise_id": "barbell-ez-bar-curl",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary biceps mass and front-on peak-height builder."
+          },
+          {
+            "exercise_id": "hammer-curl",
+            "order": 2,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Brachialis thickness that sits under the biceps and pushes it outward — adds arm thickness from the side, distinct from front-on peak."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Biceps (supinated grip) and brachialis (neutral grip) are different target muscles per the existing taxonomy, not two names for the same one — a straight curl and a hammer curl genuinely train different tissue, which is why arm-side-thickness's own regression case requires the hammer-curl family rather than a second straight curl."
+      },
+      {
+        "id": "biceps-complete",
+        "muscle_group": "biceps",
+        "level": "complete",
+        "display_name": "Biceps — Complete",
+        "objective": "Full front-of-arm development for arms as a training priority, adding a stretch-position angle to each target.",
+        "exercises": [
+          {
+            "exercise_id": "barbell-ez-bar-curl",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary biceps mass and peak-height builder."
+          },
+          {
+            "exercise_id": "hammer-curl",
+            "order": 2,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Brachialis thickness, distinct from front-on peak."
+          },
+          {
+            "exercise_id": "incline-dumbbell-curl",
+            "order": 3,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Stretch-position biceps work the standing curl's resistance curve under-loads."
+          },
+          {
+            "exercise_id": "cross-body-hammer-curl",
+            "order": 4,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "A different brachialis loading angle — the cross-body path changes the resistance profile from the standard hammer curl."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Each addition targets the same two muscles as the Efficient package through a genuinely different resistance profile (shoulder-extended stretch for biceps; cross-body angle for brachialis) rather than repeating the same curl pattern a third and fourth time."
+      },
+      {
+        "id": "triceps-efficient",
+        "muscle_group": "triceps",
+        "level": "efficient",
+        "display_name": "Triceps — Efficient",
+        "objective": "Overall triceps mass with dedicated long-head stretch work, in three exercises.",
+        "exercises": [
+          {
+            "exercise_id": "close-grip-bench-press",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Heaviest-loadable triceps mass builder, plus real total upper-body pressing volume."
+          },
+          {
+            "exercise_id": "overhead-triceps-extension",
+            "order": 2,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Long-head-specific stretch work — the overhead position most other triceps exercises miss, loading the head that makes up the largest share of triceps mass."
+          },
+          {
+            "exercise_id": "cable-pushdown",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Low-fatigue finishing volume for both heads already loaded by pressing, without adding much systemic fatigue."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "The triceps make up roughly two-thirds of upper-arm size, so this package leads with the heaviest-loadable movement, then specifically targets the long head — the one head a non-overhead exercise like the close-grip press or pushdown structurally can't bias — before adding low-fatigue finishing volume."
+      },
+      {
+        "id": "triceps-complete",
+        "muscle_group": "triceps",
+        "level": "complete",
+        "display_name": "Triceps — Complete",
+        "objective": "Full triceps development for arms as a training priority, adding a second heavy angle and a cable long-head variant.",
+        "exercises": [
+          {
+            "exercise_id": "close-grip-bench-press",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Heaviest-loadable triceps mass builder."
+          },
+          {
+            "exercise_id": "overhead-triceps-extension",
+            "order": 2,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Long-head-specific stretch work via the overhead position."
+          },
+          {
+            "exercise_id": "cable-pushdown",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Low-fatigue finishing volume."
+          },
+          {
+            "exercise_id": "dip-triceps-biased",
+            "order": 4,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "A second heavy compound angle — the upright-torso execution shifts more load onto the triceps than the chest-biased dip does."
+          },
+          {
+            "exercise_id": "cable-overhead-extension-leaning-forward",
+            "order": 5,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "A cable variant of the long-head stretch position with constant tension through the range, complementing the free-weight overhead extension."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Both additions deliberately double down on what the Efficient package already prioritizes (heavy loading, long-head stretch) rather than adding an unrelated third movement pattern — a second compound angle and a cable version of the same stretch position, for triceps as a genuine priority."
+      },
+      {
+        "id": "forearms-efficient",
+        "muscle_group": "forearms",
+        "level": "efficient",
+        "display_name": "Forearms — Efficient",
+        "objective": "Both sides of the forearm — flexor and extensor — in two exercises.",
+        "exercises": [
+          {
+            "exercise_id": "wrist-curl",
+            "order": 1,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Palm-side forearm fullness near the elbow."
+          },
+          {
+            "exercise_id": "reverse-wrist-curl",
+            "order": 2,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Back-of-hand-side forearm fullness — the side visible when the arm hangs relaxed."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Forearm flexors and extensors are opposite muscle groups trained by opposite wrist motions — one exercise per side is the minimum that actually covers both, not an arbitrary pairing."
+      },
+      {
+        "id": "forearms-complete",
+        "muscle_group": "forearms",
+        "level": "complete",
+        "display_name": "Forearms — Complete",
+        "objective": "Full forearm development, adding brachioradialis \"peak\" work to the extensor side.",
+        "exercises": [
+          {
+            "exercise_id": "wrist-curl",
+            "order": 1,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Palm-side forearm fullness near the elbow."
+          },
+          {
+            "exercise_id": "reverse-wrist-curl",
+            "order": 2,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Back-of-hand-side forearm fullness."
+          },
+          {
+            "exercise_id": "reverse-curl",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Brachioradialis \"peak\" at the elbow crease — a different loading pattern (elbow flexion under a pronated grip) than the wrist-only reverse wrist curl."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Reverse curl trains the extensor side through elbow flexion rather than wrist extension — a genuinely different joint action from the reverse wrist curl, not a repeat of it."
+      },
+      {
+        "id": "quads-efficient",
+        "muscle_group": "quads",
+        "level": "efficient",
+        "display_name": "Quads — Efficient",
+        "objective": "Overall quad mass plus above-knee separation, in the smallest combination that stays safely loadable.",
+        "exercises": [
+          {
+            "exercise_id": "back-squat",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary quad mass builder and the heaviest-loadable movement in the package."
+          },
+          {
+            "exercise_id": "leg-press",
+            "order": 2,
+            "sets": 3,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Fixed-path quad loading without the balance/spinal demand of a free squat — lets effort push closer to failure safely."
+          },
+          {
+            "exercise_id": "leg-extension",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "The most visible above-knee separation/sweep of any quad exercise in the data — isolated knee extension the two compound movements above don't provide on their own."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Leg press is not \"another squat\" — its fixed path removes the balance/bracing demand a free squat needs, letting sets run closer to failure without technical breakdown risk. Leg extension is the package's only isolation movement, added specifically because the Decision Maker's own quad-sweep-separation outcome ranks it above every compound alternative for that specific visual characteristic."
+      },
+      {
+        "id": "quads-complete",
+        "muscle_group": "quads",
+        "level": "complete",
+        "display_name": "Quads — Complete",
+        "objective": "Full quad development for legs as a training priority, adding unilateral loading and deep stretch-position work.",
+        "exercises": [
+          {
+            "exercise_id": "back-squat",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary quad mass builder."
+          },
+          {
+            "exercise_id": "leg-press",
+            "order": 2,
+            "sets": 3,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Fixed-path quad loading without the balance/spinal demand of a free squat."
+          },
+          {
+            "exercise_id": "leg-extension",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "The most visible above-knee separation/sweep of any quad exercise in the data."
+          },
+          {
+            "exercise_id": "bulgarian-split-squat-knee-dominant",
+            "order": 4,
+            "sets": 3,
+            "reps": "6-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Unilateral loading that closes left/right imbalances the bilateral squat and press can hide."
+          },
+          {
+            "exercise_id": "reverse-nordic-curl",
+            "order": 5,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Deep stretch-position quad loading through knee flexion under bodyweight — a resistance profile nothing else in the package provides."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Both additions provide something the three-exercise Efficient package structurally can't: single-leg loading, and a true lengthened-position stimulus. Neither is another bilateral, shortened-to-mid-range squat pattern."
+      },
+      {
+        "id": "hamstrings-efficient",
+        "muscle_group": "hamstrings",
+        "level": "efficient",
+        "display_name": "Hamstrings — Efficient",
+        "objective": "Overall hamstring thickness via both a hip-hinge and a knee-flexion movement.",
+        "exercises": [
+          {
+            "exercise_id": "romanian-deadlift",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary hamstring mass builder through a deep stretch position, with meaningful glute involvement as a bonus."
+          },
+          {
+            "exercise_id": "seated-leg-curl",
+            "order": 2,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Knee-flexion isolation the hip-hinge movement above doesn't train — the knowledge base notes this combination fills out the thigh more evenly than either alone."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Hip-hinge (RDL) and knee-flexion (leg curl) are the hamstrings' two distinct joint actions — training only one leaves the other genuinely under-stimulated, which is exactly what the exercise data itself says about combining the two leg-curl variations."
+      },
+      {
+        "id": "hamstrings-complete",
+        "muscle_group": "hamstrings",
+        "level": "complete",
+        "display_name": "Hamstrings — Complete",
+        "objective": "Full hamstring development for legs as a training priority, adding a second knee-flexion angle.",
+        "exercises": [
+          {
+            "exercise_id": "romanian-deadlift",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary hamstring mass builder through a deep stretch position."
+          },
+          {
+            "exercise_id": "seated-leg-curl",
+            "order": 2,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Knee-flexion isolation the hip-hinge movement doesn't train."
+          },
+          {
+            "exercise_id": "lying-leg-curl",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "A second knee-flexion angle (different hip position than seated) — the same fill-out-more-evenly effect the data notes between the two leg-curl variations."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Lying leg curl is added specifically because the underlying exercise data documents seated and lying leg curl as complementary, not redundant — the hip angle changes which part of the hamstring is most stretched under load."
+      },
+      {
+        "id": "glutes-efficient",
+        "muscle_group": "glutes",
+        "level": "efficient",
+        "display_name": "Glutes — Efficient",
+        "objective": "Glute roundness and side-hip fullness in three exercises.",
+        "exercises": [
+          {
+            "exercise_id": "hip-thrust",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary glute-roundness builder — shortened-position loading at the top of hip extension, the position glute training is most built around."
+          },
+          {
+            "exercise_id": "bulgarian-split-squat-hip-dominant",
+            "order": 2,
+            "sets": 3,
+            "reps": "6-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Unilateral, hip-dominant loading that adds glute volume without the lower-back demand of another hip-hinge movement."
+          },
+          {
+            "exercise_id": "hip-abduction",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "The side-of-hip target most bilateral squats and hinges only work as a stabilizer — fills the \"hip dip\" and adds side-profile roundness."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Gluteus maximus (roundness) and gluteus medius/minimus (side profile) are different muscles per the existing taxonomy — hip thrust and the split squat both load the former through different joint positions (shortened vs. mid-range, bilateral vs. unilateral), while hip abduction is the only movement in the package that actually trains the latter."
+      },
+      {
+        "id": "glutes-complete",
+        "muscle_group": "glutes",
+        "level": "complete",
+        "display_name": "Glutes — Complete",
+        "objective": "Full glute development for glutes as a training priority, adding isolated hip-extension volume.",
+        "exercises": [
+          {
+            "exercise_id": "hip-thrust",
+            "order": 1,
+            "sets": 3,
+            "reps": "6-12",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary glute-roundness builder."
+          },
+          {
+            "exercise_id": "bulgarian-split-squat-hip-dominant",
+            "order": 2,
+            "sets": 3,
+            "reps": "6-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Unilateral, hip-dominant glute loading."
+          },
+          {
+            "exercise_id": "hip-abduction",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Side-of-hip target most other movements only work as a stabilizer."
+          },
+          {
+            "exercise_id": "cable-kickback-glute",
+            "order": 4,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Isolated hip-extension volume with constant cable tension, without any of the spinal-erector or hamstring fatigue the compound hip-hinge movements bring along."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Cable kickback is the package's only true isolation movement — added to accumulate glute-specific volume once the compound movements' broader fatigue cost becomes the limiting factor, not to duplicate the hip thrust's own contribution."
+      },
+      {
+        "id": "calves-efficient",
+        "muscle_group": "calves",
+        "level": "efficient",
+        "display_name": "Calves — Efficient",
+        "objective": "Both calf muscles — gastrocnemius and soleus — in two exercises.",
+        "exercises": [
+          {
+            "exercise_id": "standing-calf-raise",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary calf width/shape builder — straight-knee loading of the gastrocnemius, the diamond-shaped bulge most people picture."
+          },
+          {
+            "exercise_id": "seated-calf-raise",
+            "order": 2,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Bent-knee loading that isolates the soleus — fills the lower half of the calf's profile near the ankle, often the part that stays thin even after the upper calf grows."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Straight-knee and bent-knee raises are not interchangeable — the knee angle changes which of the two calf muscles is mechanically able to contribute, which is exactly why the Decision Maker distinguishes calf-width-shape (gastrocnemius) from calf-lower-fullness (soleus) as separate outcomes."
+      },
+      {
+        "id": "calves-complete",
+        "muscle_group": "calves",
+        "level": "complete",
+        "display_name": "Calves — Complete",
+        "objective": "Full calf development for calves as a training priority, adding unilateral gastrocnemius work.",
+        "exercises": [
+          {
+            "exercise_id": "standing-calf-raise",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Primary calf width/shape builder."
+          },
+          {
+            "exercise_id": "seated-calf-raise",
+            "order": 2,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Bent-knee soleus isolation."
+          },
+          {
+            "exercise_id": "single-leg-calf-raise",
+            "order": 3,
+            "sets": 2,
+            "reps": "8-15",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Unilateral loading that lets each calf work through its full available range without the stronger side compensating, plus genuine stabilization demand standing raises don't require."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Single-leg calf raise adds a real stability/range-of-motion dimension the bilateral standing raise can mask, not a third near-identical bilateral set."
+      },
+      {
+        "id": "core-efficient",
+        "muscle_group": "core",
+        "level": "efficient",
+        "display_name": "Core — Efficient",
+        "objective": "Rectus abdominis and oblique development through genuinely different movement qualities, in three exercises.",
+        "exercises": [
+          {
+            "exercise_id": "cable-crunch",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Loadable spinal-flexion work for direct rectus-abdominis mass, progressively overloadable unlike most bodyweight ab work."
+          },
+          {
+            "exercise_id": "hanging-knee-leg-raise",
+            "order": 2,
+            "sets": 3,
+            "reps": "6-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Hip-flexion-dominant ab work — a different movement pattern (posterior pelvic tilt under load) than the spinal-flexion crunch above."
+          },
+          {
+            "exercise_id": "pallof-press",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Anti-rotation oblique work — the side-of-waist definition lines, trained by resisting rotation rather than causing it."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Cable crunch and hanging leg raise both target the rectus abdominis but through different joint actions (spinal flexion vs. hip flexion), so neither makes the other redundant. Pallof press is the only oblique-specific movement, added because rectus-abdominis and oblique development don't transfer to each other."
+      },
+      {
+        "id": "core-complete",
+        "muscle_group": "core",
+        "level": "complete",
+        "display_name": "Core — Complete",
+        "objective": "Full core development for core as a training priority, adding a rotation-producing oblique movement.",
+        "exercises": [
+          {
+            "exercise_id": "cable-crunch",
+            "order": 1,
+            "sets": 3,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Loadable spinal-flexion work for direct rectus-abdominis mass."
+          },
+          {
+            "exercise_id": "hanging-knee-leg-raise",
+            "order": 2,
+            "sets": 3,
+            "reps": "6-15",
+            "rir": "1-3",
+            "role": "direct",
+            "contribution": "Hip-flexion-dominant ab work."
+          },
+          {
+            "exercise_id": "pallof-press",
+            "order": 3,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "primary",
+            "contribution": "Anti-rotation oblique work."
+          },
+          {
+            "exercise_id": "cable-woodchop",
+            "order": 4,
+            "sets": 2,
+            "reps": "10-20",
+            "rir": "1-3",
+            "role": "secondary",
+            "contribution": "Rotational oblique work — the opposite movement quality from the Pallof press's anti-rotation, giving obliques both a rotation-producing and a rotation-resisting stimulus."
+          }
+        ],
+        "frequency": {
+          "sessions_per_week": 2
+        },
+        "rationale": "Cable woodchop deliberately trains rotation itself, the mirror image of the Pallof press's anti-rotation — obliques respond to both movement qualities, so this is a genuine addition, not a second anti-rotation exercise."
+      }
+    ]
+  }
+}

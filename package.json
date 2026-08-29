@@ -1,0 +1,33 @@
+{
+  "name": "workout-logger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workout Programmer - Phase 1 infrastructure (goal/program context, workout logging, Blueprint + Calorie Tracker integration contracts)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "sync-blueprint": "tsx scripts/sync-blueprint.mts",
+    "dev": "tsx watch src/server/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "js-yaml": "^4.1.0",
+    "@types/js-yaml": "^4.0.9",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
