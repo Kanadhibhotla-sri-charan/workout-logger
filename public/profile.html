@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Training Profile - Workout Programmer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <nav>
+    <a href="/index.html">Goals &amp; Programs</a>
+    <a href="/today.html">Today</a>
+    <a href="/profile.html">Training Profile</a>
+    <a href="/history.html">History</a>
+  </nav>
+
+  <h1>Training profile</h1>
+  <p class="muted">
+    These are constraints the future programming engine reads as data — not
+    assumptions baked into any code.
+  </p>
+
+  <section>
+    <form id="profile-form">
+      <label>Training days
+        <select id="training-days" multiple size="7"></select>
+      </label>
+      <label>Preferred split (free text, e.g. "push-pull-legs")
+        <input id="preferred-split" type="text" />
+      </label>
+      <label>Default session duration (minutes)
+        <input id="default-duration" type="number" min="0" value="60" />
+      </label>
+      <label>Minimum session duration (minutes)
+        <input id="min-duration" type="number" min="0" value="30" />
+      </label>
+      <label>Maximum session duration (minutes)
+        <input id="max-duration" type="number" min="0" value="90" />
+      </label>
+      <label>Available equipment
+        <select id="equipment" multiple size="8"></select>
+      </label>
+
+      <h2>Other recurring activity</h2>
+      <div id="activity-list"></div>
+      <button type="button" id="add-activity">Add recurring activity</button>
+
+      <button type="submit">Save profile</button>
+    </form>
+  </section>
+
+  <script src="/app.js"></script>
+  <script>
+    const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    let activities = [];
+
+    function renderActivities() {
+      const container = document.getElementById('activity-list');
+      container.innerHTML = '';
+      activities.forEach((a, i) => {
+        const row = el('div', { class: 'set-row' });
+        const day = el('select');
+        for (const d of WEEKDAYS) day.appendChild(el('option', { value: d, text: d, ...(a.day === d ? { selected: 'selected' } : {}) }));
+        day.value = a.day;
+        day.addEventListener('change', () => (a.day = day.value));
+        const type = el('input', { type: 'text', value: a.activity_type, placeholder: 'gym / badminton / rest / other' });
+        type.addEventListener('input', () => (a.activity_type = type.value));
+        const notes = el('input', { type: 'text', value: a.notes || '', placeholder: 'notes' });
+        notes.addEventListener('input', () => (a.notes = notes.value || null));
+        const remove = el('button', { type: 'button', text: 'x' });
+        remove.addEventListener('click', () => {
+          activities.splice(i, 1);
+          renderActivities();
+        });
+        row.append(day, type, notes, remove);
+        container.appendChild(row);
+      });
+    }
+
+    document.getElementById('add-activity').addEventListener('click', () => {
+      activities.push({ day: 'monday', activity_type: 'badminton', notes: null });
+      renderActivities();
+    });
+
+    async function loadEquipmentOptions() {
+      const equipment = await api('/api/blueprint/equipment');
+      const select = document.getElementById('equipment');
+      for (const e of equipment) select.appendChild(el('option', { value: e.id, text: `${e.id} (${e.exerciseCount})` }));
+    }
+
+    function loadDayOptions() {
+      const select = document.getElementById('training-days');
+      for (const d of WEEKDAYS) select.appendChild(el('option', { value: d, text: d }));
+    }
+
+    async function loadProfile() {
+      const profile = await api('/api/training-profile');
+      if (!profile) return;
+      for (const opt of document.getElementById('training-days').options) opt.selected = profile.training_days.includes(opt.value);
+      document.getElementById('preferred-split').value = profile.preferred_split || '';
+      document.getElementById('default-duration').value = profile.default_session_duration_minutes;
+      document.getElementById('min-duration').value = profile.minimum_session_duration_minutes;
+      document.getElementById('max-duration').value = profile.maximum_session_duration_minutes;
+      for (const opt of document.getElementById('equipment').options) opt.selected = profile.available_equipment.includes(opt.value);
+      activities = profile.other_activity_schedule.map((a) => ({ ...a }));
+      renderActivities();
+    }
+
+    document.getElementById('profile-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const training_days = [...document.getElementById('training-days').selectedOptions].map((o) => o.value);
+      const available_equipment = [...document.getElementById('equipment').selectedOptions].map((o) => o.value);
+      try {
+        await api('/api/training-profile', {
+          method: 'PUT',
+          body: {
+            training_days,
+            preferred_split: document.getElementById('preferred-split').value || null,
+            default_session_duration_minutes: Number(document.getElementById('default-duration').value),
+            minimum_session_duration_minutes: Number(document.getElementById('min-duration').value),
+            maximum_session_duration_minutes: Number(document.getElementById('max-duration').value),
+            available_equipment,
+            other_activity_schedule: activities,
+          },
+        });
+        alert('Saved.');
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    loadDayOptions();
+    loadEquipmentOptions().then(loadProfile);
+  </script>
+</body>
+</html>

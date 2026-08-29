@@ -3,7 +3,8 @@ import type Database from 'better-sqlite3';
 import { openDb } from '../src/db/client.js';
 import { WorkoutSessionsRepo } from '../src/repositories/workoutSessionsRepo.js';
 import { BlueprintAdapter } from '../src/blueprint/adapter.js';
-import { EXPENDITURE_NOTE, getCompletedWorkouts } from '../src/services/calorieTrackerExport.js';
+import { EXPENDITURE_NOTE, getCompletedWorkouts, getWorkoutSessions } from '../src/services/calorieTrackerExport.js';
+import type { WorkoutSessionStatus } from '../src/contracts/types.js';
 
 const KNOWN_EXERCISE_ID = BlueprintAdapter.getExercises()[0]!.id;
 
@@ -69,5 +70,47 @@ describe('getCompletedWorkouts (Calorie Tracker export contract)', () => {
 
   it('returns an empty array for a date with no sessions', () => {
     expect(getCompletedWorkouts(db, '1999-01-01')).toEqual([]);
+  });
+
+  describe('status filtering', () => {
+    const STATUSES: WorkoutSessionStatus[] = ['planned', 'in_progress', 'completed', 'skipped'];
+
+    it.each(STATUSES)('a %s session is %s returned', (status) => {
+      const repo = new WorkoutSessionsRepo(db);
+      repo.createSession({ date: '2026-08-29', session_type: 'gym', status });
+
+      const exported = getCompletedWorkouts(db, '2026-08-29');
+
+      if (status === 'completed') {
+        expect(exported).toHaveLength(1);
+        expect(exported[0]!.status).toBe('completed');
+      } else {
+        expect(exported).toHaveLength(0);
+      }
+    });
+
+    it('returns only the completed session when all four statuses exist on the same date', () => {
+      const repo = new WorkoutSessionsRepo(db);
+      for (const status of STATUSES) {
+        repo.createSession({ date: '2026-08-29', session_type: 'gym', status });
+      }
+
+      const exported = getCompletedWorkouts(db, '2026-08-29');
+
+      expect(exported).toHaveLength(1);
+      expect(exported[0]!.status).toBe('completed');
+    });
+
+    it('getWorkoutSessions returns all four regardless of status', () => {
+      const repo = new WorkoutSessionsRepo(db);
+      for (const status of STATUSES) {
+        repo.createSession({ date: '2026-08-29', session_type: 'gym', status });
+      }
+
+      const all = getWorkoutSessions(db, '2026-08-29');
+
+      expect(all).toHaveLength(4);
+      expect(new Set(all.map((s) => s.status))).toEqual(new Set(STATUSES));
+    });
   });
 });

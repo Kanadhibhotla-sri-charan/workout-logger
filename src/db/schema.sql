@@ -9,6 +9,40 @@ CREATE TABLE IF NOT EXISTS schema_meta (
   value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- One row per user. training_days and available_equipment are stored as
+-- JSON text arrays (see src/repositories/trainingProfileRepo.ts) — SQLite
+-- has no array type, and these are read/written whole, never queried by
+-- individual element.
+CREATE TABLE IF NOT EXISTS training_profiles (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  training_days TEXT NOT NULL, -- JSON array of Weekday
+  preferred_split TEXT,
+  default_session_duration_minutes INTEGER NOT NULL,
+  minimum_session_duration_minutes INTEGER NOT NULL,
+  maximum_session_duration_minutes INTEGER NOT NULL,
+  available_equipment TEXT NOT NULL, -- JSON array of Blueprint equipment ids
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- RecurringActivity rows for a TrainingProfile (e.g. badminton on Tue/Thu).
+-- A real child table, not JSON, since these are structured per-day records
+-- a future engine will want to query (e.g. "what's scheduled on Tuesday?").
+CREATE TABLE IF NOT EXISTS training_profile_activities (
+  id TEXT PRIMARY KEY,
+  training_profile_id TEXT NOT NULL REFERENCES training_profiles(id) ON DELETE CASCADE,
+  day TEXT NOT NULL CHECK (day IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')),
+  activity_type TEXT NOT NULL,
+  notes TEXT
+);
+
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY,
   goal_type TEXT NOT NULL CHECK (goal_type IN ('aesthetic', 'functional')),
@@ -26,6 +60,9 @@ CREATE TABLE IF NOT EXISTS programs (
   start_date TEXT,
   end_date TEXT,
   notes TEXT,
+  -- Blueprint commit in effect when this Program was created (see
+  -- BlueprintAdapter.getManifest()). Set once, never overwritten.
+  blueprint_commit TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
 
@@ -105,3 +142,4 @@ CREATE INDEX IF NOT EXISTS idx_workout_exercises_session ON workout_exercises(wo
 CREATE INDEX IF NOT EXISTS idx_workout_sets_exercise ON workout_sets(workout_exercise_id);
 CREATE INDEX IF NOT EXISTS idx_program_sessions_program ON program_sessions(program_id);
 CREATE INDEX IF NOT EXISTS idx_program_session_exercises_session ON program_session_exercises(program_session_id);
+CREATE INDEX IF NOT EXISTS idx_training_profile_activities_profile ON training_profile_activities(training_profile_id);

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { BlueprintAdapter } from '../blueprint/adapter.js';
 import type { ExerciseRole, Program, ProgramSession, ProgramSessionExercise, ProgramStatus, SessionType } from '../contracts/types.js';
 import { newId, nowIso } from './ids.js';
 
@@ -9,6 +10,7 @@ interface ProgramRow {
   start_date: string | null;
   end_date: string | null;
   notes: string | null;
+  blueprint_commit: string;
   created_at: string;
 }
 
@@ -50,12 +52,17 @@ export class ProgramsRepo {
       start_date: input.start_date ?? null,
       end_date: input.end_date ?? null,
       notes: input.notes ?? null,
+      // Recorded once, at creation, from whatever Blueprint snapshot this
+      // app currently has vendored — never overwritten afterward, so a
+      // historical Program stays explainable even after Blueprint's data
+      // changes under a later commit. See docs/architecture.md.
+      blueprint_commit: BlueprintAdapter.getManifest().sourceCommit,
       created_at: nowIso(),
     };
 
     const insertProgram = this.db.prepare(
-      `INSERT INTO programs (id, name, status, start_date, end_date, notes, created_at)
-       VALUES (@id, @name, @status, @start_date, @end_date, @notes, @created_at)`
+      `INSERT INTO programs (id, name, status, start_date, end_date, notes, blueprint_commit, created_at)
+       VALUES (@id, @name, @status, @start_date, @end_date, @notes, @blueprint_commit, @created_at)`
     );
     const insertGoalLink = this.db.prepare('INSERT INTO program_goals (program_id, goal_id) VALUES (?, ?)');
 
