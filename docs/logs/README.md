@@ -10,3 +10,5 @@ story of how the app got to its current state.
 - [2026-08-29-02-scaffold-phase1-app.md](2026-08-29-02-scaffold-phase1-app.md)
 - [2026-08-29-03-add-architecture-docs.md](2026-08-29-03-add-architecture-docs.md)
 - [2026-08-29-04-add-change-logs.md](2026-08-29-04-add-change-logs.md)
+- [2026-08-29-05-phase1.5-fixes-1-2-3-5.md](2026-08-29-05-phase1.5-fixes-1-2-3-5.md)
+- [2026-08-29-06-phase1.5-fixes-4-6-docs.md](2026-08-29-06-phase1.5-fixes-4-6-docs.md)
