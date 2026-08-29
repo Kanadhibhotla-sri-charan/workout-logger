@@ -52,7 +52,6 @@ describe('BlueprintAdapter', () => {
   it('never lets this app mutate Blueprint data (immutability)', () => {
     const exercise = BlueprintAdapter.getExercise('ab-wheel-rollout')!;
     expect(() => {
-      // @ts-expect-error intentional mutation attempt for the test
       exercise.name = 'Tampered Name';
     }).toThrow();
     expect(BlueprintAdapter.getExercise('ab-wheel-rollout')?.name).toBe('Ab Wheel Rollout');
@@ -66,7 +65,6 @@ describe('BlueprintAdapter', () => {
 
     const body_regions = exercise.body_regions;
     expect(() => {
-      // @ts-expect-error intentional mutation attempt for the test
       body_regions.push('made-up-region');
     }).toThrow();
   });
