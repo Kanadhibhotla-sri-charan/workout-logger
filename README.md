@@ -94,3 +94,5 @@ docs/            architecture note, deployment guide, open decisions
 - [`docs/deployment.md`](docs/deployment.md) — local vs. production setup.
 - [`docs/open-decisions.md`](docs/open-decisions.md) — what Charan needs to
   decide before Phase 2.
+- [`docs/logs/`](docs/logs/) — a dated log file per major change to this
+  repo (what changed, why, how it was verified).
