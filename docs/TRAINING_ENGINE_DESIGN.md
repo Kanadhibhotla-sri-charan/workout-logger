@@ -1,5 +1,20 @@
 # Training Engine Design
 
+> **Status update (Next Phase Implementation Specification,
+> `docs/logs/2026-08-30-13-*.md` through `2026-08-30-24-*.md`):** this
+> document describes Phase 2's state, where six of twelve engine
+> modules deliberately threw `NotApprovedError` pending methodology
+> sign-off. **That is no longer true.** The Next Phase spec resolved
+> nearly every decision this document lists as blocked, either with an
+> exact number or by pointing at real Blueprint data
+> (`globalPrinciples`, `developmentPackages`) this app hadn't been
+> reading yet — see `docs/open-decisions.md` for the current,
+> authoritative status of every item below, and the dated log entries
+> above for how and why each one was resolved. Sections 1, 2, and 24
+> below are corrected inline; the rest of this document's description
+> of *how* goal resolution, training state, and constraints work is
+> still accurate and not repeated in the newer docs.
+
 Design document for the deterministic Training Engine — the system that
 will eventually answer:
 
@@ -33,60 +48,62 @@ constraints, and everything downstream of exposure.
 | 📝 **Proposed** | A concrete rule or ranking order is written up below for review, but no code implements it. Marked so a reviewer can approve, reject, or amend it without needing to read code. |
 | 🚫 **Blocked** | A module exists (`src/engine/`) with a real interface/type signature, but its function body throws `NotApprovedError` — see `src/engine/errors.ts`. Nothing about it is decided yet. |
 
-## 1. The pipeline (§31)
+## 1. The pipeline (§31) — UPDATED, see banner above
 
 ```text
-generateWorkout(input)
+assembleAndBuildWorkout(db, date, budget)   src/engine/workoutBuilder.ts — the real, wired entry point
         ↓
 resolveGoals()              ✅ src/engine/goalResolver.ts
         ↓
 buildTrainingState()        ✅ src/engine/trainingState.ts
         ↓
-calculateExposure()         🔶 src/engine/exposureEngine.ts (provisional Strategy A/rule C — see docs/TRAINING_EXPOSURE_MODEL.md §6)
+calculateExposure()         ✅ src/engine/exposureEngine.ts (spec §7's exact 1.00/0.33 coefficients — no longer "provisional Strategy A")
         ↓
 prioritizeTargets()         ✅ folded into goalResolver's PriorityMap (primary/supporting tiers)
         ↓
-allocateVolume()            🚫 src/engine/volumeEngine.ts
+allocateVolume()            ✅ src/engine/volumeEngine.ts
         ↓
-applyFrequency()             🚫 src/engine/frequencyEngine.ts
+applyFrequency()            ✅ src/engine/frequencyEngine.ts
         ↓
-applyRecovery()               🚫 src/engine/recoveryEngine.ts
+applyRecovery()              ✅ src/engine/recoveryEngine.ts
         ↓
-applyTimeConstraint()          ✅ src/engine/constraintEngine.ts (budget primitives only — see §8 below)
+applyTimeConstraint()          ✅ src/engine/constraintEngine.ts (fitToTimeBudget — real fit-to-budget algorithm, not just primitives)
         ↓
 applyEquipmentConstraint()      ✅ src/engine/constraintEngine.ts
         ↓
-selectExercises()                 🚫 src/engine/exerciseSelector.ts
+selectExercises()                 ✅ src/engine/exerciseSelector.ts
         ↓
-buildWorkout()                      🚫 src/engine/workoutBuilder.ts
+allocateResources()                 ✅ src/engine/resourceAllocation.ts (new module, spec §17 — not in Phase 2's pipeline at all)
         ↓
-attachProgression()                   🚫 src/engine/progressionEngine.ts
+buildWorkout()                        ✅ src/engine/workoutBuilder.ts
         ↓
-generateExplanation()                   ✅ src/engine/explanationEngine.ts (only for the ✅ decisions above)
+attachProgression()                     ✅ src/engine/progressionEngine.ts (real, but not yet wired into workoutBuilder's per-set load prescription — see docs/open-decisions.md #17)
+        ↓
+generateExplanation()                     ✅ src/engine/explanationEngine.ts, plus every module's own `reasoning` field
 ```
 
-There is no `generateWorkout()` entry point wiring these together — that
-would be the actual generator, explicitly out of scope until the 🚫 rows
-are approved. The pipeline exists as documentation and as the shape each
-module's interface was designed against.
+`workoutBuilder.assembleAndBuildWorkout(db, date, budgetMinutes)` is now
+a real, tested entry point wiring all of the above together — see
+`docs/logs/2026-08-30-23-*.md`.
 
-## 2. Module boundaries (§30)
+## 2. Module boundaries (§30) — UPDATED, see banner above
 
-| Module | File | Status | Blocked on |
+| Module | File | Status | Notes |
 |---|---|---|---|
 | Goal Resolver | `src/engine/goalResolver.ts` | ✅ | — |
 | Training State | `src/engine/trainingState.ts` | ✅ | — |
-| Exposure Engine | `src/engine/exposureEngine.ts` | 🔶 IMPLEMENTED — PROVISIONAL | not approved as final methodology — `docs/TRAINING_EXPOSURE_MODEL.md` §B, §6 |
-| Priority Engine | folded into `goalResolver.PriorityMap` | ✅ (single-goal only) | multi-goal composition — §5 below |
+| Exposure Engine | `src/engine/exposureEngine.ts` | ✅ | spec §7's exact primary/secondary coefficients — `docs/open-decisions.md` #6 |
+| Priority Engine | folded into `goalResolver.PriorityMap` | ✅ (single-goal only) | multi-goal composition now lives in Resource Allocation, not here |
 | Constraint Engine (equipment) | `src/engine/constraintEngine.ts` | ✅ | — |
-| Constraint Engine (time) | `src/engine/constraintEngine.ts` | ✅ (budget arithmetic only) | per-exercise time estimation — §8 below |
-| Volume Engine | `src/engine/volumeEngine.ts` | 🚫 | `hypertrophy-volume-model` |
-| Frequency Engine | `src/engine/frequencyEngine.ts` | 🚫 | `frequency-allocation-model` |
-| Recovery Engine | `src/engine/recoveryEngine.ts` | 🚫 | `recovery-methodology` |
-| Exercise Selector | `src/engine/exerciseSelector.ts` | 🚫 | `exercise-selection-ranking` |
-| Workout Builder | `src/engine/workoutBuilder.ts` | 🚫 | all four above |
-| Progression Engine | `src/engine/progressionEngine.ts` | 🚫 | `progression-methodology` |
-| Explanation Engine | `src/engine/explanationEngine.ts` | ✅ (only for ✅ decisions) | exercise-selection explanation blocked on Exercise Selector |
+| Constraint Engine (time) | `src/engine/constraintEngine.ts` | ✅ | `fitToTimeBudget` — real fit-to-budget algorithm, `docs/logs/2026-08-30-22-*.md` |
+| Volume Engine | `src/engine/volumeEngine.ts` | ✅ | `docs/VOLUME_ENGINE.md`, `docs/open-decisions.md` #11 |
+| Frequency Engine | `src/engine/frequencyEngine.ts` | ✅ | `docs/open-decisions.md` #14 |
+| Recovery Engine | `src/engine/recoveryEngine.ts` | ✅ | `docs/open-decisions.md` #13 |
+| Exercise Selector | `src/engine/exerciseSelector.ts` | ✅ | `docs/open-decisions.md` #15 |
+| Resource Allocation | `src/engine/resourceAllocation.ts` | ✅ | new module, not in Phase 2's table at all — `docs/open-decisions.md` #18 |
+| Workout Builder | `src/engine/workoutBuilder.ts` | ✅ | `docs/logs/2026-08-30-23-*.md` |
+| Progression Engine | `src/engine/progressionEngine.ts` | ✅ | `docs/open-decisions.md` #17; not yet wired into Workout Builder's load prescription |
+| Explanation Engine | `src/engine/explanationEngine.ts` | ✅ | every engine module also carries its own `reasoning` field directly on its result — see §19 below |
 
 Every module is small, deterministic functions with explicit inputs and
 outputs — no class with hidden mutable state (§30's explicit instruction).
@@ -429,60 +446,67 @@ depend on (constraint arithmetic, exposure aggregation) rather than
 asserting behavior of a workout generator that doesn't exist — see each
 fixture file's own comment for exactly what it does and does not claim.
 
-## 24. Acceptance criteria (§36)
+## 24. Acceptance criteria (§36) — UPDATED, see banner above
 
 - [x] Timezone/date semantics are documented. (`docs/architecture.md`)
 - [x] Single-user scope is explicitly documented. (`docs/architecture.md`)
 - [x] Training Exposure remains separate from hypertrophy volume. (`docs/TRAINING_EXPOSURE_MODEL.md` §0, distinct contract types)
-- [x] Functional exposure is not assumed to equal hypertrophy volume. (`docs/TRAINING_EXPOSURE_MODEL.md` §0, distinct contract types)
-- [x] Direct vs indirect contribution has an explicit strategy, clearly marked provisional. (Strategy A — IMPLEMENTED — PROVISIONAL, not yet approved as final methodology, see `docs/open-decisions.md`)
-- [x] No fuzzy text matching is used to invent canonical relationships. (verified: `exposureEngine` never reads `secondary_targets`)
+- [x] Functional exposure is not assumed to equal hypertrophy volume. (`docs/TRAINING_EXPOSURE_MODEL.md` §0; resolved by uniform engine treatment rather than a separate arithmetic model — `docs/open-decisions.md` #12)
+- [x] Direct vs indirect contribution has an explicit strategy. (spec §7's exact 1.00/0.33 coefficients — `docs/open-decisions.md` #6, no longer provisional)
+- [x] No fuzzy text matching is used to invent canonical relationships. (secondary-target resolution is a curated, exhaustive, non-fuzzy dictionary — `docs/SECONDARY_TARGET_MAPPING.md`)
 - [x] Goal resolution works through local Goal → Blueprint reference. (`goalResolver.ts`, tested)
 - [x] Training State has a defined deterministic interface. (`trainingState.ts`)
 - [x] Weekly and rolling exposure have defined semantics. (`docs/TRAINING_EXPOSURE_MODEL.md` §G, implemented)
-- [x] Recovery constraints have documented inputs/rules. (§9 above; rule itself is proposed, not adopted — by design)
-- [x] Time is treated as a real programming constraint. (`constraintEngine.ts`, arithmetic only — per-exercise estimation is the documented gap)
+- [x] Recovery constraints have documented inputs/rules. (`recoveryEngine.ts`, real implementation — `docs/open-decisions.md` #13)
+- [x] Time is treated as a real programming constraint. (`constraintEngine.fitToTimeBudget`, real fit-to-budget algorithm — `docs/open-decisions.md` #16)
 - [x] Equipment is treated as a real programming constraint. (`constraintEngine.ts`, fully implemented)
 - [x] The 4-day gym + 2-day badminton scenario exists as a test fixture. (Fixture C)
-- [x] Actual performance is separated from planned performance. (structural since Phase 1; §17 above)
-- [x] Progression requirements are documented. (§17 above, `progressionEngine.ts`'s interface)
+- [x] Actual performance is separated from planned performance. (structural since Phase 1; `progressionEngine.ts` reads only actual logged sets)
+- [x] Progression requirements are implemented. (`progressionEngine.ts`, Blueprint's own double-progression model — `docs/open-decisions.md` #17)
 - [x] Engine module boundaries are established. (§2 above)
-- [x] Core engine functions are deterministic and testable. (§20 above; 82 new engine tests)
-- [x] Explanations can be generated from deterministic decisions. (`explanationEngine.ts`, for the decisions that exist)
-- [x] No LLM is required for programming. (§21 above)
-- [x] The full automatic optimizer is not implemented until the design decisions are approved. (§30 table — 6 of 12 modules are 🚫 by design)
+- [x] Core engine functions are deterministic and testable. (297 tests as of `docs/logs/2026-08-30-24-*.md`)
+- [x] Explanations can be generated from deterministic decisions. (every engine module's own `reasoning` field, plus `explanationEngine.ts`)
+- [x] No LLM is required for programming. (§21 above, still true)
+- [x] The full automatic optimizer is implemented, deterministic, and tested. (§2 table above — 13 of 13 modules real; see `docs/logs/2026-08-30-23-*.md` for the wired pipeline)
 
-## 25. Developer vs. user responsibilities (§37)
+## 25. Developer vs. user responsibilities (§37) — UPDATED, see banner above
 
-Unchanged from the spec: this document and its 📝 proposals are exactly
-that — proposals. Charan approves (or amends) exposure methodology
-(mostly done via Strategy A, pending final sign-off), direct/indirect
-treatment, hypertrophy-volume interpretation, functional-exposure
-interpretation, goal-priority behavior, recovery philosophy, and
-progression rules before any 🚫 module is implemented for real. See
-`docs/open-decisions.md` for the tracked list. The user is not asked to
-manually calculate training volume anywhere in this design.
+Phase 2's proposals here were superseded by the Next Phase
+Implementation Specification, which resolved almost all of them with
+exact numbers or by pointing at real Blueprint data — see
+`docs/open-decisions.md` for exactly what was resolved and how. What
+remains genuinely open (infrastructure/deployment choices, the goal/
+program hierarchy shape, exposure-level RIR/RPE weighting) is tracked
+there, not here. The user is still never asked to manually calculate
+training volume anywhere in this design.
 
-## 26. Phase 2 output (§38)
+## 26. Phase 2 output (§38) — historical; see docs/logs/ for what followed
 
 ```text
 Blueprint Adapter        ✅ (Phase 1)
 Training Profile         ✅ (Phase 1.5, extended: timezone, week_start_day)
-Goal Resolver             ✅ (this phase)
-Training State             ✅ (this phase)
-Exposure Model               🔶 (this phase, extended from Phase 1.5 — IMPLEMENTED, PROVISIONAL)
-Rule Specifications             📝 (this document + docs/TRAINING_EXPOSURE_MODEL.md)
-Engine Interfaces                 ✅ (this phase — 12 modules, 6 real (some 🔶) + 6 documented-blocked)
-Test Fixtures                       ✅ (this phase, A-G)
-Deterministic Core                    ✅ (everything ✅/🔶 above; zero AI/LLM anywhere)
+Goal Resolver             ✅ (Phase 2)
+Training State             ✅ (Phase 2)
+Exposure Model               🔶 (Phase 2 — later made ✅ IMPLEMENTED by the Next Phase spec's exact coefficients)
+Rule Specifications             📝 (Phase 2 — later mostly IMPLEMENTED by the Next Phase spec)
+Engine Interfaces                 ✅ (Phase 2 — 12 modules, 6 real (some 🔶) + 6 documented-blocked)
+Test Fixtures                       ✅ (Phase 2, A-G)
+Deterministic Core                    ✅ (Phase 2's slice; extended to the full pipeline — see docs/logs/2026-08-30-23-*.md)
 ```
 
-## 27. Final principle (§39)
+The Next Phase Implementation Specification's own output (all 13 engine
+modules real, the wired `assembleAndBuildWorkout` pipeline, 297 tests)
+is tracked in `docs/logs/2026-08-30-13-*.md` through
+`2026-08-30-24-*.md`, not re-summarized here.
+
+## 27. Final principle (§39) — UPDATED, see banner above
 
 Blueprint already answers "what exercises are good for chest?" This app
-is trying to answer "given everything known about this person, what's the
-highest-value training work they should do today?" — and this phase's job
-was to make sure that question can eventually be answered **correctly,
-transparently, and reproducibly**, not to answer it yet. Six of twelve
-engine modules deliberately still throw `NotApprovedError`. That is the
-intended state of this phase, not an unfinished one.
+now also answers "given everything known about this person, what's the
+highest-value training work they should do today?" — Phase 2's job was
+to make sure that question could eventually be answered **correctly,
+transparently, and reproducibly** without answering it yet; the Next
+Phase Implementation Specification is what actually answered it. Zero
+engine modules in this codebase throw `NotApprovedError` anymore — see
+`docs/open-decisions.md` for what's still genuinely open (none of it
+blocks the pipeline above from running).

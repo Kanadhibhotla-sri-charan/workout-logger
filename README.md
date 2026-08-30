@@ -1,21 +1,24 @@
-# Workout Programmer — Phase 1 / 1.5 / 2
+# Workout Programmer
 
-Infrastructure, contracts, and a deterministic Training Engine foundation
-for a standalone workout programming and logging app: goal/program
-context, a training profile, a workout logger, exposure tracking, and
+A standalone workout programming and logging app with a deterministic
+Training Engine: goal/program context, a training profile, a workout
+logger, exposure tracking, a full daily workout-generation pipeline, and
 read-only integration with two sibling apps — **workout-blueprint** (the
 fitness knowledge layer) and **Calorie Tracker**
 (`food_and_workout_tracker`).
 
-This app deliberately does **not** include an AI layer or a full
-automatic workout generator. Phase 2 built the deterministic engine
-*boundary* (`src/engine/`) — goal resolution, training state, exposure
-tracking, and equipment/time constraint checking are real and tested; six
-further modules (volume, frequency, recovery, exercise selection, workout
-construction, progression) have stable interfaces but deliberately throw
-`NotApprovedError` until their underlying methodology is approved. See
-`docs/TRAINING_ENGINE_DESIGN.md` for the full pipeline and module-by-module
-status, and `docs/open-decisions.md` for what's still unresolved.
+This app deliberately does **not** include an AI/LLM layer anywhere in
+core programming — every decision is deterministic and reproducible from
+stored inputs, grounded in exact numbers from the governing
+specification or real Blueprint data (`globalPrinciples`,
+`developmentPackages`), never invented. `src/engine/workoutBuilder.ts`'s
+`assembleAndBuildWorkout(db, date, budgetMinutes)` is the real, wired
+entry point that composes goal resolution, exposure, volume, frequency,
+recovery, exercise selection, resource allocation, and time-fitting into
+an actual generated workout. See `docs/TRAINING_ENGINE_DESIGN.md` for
+the pipeline and module-by-module history, and `docs/open-decisions.md`
+for what (narrowly) remains open — none of it blocks the pipeline above
+from running today.
 
 ## What this is
 
@@ -145,13 +148,22 @@ docs/            architecture note, deployment guide, open decisions,
 - [`docs/TRAINING_EXPOSURE_MODEL.md`](docs/TRAINING_EXPOSURE_MODEL.md) —
   design boundary for translating exercise performance into muscle/target
   training exposure (`exposure_units`); separates Training Exposure,
-  Hypertrophy Volume, and Functional Exposure as distinct concepts; what's
-  adopted (Strategy A) vs. what needs further sign-off.
+  Hypertrophy Volume, and Functional Exposure as distinct concepts. The
+  primary/secondary (1.00/0.33) compound-exposure split it originally
+  proposed as "Strategy A" is now implemented exactly per spec §7 — see
+  `docs/open-decisions.md` #6.
 - [`docs/TRAINING_ENGINE_DESIGN.md`](docs/TRAINING_ENGINE_DESIGN.md) — the
   full Training Engine pipeline and module boundary, goal resolution and
-  priority, training state, constraints, and exactly which of the twelve
-  engine modules are implemented vs. deliberately blocked pending
-  approval.
+  priority, training state, constraints. Originally written for Phase 2
+  (when six modules were deliberately blocked pending approval); see its
+  status banner and `docs/open-decisions.md` for what's since been
+  resolved — all thirteen engine modules are real today.
+- [`docs/VOLUME_ENGINE.md`](docs/VOLUME_ENGINE.md),
+  [`docs/GOAL_MATCHING.md`](docs/GOAL_MATCHING.md),
+  [`docs/SECONDARY_TARGET_MAPPING.md`](docs/SECONDARY_TARGET_MAPPING.md)
+  — focused design notes for the volume-decision model, natural-language
+  goal matching, and the compound-exercise secondary-target mapping,
+  respectively.
 - [`docs/CALORIE_TRACKER_INTEGRATION.md`](docs/CALORIE_TRACKER_INTEGRATION.md)
   — the formal one-way export contract to Calorie Tracker.
 - [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md) — field-by-field plan

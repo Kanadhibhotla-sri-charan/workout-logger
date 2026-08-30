@@ -1,202 +1,190 @@
-# Open decisions for Phase 2+
+# Open decisions
 
 Phase 1/1.5/2 deliberately picked pragmatic defaults, built provisional
-implementations, or wrote up proposals for these rather than silently
-deciding them for good. None of them block what's been built so far —
-but each needs a conscious choice from Charan before the next layer (the
-actual Training Engine methodology, or production deployment) builds on
-top of it.
+implementations, or wrote up proposals rather than silently deciding
+things for good. The "Next Phase Implementation Specification"
+(`docs/logs/2026-08-30-13-*.md` through `2026-08-30-24-*.md`) then
+resolved the large majority of what Phase 2 had left open — with exact
+numbers in most cases, or by pointing at real Blueprint data
+(`globalPrinciples`, `developmentPackages`) this app hadn't been
+reading yet. What's left below is genuinely still open: infrastructure/
+deployment decisions outside this spec's scope, plus a small number of
+narrower methodology questions the Next Phase spec didn't cover.
 
 Status legend: **OPEN** (nothing proposed or implemented yet),
 **PROPOSED** (a specific rule is written up for review, no code
-implements it), **IMPLEMENTED — PROVISIONAL** (real, tested code exists
-on this recommendation — safe to keep running — but it is a conservative
-engineering representation, explicitly **not yet approved as final
-training/physiology methodology**; a "no" here means revisiting the
-implementation, not just the docs, and nothing in this codebase describes
-a provisional rule's output as more physiologically precise than it is —
-see `docs/TRAINING_EXPOSURE_MODEL.md` §6).
+implements it), **IMPLEMENTED** (real, tested code exists, grounded
+either in an exact spec-given number or in real Blueprint data — not a
+placeholder), **IMPLEMENTED — PROVISIONAL** (real, tested code exists,
+but on this app's own `[DEFAULT]` operational choice rather than a
+spec-mandated or Blueprint-given number — see `src/engine/config.ts`'s
+`[SPEC]`/`[DEFAULT]` tagging convention).
 
-## Infrastructure
+## Infrastructure (unchanged — outside the Next Phase spec's scope)
 
-1. **Final storage/DB choice.**
-
-   ```text
-   Production persistence: OPEN
-
-   Current development storage: SQLite (better-sqlite3)
-
-   Reason: Suitable for local development and single-user Phase 1/1.5/2
-   operation — no concurrent writers, no network round-trip needed.
-
-   Production requirement: Persistent storage must survive
-   application/container restart. Do not deploy assuming a local SQLite
-   file will automatically persist.
-   ```
-
-   Keep SQLite for now — do not replace it just because production storage
-   is still open. It only works in production on a host with a
-   **persistent volume** (see `docs/deployment.md`) — an
-   ephemeral-filesystem host (like the free tier the old app used on
-   Render) will silently lose data on every restart unless that's set up.
-   Decide: SQLite + persistent volume, or move to a managed Postgres (as
-   the old app did) for easier backup/multi-host story? Either way, this
-   is a deployment-time decision, not one that should change this app's
-   code.
+1. **Final storage/DB choice.** [OPEN] SQLite (better-sqlite3) for
+   development; production persistence (SQLite + persistent volume vs.
+   managed Postgres) remains undecided — a deployment decision, not a
+   code decision. See `docs/deployment.md`.
 
 2. **Final Blueprint integration method.** [OPEN] Phase 1 vendors a
-   generated snapshot (`npm run sync-blueprint`, committed to this repo)
-   rather than fetching Blueprint live at request/build time, because
-   Blueprint's own generated JSON isn't committed in its repo and this app
-   shouldn't need Vite/React toolchain access just to read data.
-   Alternatives: a small published npm package from workout-blueprint, a
-   live fetch of raw YAML from GitHub at build time, or a submodule.
-   Confirm the vendored-snapshot approach, and agree on a cadence for
-   re-running the sync (manual, pre-commit hook, scheduled CI job?). Phase
-   1.5 made whatever snapshot *is* vendored reproducible per-Program
-   (`Program.blueprint_commit`, see `docs/logs/`) — that doesn't resolve
-   this decision, it just makes the current approach safer to keep using
-   until it's revisited.
+   generated snapshot (`npm run sync-blueprint`) rather than fetching
+   Blueprint live. Alternatives (published npm package, live YAML
+   fetch, submodule) and a sync cadence remain undecided.
 
-3. **Migrate historical `workout_log.csv`?** [OPEN] Calorie Tracker's
-   existing CSV has real logged history (hand-entered/LLM-parsed). Decide
-   whether to write a one-time import into workout-logger's schema — see
-   `docs/MIGRATION_PLAN.md` for the field-mapping plan, ambiguous-name
-   handling, and dry-run report design this decision should be made
-   against. No import has been performed; this remains a decision, not
-   yet an action.
+3. **Migrate historical `workout_log.csv`?** [OPEN] See
+   `docs/MIGRATION_PLAN.md`. No import has been performed.
 
-4. **Import Calorie Tracker's workout history at all?** [Mostly decided —
-   see below] Related to #3 but distinct: even without a full backfill,
-   should workout-logger read (not just export to) Calorie Tracker data
-   for context, or should the relationship stay one-directional? The
-   answer for *new* data going forward is explicit and not open:
-   one-directional, workout-logger → Calorie Tracker only (see
-   `docs/CALORIE_TRACKER_INTEGRATION.md` and `docs/architecture.md`'s
-   responsibility boundary). What remains open here is only whether to
-   special-case a one-time historical read for backfill purposes.
+4. **Import Calorie Tracker's workout history at all?** [Mostly
+   decided] New data stays one-directional (workout-logger → Calorie
+   Tracker). Only a one-time historical backfill read remains open.
 
-5. **Final goal/program hierarchy.** [OPEN] The `Goal` → `Program` →
-   `ProgramSession` → `WorkoutSession` chain is a straightforward tree
-   (goals referenced by id from programs, sessions belong to one program).
-   Real training often has multiple concurrent goals with shifting
-   priority, phases within a program (e.g. accumulation → deload), and
-   goals that outlive any single program. Confirm this shape holds, or
-   revise before more is built on it. Related and still open, from
-   `docs/TRAINING_ENGINE_DESIGN.md` §5-6: how multiple active goals'
-   priorities compose into one ranking, and what a goal-history record
-   needs to capture (interface sketched, not built).
+5. **Final goal/program hierarchy.** [Narrowed] The `Goal` → `Program`
+   → `ProgramSession` → `WorkoutSession` tree itself is unchanged and
+   still open as a shape question. What it used to also flag as
+   open — "how multiple active goals' priorities compose into one
+   ranking" and "what a goal-history record needs to capture" — are
+   now both resolved: `src/engine/resourceAllocation.ts` (spec §17)
+   and the `goal_events`/`GoalEventsRepo` append-only history (spec
+   §18), respectively. See items 18-19 below for those.
 
-## Training Exposure (see `docs/TRAINING_EXPOSURE_MODEL.md` for full detail)
+## Resolved by the Next Phase Implementation Specification
 
-6. **Direct vs. indirect contribution strategy.** [IMPLEMENTED —
-   PROVISIONAL] How indirect contribution should be handled is a core
-   Training Engine methodology decision for the next phase — it is not
-   treated as settled just because code exists. Strategy A (conservative
-   — count only canonical Blueprint `physique_targets`/`functional_goals`
-   membership; indirect/compound secondary contribution is not tracked at
-   all) is the current provisional implementation
-   (`src/engine/exposureEngine.ts`), because the current Blueprint
-   snapshot provides canonical exercise targets but does not provide
-   reliable fractional contribution weights for all secondary targets.
-   Strategy B (extend Blueprint itself with a canonical
-   `secondary_physique_targets` field) remains the legitimate alternative
-   and was not chosen here, because it requires a change to a different
-   repository outside this app's authority. See
-   `docs/TRAINING_EXPOSURE_MODEL.md` §B for the full comparison. **Needs
-   Charan's explicit sign-off before being treated as final** — if
-   Strategy B is preferred instead, that conversation belongs in
-   workout-blueprint's repo, and those relationships must live there, not
-   as a hidden mapping table inside Workout Programmer.
+6. **Direct vs. indirect (primary/secondary) exposure contribution.**
+   [IMPLEMENTED] No longer provisional. The Next Phase spec §7 gives
+   exact coefficients — primary = 1.00 exposure_unit/set, secondary =
+   0.33/set — with a worked example (`docs/logs/2026-08-30-08-*.md`
+   implemented it originally under "Strategy A"; the Next Phase spec's
+   explicit numbers superseded and extended that, adding secondary
+   contribution via a curated, documented, non-fuzzy mapping —
+   `docs/SECONDARY_TARGET_MAPPING.md`). `EXPOSURE_COEFFICIENTS` in
+   `src/engine/config.ts`, tagged `[SPEC]`.
 
-7. **Set contribution / uncompleted sets.** [IMPLEMENTED — PROVISIONAL]
-   One completed set = one `exposure_unit` toward every target the
-   exercise directly lists (full credit each, no fractional split); an
-   uncompleted set contributes zero. Implemented
-   (`exposureEngine.calculateExerciseExposure`) and testable today, but
-   `exposure_units` is a neutral engineering metric, not a claim that one
-   completed set equals one effective hypertrophy set — see
-   `docs/TRAINING_EXPOSURE_MODEL.md` §C-D, §6.
+7. **Set contribution / uncompleted sets.** [IMPLEMENTED] Unchanged
+   from Phase 2: one completed set = full credit toward every target
+   an exercise's own canonical data lists; an uncompleted set
+   contributes zero. `exposureEngine.calculateExerciseExposure`.
 
-8. **Week boundary / rolling window.** [Decided as a *mechanism*, not a
-   specific value] `TrainingProfile.week_start_day` makes the week
-   boundary configurable data rather than a hard-coded Monday; rolling
-   windows require an explicit `windowDays` argument with no silent
-   default at the engine layer. Nothing left open here mechanically — the
-   only remaining question is what default `week_start_day` a new profile
-   should start with in the UI (currently `'monday'`, easily changed).
+8. **Week boundary / rolling window.** [Decided as a mechanism]
+   Unchanged — `TrainingProfile.week_start_day` is configurable data;
+   rolling windows require an explicit `windowDays` argument.
 
-9. **Intensity weighting (RIR/RPE).** [OPEN, and currently unbuildable]
-   No rule proposed — and none is buildable yet, since nothing in the
-   logger UI collects RIR/RPE from an actual set. See
-   `docs/TRAINING_EXPOSURE_MODEL.md` §E. Sequencing: logger UI work has to
-   happen before this decision can even be usefully made.
+9. **Intensity weighting (RIR/RPE).** [Partially resolved] Still not
+   used to weight *exposure* — that remains open, and still has the
+   same UI-data-collection dependency as before (RIR/RPE do get
+   logged per set now — `Set.rir`/`Set.rpe` — but nothing weights
+   exposure by them). What IS now resolved: RIR drives
+   `progressionEngine`'s load/rep decisions directly, via Blueprint's
+   own `globalPrinciples.rir.typical_working_range` — see item 17.
 
-10. **Goal weighting of exposure.** [OPEN — design direction proposed,
-    no formula] How a goal's priority and primary/supporting split should
-    change the interpretation of raw, goal-agnostic exposure. Direction
-    proposed in `docs/TRAINING_EXPOSURE_MODEL.md` §F: compute goal-relative
-    coverage as a derived view at read time, don't bake it into the raw
-    exposure record. No weighting formula proposed or adopted.
+10. **Goal weighting of exposure.** [Resolved differently than
+    proposed] The originally-proposed direction (bake goal priority
+    into a derived "goal-relative coverage" view of raw exposure) was
+    not adopted. Instead, goal priority never multiplies or reweights
+    exposure/volume numbers at all — spec §2.2 is explicit that
+    priority "does not directly determine volume." Priority's real
+    effect is on **resource allocation** (item 18) and on which target
+    a `TargetBuildContext` wins when goals share a target
+    (`assembleAndBuildWorkout`'s dedup: highest-priority goal to touch
+    a target wins). See `docs/VOLUME_ENGINE.md`.
 
-11. **Hypertrophy Volume model.** [OPEN] `HypertrophyVolume` (contract
-    type, `src/contracts/types.ts`) is a placeholder — nothing computes
-    it. Needs: how exposure becomes hypertrophy volume, whether/how
-    fractional weighting is used, how RIR/RPE affects interpretation. See
-    `docs/TRAINING_EXPOSURE_MODEL.md` §0, §6 and
-    `docs/TRAINING_ENGINE_DESIGN.md` §14. Blocks
-    `src/engine/volumeEngine.ts` (`allocateVolume` throws
-    `NotApprovedError('hypertrophy-volume-model')`).
+11. **Hypertrophy Volume model.** [IMPLEMENTED] `volumeEngine
+    .decideVolume` — starting volume builds up to Blueprint's own
+    `weekly_volume.starting_point_sets` low end regardless of priority
+    (spec §9); maintain is the default (spec §10); a stagnant target
+    only ever increases after the caller explicitly confirms the §11
+    introspection checklist was walked, and never automatically;
+    decline/poor-recovery never auto-reduces (spec §12) — see
+    `docs/VOLUME_ENGINE.md` and `docs/logs/2026-08-30-18-*.md`. The
+    `HypertrophyVolume` contract type (`effective_sets`) remains
+    unused; `TrainingExposure.primary_sets` is what's actually compared
+    against Blueprint's ranges instead — a deliberate, documented
+    choice (see `docs/VOLUME_ENGINE.md`), not an oversight.
 
-12. **Functional Exposure model.** [OPEN] `FunctionalExposure` (contract
-    type) is a placeholder — nothing computes it, and it is explicitly NOT
-    assumed to share Hypertrophy Volume's arithmetic. See
-    `docs/TRAINING_EXPOSURE_MODEL.md` §0.
+12. **Functional Exposure model.** [Resolved by uniform treatment, not
+    a separate model] Rather than building `FunctionalExposure`'s own
+    arithmetic, the Next Phase spec's engines (`exposureEngine`,
+    `volumeEngine`, `frequencyEngine`, `exerciseSelector`) all operate
+    identically over `target_type: 'physique_target' | 'functional_goal'`
+    — the same primary/secondary exposure split, the same volume
+    process, the same frequency/selection logic. The one place
+    treatment differs: `workoutBuilder`'s rep/RIR lookup
+    (`developmentPackages.lookupExercisePrescription`) only has data
+    for physique targets, so a functional-goal target is currently
+    always skipped at that step with the gap named explicitly (spec
+    §25) rather than invented. The `FunctionalExposure` contract type
+    remains unused.
 
-## Training Engine (see `docs/TRAINING_ENGINE_DESIGN.md` for full detail)
+13. **Recovery methodology.** [IMPLEMENTED] `recoveryEngine
+    .applyRecoveryConstraint` — same-day repeat → avoid; an exposure
+    spike vs. rolling baseline (`RECOVERY_THRESHOLDS
+    .recentHighExposureMultiplier`, `[DEFAULT]`) or heavy recent
+    badminton (raw logged intensity/fatigue, never converted to a
+    set-equivalent) → reduce. See `docs/logs/2026-08-30-17-*.md`.
 
-13. **Recovery methodology.** [OPEN — direction proposed] Inputs are
-    specified (`src/engine/recoveryEngine.ts`); a conservative direction
-    is proposed ("recent high exposure + short interval → reduce priority,
-    never actively avoid") but no actual thresholds. See
-    `docs/TRAINING_ENGINE_DESIGN.md` §9. Blocks `recoveryEngine
-    .applyRecoveryConstraint`.
+14. **Frequency allocation model.** [IMPLEMENTED] `frequencyEngine
+    .allocateFrequency` — session count from Blueprint's own
+    `globalPrinciples.frequency.typical_starting_range_per_week`,
+    clamped to actual day availability; sessions spread evenly
+    (`[DEFAULT]` spacing choice — Blueprint doesn't prescribe exact
+    spacing); Monday swapped out for a lower-body physique target. See
+    `docs/logs/2026-08-30-19-*.md`.
 
-14. **Frequency allocation model.** [OPEN] How desired weekly exposure
-    gets distributed across a user's actual available training days. See
-    `docs/TRAINING_ENGINE_DESIGN.md` §15. Blocks `frequencyEngine
-    .allocateFrequency`.
+15. **Exercise selection ranking.** [IMPLEMENTED] `exerciseSelector
+    .selectExercise` — Blueprint muscle-role (primary/secondary),
+    redundancy (recent-use penalty, not exclusion), and a keep-if-tied
+    bias toward the current exercise, deterministic tie-break. See
+    `docs/logs/2026-08-30-20-*.md`.
 
-15. **Exercise selection ranking.** [OPEN — proposed order, no weights]
-    Equipment/time feasibility filtering is decided and implemented
-    (`constraintEngine.ts`); ranking among the feasible candidates is not.
-    A proposed tie-break order (target tier → redundancy avoidance →
-    recent-repetition avoidance → everything else undecided) is written up
-    in `docs/TRAINING_ENGINE_DESIGN.md` §13, explicitly not adopted.
-    Blocks `exerciseSelector.selectExercise`.
+16. **Time-per-exercise estimation.** [IMPLEMENTED — PROVISIONAL]
+    Blueprint still has no per-set duration data, so this remains this
+    app's own estimate rather than a Blueprint-given number:
+    `TIME_ESTIMATION` (`src/engine/config.ts`, `[DEFAULT]`:
+    secondsPerWorkingSet, restSecondsBetweenSets,
+    setupMinutesPerExercise) feeds `constraintEngine.fitToTimeBudget`.
+    Revisit this number specifically if real session-duration data
+    ever becomes available to calibrate against.
 
-16. **Time-per-exercise estimation.** [OPEN, and currently
-    unbuildable] The time-budget arithmetic itself is decided and
-    implemented (`constraintEngine.fitsWithinBudget`); estimating how long
-    a given exercise/set actually takes is not, and Blueprint has no
-    per-set duration data to build one from. Blocks
-    `workoutBuilder.buildWorkout`, which needs this before it can do
-    anything. See `docs/TRAINING_ENGINE_DESIGN.md` §11.
+17. **Progression methodology.** [IMPLEMENTED] `progressionEngine
+    .computeProgression` implements Blueprint's own double-progression
+    model literally (`globalPrinciples.progression`), judged against
+    Blueprint's own `rir.typical_working_range` — not an invented rule.
+    `reduce` only ever fires after a genuine multi-session decline
+    pattern (`RECOVERY_THRESHOLDS.consecutiveDecliningSessions`), never
+    from one bad session. See `docs/logs/2026-08-30-16-*.md`. Not yet
+    wired into `workoutBuilder`'s per-set load prescription (a
+    logging-time decision, separate from pre-workout generation).
 
-17. **Progression methodology.** [OPEN] Rep-range, load-increment,
-    performance-threshold, RIR/RPE-interpretation, and deload rules for
-    deciding when/how to progress between sessions of the same
-    `ProgramSession`. Blueprint's `programmingEngine` gives static
-    rep-range/RIR guidance per exercise but has no notion of a specific
-    user's history. See `docs/TRAINING_ENGINE_DESIGN.md` §17. Blocks
-    `progressionEngine.computeProgression`.
+## New from the Next Phase spec (not in Phase 2's list at all)
 
-None of the above blocks what's been built so far: the contracts,
-adapter, storage, and the six real (non-stubbed) engine modules are built
-to accommodate any reasonable answer to these without a breaking schema
-change (nullable/open fields throughout, `CONTRACT_VERSION` bumped
-already twice for additive changes). The six stubbed engine modules
-(`volumeEngine`, `frequencyEngine`, `recoveryEngine`, `exerciseSelector`,
-`workoutBuilder`, `progressionEngine`) exist specifically so their
-interfaces are stable and ready the moment their blocking decision above
-is resolved — see `docs/TRAINING_ENGINE_DESIGN.md` §2.
+18. **Resource allocation across competing goals.** [IMPLEMENTED]
+    `resourceAllocation.allocateResource` (spec §17) — strict priority
+    order, each goal capped at its own desired amount so a well-
+    progressing #1 goal is protected without hoarding, letting leftover
+    reach lower-ranked (including stagnant) goals without a second
+    pass. See `docs/logs/2026-08-30-21-*.md`.
+
+19. **Goal history.** [IMPLEMENTED] `goal_events`
+    (append-only) + `GoalEventsRepo`, recording `created`, `activated`,
+    `deactivated`, `priority_changed` today (`exercise_changed`,
+    `programming_modified` are defined but nothing writes them yet —
+    no engine currently changes a goal's programming automatically).
+    Proven by test to survive a deactivate/reactivate cycle intact —
+    see `docs/logs/2026-08-30-24-*.md`.
+
+20. **Natural-language goal matching.** [IMPLEMENTED] `goalCreation
+    .matchGoalCandidates` (spec §2.1) — deterministic Dice-coefficient
+    text matching against Blueprint's `common_user_phrasings`
+    (aesthetic outcomes) or `name`/`definition` (functional goals, a
+    genuinely weaker signal — Blueprint has no phrasings field for
+    them). See `docs/GOAL_MATCHING.md`.
+
+None of the still-open items above block anything currently built —
+every real engine module accommodates any reasonable future answer
+without a breaking schema change (`CONTRACT_VERSION` at 1.4.0,
+nullable/open fields throughout). What remains genuinely open is
+infrastructure/deployment (items 1-4), the goal/program hierarchy
+shape question (item 5), exposure-level RIR/RPE weighting (item 9,
+narrowed), and calibrating the one still-provisional number
+(time-per-exercise estimation, item 16) against real data if it ever
+becomes available.
