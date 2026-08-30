@@ -17,3 +17,4 @@ story of how the app got to its current state.
 - [2026-08-30-09-training-state-and-module-boundaries.md](2026-08-30-09-training-state-and-module-boundaries.md)
 - [2026-08-30-10-training-engine-design-and-fixtures.md](2026-08-30-10-training-engine-design-and-fixtures.md)
 - [2026-08-30-11-open-decisions-and-readme-update.md](2026-08-30-11-open-decisions-and-readme-update.md)
+- [2026-08-30-12-final-foundation-cleanup-and-testability.md](2026-08-30-12-final-foundation-cleanup-and-testability.md)
