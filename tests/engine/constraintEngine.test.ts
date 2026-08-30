@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterEquipmentFeasible,
   fitsWithinBudget,
+  fitToTimeBudget,
   isBodyFocusAllowedOnDay,
   isExerciseEquipmentFeasible,
   remainingBudgetMinutes,
@@ -95,5 +96,77 @@ describe('isBodyFocusAllowedOnDay — §16 (required test 12: Monday never lower
     for (const target of lowerBodyTargets) {
       expect(isBodyFocusAllowedOnDay(target.id, 'monday')).toBe(false);
     }
+  });
+});
+
+describe('fitToTimeBudget — spec §6.2 (required test 4: exceeds time -> preserve higher-priority work, never exceed budget)', () => {
+  it('keeps everything when it already fits', () => {
+    const items = [
+      { id: 'a', priority: 1, estimated_minutes: 10 },
+      { id: 'b', priority: 2, estimated_minutes: 10 },
+    ];
+    const result = fitToTimeBudget(items, 30);
+    expect(result.kept.map((i) => i.id)).toEqual(['a', 'b']);
+    expect(result.dropped).toEqual([]);
+    expect(result.total_minutes).toBe(20);
+  });
+
+  it('preserves higher-priority work and drops lower-priority work when it does not fit', () => {
+    const items = [
+      { id: 'low-priority', priority: 2, estimated_minutes: 20 },
+      { id: 'high-priority', priority: 1, estimated_minutes: 20 },
+    ];
+    const result = fitToTimeBudget(items, 25);
+    expect(result.kept.map((i) => i.id)).toEqual(['high-priority']);
+    expect(result.dropped.map((i) => i.id)).toEqual(['low-priority']);
+  });
+
+  it('never exceeds the time limit', () => {
+    const items = [
+      { id: 'a', priority: 1, estimated_minutes: 15 },
+      { id: 'b', priority: 1, estimated_minutes: 15 },
+      { id: 'c', priority: 1, estimated_minutes: 15 },
+    ];
+    const result = fitToTimeBudget(items, 25);
+    expect(result.total_minutes).toBeLessThanOrEqual(25);
+  });
+
+  it('drops a redundant item before a non-redundant item at the same priority', () => {
+    const items = [
+      { id: 'redundant', priority: 1, estimated_minutes: 15, redundant: true },
+      { id: 'unique', priority: 1, estimated_minutes: 15, redundant: false },
+    ];
+    const result = fitToTimeBudget(items, 15);
+    expect(result.kept.map((i) => i.id)).toEqual(['unique']);
+    expect(result.dropped.map((i) => i.id)).toEqual(['redundant']);
+  });
+
+  it('does not truncate by original array order — drops are priority-driven, not position-driven', () => {
+    // First item in the array is lowest priority; a naive "cut the tail"
+    // truncation would keep it and drop the later, higher-priority one.
+    const items = [
+      { id: 'first-in-array-lowest-priority', priority: 3, estimated_minutes: 20 },
+      { id: 'last-in-array-highest-priority', priority: 1, estimated_minutes: 20 },
+    ];
+    const result = fitToTimeBudget(items, 20);
+    expect(result.kept.map((i) => i.id)).toEqual(['last-in-array-highest-priority']);
+  });
+
+  it('is deterministic and tie-breaks equal priority/redundancy by id', () => {
+    const items = [
+      { id: 'zeta', priority: 1, estimated_minutes: 10 },
+      { id: 'alpha', priority: 1, estimated_minutes: 10 },
+    ];
+    const result = fitToTimeBudget(items, 15);
+    expect(result.kept.map((i) => i.id)).toEqual(['alpha']);
+  });
+
+  it('reasoning names exactly which items were dropped — never an opaque decision', () => {
+    const items = [
+      { id: 'kept-item', priority: 1, estimated_minutes: 10 },
+      { id: 'dropped-item', priority: 2, estimated_minutes: 10 },
+    ];
+    const result = fitToTimeBudget(items, 10);
+    expect(result.reasoning).toContain('dropped-item');
   });
 });

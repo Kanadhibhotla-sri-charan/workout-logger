@@ -1,15 +1,18 @@
 // Constraint Engine — spec §6.2/17 (time), §4.1/18 (equipment), §16
 // (the Monday-never-lower-body hard schedule rule). Only the parts of
 // these constraints that are objective facts, not judgment calls, are
-// implemented here: "is this equipment actually available" and "does
-// this fit in the remaining time budget, given an explicit time
-// estimate." What is NOT implemented: estimating how long an exercise
-// takes in the first place — Blueprint has no per-set duration data
-// (only a coarse setup_time: DemandLevel label), and this app has no
-// approved methodology for turning that into minutes. That estimation
-// step belongs to workoutBuilder (see src/engine/workoutBuilder.ts),
-// which is intentionally not implemented yet — see
-// docs/TRAINING_ENGINE_DESIGN.md.
+// implemented here: "is this equipment actually available," "does this
+// fit in the remaining time budget, given an explicit time estimate,"
+// and (fitToTimeBudget) "which already-estimated candidates fit,
+// preserving higher-priority work first." What is NOT implemented:
+// estimating how long an exercise takes in the first place — Blueprint
+// has no per-set duration data (only a coarse setup_time: DemandLevel
+// label), and this app has no approved methodology for turning that
+// into minutes. Every function below that deals with time takes an
+// already-estimated minutes figure from its caller; none of them
+// invent that estimate themselves. That estimation step belongs to
+// workoutBuilder (see src/engine/workoutBuilder.ts), which is
+// intentionally not implemented yet — see docs/TRAINING_ENGINE_DESIGN.md.
 
 import type { BlueprintExercise } from '../blueprint/adapter.js';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
@@ -76,4 +79,79 @@ export function isBodyFocusAllowedOnDay(physiqueTargetId: string, day: Weekday):
   if (!target) return true;
 
   return !forbidden.includes(target.parent_region);
+}
+
+export interface FittableItem {
+  id: string;
+  /** Lower number = higher priority — mirrors goalResolver/
+   * resourceAllocation's convention throughout this app. Two items at
+   * the same priority are further ordered by `redundant`, then by
+   * `id`, never by original array position. */
+  priority: number;
+  /** Caller-supplied estimate, not computed here (see this file's
+   * header). */
+  estimated_minutes: number;
+  /** Caller-flagged: this item's work meaningfully overlaps with
+   * something else already included (e.g. two exercises hitting the
+   * same target at the same tier). Redundant items are dropped ahead
+   * of non-redundant items at the same priority — spec §6.2 rule 2
+   * ("remove/reduce lower-priority OR redundant work"). */
+  redundant?: boolean;
+}
+
+export interface FitToTimeBudgetResult<T extends FittableItem> {
+  kept: T[];
+  dropped: T[];
+  total_minutes: number;
+  reasoning: string;
+}
+
+/**
+ * Spec §6.2: "When the ideal workout does not fit: (1) preserve
+ * higher-priority goal work; (2) remove/reduce lower-priority or
+ * redundant work; ... (4) never exceed the time limit. Do not truncate
+ * arbitrarily."
+ *
+ * Greedily keeps items in priority order (lowest `priority` number
+ * first; redundant items ordered after non-redundant ones at the same
+ * priority; ties broken by `id` for full determinism) as long as the
+ * running total stays within `budgetMinutes`. Never exceeds the
+ * budget by construction (rule 4). Never truncates by original list
+ * order (rule "do not truncate arbitrarily") — what gets dropped is
+ * always the lowest-priority/most-redundant tail of the sorted list,
+ * named explicitly in `reasoning`, never an arbitrary cut.
+ *
+ * Rule 3 ("substitute exercises where this improves feasibility") is
+ * not this function's job — it decides keep/drop among already-chosen
+ * candidates with already-known estimates; finding a shorter
+ * alternative for a dropped item is exerciseSelector's/the caller's
+ * job, re-invoked with a tighter constraint if it chooses to.
+ */
+export function fitToTimeBudget<T extends FittableItem>(items: readonly T[], budgetMinutes: number): FitToTimeBudgetResult<T> {
+  const ordered = [...items].sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    if (!!a.redundant !== !!b.redundant) return a.redundant ? 1 : -1;
+    return a.id.localeCompare(b.id);
+  });
+
+  const kept: T[] = [];
+  const dropped: T[] = [];
+  let total = 0;
+
+  for (const item of ordered) {
+    if (fitsWithinBudget(budgetMinutes, total, item.estimated_minutes)) {
+      kept.push(item);
+      total += item.estimated_minutes;
+    } else {
+      dropped.push(item);
+    }
+  }
+
+  const reasoning =
+    dropped.length === 0
+      ? `All ${kept.length} item(s) fit within the ${budgetMinutes}-minute budget (${total} minutes used) — nothing dropped.`
+      : `Kept ${kept.length} item(s) totaling ${total}/${budgetMinutes} minutes, in priority order. Dropped ${dropped.length} ` +
+        `lower-priority/redundant item(s) that would have exceeded the budget: ${dropped.map((d) => d.id).join(', ')}.`;
+
+  return { kept, dropped, total_minutes: total, reasoning };
 }
