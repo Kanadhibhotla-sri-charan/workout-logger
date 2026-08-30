@@ -7,10 +7,12 @@ import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../../src/repositories/outsideBlueprintExercisesRepo.js';
+import { BadmintonSessionDetailsRepo } from '../../src/repositories/badmintonSessionDetailsRepo.js';
 import { BlueprintAdapter } from '../../src/blueprint/adapter.js';
 
-// 2026-08-31 is a Monday.
+// 2026-08-31 is a Monday; 2026-09-01 is the following Tuesday.
 const MONDAY = '2026-08-31';
+const TUESDAY = '2026-09-01';
 const PRIOR_THURSDAY = '2026-08-27';
 
 let db: Database.Database;
@@ -247,5 +249,44 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     expect(plan?.target_reps_max).toBe(8);
     expect(plan?.target_rir_min).toBe(2);
     expect(plan?.target_rir_max).toBe(4);
+  });
+
+  it('remediation §9: a real logged badminton session actually changes the next real workout, through the full production path', () => {
+    const user = new UsersRepo(db).getOrCreateDefault();
+    new TrainingProfileRepo(db).upsert(user.id, {
+      timezone: 'Asia/Kolkata',
+      week_start_day: 'monday',
+      training_days: ['tuesday'],
+      default_session_duration_minutes: 60,
+      minimum_session_duration_minutes: 30,
+      maximum_session_duration_minutes: 90,
+      available_equipment: ['barbell', 'rack', 'machine'],
+      other_activity_schedule: [],
+    });
+
+    // No goal needed — quads gets programmed via the remediation §7.1
+    // normal-development layer (every physique target, not just active
+    // goals) as long as the budget is generous enough that nothing gets
+    // dropped for time. Equipment is scoped tight enough that quads'
+    // own candidates (back-squat/leg-press/leg-extension) are close to
+    // the only equipment-feasible, Blueprint-prescribed work available.
+    const withoutBadminton = assembleAndBuildWorkout(db, TUESDAY, 240);
+    const planWithout = withoutBadminton.exercises.find((e) => e.target_id === 'quads');
+    expect(planWithout).toBeDefined();
+
+    const sessionsRepo = new WorkoutSessionsRepo(db);
+    const badmintonSession = sessionsRepo.createSession({ date: MONDAY, session_type: 'badminton', status: 'completed' });
+    new BadmintonSessionDetailsRepo(db).record({ workout_session_id: badmintonSession.session_id, intensity: 'high' });
+
+    const withBadminton = assembleAndBuildWorkout(db, TUESDAY, 240);
+    const planWith = withBadminton.exercises.find((e) => e.target_id === 'quads');
+
+    expect(planWith).toBeDefined();
+    // A real, logged badminton session — not a hardcoded null, not an
+    // unused approval API — changed both the session's set count and
+    // its exercise selection for this lower-body target.
+    expect(planWith!.target_sets).toBe(planWithout!.target_sets - 1);
+    expect(planWith!.exercise_id).not.toBe(planWithout!.exercise_id);
+    expect(planWith!.reasoning).toContain('remediation §9');
   });
 });

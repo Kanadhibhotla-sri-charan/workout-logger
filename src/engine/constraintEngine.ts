@@ -17,7 +17,24 @@
 import type { BlueprintExercise } from '../blueprint/adapter.js';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import type { Weekday } from '../contracts/types.js';
-import { FORBIDDEN_BODY_FOCUS_BY_DAY } from './config.js';
+import { FORBIDDEN_BODY_FOCUS_BY_DAY, LOWER_BODY_PHYSIQUE_REGIONS } from './config.js';
+
+/**
+ * True iff `physiqueTargetId` resolves to one of
+ * config.ts's LOWER_BODY_PHYSIQUE_REGIONS — the same body-region
+ * classification the Monday hard rule (isBodyFocusAllowedOnDay, below)
+ * already uses, reused here (remediation §9) so badminton's real
+ * programming effects (workoutBuilder's session-set trim and exercise-
+ * selection fatigue preference, frequencyEngine's day-avoidance) share
+ * one single "what counts as lower body" definition rather than each
+ * inventing its own. False for an unresolvable id, like
+ * isBodyFocusAllowedOnDay's own unresolvable-id handling.
+ */
+export function isLowerBodyPhysiqueTarget(physiqueTargetId: string): boolean {
+  const target = BlueprintAdapter.getTarget(physiqueTargetId);
+  if (!target) return false;
+  return LOWER_BODY_PHYSIQUE_REGIONS.includes(target.parent_region);
+}
 
 /**
  * True iff every piece of equipment `exercise` requires is present in

@@ -206,6 +206,37 @@ describe('exerciseSelector — Strict Remediation Spec §3: gate hierarchy, no a
     expect(result.decisive_gate).toBe('gate6_tie_break');
   });
 
+  it('remediation §9: prefer_lower_fatigue_cost overrides alphabetical order within Gate 6 (never a new gate, still narrow())', () => {
+    // dip-triceps-biased (fatigue_cost medium) sorts alphabetically
+    // before overhead-triceps-extension (fatigue_cost low) — so without
+    // the badminton-driven preference, alphabetical Gate 6 would pick
+    // the higher-fatigue one. With the preference on, the lower-
+    // fatigue_cost candidate must win instead.
+    const higherFatigue = 'dip-triceps-biased';
+    const lowerFatigue = 'overhead-triceps-extension';
+
+    const withoutPreference = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [higherFatigue, lowerFatigue],
+      recent_exercise_ids: [],
+    });
+    expect(withoutPreference.exercise_id).toBe(higherFatigue);
+
+    const withPreference = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [higherFatigue, lowerFatigue],
+      recent_exercise_ids: [],
+      prefer_lower_fatigue_cost: true,
+    });
+    expect(withPreference.exercise_id).toBe(lowerFatigue);
+    expect(withPreference.decisive_gate).toBe('gate6_tie_break');
+    expect(withPreference.reasoning).toContain('fatigue_cost');
+  });
+
   it('rejected_candidates lists every candidate that did not win, for explainability', () => {
     const result = selectExercise({
       target_type: 'physique_target',

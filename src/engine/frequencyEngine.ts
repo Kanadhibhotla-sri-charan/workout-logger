@@ -15,18 +15,33 @@
 // never be generated as a lower-body day (constraintEngine
 // .isBodyFocusAllowedOnDay) — a forbidden Monday slot is swapped for
 // the next available day rather than silently dropped.
+//
+// Remediation §9 ("session distribution... day-moving" must be a real
+// badminton effect): a lower-body physique_target also gets a SOFT
+// preference away from a day the user's TrainingProfile marks as a
+// recurring badminton commitment (`other_activity_schedule`) — the
+// same day it competes with for recovery capacity. Unlike the Monday
+// rule this is never forced; if no alternative day exists, the
+// original day is kept (reasoning says so) rather than ever dropping
+// coverage.
 
 import type { BlueprintId, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import type { TargetType } from './goalResolver.js';
-import { isBodyFocusAllowedOnDay } from './constraintEngine.js';
+import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget } from './constraintEngine.js';
 
 export interface FrequencyAllocationInput {
   target_type: TargetType;
   target_id: BlueprintId;
   desired_weekly_exposure_units: number;
   available_training_days: readonly Weekday[];
+  /** Days the user's TrainingProfile marks as a recurring badminton
+   * commitment — a lower-body physique_target prefers (never forces)
+   * an alternative day here, since badminton itself already loads the
+   * lower body. Optional; defaults to none (no known recurring
+   * badminton schedule). */
+  recurring_badminton_days?: readonly Weekday[];
 }
 
 export interface FrequencyAllocation {
@@ -104,6 +119,28 @@ export function allocateFrequency(input: FrequencyAllocationInput): FrequencyAll
 
   const droppedMonday = input.target_type === 'physique_target' && !assignedDays.every((d) => isBodyFocusAllowedOnDay(input.target_id, d));
 
+  // Remediation §9: a lower-body target's session distribution should
+  // actually move away from a recurring badminton day when a feasible
+  // alternative exists — soft (best-effort), never dropping a day
+  // outright, unlike the hard Monday rule above.
+  const recurringBadmintonDays = input.recurring_badminton_days ?? [];
+  const movedForBadminton: Weekday[] = [];
+  if (input.target_type === 'physique_target' && recurringBadmintonDays.length > 0 && isLowerBodyPhysiqueTarget(input.target_id)) {
+    const otherDays = orderedAvailable.filter((d) => !assignedDays.includes(d));
+    assignedDays = assignedDays.map((day) => {
+      if (!recurringBadmintonDays.includes(day)) return day;
+      const replacement = otherDays.find(
+        (d) => !recurringBadmintonDays.includes(d) && isBodyFocusAllowedOnDay(input.target_id, d) && !assignedDays.includes(d)
+      );
+      if (replacement) {
+        otherDays.splice(otherDays.indexOf(replacement), 1);
+        movedForBadminton.push(day);
+        return replacement;
+      }
+      return day; // no feasible alternative — keep the day, never drop coverage
+    });
+  }
+
   return {
     target_type: input.target_type,
     target_id: input.target_id,
@@ -117,6 +154,11 @@ export function allocateFrequency(input: FrequencyAllocationInput): FrequencyAll
         ? ' Could not fully honor the Monday-never-lower-body rule — no alternative day was available to swap into.'
         : input.target_type === 'physique_target' && orderedAvailable.includes('monday')
           ? ' Monday-never-lower-body (§16) checked and respected.'
+          : '') +
+      (movedForBadminton.length > 0
+        ? ` Moved off recurring badminton day(s) ${movedForBadminton.join(', ')} (lower-body target, remediation §9 — badminton loads the lower body too).`
+        : recurringBadmintonDays.length > 0 && input.target_type === 'physique_target' && isLowerBodyPhysiqueTarget(input.target_id)
+          ? ' Recurring badminton day(s) present but no feasible alternative day existed — kept as-is rather than dropping coverage.'
           : ''),
   };
 }

@@ -105,6 +105,41 @@ describe('frequencyEngine — spec §16', () => {
     }
   });
 
+  it('remediation §9: moves a lower-body target off a recurring badminton day onto a feasible alternative', () => {
+    const result = allocateFrequency({
+      target_type: 'physique_target',
+      target_id: 'quads',
+      desired_weekly_exposure_units: 1, // small enough to land exactly 1 session/week
+      available_training_days: ['tuesday', 'thursday'],
+      recurring_badminton_days: ['tuesday'],
+    });
+    expect(result.assigned_days).toEqual(['thursday']);
+    expect(result.reasoning).toContain('Moved off recurring badminton day');
+  });
+
+  it('remediation §9: does not move an upper-body target off a recurring badminton day (badminton is lower-body-dominant)', () => {
+    const result = allocateFrequency({
+      target_type: 'physique_target',
+      target_id: 'upper-pec',
+      desired_weekly_exposure_units: 1,
+      available_training_days: ['tuesday', 'thursday'],
+      recurring_badminton_days: ['tuesday'],
+    });
+    expect(result.assigned_days).toEqual(['tuesday']);
+  });
+
+  it('remediation §9: keeps the recurring-badminton day for a lower-body target when no alternative day exists (never drops coverage)', () => {
+    const result = allocateFrequency({
+      target_type: 'physique_target',
+      target_id: 'quads',
+      desired_weekly_exposure_units: 4,
+      available_training_days: ['tuesday'],
+      recurring_badminton_days: ['tuesday'],
+    });
+    expect(result.assigned_days).toEqual(['tuesday']);
+    expect(result.reasoning).toContain('no feasible alternative day existed');
+  });
+
   it('reasoning cites the Blueprint frequency range actually used', () => {
     const { typical_starting_range_per_week } = BlueprintAdapter.getGlobalPrinciples().frequency;
     const result = allocateFrequency({

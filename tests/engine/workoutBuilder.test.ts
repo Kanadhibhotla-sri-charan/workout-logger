@@ -375,4 +375,96 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       expect(line.length).toBeGreaterThan(5);
     }
   });
+
+  describe('remediation §9: badminton actually changes programming, not just explanation text', () => {
+    const QUADS_EQUIPMENT = ['barbell', 'rack', 'machine'];
+
+    function quadsInput(recentBadminton: TargetBuildContext['recent_badminton']) {
+      return {
+        date: '2026-09-01', // a Tuesday
+        weekday: 'tuesday' as const,
+        budget_minutes: 60,
+        available_equipment: QUADS_EQUIPMENT,
+        available_training_days: ['tuesday'] as const, // forces exactly one session, on tuesday
+        targets: [
+          baseTarget({
+            target_id: 'quads',
+            current_weekly_primary_sets: 0, // §9 starting-volume branch: always 'increase', regardless of recovery_ok
+            recent_badminton: recentBadminton,
+          }),
+        ],
+      };
+    }
+
+    it('trims today\'s session by one set (never the weekly volume) for a lower-body target after heavy badminton', () => {
+      const withoutBadminton = buildWorkout(quadsInput(null));
+      const withBadminton = buildWorkout(quadsInput({ intensity: 'high', post_session_fatigue: null }));
+
+      const planWithout = withoutBadminton.exercises.find((e) => e.target_id === 'quads')!;
+      const planWith = withBadminton.exercises.find((e) => e.target_id === 'quads')!;
+      expect(planWithout.target_sets).toBeGreaterThan(1); // baseline must be >1 for the -1 trim to be observable
+      expect(planWith.target_sets).toBe(planWithout.target_sets - 1);
+      expect(planWith.reasoning).toContain('remediation §9');
+    });
+
+    it('prefers a lower Blueprint fatigue_cost exercise for a lower-body target after heavy badminton', () => {
+      // back-squat (fatigue_cost high) sorts alphabetically before
+      // leg-extension (fatigue_cost low) — without badminton, Gate 6's
+      // plain alphabetical tie-break picks back-squat.
+      const withoutBadminton = buildWorkout(quadsInput(null));
+      const planWithout = withoutBadminton.exercises.find((e) => e.target_id === 'quads')!;
+      expect(planWithout.exercise_id).toBe('back-squat');
+
+      const withBadminton = buildWorkout(quadsInput({ intensity: 'high', post_session_fatigue: null }));
+      const planWith = withBadminton.exercises.find((e) => e.target_id === 'quads')!;
+      expect(planWith.exercise_id).toBe('leg-extension');
+      expect(planWith.reasoning).toContain('fatigue_cost');
+    });
+
+    it('does not apply the lower-body badminton effects to an upper-body target', () => {
+      const result = buildWorkout({
+        date: '2026-09-01',
+        weekday: 'tuesday',
+        budget_minutes: 60,
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['tuesday'],
+        targets: [
+          baseTarget({
+            target_id: 'mid-pec',
+            current_weekly_primary_sets: 0,
+            recent_badminton: { intensity: 'high', post_session_fatigue: null },
+          }),
+        ],
+      });
+      const plan = result.exercises.find((e) => e.target_id === 'mid-pec');
+      expect(plan?.reasoning).not.toContain('remediation §9');
+    });
+
+    it('still never authorizes a weekly volume increase from badminton alone when starting volume is not the reason (recovery_ok stays the only gate volumeEngine sees)', () => {
+      // Non-zero current volume + stagnant trend + badminton-caused
+      // 'reduce' must fall to introspect_needed, exactly like any other
+      // 'reduce' cause — badminton never gets a special volume-level
+      // bypass or a special volume-level penalty.
+      const result = buildWorkout({
+        date: '2026-09-01',
+        weekday: 'tuesday',
+        budget_minutes: 60,
+        available_equipment: QUADS_EQUIPMENT,
+        available_training_days: ['tuesday'],
+        targets: [
+          baseTarget({
+            target_id: 'quads',
+            current_weekly_primary_sets: 6,
+            most_recent_assessment: { rating: 3, date: '2026-08-25' }, // stagnant
+            recent_badminton: { intensity: 'high', post_session_fatigue: null },
+          }),
+        ],
+      });
+      const plan = result.exercises.find((e) => e.target_id === 'quads');
+      // Weekly volume held at the pre-existing 6 (minus the single
+      // session-level trim, since sessions_per_week === 1 here) — never
+      // pushed up OR down by badminton itself.
+      expect(plan?.target_sets).toBe(5);
+    });
+  });
 });

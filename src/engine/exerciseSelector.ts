@@ -21,8 +21,21 @@
 
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { resolveSecondaryTarget } from '../blueprint/secondaryTargetMapping.js';
+import type { DemandLevel } from '../blueprint/types.js';
 import type { BlueprintId } from '../contracts/types.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
+
+/** Ordinal ranking for Blueprint's own DemandLevel label, used only to
+ * compare (never sum/weight) two candidates' fatigue_cost within Gate
+ * 6's tie-break — see prefer_lower_fatigue_cost above. An outside-
+ * Blueprint candidate (or any id with no Blueprint fatigue_cost data)
+ * ranks as 'medium' — a neutral, documented default that neither
+ * favors nor penalizes it against a known Blueprint candidate. */
+const FATIGUE_RANK: Record<DemandLevel, number> = { low: 0, medium: 1, high: 2 };
+function fatigueRank(exerciseId: BlueprintId): number {
+  const fatigueCost = BlueprintAdapter.getExercise(exerciseId)?.fatigue_cost;
+  return FATIGUE_RANK[fatigueCost ?? 'medium'];
+}
 
 export interface ExerciseSelectionInput {
   target_type: TargetType;
@@ -56,6 +69,15 @@ export interface ExerciseSelectionInput {
    * `candidate_exercise_ids` may freely mix Blueprint and outside ids.
    * Optional; defaults to none (every candidate is Blueprint's own). */
   outside_blueprint_candidates?: ReadonlyMap<BlueprintId, { role: ExerciseTargetRole; name: string }>;
+  /** Remediation §9: when a recent heavy badminton session has already
+   * loaded this (lower-body) target, prefer a lower Blueprint
+   * `fatigue_cost` candidate within Gate 6's tie-break — never a new
+   * gate, never a score: still the exact same `narrow()` category
+   * primitive every earlier gate uses, applied to fatigue_cost instead
+   * of role/recency/continuity, and only reached at all when Gates 2-5
+   * left more than one candidate tied. Optional; defaults to false (no
+   * fatigue preference — Gate 6 is alphabetical only, as before). */
+  prefer_lower_fatigue_cost?: boolean;
 }
 
 export interface ExerciseSelectionResult {
@@ -196,10 +218,26 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
     decisiveGate = 'gate5_progression_continuity';
   }
 
-  // Gate 6 — stable tie-break: Blueprint has no stored per-exercise
-  // ordering/priority field (verified against src/blueprint/types.ts),
-  // so alphabetical exercise-id ordering is the documented fallback —
-  // never randomness, never a new invented weight.
+  // Gate 6 — stable tie-break. Remediation §9: when badminton has
+  // already loaded this (lower-body) target, prefer the lowest-
+  // fatigue_cost tied candidate first — still the same narrow()
+  // category primitive as every earlier gate, not a new score. Falls
+  // through to alphabetical for any remaining tie, or when the caller
+  // didn't ask for a fatigue preference at all: Blueprint has no
+  // stored per-exercise ordering/priority field (verified against
+  // src/blueprint/types.ts), so alphabetical exercise-id ordering is
+  // the final, documented fallback — never randomness, never a new
+  // invented weight.
+  let fatiguePreferenceApplied = false;
+  if (input.prefer_lower_fatigue_cost && pool.length > 1) {
+    const before = pool;
+    const minRank = Math.min(...pool.map(fatigueRank));
+    pool = narrow(pool, (id) => fatigueRank(id) === minRank);
+    if (pool.length !== before.length) {
+      decisiveGate = 'gate6_tie_break';
+      fatiguePreferenceApplied = true;
+    }
+  }
   if (pool.length > 1) {
     pool = [...pool].sort((a, b) => a.localeCompare(b));
     decisiveGate = 'gate6_tie_break';
@@ -223,6 +261,9 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
     const previous =
       input.outside_blueprint_candidates?.get(input.current_exercise_id)?.name ?? BlueprintAdapter.getExercise(input.current_exercise_id)?.name ?? input.current_exercise_id;
     reasonParts.push(`replaces "${previous}" — a better-ranked candidate under the gate hierarchy`);
+  }
+  if (fatiguePreferenceApplied) {
+    reasonParts.push('preferred over a tied candidate for lower fatigue_cost (remediation §9 — recent badminton already loaded this target)');
   }
 
   return {

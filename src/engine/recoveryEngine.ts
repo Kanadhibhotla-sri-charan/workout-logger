@@ -58,6 +58,14 @@ export interface RecoveryConstraintResult {
   target_id: BlueprintId;
   priority_adjustment: 'none' | 'reduce' | 'avoid';
   reasoning: string;
+  /** True iff recent logged badminton data (not the rolling-exposure
+   * spike signal) is one of the reasons behind a 'reduce' outcome —
+   * remediation §9: badminton must be able to trigger real, targeted
+   * programming effects (lower-body session-set trim, exercise-
+   * selection fatigue preference), not just fold anonymously into a
+   * generic 'reduce' a caller can't tell the cause of. Always false for
+   * 'none'/'avoid'. */
+  badminton_triggered: boolean;
 }
 
 /**
@@ -74,6 +82,7 @@ export function applyRecoveryConstraint(input: RecoveryConstraintInput): Recover
       target_id: input.target_id,
       priority_adjustment: 'avoid',
       reasoning: `This target was already trained earlier today (days_since_target_last_trained = 0) — avoid training it again in the same day.`,
+      badminton_triggered: false,
     };
   }
 
@@ -108,6 +117,7 @@ export function applyRecoveryConstraint(input: RecoveryConstraintInput): Recover
       target_id: input.target_id,
       priority_adjustment: 'reduce',
       reasoning: `Reduce priority for this target today: ${reasons.join('; ')}.`,
+      badminton_triggered: badmintonHeavy,
     };
   }
 
@@ -116,5 +126,6 @@ export function applyRecoveryConstraint(input: RecoveryConstraintInput): Recover
     target_id: input.target_id,
     priority_adjustment: 'none',
     reasoning: 'No recovery caution signal triggered — normal weekly exposure rate, no same-day repeat, no heavy recent badminton demand.',
+    badminton_triggered: false,
   };
 }

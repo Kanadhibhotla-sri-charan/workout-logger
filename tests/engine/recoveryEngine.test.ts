@@ -74,6 +74,26 @@ describe('recoveryEngine — spec §12 (inspect first, never auto-reduce) + §15
     expect(result).not.toHaveProperty('effective_sets');
   });
 
+  it('remediation §9: badminton_triggered is true when heavy badminton alone causes the reduce', () => {
+    const result = applyRecoveryConstraint({
+      ...BASE,
+      recent_badminton: { intensity: 'high', post_session_fatigue: null },
+    });
+    expect(result.priority_adjustment).toBe('reduce');
+    expect(result.badminton_triggered).toBe(true);
+  });
+
+  it('remediation §9: badminton_triggered is false when a pure exposure spike (no badminton) causes the reduce', () => {
+    const result = applyRecoveryConstraint({ ...BASE, weekly_exposure_units: 20, rolling_exposure_units: 16 });
+    expect(result.priority_adjustment).toBe('reduce');
+    expect(result.badminton_triggered).toBe(false);
+  });
+
+  it('badminton_triggered is false for none/avoid outcomes', () => {
+    expect(applyRecoveryConstraint(BASE).badminton_triggered).toBe(false);
+    expect(applyRecoveryConstraint({ ...BASE, days_since_target_last_trained: 0 }).badminton_triggered).toBe(false);
+  });
+
   it('cites every triggered signal in reasoning when both a spike and heavy badminton co-occur', () => {
     const result = applyRecoveryConstraint({
       ...BASE,

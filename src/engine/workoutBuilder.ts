@@ -37,7 +37,7 @@ import { lookupExercisePrescription, parseRange } from '../blueprint/development
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
-import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, type FittableItem } from './constraintEngine.js';
+import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { daysBetween } from './dateMath.js';
 import { allocateFrequency } from './frequencyEngine.js';
 import { exercisesTrainingTarget, selectExercise } from './exerciseSelector.js';
@@ -136,6 +136,11 @@ export interface BuildWorkoutInput {
   available_equipment: readonly string[];
   available_training_days: readonly Weekday[];
   targets: readonly TargetBuildContext[];
+  /** Days the user's TrainingProfile marks as a recurring badminton
+   * commitment (remediation §9's "session distribution... day-moving"
+   * — see frequencyEngine.allocateFrequency's own soft-avoidance
+   * doc). Optional; defaults to none. */
+  recurring_badminton_days?: readonly Weekday[];
 }
 
 export interface PlannedExercise {
@@ -232,6 +237,22 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       continue;
     }
 
+    // Remediation §9: badminton must produce real, targeted programming
+    // effects — never a blanket weekly-volume cut (that stays gated by
+    // recovery_ok below, exactly as before). Scoped deliberately narrow:
+    // only a lower-body physique target, and only when recent logged
+    // badminton data (not e.g. a pure rolling-exposure spike) is the
+    // actual trigger — badminton itself is a lower-body-dominant
+    // activity, so this is where real "already loaded" overlap exists.
+    const badmintonLowerBodyReduce =
+      target.target_type === 'physique_target' &&
+      recovery.priority_adjustment === 'reduce' &&
+      recovery.badminton_triggered &&
+      isLowerBodyPhysiqueTarget(target.target_id);
+    if (badmintonLowerBodyReduce) {
+      log.push(`${target.target_type} "${target.target_id}": recent badminton already loaded this lower-body target — trimming today's session by one set and preferring a lower-fatigue_cost exercise.`);
+    }
+
     const trend: AestheticProgressTrend = classifyAestheticTrend(target.most_recent_assessment, input.date, target.review_cadence_days);
     const volumeDecision = decideVolume({
       target_type: target.target_type,
@@ -261,6 +282,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       target_id: target.target_id,
       desired_weekly_exposure_units: desiredWeekly,
       available_training_days: input.available_training_days,
+      recurring_badminton_days: input.recurring_badminton_days,
     });
     log.push(`${target.target_type} "${target.target_id}": ${frequency.reasoning}`);
 
@@ -354,6 +376,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       current_exercise_id: target.current_exercise_id,
       exercises_already_planned_today: plannedExerciseIdsSoFar,
       outside_blueprint_candidates: new Map([...outsideCandidatesById].map(([id, e]) => [id, { role: e.role, name: e.name }])),
+      prefer_lower_fatigue_cost: badmintonLowerBodyReduce,
     });
     log.push(selection.reasoning);
 
@@ -397,6 +420,15 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     let progressionDecision: ProgressionResult | null = null;
     let previousPerformance: PlannedExercise['previous_performance'] = null;
 
+    // Remediation §9's session-level badminton effect (see the
+    // badmintonLowerBodyReduce computation above) — bounded to one set,
+    // floored at 1, and stacks independently of (never replaces) the
+    // progression-driven 'reduce' below; the weekly volume decision
+    // itself (desiredWeekly) is never touched by either.
+    if (badmintonLowerBodyReduce) {
+      sessionSets = Math.max(1, sessionSets - 1);
+    }
+
     if (exerciseHistory.length > 0) {
       const mostRecent = exerciseHistory[0]!;
       const lastCompletedSet = [...mostRecent.sets].reverse().find((s) => s.completed) ?? null;
@@ -439,7 +471,8 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         reasoning:
           `${selection.reasoning} ${sessionSets} sets/session (${desiredWeekly} desired weekly, ${frequency.sessions_per_week} sessions/week). ` +
           `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
-          (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.'),
+          (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.') +
+          (badmintonLowerBodyReduce ? ` Badminton (remediation §9): ${recovery.reasoning}` : ''),
       },
     });
   }
@@ -666,6 +699,15 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
     );
   }
 
+  // Remediation §9: the recurring badminton days this user's own
+  // TrainingProfile already records (`other_activity_schedule` —
+  // "reduced training/recovery capacity, not just ignore," per that
+  // field's own doc comment) are the real input frequencyEngine's
+  // soft day-avoidance needs — never re-derived or guessed here.
+  const recurringBadmintonDays = (state.training_profile?.other_activity_schedule ?? [])
+    .filter((a) => a.activity_type === 'badminton')
+    .map((a) => a.day);
+
   return buildWorkout({
     date,
     weekday,
@@ -673,5 +715,6 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
     available_equipment: state.training_profile?.available_equipment ?? [],
     available_training_days: state.training_profile?.training_days ?? [],
     targets,
+    recurring_badminton_days: recurringBadmintonDays,
   });
 }
