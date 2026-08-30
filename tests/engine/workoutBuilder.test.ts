@@ -376,6 +376,67 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     }
   });
 
+  describe('remediation §17: resourceAllocation.allocateResource wired into the real time-budget split', () => {
+    it('logs a real goal-level time allocation line naming each competing goal\'s priority', () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 60,
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [
+          baseTarget({ target_id: 'mid-pec', goal_id: 'goal_A', goal_priority: 1 }),
+          baseTarget({ target_id: 'upper-pec', goal_id: 'goal_B', goal_priority: 2 }),
+        ],
+      });
+      const allocationLine = result.reasoning_log.find((l) => l.includes('Goal-level time allocation (spec §17)'));
+      expect(allocationLine).toBeDefined();
+      expect(allocationLine).toContain('priority 1');
+      expect(allocationLine).toContain('priority 2');
+    });
+
+    it('caps the higher-priority goal at its own desired amount and lets the leftover reach the lower-priority goal — both goals served when the budget allows', () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 60, // generous enough for both single-exercise goals
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [
+          baseTarget({ target_id: 'mid-pec', goal_id: 'goal_A', goal_priority: 1 }),
+          baseTarget({ target_id: 'upper-pec', goal_id: 'goal_B', goal_priority: 2 }),
+        ],
+      });
+      expect(result.exercises.find((e) => e.target_id === 'mid-pec')).toBeDefined();
+      expect(result.exercises.find((e) => e.target_id === 'upper-pec')).toBeDefined();
+      const allocationLine = result.reasoning_log.find((l) => l.includes('Goal-level time allocation (spec §17)'))!;
+      // resourceAllocation.ts's own reasoning text ("received its full
+      // desired... — ranking respected, not capped below its own
+      // request") appearing here is the proof this is the real module's
+      // output landing in the log, not a re-derivation of the same
+      // numbers by workoutBuilder itself.
+      expect(allocationLine).toContain('ranking respected, not capped below its own request');
+    });
+
+    it("reports insufficient session_minutes for the lower-priority goal when the scarce budget can't serve both", () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 9, // enough for goal_A alone (~8.8 min), not goal_B too
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [
+          baseTarget({ target_id: 'mid-pec', goal_id: 'goal_A', goal_priority: 1 }),
+          baseTarget({ target_id: 'upper-pec', goal_id: 'goal_B', goal_priority: 2 }),
+        ],
+      });
+      expect(result.exercises.find((e) => e.target_id === 'mid-pec')).toBeDefined();
+      expect(result.exercises.find((e) => e.target_id === 'upper-pec')).toBeUndefined();
+      const allocationLine = result.reasoning_log.find((l) => l.includes('Goal-level time allocation (spec §17)'))!;
+      expect(allocationLine).toContain('insufficient session_minutes remained after higher-priority goals were served first');
+    });
+  });
+
   describe('remediation §9: badminton actually changes programming, not just explanation text', () => {
     const QUADS_EQUIPMENT = ['barbell', 'rack', 'machine'];
 

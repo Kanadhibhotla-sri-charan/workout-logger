@@ -45,6 +45,7 @@ import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
 import { computeProgression, type ProgressionResult } from './progressionEngine.js';
 import { applyRecoveryConstraint, type RecentBadmintonSignal } from './recoveryEngine.js';
+import { allocateResource } from './resourceAllocation.js';
 import { classifyAestheticTrend, decideVolume, type AestheticProgressTrend } from './volumeEngine.js';
 import { buildTrainingState } from './trainingState.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
@@ -198,8 +199,17 @@ function estimateMinutes(sets: number): number {
 export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   const log: string[] = [];
   const skipped: SkippedTarget[] = [];
-  const candidates: Array<FittableItem & { planned: Omit<PlannedExercise, 'estimated_minutes'> }> = [];
+  const candidates: Array<FittableItem & { goal_id: string; planned: Omit<PlannedExercise, 'estimated_minutes'> }> = [];
   const plannedExerciseIdsSoFar: BlueprintId[] = [];
+  // Remediation §17/resourceAllocation.ts: this target's aesthetic
+  // trend is identical across every target belonging to the same real
+  // goal (assembleAndBuildWorkout applies one goal-level
+  // most_recent_assessment to every one of that goal's PrioritizedTargets)
+  // and is always 'insufficient_data' for the synthetic non-
+  // specialization bucket (no goal, so no assessment) — so it's safe to
+  // just overwrite per goal_id as targets are processed, one clean
+  // per-goal value falls out with no separate aggregation step.
+  const goalTrend = new Map<string, AestheticProgressTrend>();
 
   const orderedTargets = [...input.targets].sort((a, b) =>
     a.goal_priority !== b.goal_priority ? a.goal_priority - b.goal_priority : a.target_id.localeCompare(b.target_id)
@@ -254,6 +264,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     }
 
     const trend: AestheticProgressTrend = classifyAestheticTrend(target.most_recent_assessment, input.date, target.review_cadence_days);
+    goalTrend.set(target.goal_id, trend);
     const volumeDecision = decideVolume({
       target_type: target.target_type,
       target_id: target.target_id,
@@ -455,6 +466,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       id: selection.exercise_id,
       priority: target.goal_priority,
       estimated_minutes: estimateMinutes(sessionSets),
+      goal_id: target.goal_id,
       planned: {
         exercise_id: selection.exercise_id,
         target_type: target.target_type,
@@ -477,24 +489,66 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     });
   }
 
-  const fitted = fitToTimeBudget(candidates, input.budget_minutes);
-  log.push(fitted.reasoning);
-
-  for (const dropped of fitted.dropped) {
-    skipped.push({
-      target_type: dropped.planned.target_type,
-      target_id: dropped.planned.target_id,
-      classification: dropped.planned.classification,
-      reason: `Dropped by time-fitting: ${fitted.reasoning}`,
-    });
+  // Remediation §17: goals literally compete for the day's time budget
+  // — allocateResource (resourceAllocation.ts) is the real, tested
+  // module for exactly this ("use the user's explicit ranking... a
+  // well-progressing #1 goal should remain protected... scarce
+  // resources can be allocated to a stagnant lower-ranked goal"),
+  // previously built but never called from here. Level 1: split
+  // budget_minutes across goal buckets — every real active goal, plus
+  // the single synthetic bucket every non-specialization target shares
+  // (they all carry the same NON_SPECIALIZATION_GOAL_ID goal_id) — in
+  // strict priority order, each capped at its own desired_amount (the
+  // total minutes its own already-selected candidates would need).
+  // Level 2: within each bucket's own capped sub-budget,
+  // fitToTimeBudget picks which of that goal's own candidates actually
+  // fit, using their original priority for internal tie-break exactly
+  // as before this change (so within the synthetic bucket, each
+  // individual non-specialization target's own 1000+index priority
+  // still governs which of THOSE get dropped first).
+  const candidatesByGoal = new Map<string, typeof candidates>();
+  for (const c of candidates) {
+    const list = candidatesByGoal.get(c.goal_id) ?? [];
+    list.push(c);
+    candidatesByGoal.set(c.goal_id, list);
   }
 
-  const exercises: PlannedExercise[] = fitted.kept.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes }));
+  const allocation = allocateResource({
+    resource_name: 'session_minutes',
+    total_available: input.budget_minutes,
+    goals: [...candidatesByGoal.entries()].map(([goalId, group]) => ({
+      goal_id: goalId,
+      priority: Math.min(...group.map((c) => c.priority)),
+      desired_amount: group.reduce((sum, c) => sum + c.estimated_minutes, 0),
+      progress_status: goalTrend.get(goalId),
+    })),
+  });
+  if (allocation.allocations.length > 0) {
+    log.push(`Goal-level time allocation (spec §17): ${allocation.allocations.map((a) => a.reasoning).join(' ')}`);
+  }
+
+  const exercises: PlannedExercise[] = [];
+  let totalMinutes = 0;
+  for (const entry of allocation.allocations) {
+    const group = candidatesByGoal.get(entry.goal_id) ?? [];
+    const fitted = fitToTimeBudget(group, entry.allocated_amount);
+    log.push(fitted.reasoning);
+    totalMinutes += fitted.total_minutes;
+    exercises.push(...fitted.kept.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes })));
+    for (const dropped of fitted.dropped) {
+      skipped.push({
+        target_type: dropped.planned.target_type,
+        target_id: dropped.planned.target_id,
+        classification: dropped.planned.classification,
+        reason: `Dropped by time-fitting within its goal's allocated budget: ${fitted.reasoning}`,
+      });
+    }
+  }
 
   return {
     date: input.date,
     exercises,
-    estimated_minutes: fitted.total_minutes,
+    estimated_minutes: totalMinutes,
     skipped_targets: skipped,
     reasoning_log: log,
   };
