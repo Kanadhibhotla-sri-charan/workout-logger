@@ -33,3 +33,4 @@ story of how the app got to its current state.
 - [2026-08-30-25-docs-update-resolved-decisions.md](2026-08-30-25-docs-update-resolved-decisions.md)
 - [2026-08-30-26-remediation-exercise-selector-gates.md](2026-08-30-26-remediation-exercise-selector-gates.md)
 - [2026-08-30-27-remediation-real-history-wiring.md](2026-08-30-27-remediation-real-history-wiring.md)
+- [2026-08-30-28-remediation-progression-wiring.md](2026-08-30-28-remediation-progression-wiring.md)

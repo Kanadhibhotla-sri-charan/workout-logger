@@ -115,6 +115,13 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     const midPecPlan = result.exercises.find((e) => e.target_id === 'mid-pec');
     expect(midPecPlan?.exercise_id).toBe('flat-barbell-bench-press');
     expect(midPecPlan?.reasoning).toContain('gate5_progression_continuity');
+    // remediation §6: progressionEngine must actually be consumed here —
+    // real prior sets (8 reps, within flat-barbell-bench-press's 6-12
+    // Blueprint range but not yet at the top) should produce a real
+    // increase_reps decision and a real previous_performance summary,
+    // not null placeholders.
+    expect(midPecPlan?.progression_decision?.recommendation).toBe('increase_reps');
+    expect(midPecPlan?.previous_performance).toEqual({ date: PRIOR_THURSDAY, weight: 60, reps: 8 });
   });
 
   it('remediation §5: a target already trained today is skipped (avoid), proving days_since_target_last_trained is real', () => {

@@ -34,7 +34,7 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
-import type { BadmintonIntensity, BlueprintId, Weekday } from '../contracts/types.js';
+import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { TIME_ESTIMATION } from './config.js';
 import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, type FittableItem } from './constraintEngine.js';
@@ -43,12 +43,22 @@ import { allocateFrequency } from './frequencyEngine.js';
 import { exercisesTrainingTarget, selectExercise } from './exerciseSelector.js';
 import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
+import { computeProgression, type ProgressionResult } from './progressionEngine.js';
 import { applyRecoveryConstraint, type RecentBadmintonSignal } from './recoveryEngine.js';
 import { classifyAestheticTrend, decideVolume, type AestheticProgressTrend } from './volumeEngine.js';
 import { buildTrainingState } from './trainingState.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDetailsRepo.js';
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
+
+/** One prior session's actual logged sets for a specific exercise —
+ * ground truth, never a planned/target value (ExercisePerformance's
+ * Set[] vs. ProgramSessionExercise's target_* fields stay distinct
+ * everywhere in this app; see src/contracts/types.ts). */
+export interface ExerciseSessionHistory {
+  date: string;
+  sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
+}
 
 /** Everything buildWorkout needs for one target, already gathered by
  * the caller (normally assembleWorkoutBuildInput) — no database access
@@ -69,6 +79,13 @@ export interface TargetBuildContext {
   recent_badminton: RecentBadmintonSignal | null;
   recent_exercise_ids: readonly BlueprintId[];
   current_exercise_id: BlueprintId | null;
+  /** Real prior-session actual sets, keyed by exercise id (any
+   * exercise that has ever meaningfully touched this target within
+   * the loaded history window), most-recent-session-first — the
+   * per-exercise input progressionEngine.computeProgression needs.
+   * Remediation §6: "a progression engine that is not consumed by the
+   * workout builder is incomplete." */
+  exercise_history: Readonly<Record<BlueprintId, readonly ExerciseSessionHistory[]>>;
 }
 
 export interface BuildWorkoutInput {
@@ -91,6 +108,16 @@ export interface PlannedExercise {
   target_rir_min: number;
   target_rir_max: number;
   estimated_minutes: number;
+  /** The single most recent actual logged performance of this exact
+   * exercise, if any — distinguished from the planned target above,
+   * per remediation §6.2 ("the output must distinguish: planned
+   * target; previous result; progression decision"). */
+  previous_performance: { date: string; weight: number | null; reps: number | null } | null;
+  /** Real progressionEngine.computeProgression output when usable
+   * prior history for this exact exercise exists; null for a
+   * first-time prescription (Blueprint's own baseline reps/RIR only —
+   * there is nothing yet to progress from). */
+  progression_decision: ProgressionResult | null;
   reasoning: string;
 }
 
@@ -263,21 +290,60 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     const rir = parseRange(prescription.rir);
     plannedExerciseIdsSoFar.push(selection.exercise_id);
 
+    // Remediation §6: a progression engine that is not consumed by the
+    // workout builder is incomplete. Only exercises with usable prior
+    // history for THIS exact exercise (not merely this target) get a
+    // real progression decision — a first-time prescription has
+    // nothing to progress from yet, and stays at Blueprint's own
+    // baseline reps/RIR (progression_decision: null is the honest
+    // answer, not a gap).
+    const exerciseHistory = target.exercise_history[selection.exercise_id] ?? [];
+    let sessionSets = setsToday;
+    let progressionDecision: ProgressionResult | null = null;
+    let previousPerformance: PlannedExercise['previous_performance'] = null;
+
+    if (exerciseHistory.length > 0) {
+      const mostRecent = exerciseHistory[0]!;
+      const lastCompletedSet = [...mostRecent.sets].reverse().find((s) => s.completed) ?? null;
+      previousPerformance = { date: mostRecent.date, weight: lastCompletedSet?.weight ?? null, reps: lastCompletedSet?.reps ?? null };
+
+      progressionDecision = computeProgression({
+        exercise_id: selection.exercise_id,
+        target_reps_min: reps.min,
+        target_reps_max: reps.max,
+        recent_sessions_actual_sets: exerciseHistory.map((h) => h.sets),
+      });
+      log.push(progressionDecision.reasoning);
+
+      // 'reduce' is the one progression outcome with a real, bounded
+      // session-level effect here: one fewer set than the weekly-volume
+      // math alone would call for, floored at 1 — never touching the
+      // weekly volume decision itself (that stays volumeEngine's job).
+      if (progressionDecision.recommendation === 'reduce') {
+        sessionSets = Math.max(1, sessionSets - 1);
+      }
+    }
+
     candidates.push({
       id: selection.exercise_id,
       priority: target.goal_priority,
-      estimated_minutes: estimateMinutes(setsToday),
+      estimated_minutes: estimateMinutes(sessionSets),
       planned: {
         exercise_id: selection.exercise_id,
         target_type: target.target_type,
         target_id: target.target_id,
         role: target.tier,
-        target_sets: setsToday,
+        target_sets: sessionSets,
         target_reps_min: reps.min,
         target_reps_max: reps.max,
         target_rir_min: rir.min,
         target_rir_max: rir.max,
-        reasoning: `${selection.reasoning} ${setsToday} sets/session (${desiredWeekly} desired weekly, ${frequency.sessions_per_week} sessions/week). Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.`,
+        previous_performance: previousPerformance,
+        progression_decision: progressionDecision,
+        reasoning:
+          `${selection.reasoning} ${sessionSets} sets/session (${desiredWeekly} desired weekly, ${frequency.sessions_per_week} sessions/week). ` +
+          `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
+          (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.'),
       },
     });
   }
@@ -316,6 +382,7 @@ function weekdayOfDate(dateIso: string): Weekday {
 interface TargetTouch {
   date: string;
   exercise_id: BlueprintId;
+  sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
 }
 
 /**
@@ -344,7 +411,7 @@ function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSessions: 
       for (const c of contributions) {
         const key = `${c.target_type}:${c.target_id}`;
         const list = byTarget.get(key) ?? [];
-        list.push({ date: session.date, exercise_id: performance.exercise_id });
+        list.push({ date: session.date, exercise_id: performance.exercise_id, sets: performance.sets });
         byTarget.set(key, list);
       }
     }
@@ -399,6 +466,15 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
       const touches = touchesByTarget.get(key) ?? [];
       const mostRecentTouch = touches[0];
 
+      // Group this target's touches by exercise id — the per-exercise
+      // (not per-target) history progressionEngine actually needs.
+      // touches is already most-recent-first (gatherTargetTouches
+      // sorts it), so each exercise's list stays most-recent-first too.
+      const exerciseHistory: Record<BlueprintId, ExerciseSessionHistory[]> = {};
+      for (const touch of touches) {
+        (exerciseHistory[touch.exercise_id] ??= []).push({ date: touch.date, sets: touch.sets });
+      }
+
       targets.push({
         target_type: t.target_type,
         target_id: t.target_id,
@@ -415,6 +491,7 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
         recent_badminton: recentBadmintonSignal,
         recent_exercise_ids: [...new Set(touches.map((t2) => t2.exercise_id))],
         current_exercise_id: mostRecentTouch?.exercise_id ?? null,
+        exercise_history: exerciseHistory,
       });
     }
   }

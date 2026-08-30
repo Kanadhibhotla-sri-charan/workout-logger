@@ -19,6 +19,7 @@ function baseTarget(overrides: Partial<TargetBuildContext> = {}): TargetBuildCon
     recent_badminton: null,
     recent_exercise_ids: [],
     current_exercise_id: null,
+    exercise_history: {},
     ...overrides,
   };
 }
@@ -45,6 +46,84 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     expect(planned.estimated_minutes).toBeGreaterThan(0);
     // The exercise must genuinely be Blueprint's own package data for mid-pec.
     expect(BlueprintAdapter.getExercise(planned.exercise_id)).toBeDefined();
+    // No exercise_history was supplied — a first-time prescription has
+    // nothing to progress from yet.
+    expect(planned.progression_decision).toBeNull();
+    expect(planned.previous_performance).toBeNull();
+  });
+
+  it('remediation §6: usable exercise history produces a real progression_decision and previous_performance, consumed by the builder', () => {
+    const result = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: CHEST_EQUIPMENT,
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [
+        baseTarget({
+          current_exercise_id: 'flat-barbell-bench-press',
+          exercise_history: {
+            'flat-barbell-bench-press': [
+              {
+                date: '2026-08-27',
+                sets: [
+                  { weight: 60, reps: 12, completed: true, rir: 1 },
+                  { weight: 60, reps: 12, completed: true, rir: 1 },
+                ],
+              },
+            ],
+          },
+        }),
+      ],
+    });
+
+    expect(result.exercises.length).toBe(1);
+    const planned = result.exercises[0]!;
+    expect(planned.exercise_id).toBe('flat-barbell-bench-press');
+    expect(planned.progression_decision).not.toBeNull();
+    expect(planned.progression_decision!.exercise_id).toBe('flat-barbell-bench-press');
+    expect(planned.previous_performance).toEqual({ date: '2026-08-27', weight: 60, reps: 12 });
+  });
+
+  it('remediation §6: a "reduce" progression decision actually reduces the session\'s set count, distinct from weekly volume', () => {
+    // Four consecutive sessions all falling short of the bottom of the
+    // rep range (well below the ~8-12 Blueprint prescribes for
+    // flat-barbell-bench-press) is a genuine multi-session decline
+    // pattern progressionEngine recognizes as 'reduce'.
+    const decliningSession = {
+      date: '2026-08-20',
+      sets: [{ weight: 60, reps: 3, completed: true, rir: 0 }],
+    };
+    const withoutDecline = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: CHEST_EQUIPMENT,
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [baseTarget({ current_weekly_primary_sets: 12 })],
+    });
+    const withDecline = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: CHEST_EQUIPMENT,
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [
+        baseTarget({
+          current_weekly_primary_sets: 12,
+          current_exercise_id: 'flat-barbell-bench-press',
+          exercise_history: {
+            'flat-barbell-bench-press': [decliningSession, decliningSession, decliningSession],
+          },
+        }),
+      ],
+    });
+
+    const withoutPlan = withoutDecline.exercises[0]!;
+    const withPlan = withDecline.exercises.find((e) => e.exercise_id === 'flat-barbell-bench-press');
+    expect(withPlan).toBeDefined();
+    expect(withPlan!.progression_decision?.recommendation).toBe('reduce');
+    expect(withPlan!.target_sets).toBeLessThan(withoutPlan.target_sets);
   });
 
   it('never exceeds the time budget across multiple targets', () => {
