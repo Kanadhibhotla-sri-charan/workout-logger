@@ -190,6 +190,16 @@ export class WorkoutSessionsRepo {
     return rows.map(rowToSession);
   }
 
+  /** Sessions with `date` in [start, end], inclusive — used by
+   * src/engine/trainingState.ts to fetch the data window exposure
+   * aggregation needs. */
+  listSessionsInRange(start: string, end: string): WorkoutSession[] {
+    const rows = this.db
+      .prepare('SELECT * FROM workout_sessions WHERE date >= ? AND date <= ? ORDER BY date ASC, start_time ASC')
+      .all(start, end) as WorkoutSessionRow[];
+    return rows.map(rowToSession);
+  }
+
   /** Throws UnknownBlueprintExerciseError if exercise_id does not resolve
    * in Blueprint — this is the enforcement point that keeps every
    * persisted performance anchored to a real, resolvable exercise. */
