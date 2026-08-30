@@ -39,14 +39,14 @@ import { WEEKDAYS } from '../contracts/types.js';
 import { REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
 import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { daysBetween } from './dateMath.js';
-import { allocateFrequency } from './frequencyEngine.js';
-import { exercisesTrainingTarget, selectExercise } from './exerciseSelector.js';
+import { allocateFrequency, type FrequencyAllocation } from './frequencyEngine.js';
+import { exercisesTrainingTarget, selectExercise, type ExerciseSelectionResult } from './exerciseSelector.js';
 import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
 import { computeProgression, type ProgressionResult } from './progressionEngine.js';
-import { applyRecoveryConstraint, type RecentBadmintonSignal } from './recoveryEngine.js';
-import { allocateResource } from './resourceAllocation.js';
-import { classifyAestheticTrend, decideVolume, type AestheticProgressTrend } from './volumeEngine.js';
+import { applyRecoveryConstraint, type RecentBadmintonSignal, type RecoveryConstraintResult } from './recoveryEngine.js';
+import { allocateResource, type ResourceAllocationEntry } from './resourceAllocation.js';
+import { classifyAestheticTrend, decideVolume, type AestheticProgressTrend, type VolumeDecision } from './volumeEngine.js';
 import { buildTrainingState } from './trainingState.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDetailsRepo.js';
@@ -107,12 +107,27 @@ export interface TargetBuildContext {
   goal_id: string;
   goal_priority: number;
   current_weekly_primary_sets: number;
+  /** Remediation §16: "secondary exposure contributions" — this
+   * target's current week's secondary-role (compound-overlap) sets,
+   * straight from the same TrainingExposure record
+   * current_weekly_primary_sets already comes from (total_sets =
+   * primary_sets + secondary_sets always; see contracts/types.ts). No
+   * separate tracking mechanism — the data was already computed by
+   * exposureEngine, just not previously threaded this far. */
+  weekly_secondary_sets: number;
   weekly_exposure_units: number;
   rolling_exposure_units: number;
   rolling_window_days: number;
   most_recent_assessment: { rating: 1 | 2 | 3 | 4 | 5; date: string } | null;
   review_cadence_days: number;
   days_since_target_last_trained: number | null;
+  /** Remediation §16: "last-trained dates" — the raw calendar date
+   * days_since_target_last_trained was itself computed from, kept
+   * alongside it for the machine-readable explanation object rather
+   * than forcing a consumer to re-derive a date from a day-count. Null
+   * under the identical condition days_since_target_last_trained is
+   * null (no real touch found in the loaded history window). */
+  last_trained_date: string | null;
   recent_badminton: RecentBadmintonSignal | null;
   recent_exercise_ids: readonly BlueprintId[];
   current_exercise_id: BlueprintId | null;
@@ -144,6 +159,56 @@ export interface BuildWorkoutInput {
   recurring_badminton_days?: readonly Weekday[];
 }
 
+/**
+ * Remediation §16: "every generated workout must include a machine-
+ * readable reasoning object" covering (its exact list): weekly
+ * exposure, secondary exposure contributions, last-trained dates,
+ * recent exercise history, progression input/output, badminton
+ * context, selected exercises, rejected candidates, substitutions, and
+ * the volume decision + reason. Every field here is a value this
+ * pipeline already computed somewhere in `buildWorkout` — nothing is
+ * re-derived or invented for this object; it exists so a caller/UI can
+ * read the *why* as data instead of parsing `reasoning` prose (which
+ * stays, unchanged, alongside this for a human-readable summary).
+ * "Active goals, rankings" and "equipment/time constraints" are the two
+ * §16 items that are necessarily whole-workout (not per-exercise)
+ * concerns — see WorkoutBuildResult.active_goals/resource_allocation/
+ * constraints below instead.
+ */
+export interface DecisionExplanation {
+  classification: TargetClassification;
+  weekly_exposure: {
+    primary_sets: number;
+    secondary_sets: number;
+    exposure_units: number;
+    rolling_exposure_units: number;
+    rolling_window_days: number;
+  };
+  last_trained: { date: string | null; days_since: number | null };
+  recent_exercise_ids: readonly BlueprintId[];
+  badminton_context: RecentBadmintonSignal | null;
+  recovery: RecoveryConstraintResult;
+  volume_decision: VolumeDecision;
+  /** Null when a target was skipped before frequency allocation ran
+   * (e.g. an 'avoid' recovery signal, or no weekly volume recommended
+   * yet) — there is nothing genuine to report yet, and this stays null
+   * rather than a fabricated placeholder. */
+  frequency: FrequencyAllocation | null;
+  /** Null under the identical conditions as `frequency` above, plus
+   * whenever no feasible/prescribed candidate existed to select from at
+   * all. */
+  selection: {
+    decisive_gate: ExerciseSelectionResult['decisive_gate'];
+    rejected_candidates: readonly BlueprintId[];
+    /** The exercise this selection replaced, if selection landed on a
+     * different exercise than the target's own current_exercise_id —
+     * remediation §16's "substitutions." Null when the winner IS the
+     * current exercise (continuity, not a substitution) or there was no
+     * prior current exercise to replace. */
+    substituted_from: BlueprintId | null;
+  } | null;
+}
+
 export interface PlannedExercise {
   exercise_id: BlueprintId;
   target_type: TargetType;
@@ -167,6 +232,11 @@ export interface PlannedExercise {
    * there is nothing yet to progress from). */
   progression_decision: ProgressionResult | null;
   reasoning: string;
+  /** Remediation §16's machine-readable reasoning object — always
+   * fully populated (never null) for a generated exercise, since every
+   * step it draws from ran to completion by the time an exercise is
+   * actually planned. */
+  decision: DecisionExplanation;
 }
 
 export interface SkippedTarget {
@@ -174,6 +244,17 @@ export interface SkippedTarget {
   target_id: BlueprintId;
   classification: TargetClassification;
   reason: string;
+  /** As much of the same machine-readable explanation as had actually
+   * been computed before this target was skipped — e.g. a target
+   * skipped on an 'avoid' recovery signal carries `recovery` but null
+   * `volume_decision`/`frequency`/`selection`, since this pipeline
+   * never fabricates a decision it didn't reach (spec §25's rule
+   * applied to explainability itself, not just prescriptions). */
+  decision: Omit<DecisionExplanation, 'volume_decision' | 'frequency' | 'selection'> & {
+    volume_decision: VolumeDecision | null;
+    frequency: FrequencyAllocation | null;
+    selection: DecisionExplanation['selection'];
+  };
 }
 
 export interface WorkoutBuildResult {
@@ -182,6 +263,21 @@ export interface WorkoutBuildResult {
   estimated_minutes: number;
   skipped_targets: SkippedTarget[];
   reasoning_log: string[];
+  /** Remediation §16's "active goals, rankings" — every distinct real
+   * goal this build actually considered (the synthetic normal-
+   * development/maintenance bucket is deliberately excluded — it is
+   * not a user goal), with the same priority and aesthetic-progress
+   * trend used throughout this build. */
+  active_goals: Array<{ goal_id: string; priority: number; trend: AestheticProgressTrend }>;
+  /** Remediation §17/§16: the real allocateResource() output that
+   * decided today's goal-level time-budget split — see the "Remediation
+   * §17" block below for how it's produced. */
+  resource_allocation: readonly ResourceAllocationEntry[];
+  /** Remediation §16's "equipment/time constraints" — the exact inputs
+   * every equipment-feasibility check and the time-budget split above
+   * were run against, echoed here rather than requiring a caller to
+   * hold onto its own BuildWorkoutInput to know what was applied. */
+  constraints: { available_equipment: readonly string[]; budget_minutes: number };
 }
 
 function estimateMinutes(sets: number): number {
@@ -242,8 +338,45 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       other_activity_today: [],
     });
 
+    // Remediation §16: the machine-readable explanation object, built
+    // incrementally as this target's own real decisions actually run —
+    // every field below is a value already computed for this exact
+    // target elsewhere in this iteration, never re-derived or invented
+    // for explainability's sake. `weeklyExposure`/`lastTrained` are
+    // fixed for the whole iteration; `makeSkipDecision` fills in
+    // whatever downstream steps (volume/frequency/selection) had
+    // actually run by the time a given skip site is reached, leaving
+    // the rest null rather than fabricating a decision never made.
+    const weeklyExposure: DecisionExplanation['weekly_exposure'] = {
+      primary_sets: target.current_weekly_primary_sets,
+      secondary_sets: target.weekly_secondary_sets,
+      exposure_units: target.weekly_exposure_units,
+      rolling_exposure_units: target.rolling_exposure_units,
+      rolling_window_days: target.rolling_window_days,
+    };
+    const lastTrained: DecisionExplanation['last_trained'] = { date: target.last_trained_date, days_since: target.days_since_target_last_trained };
+    const makeSkipDecision = (
+      overrides: { volume_decision?: VolumeDecision | null; frequency?: FrequencyAllocation | null; selection?: DecisionExplanation['selection'] } = {}
+    ): SkippedTarget['decision'] => ({
+      classification,
+      weekly_exposure: weeklyExposure,
+      last_trained: lastTrained,
+      recent_exercise_ids: target.recent_exercise_ids,
+      badminton_context: target.recent_badminton,
+      recovery,
+      volume_decision: overrides.volume_decision ?? null,
+      frequency: overrides.frequency ?? null,
+      selection: overrides.selection ?? null,
+    });
+
     if (recovery.priority_adjustment === 'avoid') {
-      skipped.push({ target_type: target.target_type, target_id: target.target_id, classification, reason: `recovery: ${recovery.reasoning}` });
+      skipped.push({
+        target_type: target.target_type,
+        target_id: target.target_id,
+        classification,
+        reason: `recovery: ${recovery.reasoning}`,
+        decision: makeSkipDecision(),
+      });
       continue;
     }
 
@@ -284,7 +417,13 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
 
     const desiredWeekly = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : target.current_weekly_primary_sets;
     if (desiredWeekly <= 0) {
-      skipped.push({ target_type: target.target_type, target_id: target.target_id, classification, reason: 'No weekly volume recommended yet for this target.' });
+      skipped.push({
+        target_type: target.target_type,
+        target_id: target.target_id,
+        classification,
+        reason: 'No weekly volume recommended yet for this target.',
+        decision: makeSkipDecision({ volume_decision: volumeDecision }),
+      });
       continue;
     }
 
@@ -303,6 +442,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_id: target.target_id,
         classification,
         reason: `Not scheduled for ${input.weekday} — assigned days are ${frequency.assigned_days.join(', ') || 'none'}.`,
+        decision: makeSkipDecision({ volume_decision: volumeDecision, frequency }),
       });
       continue;
     }
@@ -340,6 +480,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_id: target.target_id,
         classification,
         reason: 'No equipment-feasible (and, for a lower-body target, Monday-compliant) Blueprint or approved outside-Blueprint exercise trains this target.',
+        decision: makeSkipDecision({ volume_decision: volumeDecision, frequency }),
       });
       continue;
     }
@@ -362,6 +503,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
           target_id: target.target_id,
           classification,
           reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription (or an approved outside-Blueprint one) for this target — exposing this gap rather than inventing one (spec §25).',
+          decision: makeSkipDecision({ volume_decision: volumeDecision, frequency }),
         });
         continue;
       }
@@ -391,6 +533,16 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     });
     log.push(selection.reasoning);
 
+    // Remediation §16's "substitutions": the prior exercise this pick
+    // actually replaced, distinct from mere continuity (winner === the
+    // target's own current_exercise_id) or a genuinely first-time pick
+    // (no current_exercise_id to replace at all).
+    const selectionDecision: NonNullable<DecisionExplanation['selection']> = {
+      decisive_gate: selection.decisive_gate,
+      rejected_candidates: selection.rejected_candidates,
+      substituted_from: target.current_exercise_id && target.current_exercise_id !== selection.exercise_id ? target.current_exercise_id : null,
+    };
+
     const outsideSelection = outsideCandidatesById.get(selection.exercise_id);
 
     // Only an exact (target, exercise) match against a real Blueprint
@@ -411,6 +563,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_id: target.target_id,
         classification,
         reason: `No Blueprint development-package rep/RIR prescription is available for "${selection.exercise_id}" against this target — exposing this gap rather than inventing a rep range (spec §25).`,
+        decision: makeSkipDecision({ volume_decision: volumeDecision, frequency, selection: selectionDecision }),
       });
       continue;
     }
@@ -485,6 +638,17 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
           `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
           (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.') +
           (badmintonLowerBodyReduce ? ` Badminton (remediation §9): ${recovery.reasoning}` : ''),
+        decision: {
+          classification,
+          weekly_exposure: weeklyExposure,
+          last_trained: lastTrained,
+          recent_exercise_ids: target.recent_exercise_ids,
+          badminton_context: target.recent_badminton,
+          recovery,
+          volume_decision: volumeDecision,
+          frequency,
+          selection: selectionDecision,
+        },
       },
     });
   }
@@ -541,9 +705,24 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_id: dropped.planned.target_id,
         classification: dropped.planned.classification,
         reason: `Dropped by time-fitting within its goal's allocated budget: ${fitted.reasoning}`,
+        decision: dropped.planned.decision,
       });
     }
   }
+
+  // Remediation §16's "active goals, rankings" — every distinct real
+  // (is_specialization) goal among the targets this build actually
+  // received, regardless of whether any of its targets ended up
+  // skipped. The synthetic normal-development/maintenance bucket is
+  // excluded here via the same is_specialization flag every other
+  // classification decision already reads — no separate sentinel-id
+  // check needed.
+  const activeGoalIds = [...new Set(input.targets.filter((t) => t.is_specialization).map((t) => t.goal_id))];
+  const activeGoals = activeGoalIds.map((goalId) => ({
+    goal_id: goalId,
+    priority: Math.min(...input.targets.filter((t) => t.goal_id === goalId).map((t) => t.goal_priority)),
+    trend: goalTrend.get(goalId) ?? ('insufficient_data' as AestheticProgressTrend),
+  }));
 
   return {
     date: input.date,
@@ -551,6 +730,9 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     estimated_minutes: totalMinutes,
     skipped_targets: skipped,
     reasoning_log: log,
+    active_goals: activeGoals,
+    resource_allocation: allocation.allocations,
+    constraints: { available_equipment: input.available_equipment, budget_minutes: input.budget_minutes },
   };
 }
 
@@ -674,12 +856,14 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
       goal_id: goalId,
       goal_priority: goalPriority,
       current_weekly_primary_sets: weekly?.primary_sets ?? 0,
+      weekly_secondary_sets: weekly?.secondary_sets ?? 0,
       weekly_exposure_units: weekly?.exposure_units ?? 0,
       rolling_exposure_units: rolling?.exposure_units ?? 0,
       rolling_window_days: state.rolling_window_days,
       most_recent_assessment: mostRecentAssessment,
       review_cadence_days: reviewCadenceDays,
       days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, date) : null,
+      last_trained_date: mostRecentTouch?.date ?? null,
       recent_badminton: recentBadmintonSignal,
       recent_exercise_ids: [...new Set(touches.map((t) => t.exercise_id))],
       current_exercise_id: mostRecentTouch?.exercise_id ?? null,

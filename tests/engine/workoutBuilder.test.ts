@@ -11,12 +11,14 @@ function baseTarget(overrides: Partial<TargetBuildContext> = {}): TargetBuildCon
     goal_id: 'goal_1',
     goal_priority: 1,
     current_weekly_primary_sets: 0,
+    weekly_secondary_sets: 0,
     weekly_exposure_units: 0,
     rolling_exposure_units: 0,
     rolling_window_days: 14,
     most_recent_assessment: null,
     review_cadence_days: 28,
     days_since_target_last_trained: null,
+    last_trained_date: null,
     recent_badminton: null,
     recent_exercise_ids: [],
     current_exercise_id: null,
@@ -374,6 +376,123 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       expect(typeof line).toBe('string');
       expect(line.length).toBeGreaterThan(5);
     }
+  });
+
+  describe('remediation §16: machine-readable decision explanation object', () => {
+    it('a generated exercise carries a fully populated decision object drawn from real per-target data', () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 60,
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [
+          baseTarget({
+            current_weekly_primary_sets: 4,
+            weekly_secondary_sets: 2,
+            weekly_exposure_units: 5.66,
+            rolling_exposure_units: 8,
+            days_since_target_last_trained: 3,
+            last_trained_date: '2026-08-28',
+            recent_exercise_ids: ['flat-barbell-bench-press'],
+          }),
+        ],
+      });
+
+      const planned = result.exercises[0]!;
+      expect(planned.decision.classification).toBe(planned.classification);
+      expect(planned.decision.weekly_exposure).toEqual({
+        primary_sets: 4,
+        secondary_sets: 2,
+        exposure_units: 5.66,
+        rolling_exposure_units: 8,
+        rolling_window_days: 14,
+      });
+      expect(planned.decision.last_trained).toEqual({ date: '2026-08-28', days_since: 3 });
+      expect(planned.decision.recent_exercise_ids).toEqual(['flat-barbell-bench-press']);
+      expect(planned.decision.badminton_context).toBeNull();
+      expect(planned.decision.recovery.priority_adjustment).not.toBe('avoid');
+      expect(planned.decision.volume_decision.action).toBeDefined();
+      expect(planned.decision.frequency?.assigned_days).toContain('monday');
+      expect(planned.decision.selection?.decisive_gate).toBeDefined();
+      expect(Array.isArray(planned.decision.selection?.rejected_candidates)).toBe(true);
+    });
+
+    it('a substitution is recorded when selection replaces the target\'s current exercise', () => {
+      // Only 'cable' equipment is available: flat-barbell-bench-press
+      // (the "current" exercise) becomes infeasible, forcing a real
+      // substitution to cable-fly.
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 60,
+        available_equipment: ['cable'],
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [baseTarget({ current_exercise_id: 'flat-barbell-bench-press', recent_exercise_ids: ['flat-barbell-bench-press'] })],
+      });
+      const planned = result.exercises[0]!;
+      expect(planned.exercise_id).not.toBe('flat-barbell-bench-press');
+      expect(planned.decision.selection?.substituted_from).toBe('flat-barbell-bench-press');
+    });
+
+    it('no substitution is recorded when selection keeps the target\'s current exercise (continuity, not a substitution)', () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 60,
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [baseTarget({ current_exercise_id: 'flat-barbell-bench-press', recent_exercise_ids: [] })],
+      });
+      const planned = result.exercises[0]!;
+      expect(planned.exercise_id).toBe('flat-barbell-bench-press');
+      expect(planned.decision.selection?.substituted_from).toBeNull();
+    });
+
+    it('a target skipped before frequency allocation carries recovery but null volume_decision/frequency/selection — never a fabricated decision', () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 60,
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [baseTarget({ days_since_target_last_trained: 0 })], // trained today -> 'avoid'
+      });
+      const skip = result.skipped_targets.find((s) => s.target_id === 'mid-pec')!;
+      expect(skip.decision.recovery.priority_adjustment).toBe('avoid');
+      expect(skip.decision.volume_decision).toBeNull();
+      expect(skip.decision.frequency).toBeNull();
+      expect(skip.decision.selection).toBeNull();
+    });
+
+    it("active_goals lists every real (specialization) goal, excluding the synthetic normal-development bucket", () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 60,
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [
+          baseTarget({ target_id: 'mid-pec', goal_id: 'goal_A', goal_priority: 1, is_specialization: true }),
+          baseTarget({ target_id: 'upper-pec', goal_id: '__normal_development_or_maintenance__', goal_priority: 1000, is_specialization: false }),
+        ],
+      });
+      expect(result.active_goals).toEqual([{ goal_id: 'goal_A', priority: 1, trend: 'insufficient_data' }]);
+    });
+
+    it('resource_allocation and constraints echo the real allocation and the real input constraints', () => {
+      const result = buildWorkout({
+        date: '2026-08-31',
+        weekday: 'monday',
+        budget_minutes: 45,
+        available_equipment: CHEST_EQUIPMENT,
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [baseTarget()],
+      });
+      expect(result.resource_allocation.length).toBeGreaterThan(0);
+      expect(result.resource_allocation[0]!.goal_id).toBe('goal_1');
+      expect(result.constraints).toEqual({ available_equipment: CHEST_EQUIPMENT, budget_minutes: 45 });
+    });
   });
 
   describe('remediation §17: resourceAllocation.allocateResource wired into the real time-budget split', () => {

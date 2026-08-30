@@ -38,3 +38,4 @@ story of how the app got to its current state.
 - [2026-08-30-30-remediation-outside-blueprint-wiring.md](2026-08-30-30-remediation-outside-blueprint-wiring.md)
 - [2026-08-30-31-remediation-badminton-programming-effects.md](2026-08-30-31-remediation-badminton-programming-effects.md)
 - [2026-08-30-32-remediation-resource-allocation-wiring.md](2026-08-30-32-remediation-resource-allocation-wiring.md)
+- [2026-08-30-33-remediation-explainability-decision-object.md](2026-08-30-33-remediation-explainability-decision-object.md)
