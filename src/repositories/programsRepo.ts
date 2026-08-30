@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
+import { resolveExercise } from '../engine/exerciseUniverse.js';
 import type { ExerciseRole, Program, ProgramSession, ProgramSessionExercise, ProgramStatus, SessionType } from '../contracts/types.js';
+import { UnknownExerciseError } from './workoutSessionsRepo.js';
 import { newId, nowIso } from './ids.js';
 
 interface ProgramRow {
@@ -97,6 +99,12 @@ export class ProgramsRepo {
   }
 
   createProgramSession(input: CreateProgramSessionInput): ProgramSession {
+    for (const ex of input.exercises) {
+      if (!resolveExercise(this.db, ex.exercise_id)) {
+        throw new UnknownExerciseError(ex.exercise_id);
+      }
+    }
+
     const session: ProgramSession = {
       id: newId('psession'),
       program_id: input.program_id,

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { BlueprintAdapter } from '../blueprint/adapter.js';
+import { resolveExercise } from '../engine/exerciseUniverse.js';
 import type {
   ExercisePerformance,
   ExerciseRole,
@@ -11,12 +11,18 @@ import type {
 } from '../contracts/types.js';
 import { newId, nowIso } from './ids.js';
 
-export class UnknownBlueprintExerciseError extends Error {
+/** Neither a known Blueprint exercise (§4.1) nor an approved
+ * outside-Blueprint exercise (§4.2) — see src/engine/exerciseUniverse.ts. */
+export class UnknownExerciseError extends Error {
   constructor(public exerciseId: string) {
-    super(`"${exerciseId}" is not a known Blueprint exercise id`);
-    this.name = 'UnknownBlueprintExerciseError';
+    super(`"${exerciseId}" is not a known Blueprint exercise id, and not an approved outside-Blueprint exercise`);
+    this.name = 'UnknownExerciseError';
   }
 }
+
+/** @deprecated renamed to UnknownExerciseError — exercises can now also
+ * come from an approved outside-Blueprint proposal, not only Blueprint. */
+export { UnknownExerciseError as UnknownBlueprintExerciseError };
 
 interface WorkoutSessionRow {
   session_id: string;
@@ -200,12 +206,13 @@ export class WorkoutSessionsRepo {
     return rows.map(rowToSession);
   }
 
-  /** Throws UnknownBlueprintExerciseError if exercise_id does not resolve
-   * in Blueprint — this is the enforcement point that keeps every
-   * persisted performance anchored to a real, resolvable exercise. */
+  /** Throws UnknownExerciseError if exercise_id resolves neither in
+   * Blueprint nor as an approved outside-Blueprint exercise (§4) — this
+   * is the enforcement point that keeps every persisted performance
+   * anchored to a real, resolvable, approved exercise. */
   addExercisePerformance(workoutSessionId: string, input: AddExercisePerformanceInput): ExercisePerformance {
-    if (!BlueprintAdapter.isKnownExercise(input.exercise_id)) {
-      throw new UnknownBlueprintExerciseError(input.exercise_id);
+    if (!resolveExercise(this.db, input.exercise_id)) {
+      throw new UnknownExerciseError(input.exercise_id);
     }
 
     const performanceId = newId('perf');

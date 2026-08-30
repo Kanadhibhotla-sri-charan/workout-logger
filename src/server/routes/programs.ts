@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type Database from 'better-sqlite3';
-import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { ProgramsRepo } from '../../repositories/programsRepo.js';
+import { UnknownExerciseError } from '../../repositories/workoutSessionsRepo.js';
 
 export const programsRouter = Router();
 
@@ -48,20 +48,22 @@ programsRouter.post('/:id/sessions', (req, res) => {
   if (!Array.isArray(exercises)) {
     return res.status(400).json({ error: 'exercises must be an array' });
   }
-  for (const ex of exercises) {
-    if (!BlueprintAdapter.isKnownExercise(ex.exercise_id)) {
-      return res.status(400).json({ error: `exercise_id "${ex.exercise_id}" is not a known Blueprint exercise id` });
-    }
-  }
 
   const repo = new ProgramsRepo(db(req));
-  const session = repo.createProgramSession({
-    program_id: req.params.id,
-    day_index,
-    name,
-    planned_session_type,
-    exercises,
-    notes,
-  });
-  res.status(201).json(session);
+  try {
+    const session = repo.createProgramSession({
+      program_id: req.params.id,
+      day_index,
+      name,
+      planned_session_type,
+      exercises,
+      notes,
+    });
+    res.status(201).json(session);
+  } catch (err) {
+    if (err instanceof UnknownExerciseError) {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
 });

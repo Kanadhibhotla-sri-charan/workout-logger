@@ -11,7 +11,7 @@
 // Bump CONTRACT_VERSION on any breaking shape change and add a migration
 // (see src/db/schema.sql + src/db/migrate.ts).
 
-export const CONTRACT_VERSION = '1.2.0';
+export const CONTRACT_VERSION = '1.3.0';
 
 /** A Blueprint entity id (exercise, physique target, aesthetic outcome,
  * functional goal, or equipment). Opaque to this app — never resolved
@@ -48,10 +48,104 @@ export interface Goal {
   /** For 'aesthetic': a Blueprint aestheticOutcome id. For 'functional': a
    * Blueprint functionalGoal id. Resolve only through BlueprintAdapter. */
   blueprint_ref: BlueprintId;
+  /** User-controlled rank (lower = higher priority). The system never
+   * infers or overrides this — spec §2.2. */
   priority: number;
   notes: string | null;
   active: boolean;
+  /** Recommended (or user-overridden) days between aesthetic-outcome
+   * reviews — spec §3. See src/engine/config.ts
+   * REVIEW_CADENCE_DEFAULT_DAYS for the recommended starting point. */
+  review_cadence_days: number;
+  /** How this goal was created. A 'natural_language' goal is only ever
+   * persisted after explicit user confirmation — see
+   * src/engine/goalCreation.ts — so both sources represent a confirmed
+   * activation by the time a Goal row exists. */
+  source: 'structured' | 'natural_language';
+  source_text: string | null;
   created_at: string;
+}
+
+export type GoalEventType =
+  | 'created'
+  | 'activated'
+  | 'deactivated'
+  | 'priority_changed'
+  | 'cadence_changed'
+  | 'exercise_changed'
+  | 'programming_modified';
+
+/** One entry in a Goal's append-only history — spec §18: "when a goal
+ * returns, use its historical evidence rather than restarting from
+ * zero." `detail`'s shape depends on `event_type` (see
+ * src/repositories/goalEventsRepo.ts). */
+export interface GoalEvent {
+  id: string;
+  goal_id: string;
+  event_type: GoalEventType;
+  occurred_at: string;
+  detail: Record<string, unknown> | null;
+  notes: string | null;
+}
+
+/** A dated 1-5 user assessment of aesthetic progress toward one goal —
+ * spec §3. Never conflate with performance/strength data. */
+export interface AestheticAssessment {
+  id: string;
+  goal_id: string;
+  date: string;
+  /** 1 = significantly worse .. 5 = significantly improved. See
+   * src/engine/config.ts ASSESSMENT_SCALE. */
+  rating: 1 | 2 | 3 | 4 | 5;
+  notes: string | null;
+  created_at: string;
+}
+
+/** A dated body measurement — spec §3. `goal_id` is nullable and
+ * singular: not every measurement applies to every goal, and this app
+ * does not assume one does. */
+export interface Measurement {
+  id: string;
+  goal_id: string | null;
+  date: string;
+  metric_name: string;
+  value: number;
+  unit: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export type BadmintonIntensity = 'low' | 'medium' | 'high';
+export type BadmintonFormat = 'singles' | 'doubles';
+
+/** Badminton-specific detail attached to a WorkoutSession whose
+ * session_type is 'badminton' — spec §15. Badminton is a first-class
+ * modality, not converted into hypertrophy-set-equivalents (see
+ * docs/TRAINING_ENGINE_DESIGN.md's badminton section). */
+export interface BadmintonSessionDetails {
+  workout_session_id: string;
+  intensity: BadmintonIntensity | null;
+  format: BadmintonFormat | null;
+  games_count: number | null;
+  session_quality: 1 | 2 | 3 | 4 | 5 | null;
+  post_session_fatigue: 1 | 2 | 3 | 4 | 5 | null;
+  notes: string | null;
+}
+
+export type OutsideBlueprintJustification = 'blueprint_inadequate' | 'contextual_constraint' | 'meaningful_advantage';
+
+/** A proposed exercise outside Blueprint's pool — spec §4.2. Never
+ * prescribable until `approved`. See
+ * src/engine/exerciseUniverse.ts for the resolution/enforcement point. */
+export interface OutsideBlueprintExercise {
+  id: string;
+  name: string;
+  description: string | null;
+  justification_category: OutsideBlueprintJustification;
+  justification_text: string;
+  proposed_at: string;
+  approved: boolean;
+  approved_at: string | null;
 }
 
 export type ProgramStatus = 'draft' | 'active' | 'completed' | 'archived';
