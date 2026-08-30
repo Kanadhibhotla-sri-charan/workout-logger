@@ -7,6 +7,7 @@ function baseTarget(overrides: Partial<TargetBuildContext> = {}): TargetBuildCon
     target_type: 'physique_target',
     target_id: 'mid-pec',
     tier: 'primary',
+    is_specialization: true,
     goal_id: 'goal_1',
     goal_priority: 1,
     current_weekly_primary_sets: 0,

@@ -62,7 +62,7 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     expect(result.estimated_minutes).toBeLessThanOrEqual(60);
   });
 
-  it('produces no exercises (only skipped_targets) when there are no active goals at all', () => {
+  it('remediation §7.2: still programs the physique via normal_development when there are no active goals at all — the two-goal limit is not a two-muscle limit', () => {
     const user = new UsersRepo(db).getOrCreateDefault();
     new TrainingProfileRepo(db).upsert(user.id, {
       timezone: 'Asia/Kolkata',
@@ -76,8 +76,10 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     });
 
     const result = assembleAndBuildWorkout(db, MONDAY, 60);
-    expect(result.exercises).toEqual([]);
-    expect(result.skipped_targets).toEqual([]);
+    expect(result.exercises.length).toBeGreaterThan(0);
+    for (const planned of result.exercises) {
+      expect(planned.classification).not.toBe('specialization');
+    }
   });
 
   it('works with no TrainingProfile at all (falls back to empty equipment/training days, so nothing is scheduled)', () => {
@@ -141,6 +143,38 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     expect(midPecPlan).toBeUndefined();
     const skip = result.skipped_targets.find((s) => s.target_id === 'mid-pec');
     expect(skip?.reason).toContain('recovery');
+  });
+
+  it('remediation §7/§14: a real workout is a mix of specialization AND normal_development/maintenance work, with specialization protected when time is scarce', () => {
+    const FULL_EQUIPMENT = ['band', 'barbell', 'bench', 'block or plate', 'cable', 'dumbbell', 'ez-bar', 'hip-thrust machine', 'machine', 'pull-up bar', 'rack', 'smith machine'];
+
+    const generous = (() => {
+      const generousDb = openDb(':memory:');
+      setupProfileAndGoal(generousDb, FULL_EQUIPMENT);
+      return assembleAndBuildWorkout(generousDb, MONDAY, 240); // generous budget: everything that's scheduled today should fit
+    })();
+
+    const specializationPlans = generous.exercises.filter((e) => e.classification === 'specialization');
+    const nonSpecializationPlans = generous.exercises.filter((e) => e.classification !== 'specialization');
+    expect(specializationPlans.length).toBeGreaterThan(0);
+    expect(nonSpecializationPlans.length).toBeGreaterThan(0);
+    // Every non-specialization plan is classified normal_development
+    // (nothing has prior volume yet in this fresh database) or
+    // maintenance — never invented as specialization.
+    for (const plan of nonSpecializationPlans) {
+      expect(['normal_development', 'maintenance']).toContain(plan.classification);
+    }
+
+    const scarce = (() => {
+      const scarceDb = openDb(':memory:');
+      setupProfileAndGoal(scarceDb, FULL_EQUIPMENT);
+      return assembleAndBuildWorkout(scarceDb, MONDAY, 15); // only room for ~one exercise
+    })();
+    // Under a scarce budget, the specialization goal's own target
+    // (mid-pec) must still be the one preserved — never bumped by
+    // normal-development work, which sits at a synthetic lower
+    // priority precisely so this can never happen.
+    expect(scarce.exercises.some((e) => e.target_id === 'mid-pec' && e.classification === 'specialization')).toBe(true);
   });
 
   it('remediation §4: a recently-used-but-not-current exercise is still selectable (Gate 4 sees real recent_exercise_ids, not an empty placeholder)', () => {

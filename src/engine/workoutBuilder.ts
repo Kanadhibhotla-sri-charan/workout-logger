@@ -36,7 +36,7 @@ import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { TIME_ESTIMATION } from './config.js';
+import { REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
 import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, type FittableItem } from './constraintEngine.js';
 import { daysBetween } from './dateMath.js';
 import { allocateFrequency } from './frequencyEngine.js';
@@ -60,6 +60,17 @@ export interface ExerciseSessionHistory {
   sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
 }
 
+/** Remediation §7.1/§14: every relevant target is classified so the
+ * two-active-aesthetic-goal limit never means "only two muscles get
+ * trained." 'specialization' = tied to an active goal's own
+ * PriorityMap; 'normal_development' = not goal-tied, currently at zero
+ * direct volume, needs building up; 'maintenance' = not goal-tied,
+ * already carries some volume, gets upkeep work rather than
+ * unnecessary extra. The last two are both derived from the SAME
+ * volumeEngine.decideVolume call every target already goes through —
+ * no separate classification formula, just reading its real action. */
+export type TargetClassification = 'specialization' | 'normal_development' | 'maintenance';
+
 /** Everything buildWorkout needs for one target, already gathered by
  * the caller (normally assembleWorkoutBuildInput) — no database access
  * happens below this type. */
@@ -67,6 +78,12 @@ export interface TargetBuildContext {
   target_type: TargetType;
   target_id: BlueprintId;
   tier: TargetPriorityTier;
+  /** True for a target reached via an active goal's own PriorityMap;
+   * false for a target this pipeline is covering only because
+   * remediation §7.1 requires the whole physique to stay programmed,
+   * not just specialization targets. Drives `classification` below —
+   * see its doc comment. */
+  is_specialization: boolean;
   goal_id: string;
   goal_priority: number;
   current_weekly_primary_sets: number;
@@ -102,6 +119,7 @@ export interface PlannedExercise {
   target_type: TargetType;
   target_id: BlueprintId;
   role: string;
+  classification: TargetClassification;
   target_sets: number;
   target_reps_min: number;
   target_reps_max: number;
@@ -124,6 +142,7 @@ export interface PlannedExercise {
 export interface SkippedTarget {
   target_type: TargetType;
   target_id: BlueprintId;
+  classification: TargetClassification;
   reason: string;
 }
 
@@ -158,6 +177,21 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   );
 
   for (const target of orderedTargets) {
+    // Remediation §7.1/§14: classification is derived once, up front,
+    // from data already on the target — not a separate formula, and
+    // not something later steps can silently override. A
+    // specialization target is always 'specialization' regardless of
+    // its current volume; a non-goal target is 'normal_development'
+    // when it currently has zero direct volume (this pipeline's only
+    // path to volumeEngine returning 'increase' for a non-specialization
+    // target — see volumeEngine.decideVolume's §9 starting-volume
+    // branch) and 'maintenance' otherwise.
+    const classification: TargetClassification = target.is_specialization
+      ? 'specialization'
+      : target.current_weekly_primary_sets === 0
+        ? 'normal_development'
+        : 'maintenance';
+
     const recovery = applyRecoveryConstraint({
       target_type: target.target_type,
       target_id: target.target_id,
@@ -170,7 +204,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     });
 
     if (recovery.priority_adjustment === 'avoid') {
-      skipped.push({ target_type: target.target_type, target_id: target.target_id, reason: `recovery: ${recovery.reasoning}` });
+      skipped.push({ target_type: target.target_type, target_id: target.target_id, classification, reason: `recovery: ${recovery.reasoning}` });
       continue;
     }
 
@@ -194,7 +228,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
 
     const desiredWeekly = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : target.current_weekly_primary_sets;
     if (desiredWeekly <= 0) {
-      skipped.push({ target_type: target.target_type, target_id: target.target_id, reason: 'No weekly volume recommended yet for this target.' });
+      skipped.push({ target_type: target.target_type, target_id: target.target_id, classification, reason: 'No weekly volume recommended yet for this target.' });
       continue;
     }
 
@@ -210,6 +244,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       skipped.push({
         target_type: target.target_type,
         target_id: target.target_id,
+        classification,
         reason: `Not scheduled for ${input.weekday} — assigned days are ${frequency.assigned_days.join(', ') || 'none'}.`,
       });
       continue;
@@ -234,6 +269,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       skipped.push({
         target_type: target.target_type,
         target_id: target.target_id,
+        classification,
         reason: 'No equipment-feasible (and, for a lower-body target, Monday-compliant) Blueprint exercise trains this target.',
       });
       continue;
@@ -252,6 +288,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         skipped.push({
           target_type: target.target_type,
           target_id: target.target_id,
+          classification,
           reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription for this target — exposing this gap rather than inventing one (spec §25).',
         });
         continue;
@@ -281,6 +318,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       skipped.push({
         target_type: target.target_type,
         target_id: target.target_id,
+        classification,
         reason: `No Blueprint development-package rep/RIR prescription is available for "${selection.exercise_id}" against this target — exposing this gap rather than inventing a rep range (spec §25).`,
       });
       continue;
@@ -333,6 +371,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_type: target.target_type,
         target_id: target.target_id,
         role: target.tier,
+        classification,
         target_sets: sessionSets,
         target_reps_min: reps.min,
         target_reps_max: reps.max,
@@ -352,7 +391,12 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   log.push(fitted.reasoning);
 
   for (const dropped of fitted.dropped) {
-    skipped.push({ target_type: dropped.planned.target_type, target_id: dropped.planned.target_id, reason: `Dropped by time-fitting: ${fitted.reasoning}` });
+    skipped.push({
+      target_type: dropped.planned.target_type,
+      target_id: dropped.planned.target_id,
+      classification: dropped.planned.classification,
+      reason: `Dropped by time-fitting: ${fitted.reasoning}`,
+    });
   }
 
   const exercises: PlannedExercise[] = fitted.kept.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes }));
@@ -448,6 +492,56 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
       ? { intensity: badmintonDetails.intensity as BadmintonIntensity, post_session_fatigue: badmintonDetails.post_session_fatigue }
       : null;
 
+  /** Builds one TargetBuildContext from real exposure/history data —
+   * shared by both the goal-linked loop below and the remediation
+   * §7.1 normal-development/maintenance loop that follows it, so the
+   * two paths can never drift into gathering data differently. */
+  function makeTargetContext(
+    targetType: TargetType,
+    targetId: BlueprintId,
+    tier: TargetPriorityTier,
+    isSpecialization: boolean,
+    goalId: string,
+    goalPriority: number,
+    reviewCadenceDays: number,
+    mostRecentAssessment: { rating: 1 | 2 | 3 | 4 | 5; date: string } | null
+  ): TargetBuildContext {
+    const key = `${targetType}:${targetId}`;
+    const weekly = weeklyByTarget.get(key);
+    const rolling = rollingByTarget.get(key);
+    const touches = touchesByTarget.get(key) ?? [];
+    const mostRecentTouch = touches[0];
+
+    // Group this target's touches by exercise id — the per-exercise
+    // (not per-target) history progressionEngine actually needs.
+    // touches is already most-recent-first (gatherTargetTouches sorts
+    // it), so each exercise's list stays most-recent-first too.
+    const exerciseHistory: Record<BlueprintId, ExerciseSessionHistory[]> = {};
+    for (const touch of touches) {
+      (exerciseHistory[touch.exercise_id] ??= []).push({ date: touch.date, sets: touch.sets });
+    }
+
+    return {
+      target_type: targetType,
+      target_id: targetId,
+      tier,
+      is_specialization: isSpecialization,
+      goal_id: goalId,
+      goal_priority: goalPriority,
+      current_weekly_primary_sets: weekly?.primary_sets ?? 0,
+      weekly_exposure_units: weekly?.exposure_units ?? 0,
+      rolling_exposure_units: rolling?.exposure_units ?? 0,
+      rolling_window_days: state.rolling_window_days,
+      most_recent_assessment: mostRecentAssessment,
+      review_cadence_days: reviewCadenceDays,
+      days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, date) : null,
+      recent_badminton: recentBadmintonSignal,
+      recent_exercise_ids: [...new Set(touches.map((t) => t.exercise_id))],
+      current_exercise_id: mostRecentTouch?.exercise_id ?? null,
+      exercise_history: exerciseHistory,
+    };
+  }
+
   const targets: TargetBuildContext[] = [];
   const seen = new Set<string>();
   for (let i = 0; i < state.active_goals.length; i++) {
@@ -461,39 +555,49 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
       if (seen.has(key)) continue; // first (highest-priority) goal to touch a target wins
       seen.add(key);
 
-      const weekly = weeklyByTarget.get(key);
-      const rolling = rollingByTarget.get(key);
-      const touches = touchesByTarget.get(key) ?? [];
-      const mostRecentTouch = touches[0];
-
-      // Group this target's touches by exercise id — the per-exercise
-      // (not per-target) history progressionEngine actually needs.
-      // touches is already most-recent-first (gatherTargetTouches
-      // sorts it), so each exercise's list stays most-recent-first too.
-      const exerciseHistory: Record<BlueprintId, ExerciseSessionHistory[]> = {};
-      for (const touch of touches) {
-        (exerciseHistory[touch.exercise_id] ??= []).push({ date: touch.date, sets: touch.sets });
-      }
-
-      targets.push({
-        target_type: t.target_type,
-        target_id: t.target_id,
-        tier: t.tier,
-        goal_id: goal.id,
-        goal_priority: goal.priority,
-        current_weekly_primary_sets: weekly?.primary_sets ?? 0,
-        weekly_exposure_units: weekly?.exposure_units ?? 0,
-        rolling_exposure_units: rolling?.exposure_units ?? 0,
-        rolling_window_days: state.rolling_window_days,
-        most_recent_assessment: mostRecentAssessment ? { rating: mostRecentAssessment.rating, date: mostRecentAssessment.date } : null,
-        review_cadence_days: goal.review_cadence_days,
-        days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, date) : null,
-        recent_badminton: recentBadmintonSignal,
-        recent_exercise_ids: [...new Set(touches.map((t2) => t2.exercise_id))],
-        current_exercise_id: mostRecentTouch?.exercise_id ?? null,
-        exercise_history: exerciseHistory,
-      });
+      targets.push(
+        makeTargetContext(
+          t.target_type,
+          t.target_id,
+          t.tier,
+          true,
+          goal.id,
+          goal.priority,
+          goal.review_cadence_days,
+          mostRecentAssessment ? { rating: mostRecentAssessment.rating, date: mostRecentAssessment.date } : null
+        )
+      );
     }
+  }
+
+  // Remediation §7.1/§14: "the two-goal limit controls specialization
+  // priority — it does NOT remove chest, back, legs, shoulders, arms,
+  // other relevant musculature from normal programming." Every real
+  // Blueprint physique target not already covered by an active goal
+  // still gets programmed here, at a synthetic priority number that
+  // sorts after every real goal (1000+) so specialization work is
+  // always protected first by the exact same priority-ordering
+  // mechanism buildWorkout and fitToTimeBudget already use — no
+  // separate "protect specialization" rule needed.
+  const NON_SPECIALIZATION_GOAL_ID = '__normal_development_or_maintenance__';
+  const allPhysiqueTargets = [...BlueprintAdapter.getTargets()].sort((a, b) => a.id.localeCompare(b.id));
+  for (const [index, physiqueTarget] of allPhysiqueTargets.entries()) {
+    const key = `physique_target:${physiqueTarget.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    targets.push(
+      makeTargetContext(
+        'physique_target',
+        physiqueTarget.id,
+        'supporting',
+        false,
+        NON_SPECIALIZATION_GOAL_ID,
+        1000 + index,
+        REVIEW_CADENCE_DEFAULT_DAYS.aesthetic,
+        null // no goal, so no aesthetic-assessment history applies
+      )
+    );
   }
 
   return buildWorkout({
