@@ -65,6 +65,22 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     expect(result.estimated_minutes).toBeLessThanOrEqual(60);
   });
 
+  it('remediation §17/§25: deterministic at the real impure boundary too — identical DB state produces byte-identical output on repeat calls, never randomness', () => {
+    setupProfileAndGoal(db, ['barbell', 'bench', 'rack', 'cable']);
+    const sessionsRepo = new WorkoutSessionsRepo(db);
+    const session = sessionsRepo.createSession({ date: PRIOR_THURSDAY, session_type: 'gym', status: 'completed' });
+    sessionsRepo.addExercisePerformance(session.session_id, {
+      exercise_id: 'flat-barbell-bench-press',
+      order: 1,
+      role: 'primary',
+      sets: [{ set_number: 1, weight: 60, reps: 8, completed: true }],
+    });
+
+    const first = assembleAndBuildWorkout(db, MONDAY, 60);
+    const second = assembleAndBuildWorkout(db, MONDAY, 60);
+    expect(second).toEqual(first);
+  });
+
   it('remediation §7.2: still programs the physique via normal_development when there are no active goals at all — the two-goal limit is not a two-muscle limit', () => {
     const user = new UsersRepo(db).getOrCreateDefault();
     new TrainingProfileRepo(db).upsert(user.id, {
