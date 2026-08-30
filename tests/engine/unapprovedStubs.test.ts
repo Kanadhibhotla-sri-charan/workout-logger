@@ -8,38 +8,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { NotApprovedError } from '../../src/engine/errors.js';
-import { allocateVolume } from '../../src/engine/volumeEngine.js';
 import { allocateFrequency } from '../../src/engine/frequencyEngine.js';
 import { selectExercise } from '../../src/engine/exerciseSelector.js';
 import { buildWorkout } from '../../src/engine/workoutBuilder.js';
 import { explainExerciseSelection } from '../../src/engine/explanationEngine.js';
 
 describe('unapproved engine modules — throw, never silently invent an answer', () => {
-  it('volumeEngine.allocateVolume throws NotApprovedError("hypertrophy-volume-model")', () => {
-    expect(() =>
-      allocateVolume({
-        target_type: 'physique_target',
-        target_id: 'triceps',
-        blueprint_volume_guidance: undefined,
-        current_exposure: {
-          target_type: 'physique_target',
-          target_id: 'triceps',
-          period_start: '2026-08-31',
-          period_end: '2026-09-06',
-          exercise_ids: [],
-          total_sets: 0,
-          exposure_units: 0,
-        },
-        goal_priority: 1,
-      })
-    ).toThrow(NotApprovedError);
-    try {
-      allocateVolume({} as any);
-    } catch (err) {
-      expect((err as NotApprovedError).decision).toBe('hypertrophy-volume-model');
-    }
-  });
-
   it('frequencyEngine.allocateFrequency throws NotApprovedError("frequency-allocation-model")', () => {
     expect(() =>
       allocateFrequency({

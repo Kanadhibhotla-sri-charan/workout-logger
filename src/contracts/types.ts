@@ -11,7 +11,7 @@
 // Bump CONTRACT_VERSION on any breaking shape change and add a migration
 // (see src/db/schema.sql + src/db/migrate.ts).
 
-export const CONTRACT_VERSION = '1.3.0';
+export const CONTRACT_VERSION = '1.4.0';
 
 /** A Blueprint entity id (exercise, physique target, aesthetic outcome,
  * functional goal, or equipment). Opaque to this app — never resolved
@@ -276,6 +276,14 @@ export interface TrainingExposure {
   exercise_ids: BlueprintId[];
   total_sets: number;
   exposure_units: number;
+  /** total_sets broken down by role — total_sets = primary_sets +
+   * secondary_sets always. Blueprint's own weekly_volume guidance
+   * ("18-20 hard sets/muscle/week") means direct/primary sets in the
+   * classic sense, not a primary+secondary blend — src/engine/volumeEngine.ts
+   * compares against primary_sets, never total_sets or exposure_units,
+   * for exactly that reason. See docs/VOLUME_ENGINE.md. */
+  primary_sets: number;
+  secondary_sets: number;
 }
 
 /**

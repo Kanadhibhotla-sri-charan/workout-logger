@@ -169,6 +169,8 @@ export function aggregateExposure(
         if (existing) {
           existing.total_sets += c.completed_sets;
           existing.exposure_units += c.exposure_units;
+          if (c.role === 'primary') existing.primary_sets += c.completed_sets;
+          else existing.secondary_sets += c.completed_sets;
           if (!existing.exercise_ids.includes(c.exercise_id)) existing.exercise_ids.push(c.exercise_id);
         } else {
           byTarget.set(key, {
@@ -179,6 +181,8 @@ export function aggregateExposure(
             exercise_ids: [c.exercise_id],
             total_sets: c.completed_sets,
             exposure_units: c.exposure_units,
+            primary_sets: c.role === 'primary' ? c.completed_sets : 0,
+            secondary_sets: c.role === 'secondary' ? c.completed_sets : 0,
           });
         }
       }
