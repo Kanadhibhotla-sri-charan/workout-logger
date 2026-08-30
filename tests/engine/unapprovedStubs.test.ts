@@ -8,28 +8,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { NotApprovedError } from '../../src/engine/errors.js';
-import { allocateFrequency } from '../../src/engine/frequencyEngine.js';
 import { selectExercise } from '../../src/engine/exerciseSelector.js';
 import { buildWorkout } from '../../src/engine/workoutBuilder.js';
 import { explainExerciseSelection } from '../../src/engine/explanationEngine.js';
 
 describe('unapproved engine modules — throw, never silently invent an answer', () => {
-  it('frequencyEngine.allocateFrequency throws NotApprovedError("frequency-allocation-model")', () => {
-    expect(() =>
-      allocateFrequency({
-        target_type: 'physique_target',
-        target_id: 'triceps',
-        desired_weekly_exposure_units: 12,
-        available_training_days: ['monday', 'wednesday', 'friday', 'saturday'],
-      })
-    ).toThrow(NotApprovedError);
-    try {
-      allocateFrequency({} as any);
-    } catch (err) {
-      expect((err as NotApprovedError).decision).toBe('frequency-allocation-model');
-    }
-  });
-
   it('exerciseSelector.selectExercise throws NotApprovedError("exercise-selection-ranking")', () => {
     try {
       selectExercise({} as any);

@@ -1,4 +1,5 @@
-// Constraint Engine — spec §17 (time), §18 (equipment). Only the parts of
+// Constraint Engine — spec §6.2/17 (time), §4.1/18 (equipment), §16
+// (the Monday-never-lower-body hard schedule rule). Only the parts of
 // these constraints that are objective facts, not judgment calls, are
 // implemented here: "is this equipment actually available" and "does
 // this fit in the remaining time budget, given an explicit time
@@ -11,6 +12,9 @@
 // docs/TRAINING_ENGINE_DESIGN.md.
 
 import type { BlueprintExercise } from '../blueprint/adapter.js';
+import { BlueprintAdapter } from '../blueprint/adapter.js';
+import type { Weekday } from '../contracts/types.js';
+import { FORBIDDEN_BODY_FOCUS_BY_DAY } from './config.js';
 
 /**
  * True iff every piece of equipment `exercise` requires is present in
@@ -52,4 +56,24 @@ export function remainingBudgetMinutes(budgetMinutes: number, elapsedMinutes: nu
  */
 export function fitsWithinBudget(budgetMinutes: number, elapsedMinutes: number, itemMinutes: number): boolean {
   return elapsedMinutes + itemMinutes <= budgetMinutes;
+}
+
+/**
+ * Spec §16's one hard schedule rule: "Monday must never be generated as
+ * a lower-body day." Resolves `physiqueTargetId` to its Blueprint
+ * `parent_region` and checks that against
+ * FORBIDDEN_BODY_FOCUS_BY_DAY[day] (config.ts's
+ * LOWER_BODY_PHYSIQUE_REGIONS for monday, currently the only day with
+ * any forbidden regions). Returns true (allowed) for an unresolvable
+ * target id — this function gates a known lower-body region, it does
+ * not itself validate that the id exists.
+ */
+export function isBodyFocusAllowedOnDay(physiqueTargetId: string, day: Weekday): boolean {
+  const forbidden = FORBIDDEN_BODY_FOCUS_BY_DAY[day];
+  if (!forbidden || forbidden.length === 0) return true;
+
+  const target = BlueprintAdapter.getTarget(physiqueTargetId);
+  if (!target) return true;
+
+  return !forbidden.includes(target.parent_region);
 }

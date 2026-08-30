@@ -97,11 +97,24 @@ export const DEFAULT_WEEKLY_SCHEDULE: Record<Weekday, 'gym' | 'badminton' | 'res
   sunday: 'badminton',
 };
 
+/** [DEFAULT] Blueprint's own physique-target `parent_region` values
+ * (verified against src/blueprint/snapshot/programming.json) this app
+ * classifies as "lower body" for spec §16's Monday rule. Blueprint has
+ * no native upper/lower tag of its own — this is a small, exhaustive,
+ * uncontroversial grouping of its existing region vocabulary (quads,
+ * hamstrings, calves, hips), not an invented anatomical model. `core`,
+ * `forearms`, and `neck` are deliberately excluded (neither clearly
+ * upper nor lower). See src/engine/constraintEngine.ts's
+ * isBodyFocusAllowedOnDay. */
+export const LOWER_BODY_PHYSIQUE_REGIONS: readonly string[] = ['quads', 'hamstrings', 'calves', 'hips'];
+
 /** [SPEC] §16: "Monday must never be generated as a lower-body day."
  * Hard constraint, checked deterministically — see
- * constraintEngine.isBodyFocusAllowedOnDay. */
+ * constraintEngine.isBodyFocusAllowedOnDay, which resolves a
+ * physique_target's parent_region against LOWER_BODY_PHYSIQUE_REGIONS
+ * rather than matching against this list's labels directly. */
 export const FORBIDDEN_BODY_FOCUS_BY_DAY: Partial<Record<Weekday, readonly string[]>> = {
-  monday: ['lower', 'legs'],
+  monday: LOWER_BODY_PHYSIQUE_REGIONS,
 };
 
 /** [DEFAULT] §2.1: natural-language goal matching needs *some* minimum
@@ -128,6 +141,7 @@ export const ENGINE_CONFIG = {
   progressionIncrements: PROGRESSION_INCREMENTS,
   recoveryThresholds: RECOVERY_THRESHOLDS,
   defaultWeeklySchedule: DEFAULT_WEEKLY_SCHEDULE,
+  lowerBodyPhysiqueRegions: LOWER_BODY_PHYSIQUE_REGIONS,
   forbiddenBodyFocusByDay: FORBIDDEN_BODY_FOCUS_BY_DAY,
   goalMatch: GOAL_MATCH,
 } as const;

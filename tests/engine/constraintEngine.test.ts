@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterEquipmentFeasible,
   fitsWithinBudget,
+  isBodyFocusAllowedOnDay,
   isExerciseEquipmentFeasible,
   remainingBudgetMinutes,
 } from '../../src/engine/constraintEngine.js';
@@ -52,5 +53,47 @@ describe('time budget primitives — §17', () => {
 
   it('exactly filling the budget is allowed (inclusive boundary)', () => {
     expect(fitsWithinBudget(60, 30, 30)).toBe(true);
+  });
+});
+
+describe('isBodyFocusAllowedOnDay — §16 (required test 12: Monday never lower-body)', () => {
+  it('forbids a quads target on Monday', () => {
+    expect(isBodyFocusAllowedOnDay('quads', 'monday')).toBe(false);
+  });
+
+  it('forbids a hamstrings target on Monday', () => {
+    expect(isBodyFocusAllowedOnDay('hamstrings', 'monday')).toBe(false);
+  });
+
+  it('forbids a calves target (gastrocnemius, parent_region "calves") on Monday', () => {
+    expect(isBodyFocusAllowedOnDay('gastrocnemius', 'monday')).toBe(false);
+  });
+
+  it('forbids a hips target (gluteus-maximus, parent_region "hips") on Monday', () => {
+    expect(isBodyFocusAllowedOnDay('gluteus-maximus', 'monday')).toBe(false);
+  });
+
+  it('allows an upper-body target (chest) on Monday', () => {
+    expect(isBodyFocusAllowedOnDay('upper-pec', 'monday')).toBe(true);
+  });
+
+  it('allows a lower-body target on any other day — the rule is Monday-specific', () => {
+    for (const day of ['tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const) {
+      expect(isBodyFocusAllowedOnDay('quads', day)).toBe(true);
+    }
+  });
+
+  it('is permissive (true) for an unresolvable target id — this function gates known lower-body regions, it does not validate ids', () => {
+    expect(isBodyFocusAllowedOnDay('not-a-real-target', 'monday')).toBe(true);
+  });
+
+  it('every real Blueprint lower-body physique target is forbidden on Monday', () => {
+    const lowerBodyTargets = BlueprintAdapter.getTargets().filter((t) =>
+      ['quads', 'hamstrings', 'calves', 'hips'].includes(t.parent_region)
+    );
+    expect(lowerBodyTargets.length).toBeGreaterThan(0);
+    for (const target of lowerBodyTargets) {
+      expect(isBodyFocusAllowedOnDay(target.id, 'monday')).toBe(false);
+    }
   });
 });
