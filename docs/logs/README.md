@@ -43,3 +43,4 @@ story of how the app got to its current state.
 - [2026-08-30-35-remediation-implementation-report.md](2026-08-30-35-remediation-implementation-report.md)
 - [2026-08-30-36-final-pass-weekly-allocation-rewrite.md](2026-08-30-36-final-pass-weekly-allocation-rewrite.md)
 - [2026-08-30-37-final-pass-25-required-tests.md](2026-08-30-37-final-pass-25-required-tests.md)
+- [2026-08-30-38-final-pass-realistic-week-fixture-update.md](2026-08-30-38-final-pass-realistic-week-fixture-update.md)

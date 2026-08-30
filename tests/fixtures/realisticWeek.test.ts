@@ -1,6 +1,11 @@
-// Remediation §19: "at least one fixture representing a realistic week
-// (Mon/Tue gym, Wed rest, Thu/Fri gym, Sat/Sun badminton/rest) that
-// includes compound pressing so secondary exposure is tested end-to-end."
+// Remediation §19 / Final Programming-Engine Pass §26: "at least one
+// integration fixture" representing a realistic week (Mon/Tue gym, Wed
+// rest, Thu/Fri gym, Sat/Sun badminton/rest), including: PPL+Upper
+// context; at least one compound press; actual logged exercise
+// history; actual badminton history; at least two active ranked
+// aesthetic goals; normal-development targets; equipment constraints;
+// a realistic time limit — invoking the real production generation
+// path, never isolated function calls.
 //
 // This exercises the FULL real production path — TrainingProfileRepo,
 // GoalsRepo, WorkoutSessionsRepo, BadmintonSessionDetailsRepo,
@@ -87,9 +92,15 @@ describe('fixture: a realistic week (Mon/Tue gym, Wed rest, Thu/Fri gym, Sat/Sun
       ],
     });
 
-    // "Chest looks flat from the side" -> primary_targets: ['mid-pec'].
+    // Final Pass §26: at least two active, ranked aesthetic goals.
+    // "Chest looks flat from the side" -> primary_targets: ['mid-pec']
+    // (push/upper-compatible), ranked #1.
     const outcome = BlueprintAdapter.getAestheticGoals().find((o) => o.primary_targets.includes('mid-pec'))!;
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: outcome.id, priority: 1 });
+    // arm-side-thickness -> primary_targets: ['brachialis-arm-thickness']
+    // (pull-compatible — a genuinely different PPL session than goal 1),
+    // ranked #2.
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'arm-side-thickness', priority: 2 });
 
     // Real gym sessions Monday/Tuesday/Thursday/Friday of week 1 — the
     // same compound press each time, so its secondary contribution
@@ -160,11 +171,33 @@ describe('fixture: a realistic week (Mon/Tue gym, Wed rest, Thu/Fri gym, Sat/Sun
     }
   });
 
-  it('the mid-pec specialization goal is still protected and present across the full week, alongside real normal-development coverage of the rest of the physique', () => {
+  it('both ranked specialization goals stay protected and present across the week, alongside real normal-development coverage of the rest of the physique', () => {
+    // Monday (push) is goal 1's own day — mid-pec must be there.
     const monday2 = assembleAndBuildWorkout(db, MON2, 90);
-    const specialization = monday2.exercises.filter((e) => e.classification === 'specialization');
-    const rest = monday2.exercises.filter((e) => e.classification !== 'specialization');
-    expect(specialization.some((e) => e.target_id === 'mid-pec')).toBe(true);
-    expect(rest.length).toBeGreaterThan(0);
+    const mondaySpecialization = monday2.exercises.filter((e) => e.classification === 'specialization');
+    const mondayRest = monday2.exercises.filter((e) => e.classification !== 'specialization');
+    expect(mondaySpecialization.some((e) => e.target_id === 'mid-pec')).toBe(true);
+    expect(mondayRest.length).toBeGreaterThan(0);
+
+    // Tuesday (pull) is goal 2's own day — brachialis-arm-thickness must
+    // be there too, proving the #2-ranked goal isn't starved merely
+    // because goal 1 exists and outranks it (Final Pass §3 Step 2).
+    const tuesday2 = assembleAndBuildWorkout(db, TUE2, 90);
+    expect(tuesday2.exercises.some((e) => e.target_id === 'brachialis-arm-thickness' && e.classification === 'specialization')).toBe(true);
+    expect(tuesday2.active_goals.length).toBe(2);
+    expect(tuesday2.active_goals.map((g) => g.priority).sort()).toEqual([1, 2]);
+  });
+
+  it('Final Pass §5/§12: the week carries real, coordinated PPL+Upper session purposes — Monday push, Tuesday pull, Thursday legs, Friday upper', () => {
+    const expectedPurposes: Record<string, string> = { [MON1]: 'push', [TUE1]: 'pull', [THU1]: 'legs', [FRI1]: 'upper' };
+    for (const [date, expectedPurpose] of Object.entries(expectedPurposes)) {
+      const result = assembleAndBuildWorkout(db, date, 90);
+      expect(result.exercises.length).toBeGreaterThan(0);
+      for (const plan of result.exercises) {
+        if (plan.target_type === 'physique_target') {
+          expect(plan.decision.session_purpose).toBe(expectedPurpose);
+        }
+      }
+    }
   });
 });
