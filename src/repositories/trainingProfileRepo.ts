@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
-import type { RecurringActivity, TrainingProfile, Weekday } from '../contracts/types.js';
+import { WEEKDAYS, type RecurringActivity, type TrainingProfile, type Weekday } from '../contracts/types.js';
 import { isValidTimezone } from '../lib/timezone.js';
 import { newId, nowIso } from './ids.js';
 
@@ -20,6 +20,7 @@ export class InvalidTimezoneError extends Error {
 
 export interface UpsertTrainingProfileInput {
   timezone: string;
+  week_start_day: Weekday;
   training_days: Weekday[];
   preferred_split?: string | null;
   default_session_duration_minutes: number;
@@ -33,6 +34,7 @@ interface TrainingProfileRow {
   id: string;
   user_id: string;
   timezone: string;
+  week_start_day: Weekday;
   training_days: string;
   preferred_split: string | null;
   default_session_duration_minutes: number;
@@ -49,6 +51,9 @@ export class TrainingProfileRepo {
   upsert(userId: string, input: UpsertTrainingProfileInput): TrainingProfile {
     if (!isValidTimezone(input.timezone)) {
       throw new InvalidTimezoneError(input.timezone);
+    }
+    if (!WEEKDAYS.includes(input.week_start_day)) {
+      throw new Error(`week_start_day must be one of ${WEEKDAYS.join('|')}`);
     }
     for (const equipmentId of input.available_equipment) {
       if (!BlueprintAdapter.getEquipment(equipmentId)) {
@@ -70,6 +75,7 @@ export class TrainingProfileRepo {
       id,
       user_id: userId,
       timezone: input.timezone,
+      week_start_day: input.week_start_day,
       training_days: JSON.stringify(input.training_days),
       preferred_split: input.preferred_split ?? null,
       default_session_duration_minutes: input.default_session_duration_minutes,
@@ -86,6 +92,7 @@ export class TrainingProfileRepo {
           .prepare(
             `UPDATE training_profiles SET
                timezone = @timezone,
+               week_start_day = @week_start_day,
                training_days = @training_days,
                preferred_split = @preferred_split,
                default_session_duration_minutes = @default_session_duration_minutes,
@@ -101,11 +108,11 @@ export class TrainingProfileRepo {
         this.db
           .prepare(
             `INSERT INTO training_profiles
-               (id, user_id, timezone, training_days, preferred_split, default_session_duration_minutes,
+               (id, user_id, timezone, week_start_day, training_days, preferred_split, default_session_duration_minutes,
                 minimum_session_duration_minutes, maximum_session_duration_minutes, available_equipment,
                 created_at, updated_at)
              VALUES
-               (@id, @user_id, @timezone, @training_days, @preferred_split, @default_session_duration_minutes,
+               (@id, @user_id, @timezone, @week_start_day, @training_days, @preferred_split, @default_session_duration_minutes,
                 @minimum_session_duration_minutes, @maximum_session_duration_minutes, @available_equipment,
                 @created_at, @updated_at)`
           )
@@ -151,6 +158,7 @@ export class TrainingProfileRepo {
       id: row.id,
       user_id: row.user_id,
       timezone: row.timezone,
+      week_start_day: row.week_start_day,
       training_days: JSON.parse(row.training_days),
       preferred_split: row.preferred_split,
       default_session_duration_minutes: row.default_session_duration_minutes,

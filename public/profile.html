@@ -25,6 +25,9 @@
       <label>Timezone (IANA name, e.g. "Asia/Kolkata")
         <input id="timezone" type="text" required />
       </label>
+      <label>Week starts on
+        <select id="week-start-day"></select>
+      </label>
       <label>Training days
         <select id="training-days" multiple size="7"></select>
       </label>
@@ -94,6 +97,9 @@
     function loadDayOptions() {
       const select = document.getElementById('training-days');
       for (const d of WEEKDAYS) select.appendChild(el('option', { value: d, text: d }));
+      const weekStart = document.getElementById('week-start-day');
+      for (const d of WEEKDAYS) weekStart.appendChild(el('option', { value: d, text: d }));
+      weekStart.value = 'monday';
     }
 
     async function loadProfile() {
@@ -105,6 +111,7 @@
         return;
       }
       document.getElementById('timezone').value = profile.timezone;
+      document.getElementById('week-start-day').value = profile.week_start_day;
       for (const opt of document.getElementById('training-days').options) opt.selected = profile.training_days.includes(opt.value);
       document.getElementById('preferred-split').value = profile.preferred_split || '';
       document.getElementById('default-duration').value = profile.default_session_duration_minutes;
@@ -124,6 +131,7 @@
           method: 'PUT',
           body: {
             timezone: document.getElementById('timezone').value,
+            week_start_day: document.getElementById('week-start-day').value,
             training_days,
             preferred_split: document.getElementById('preferred-split').value || null,
             default_session_duration_minutes: Number(document.getElementById('default-duration').value),

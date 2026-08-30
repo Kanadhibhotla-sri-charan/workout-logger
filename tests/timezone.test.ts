@@ -44,6 +44,7 @@ describe('src/lib/userTimezone.ts — resolving the app-wide user timezone', () 
     const user = new UsersRepo(db).getOrCreateDefault();
     new TrainingProfileRepo(db).upsert(user.id, {
       timezone: 'Asia/Kolkata',
+      week_start_day: 'monday',
       training_days: [],
       default_session_duration_minutes: 60,
       minimum_session_duration_minutes: 30,
@@ -59,6 +60,7 @@ describe('src/lib/userTimezone.ts — resolving the app-wide user timezone', () 
     const user = new UsersRepo(db).getOrCreateDefault();
     new TrainingProfileRepo(db).upsert(user.id, {
       timezone: 'Asia/Kolkata',
+      week_start_day: 'monday',
       training_days: [],
       default_session_duration_minutes: 60,
       minimum_session_duration_minutes: 30,

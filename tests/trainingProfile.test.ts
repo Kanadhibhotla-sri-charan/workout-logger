@@ -21,6 +21,7 @@ describe('TrainingProfileRepo', () => {
     const repo = new TrainingProfileRepo(db);
     const created = repo.upsert(userId, {
       timezone: TZ,
+      week_start_day: 'monday',
       training_days: ['monday', 'wednesday', 'friday'],
       preferred_split: 'push-pull-legs',
       default_session_duration_minutes: 60,
@@ -43,6 +44,7 @@ describe('TrainingProfileRepo', () => {
     const repo = new TrainingProfileRepo(db);
     const profile = repo.upsert(userId, {
       timezone: TZ,
+      week_start_day: 'monday',
       training_days: ['monday'],
       default_session_duration_minutes: 45,
       minimum_session_duration_minutes: 20,
@@ -64,6 +66,7 @@ describe('TrainingProfileRepo', () => {
     expect(() =>
       repo.upsert(userId, {
         timezone: TZ,
+      week_start_day: 'monday',
         training_days: [],
         default_session_duration_minutes: 45,
         minimum_session_duration_minutes: 20,
@@ -79,6 +82,7 @@ describe('TrainingProfileRepo', () => {
     expect(() =>
       repo.upsert(userId, {
         timezone: TZ,
+      week_start_day: 'monday',
         training_days: [],
         default_session_duration_minutes: 45,
         minimum_session_duration_minutes: 90,
@@ -94,6 +98,7 @@ describe('TrainingProfileRepo', () => {
     expect(() =>
       repo.upsert(userId, {
         timezone: 'Not/AZone',
+      week_start_day: 'monday',
         training_days: [],
         default_session_duration_minutes: 45,
         minimum_session_duration_minutes: 20,
@@ -108,6 +113,7 @@ describe('TrainingProfileRepo', () => {
     const repo = new TrainingProfileRepo(db);
     repo.upsert(userId, {
       timezone: TZ,
+      week_start_day: 'monday',
       training_days: ['monday'],
       default_session_duration_minutes: 45,
       minimum_session_duration_minutes: 20,
@@ -117,6 +123,7 @@ describe('TrainingProfileRepo', () => {
     });
     const updated = repo.upsert(userId, {
       timezone: 'America/Los_Angeles',
+      week_start_day: 'monday',
       training_days: ['tuesday', 'thursday'],
       default_session_duration_minutes: 50,
       minimum_session_duration_minutes: 25,

@@ -11,7 +11,7 @@
 // Bump CONTRACT_VERSION on any breaking shape change and add a migration
 // (see src/db/schema.sql + src/db/migrate.ts).
 
-export const CONTRACT_VERSION = '1.1.0';
+export const CONTRACT_VERSION = '1.2.0';
 
 /** A Blueprint entity id (exercise, physique target, aesthetic outcome,
  * functional goal, or equipment). Opaque to this app — never resolved
@@ -160,11 +160,19 @@ export interface ExercisePerformance {
 }
 
 /**
- * Derived rollup: how much a given Blueprint target/goal has actually been
- * trained over a period. Phase 1 defines the shape only — the aggregation
- * rule (what counts as an "effective set", partial-completion weighting)
- * is an open decision for Phase 2. Nothing in this app computes or persists
- * TrainingExposure yet.
+ * A neutral, goal-agnostic rollup of how much a given Blueprint target has
+ * actually been trained over a period — see docs/TRAINING_EXPOSURE_MODEL.md
+ * for the full design. Deliberately NOT the same concept as
+ * HypertrophyVolume or FunctionalExposure below — see that document's §0.
+ *
+ * `exposure_units` counts one completed set as one unit of exposure to
+ * every target the exercise directly lists (Strategy A — see
+ * docs/TRAINING_EXPOSURE_MODEL.md §B) — implemented in
+ * src/engine/exposureEngine.ts. It is intentionally NOT named
+ * "effective_sets": that name implies hypertrophy-specific physiological
+ * precision (proximity to failure, indirect contribution, target
+ * priority) that this flat count does not have. Never rename or reuse
+ * this field to mean that.
  */
 export interface TrainingExposure {
   target_type: 'physique_target' | 'functional_goal';
@@ -173,7 +181,44 @@ export interface TrainingExposure {
   period_end: string;
   exercise_ids: BlueprintId[];
   total_sets: number;
+  exposure_units: number;
+}
+
+/**
+ * A goal-specific interpretation of TrainingExposure for physique
+ * development — NOT the same as raw TrainingExposure (see
+ * docs/TRAINING_EXPOSURE_MODEL.md §0). Shape only: nothing in this
+ * codebase computes a HypertrophyVolume yet. Reserved for once direct vs.
+ * indirect weighting, RIR/RPE-based intensity, exercise role, and target
+ * priority all have approved rules (docs/TRAINING_EXPOSURE_MODEL.md §E,
+ * §F; docs/open-decisions.md).
+ */
+export interface HypertrophyVolume {
+  target_type: 'physique_target';
+  target_id: BlueprintId;
+  period_start: string;
+  period_end: string;
+  goal_id: string | null;
+  /** Deliberately distinct from TrainingExposure.exposure_units — see
+   * docs/TRAINING_EXPOSURE_MODEL.md §6. Not computed by any code yet. */
   effective_sets: number | null;
+}
+
+/**
+ * A goal-specific interpretation of TrainingExposure for a functional
+ * goal (e.g. rotator-cuff, core-anti-rotation) — explicitly NOT assumed
+ * to share HypertrophyVolume's arithmetic (see
+ * docs/TRAINING_EXPOSURE_MODEL.md §0). Shape only: nothing in this
+ * codebase computes a FunctionalExposure yet.
+ */
+export interface FunctionalExposure {
+  target_type: 'functional_goal';
+  target_id: BlueprintId;
+  period_start: string;
+  period_end: string;
+  goal_id: string | null;
+  /** No formula decided — placeholder until one is approved. */
+  adequacy: 'insufficient' | 'adequate' | 'unknown' | null;
 }
 
 export interface User {
@@ -214,6 +259,11 @@ export interface TrainingProfile {
    * WorkoutSession.date/start_time/end_time values are interpreted in
    * this zone — see docs/architecture.md's timezone contract. */
   timezone: string;
+  /** First day of this user's training week, for weekly exposure
+   * aggregation (docs/TRAINING_EXPOSURE_MODEL.md §G). Stored data, never
+   * a hard-coded Monday assumption — see that document and
+   * docs/TRAINING_ENGINE_DESIGN.md §13. */
+  week_start_day: Weekday;
   training_days: Weekday[];
   /** Open string — Blueprint does not define a split taxonomy, so this
    * app doesn't invent a closed enum for it either (e.g. "push-pull-legs",
