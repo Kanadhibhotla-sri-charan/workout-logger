@@ -6,6 +6,7 @@ import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
+import { OutsideBlueprintExercisesRepo } from '../../src/repositories/outsideBlueprintExercisesRepo.js';
 import { BlueprintAdapter } from '../../src/blueprint/adapter.js';
 
 // 2026-08-31 is a Monday.
@@ -198,5 +199,53 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     const result = assembleAndBuildWorkout(db, MONDAY, 60);
     const midPecPlan = result.exercises.find((e) => e.target_id === 'mid-pec');
     expect(midPecPlan?.exercise_id).toBe('cable-fly');
+  });
+
+  it('remediation §10: an approved outside-Blueprint exercise becomes a real, selectable candidate through the full production path', () => {
+    const user = new UsersRepo(db).getOrCreateDefault();
+    new TrainingProfileRepo(db).upsert(user.id, {
+      timezone: 'Asia/Kolkata',
+      week_start_day: 'monday',
+      training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      default_session_duration_minutes: 60,
+      minimum_session_duration_minutes: 30,
+      maximum_session_duration_minutes: 90,
+      available_equipment: ['kettlebell'],
+      other_activity_schedule: [],
+    });
+
+    const functionalGoal = BlueprintAdapter.getFunctionalGoals()[0]!;
+    new GoalsRepo(db).create({ goal_type: 'functional', blueprint_ref: functionalGoal.id, priority: 1 });
+
+    // Blueprint itself has no development-package prescription for a
+    // functional_goal target (proven by the sibling "skips a
+    // functional_goal target" unit test in workoutBuilder.test.ts) —
+    // this is exactly the case remediation §10's fallback exists for.
+    const outsideRepo = new OutsideBlueprintExercisesRepo(db);
+    const proposed = outsideRepo.propose({
+      name: 'Turkish Get-Up',
+      justification_category: 'blueprint_inadequate',
+      justification_text: 'Blueprint has no prescribable exercise for this functional goal',
+      target_type: 'functional_goal',
+      target_id: functionalGoal.id,
+      role: 'primary',
+      equipment: ['kettlebell'],
+      reps_range: '5-8',
+      rir_range: '2-4',
+    });
+
+    // Unapproved: must not appear yet — proposing alone is never enough.
+    const beforeApproval = assembleAndBuildWorkout(db, MONDAY, 60);
+    expect(beforeApproval.exercises.find((e) => e.target_id === functionalGoal.id)).toBeUndefined();
+
+    outsideRepo.approve(proposed.id);
+
+    const afterApproval = assembleAndBuildWorkout(db, MONDAY, 60);
+    const plan = afterApproval.exercises.find((e) => e.target_id === functionalGoal.id);
+    expect(plan?.exercise_id).toBe(proposed.id);
+    expect(plan?.target_reps_min).toBe(5);
+    expect(plan?.target_reps_max).toBe(8);
+    expect(plan?.target_rir_min).toBe(2);
+    expect(plan?.target_rir_max).toBe(4);
   });
 });

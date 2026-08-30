@@ -35,3 +35,4 @@ story of how the app got to its current state.
 - [2026-08-30-27-remediation-real-history-wiring.md](2026-08-30-27-remediation-real-history-wiring.md)
 - [2026-08-30-28-remediation-progression-wiring.md](2026-08-30-28-remediation-progression-wiring.md)
 - [2026-08-30-29-remediation-normal-development-layer.md](2026-08-30-29-remediation-normal-development-layer.md)
+- [2026-08-30-30-remediation-outside-blueprint-wiring.md](2026-08-30-30-remediation-outside-blueprint-wiring.md)

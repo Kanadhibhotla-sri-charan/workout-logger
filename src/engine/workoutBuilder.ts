@@ -50,6 +50,8 @@ import { buildTrainingState } from './trainingState.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDetailsRepo.js';
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
+import { OutsideBlueprintExercisesRepo } from '../repositories/outsideBlueprintExercisesRepo.js';
+import type { ExerciseTargetRole } from './exerciseSelector.js';
 
 /** One prior session's actual logged sets for a specific exercise —
  * ground truth, never a planned/target value (ExercisePerformance's
@@ -70,6 +72,23 @@ export interface ExerciseSessionHistory {
  * volumeEngine.decideVolume call every target already goes through —
  * no separate classification formula, just reading its real action. */
 export type TargetClassification = 'specialization' | 'normal_development' | 'maintenance';
+
+/** An approved outside-Blueprint exercise, already resolved into
+ * exactly what buildWorkout needs to treat it as a real selection
+ * candidate for one target — remediation §10: "the actual generation
+ * path must support" Blueprint-inadequate -> approved-outside-
+ * Blueprint fallback, not just an unused approval API. Only exercises
+ * `OutsideBlueprintExercisesRepo.listApprovedForTarget` returns (i.e.
+ * already approved AND declared for this exact target) ever appear
+ * here. */
+export interface OutsideBlueprintCandidate {
+  id: BlueprintId;
+  name: string;
+  role: ExerciseTargetRole;
+  equipment: string[];
+  reps_range: string;
+  rir_range: string;
+}
 
 /** Everything buildWorkout needs for one target, already gathered by
  * the caller (normally assembleWorkoutBuildInput) — no database access
@@ -103,6 +122,11 @@ export interface TargetBuildContext {
    * Remediation §6: "a progression engine that is not consumed by the
    * workout builder is incomplete." */
   exercise_history: Readonly<Record<BlueprintId, readonly ExerciseSessionHistory[]>>;
+  /** Approved outside-Blueprint exercises declared for this exact
+   * target — remediation §10's real fallback pool, merged alongside
+   * Blueprint's own candidates during selection below. Empty for most
+   * targets (no proposal has ever been approved for them). */
+  outside_blueprint_exercises: readonly OutsideBlueprintCandidate[];
 }
 
 export interface BuildWorkoutInput {
@@ -257,6 +281,18 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       candidateExerciseIds.map((id) => BlueprintAdapter.getExercise(id)!),
       input.available_equipment
     ).map((e) => e.id);
+
+    // Remediation §10: an approved outside-Blueprint exercise is a
+    // real fallback candidate, merged in alongside Blueprint's own —
+    // equipment-gated exactly like a Blueprint exercise (its own
+    // `equipment` field satisfies the same Pick<BlueprintExercise,
+    // 'equipment'> shape filterEquipmentFeasible already checks).
+    const feasibleOutside = filterEquipmentFeasible(target.outside_blueprint_exercises, input.available_equipment);
+    const outsideCandidatesById = new Map(feasibleOutside.map((e) => [e.id, e]));
+    for (const outside of feasibleOutside) {
+      if (!candidateExerciseIds.includes(outside.id)) candidateExerciseIds.push(outside.id);
+    }
+
     // Defensive double-check of §16's Monday rule: frequencyEngine
     // already refuses to assign a lower-body target to Monday (so the
     // "not scheduled for {weekday}" skip above should already have
@@ -270,30 +306,43 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_type: target.target_type,
         target_id: target.target_id,
         classification,
-        reason: 'No equipment-feasible (and, for a lower-body target, Monday-compliant) Blueprint exercise trains this target.',
+        reason: 'No equipment-feasible (and, for a lower-body target, Monday-compliant) Blueprint or approved outside-Blueprint exercise trains this target.',
       });
       continue;
     }
 
-    // Narrow to candidates that actually have a real Blueprint
-    // development-package prescription for this target BEFORE ranking
-    // — otherwise the top-ranked candidate could be one with no
-    // prescription data, forcing an avoidable skip when a
-    // still-legitimate, still-feasible alternative candidate does have
-    // one (spec §5: substitute when the preferred pick doesn't work
-    // out; §25: never invent a substitute prescription instead).
+    // Narrow to candidates that actually have a usable rep/RIR
+    // prescription for this target BEFORE ranking — either Blueprint's
+    // own development-package data, or (for an outside-Blueprint
+    // candidate) the range the human supplied and this repo already
+    // validated at proposal time — otherwise the top-ranked candidate
+    // could be one with no prescription data, forcing an avoidable
+    // skip when a still-legitimate, still-feasible alternative
+    // candidate does have one (spec §5: substitute when the preferred
+    // pick doesn't work out; §25: never invent a substitute
+    // prescription instead).
     if (target.target_type === 'physique_target') {
-      const withPrescription = candidateExerciseIds.filter((id) => lookupExercisePrescription(target.target_id, id) !== null);
+      const withPrescription = candidateExerciseIds.filter((id) => outsideCandidatesById.has(id) || lookupExercisePrescription(target.target_id, id) !== null);
       if (withPrescription.length === 0) {
         skipped.push({
           target_type: target.target_type,
           target_id: target.target_id,
           classification,
-          reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription for this target — exposing this gap rather than inventing one (spec §25).',
+          reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription (or an approved outside-Blueprint one) for this target — exposing this gap rather than inventing one (spec §25).',
         });
         continue;
       }
       candidateExerciseIds = withPrescription;
+    } else {
+      // A functional_goal target has no Blueprint development-package
+      // prescription source at all — an approved outside-Blueprint
+      // exercise (with its own reps_range/rir_range) is the only real
+      // candidate remediation §15 permits; Blueprint-only candidates
+      // with nothing to prescribe are dropped here rather than reaching
+      // selection just to be skipped afterward with no explanation of
+      // why.
+      const withPrescription = candidateExerciseIds.filter((id) => outsideCandidatesById.has(id));
+      if (withPrescription.length > 0) candidateExerciseIds = withPrescription;
     }
 
     const selection = selectExercise({
@@ -304,15 +353,23 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       recent_exercise_ids: target.recent_exercise_ids,
       current_exercise_id: target.current_exercise_id,
       exercises_already_planned_today: plannedExerciseIdsSoFar,
+      outside_blueprint_candidates: new Map([...outsideCandidatesById].map(([id, e]) => [id, { role: e.role, name: e.name }])),
     });
     log.push(selection.reasoning);
 
+    const outsideSelection = outsideCandidatesById.get(selection.exercise_id);
+
     // Only an exact (target, exercise) match against a real Blueprint
-    // development package counts — falling back to some other
+    // development package (or an approved outside-Blueprint exercise's
+    // own human-supplied range) counts — falling back to some other
     // exercise's prescription within the same package would mean
     // applying one exercise's reps/RIR to a different one, which is
     // exactly the kind of invented substitute spec §25 forbids.
-    const prescription = target.target_type === 'physique_target' ? lookupExercisePrescription(target.target_id, selection.exercise_id) : null;
+    const prescription = outsideSelection
+      ? { reps: outsideSelection.reps_range, rir: outsideSelection.rir_range }
+      : target.target_type === 'physique_target'
+        ? lookupExercisePrescription(target.target_id, selection.exercise_id)
+        : null;
 
     if (!prescription) {
       skipped.push({
@@ -479,6 +536,7 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
   const assessmentsRepo = new AestheticAssessmentsRepo(db);
   const badmintonRepo = new BadmintonSessionDetailsRepo(db);
   const sessionsRepo = new WorkoutSessionsRepo(db);
+  const outsideRepo = new OutsideBlueprintExercisesRepo(db);
 
   const weeklyByTarget = new Map(state.weekly_exposure.map((e) => [`${e.target_type}:${e.target_id}`, e]));
   const rollingByTarget = new Map(state.rolling_exposure.map((e) => [`${e.target_type}:${e.target_id}`, e]));
@@ -539,6 +597,14 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
       recent_exercise_ids: [...new Set(touches.map((t) => t.exercise_id))],
       current_exercise_id: mostRecentTouch?.exercise_id ?? null,
       exercise_history: exerciseHistory,
+      outside_blueprint_exercises: outsideRepo.listApprovedForTarget(targetType, targetId).map((e) => ({
+        id: e.id,
+        name: e.name,
+        role: e.role,
+        equipment: e.equipment,
+        reps_range: e.reps_range,
+        rir_range: e.rir_range,
+      })),
     };
   }
 

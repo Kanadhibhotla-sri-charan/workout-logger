@@ -21,6 +21,7 @@ function baseTarget(overrides: Partial<TargetBuildContext> = {}): TargetBuildCon
     recent_exercise_ids: [],
     current_exercise_id: null,
     exercise_history: {},
+    outside_blueprint_exercises: [],
     ...overrides,
   };
 }
@@ -236,6 +237,57 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     expect(result.exercises.find((e) => e.target_id === functionalGoal.id)).toBeUndefined();
     const skip = result.skipped_targets.find((s) => s.target_id === functionalGoal.id);
     expect(skip).toBeDefined();
+  });
+
+  it('remediation §10/§15: an approved outside-Blueprint candidate fills a functional_goal target Blueprint itself cannot prescribe', () => {
+    const functionalGoal = BlueprintAdapter.getFunctionalGoals()[0]!;
+    const result = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: ['bodyweight', 'kettlebell'],
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [
+        baseTarget({
+          target_type: 'functional_goal',
+          target_id: functionalGoal.id,
+          current_weekly_primary_sets: 4,
+          outside_blueprint_exercises: [
+            { id: 'outside-ex-1', name: 'Turkish Get-Up', role: 'primary', equipment: ['kettlebell'], reps_range: '5-8', rir_range: '2-4' },
+          ],
+        }),
+      ],
+    });
+    const plan = result.exercises.find((e) => e.target_id === functionalGoal.id);
+    expect(plan?.exercise_id).toBe('outside-ex-1');
+    expect(plan?.target_reps_min).toBe(5);
+    expect(plan?.target_reps_max).toBe(8);
+    expect(plan?.target_rir_min).toBe(2);
+    expect(plan?.target_rir_max).toBe(4);
+    expect(result.skipped_targets.find((s) => s.target_id === functionalGoal.id)).toBeUndefined();
+  });
+
+  it("remediation §10: an outside-Blueprint candidate requiring unavailable equipment never becomes selectable", () => {
+    const functionalGoal = BlueprintAdapter.getFunctionalGoals()[0]!;
+    const result = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: ['bodyweight'],
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [
+        baseTarget({
+          target_type: 'functional_goal',
+          target_id: functionalGoal.id,
+          current_weekly_primary_sets: 4,
+          outside_blueprint_exercises: [
+            { id: 'outside-ex-1', name: 'Turkish Get-Up', role: 'primary', equipment: ['kettlebell'], reps_range: '5-8', rir_range: '2-4' },
+          ],
+        }),
+      ],
+    });
+    expect(result.exercises.find((e) => e.target_id === functionalGoal.id)).toBeUndefined();
+    expect(result.skipped_targets.find((s) => s.target_id === functionalGoal.id)).toBeDefined();
   });
 
   it('required test 3: substitutes a feasible Blueprint exercise when the preferred/current one is unavailable', () => {

@@ -11,7 +11,7 @@
 // Bump CONTRACT_VERSION on any breaking shape change and add a migration
 // (see src/db/schema.sql + src/db/migrate.ts).
 
-export const CONTRACT_VERSION = '1.4.0';
+export const CONTRACT_VERSION = '1.5.0';
 
 /** A Blueprint entity id (exercise, physique target, aesthetic outcome,
  * functional goal, or equipment). Opaque to this app — never resolved
@@ -136,13 +136,32 @@ export type OutsideBlueprintJustification = 'blueprint_inadequate' | 'contextual
 
 /** A proposed exercise outside Blueprint's pool — spec §4.2. Never
  * prescribable until `approved`. See
- * src/engine/exerciseUniverse.ts for the resolution/enforcement point. */
+ * src/engine/exerciseUniverse.ts for the resolution/enforcement point.
+ *
+ * Remediation §10: an outside-Blueprint exercise must be usable as a
+ * real candidate once approved, so it carries the same kind of
+ * programming metadata a Blueprint exercise gets from
+ * BlueprintExercise + a development-package entry — target_type/
+ * target_id/role mirror Blueprint's own muscle-role model exactly;
+ * reps_range/rir_range are the human proposer's own explicit numbers
+ * (this app has no Blueprint package data for a non-Blueprint exercise
+ * and does not invent a substitute). */
 export interface OutsideBlueprintExercise {
   id: string;
   name: string;
   description: string | null;
   justification_category: OutsideBlueprintJustification;
   justification_text: string;
+  target_type: 'physique_target' | 'functional_goal';
+  target_id: BlueprintId;
+  role: 'primary' | 'secondary';
+  equipment: string[];
+  /** e.g. "8-12" — same string shape as a Blueprint development
+   * package's own `reps` field; parsed with the same
+   * src/blueprint/developmentPackages.ts's parseRange. */
+  reps_range: string;
+  /** e.g. "1-3" — same shape as a Blueprint package's `rir` field. */
+  rir_range: string;
   proposed_at: string;
   approved: boolean;
   approved_at: string | null;

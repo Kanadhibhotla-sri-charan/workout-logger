@@ -132,6 +132,15 @@ CREATE TABLE IF NOT EXISTS badminton_session_details (
 -- prescribable until approved=1 — see
 -- src/repositories/outsideBlueprintExercisesRepo.ts and
 -- src/engine/exerciseUniverse.ts for the enforcement point.
+-- Remediation §10: an outside-Blueprint exercise must be a real,
+-- usable candidate once approved — not just an approval record with no
+-- programming data. target_type/target_id/role mirror Blueprint's own
+-- muscle-role model exactly (never a separate vocabulary); equipment
+-- mirrors TrainingProfile.available_equipment's own id space;
+-- reps_range/rir_range are the human proposer's own explicit numbers
+-- (this app has no Blueprint development-package data for a
+-- non-Blueprint exercise, and does not invent a substitute — see
+-- src/engine/workoutBuilder.ts).
 CREATE TABLE IF NOT EXISTS outside_blueprint_exercises (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -140,6 +149,12 @@ CREATE TABLE IF NOT EXISTS outside_blueprint_exercises (
     justification_category IN ('blueprint_inadequate', 'contextual_constraint', 'meaningful_advantage')
   ),
   justification_text TEXT NOT NULL,
+  target_type TEXT NOT NULL CHECK (target_type IN ('physique_target', 'functional_goal')),
+  target_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('primary', 'secondary')),
+  equipment TEXT NOT NULL, -- JSON array of equipment ids, e.g. '["cable"]'
+  reps_range TEXT NOT NULL, -- e.g. "8-12" — same string shape as Blueprint's own package reps
+  rir_range TEXT NOT NULL, -- e.g. "1-3"
   proposed_at TEXT NOT NULL,
   approved INTEGER NOT NULL DEFAULT 0,
   approved_at TEXT

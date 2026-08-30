@@ -19,6 +19,12 @@ describe('OutsideBlueprintExercisesRepo — spec §4.2 approval gate', () => {
       name: 'Landmine Press',
       justification_category: 'blueprint_inadequate',
       justification_text: 'Blueprint has no single-arm landmine pressing variation',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'primary',
+      equipment: ['landmine'],
+      reps_range: '8-12',
+      rir_range: '1-3',
     });
 
     expect(proposed.approved).toBe(false);
@@ -30,6 +36,12 @@ describe('OutsideBlueprintExercisesRepo — spec §4.2 approval gate', () => {
       name: 'Landmine Press',
       justification_category: 'blueprint_inadequate',
       justification_text: 'Blueprint has no single-arm landmine pressing variation',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'primary',
+      equipment: ['landmine'],
+      reps_range: '8-12',
+      rir_range: '1-3',
     });
 
     expect(isKnownExercise(db, proposed.id)).toBe(false);
@@ -41,6 +53,12 @@ describe('OutsideBlueprintExercisesRepo — spec §4.2 approval gate', () => {
       name: 'Landmine Press',
       justification_category: 'blueprint_inadequate',
       justification_text: 'Blueprint has no single-arm landmine pressing variation',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'primary',
+      equipment: ['landmine'],
+      reps_range: '8-12',
+      rir_range: '1-3',
     });
 
     const approved = outsideRepo.approve(proposed.id);
@@ -63,6 +81,12 @@ describe('OutsideBlueprintExercisesRepo — spec §4.2 approval gate', () => {
       name: 'Landmine Press',
       justification_category: 'contextual_constraint',
       justification_text: 'Only a landmine attachment is available at this location',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'primary',
+      equipment: ['landmine'],
+      reps_range: '8-12',
+      rir_range: '1-3',
     });
 
     const sessionsRepo = new WorkoutSessionsRepo(db);
@@ -83,6 +107,12 @@ describe('OutsideBlueprintExercisesRepo — spec §4.2 approval gate', () => {
       name: 'Landmine Press',
       justification_category: 'meaningful_advantage',
       justification_text: 'Reduces shoulder impingement pain reported across the last 3 sessions',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'primary',
+      equipment: ['landmine'],
+      reps_range: '8-12',
+      rir_range: '1-3',
     });
     outsideRepo.approve(proposed.id);
 
@@ -104,11 +134,23 @@ describe('OutsideBlueprintExercisesRepo — spec §4.2 approval gate', () => {
       name: 'Landmine Press',
       justification_category: 'blueprint_inadequate',
       justification_text: 'x',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'primary',
+      equipment: ['landmine'],
+      reps_range: '8-12',
+      rir_range: '1-3',
     });
     const b = outsideRepo.propose({
       name: 'Sled Push',
       justification_category: 'contextual_constraint',
       justification_text: 'y',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'secondary',
+      equipment: ['sled'],
+      reps_range: '10-15',
+      rir_range: '1-3',
     });
     outsideRepo.approve(a.id);
 

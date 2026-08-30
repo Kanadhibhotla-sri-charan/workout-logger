@@ -48,6 +48,14 @@ export interface ExerciseSelectionInput {
    * defaults to none (a caller building one target in isolation, e.g.
    * a unit test, has nothing to avoid yet). */
   exercises_already_planned_today?: readonly BlueprintId[];
+  /** Remediation §10: an approved outside-Blueprint exercise is a real
+   * selection candidate, not just an approval record — but it has no
+   * Blueprint muscle-role data for `roleFor` to resolve, since it
+   * isn't in Blueprint's own exercise pool at all. Any id present here
+   * carries its own (human-approved) role/name instead of Blueprint's;
+   * `candidate_exercise_ids` may freely mix Blueprint and outside ids.
+   * Optional; defaults to none (every candidate is Blueprint's own). */
+  outside_blueprint_candidates?: ReadonlyMap<BlueprintId, { role: ExerciseTargetRole; name: string }>;
 }
 
 export interface ExerciseSelectionResult {
@@ -131,9 +139,17 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
   const plannedToday = input.exercises_already_planned_today ?? [];
   let decisiveGate: ExerciseSelectionResult['decisive_gate'] = 'gate2_goal_relevance';
 
+  // An approved outside-Blueprint candidate carries its own
+  // human-approved role for this exact target (remediation §10) — it
+  // isn't in Blueprint's own pool at all, so roleFor alone can never
+  // see it. Check the override map first; fall back to Blueprint's own
+  // muscle-role data otherwise.
+  const resolveRole = (id: BlueprintId): ExerciseTargetRole => input.outside_blueprint_candidates?.get(id)?.role ?? roleFor(id, input.target_type, input.target_id);
+
   // Gate 2 — goal relevance: only exercises that actually train this
-  // target (Blueprint muscle-role data) survive at all.
-  let pool = allCandidates.filter((id) => roleFor(id, input.target_type, input.target_id) !== 'none');
+  // target (Blueprint muscle-role data, or an approved outside-
+  // Blueprint exercise's own declared role) survive at all.
+  let pool = allCandidates.filter((id) => resolveRole(id) !== 'none');
   if (pool.length === 0) {
     // Every supplied "candidate" was actually irrelevant to this
     // target — a caller error upstream, but fail loudly rather than
@@ -149,7 +165,7 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
   // one session).
   if (pool.length > 1) {
     const before = pool;
-    pool = narrow(pool, (id) => roleFor(id, input.target_type, input.target_id) === 'primary');
+    pool = narrow(pool, (id) => resolveRole(id) === 'primary');
     if (pool.length !== before.length) decisiveGate = 'gate3_programming_need';
   }
   if (pool.length > 1) {
@@ -190,19 +206,22 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
   }
 
   const winnerId = pool[0]!;
-  const winnerRole = roleFor(winnerId, input.target_type, input.target_id);
+  const winnerRole = resolveRole(winnerId);
   const rejected = allCandidates.filter((id) => id !== winnerId);
 
+  const outsideWinner = input.outside_blueprint_candidates?.get(winnerId);
   const exercise = BlueprintAdapter.getExercise(winnerId);
-  const exerciseName = exercise?.name ?? winnerId;
+  const exerciseName = outsideWinner?.name ?? exercise?.name ?? winnerId;
+  const roleSource = outsideWinner ? 'approved outside-Blueprint role' : 'Blueprint muscle-role';
   const reasonParts: string[] = [
-    `Blueprint muscle-role for this target is "${winnerRole}"` + (winnerRole === 'primary' ? ' (direct target)' : winnerRole === 'secondary' ? ' (indirect/secondary)' : ''),
+    `${roleSource} for this target is "${winnerRole}"` + (winnerRole === 'primary' ? ' (direct target)' : winnerRole === 'secondary' ? ' (indirect/secondary)' : ''),
     `decisive gate: ${decisiveGate}`,
   ];
   if (winnerId === input.current_exercise_id) {
     reasonParts.push('is the currently prescribed exercise — kept for progression continuity (Gate 5), not merely for the sake of no change');
   } else if (input.current_exercise_id) {
-    const previous = BlueprintAdapter.getExercise(input.current_exercise_id)?.name ?? input.current_exercise_id;
+    const previous =
+      input.outside_blueprint_candidates?.get(input.current_exercise_id)?.name ?? BlueprintAdapter.getExercise(input.current_exercise_id)?.name ?? input.current_exercise_id;
     reasonParts.push(`replaces "${previous}" — a better-ranked candidate under the gate hierarchy`);
   }
 
