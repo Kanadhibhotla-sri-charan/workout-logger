@@ -22,3 +22,4 @@ story of how the app got to its current state.
 - [2026-08-30-14-goal-creation-confirmation-flow.md](2026-08-30-14-goal-creation-confirmation-flow.md)
 - [2026-08-30-15-badminton-session-logging.md](2026-08-30-15-badminton-session-logging.md)
 - [2026-08-30-16-progression-engine.md](2026-08-30-16-progression-engine.md)
+- [2026-08-30-17-recovery-engine.md](2026-08-30-17-recovery-engine.md)

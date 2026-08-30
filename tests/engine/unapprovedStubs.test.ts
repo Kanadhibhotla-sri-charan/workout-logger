@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest';
 import { NotApprovedError } from '../../src/engine/errors.js';
 import { allocateVolume } from '../../src/engine/volumeEngine.js';
 import { allocateFrequency } from '../../src/engine/frequencyEngine.js';
-import { applyRecoveryConstraint } from '../../src/engine/recoveryEngine.js';
 import { selectExercise } from '../../src/engine/exerciseSelector.js';
 import { buildWorkout } from '../../src/engine/workoutBuilder.js';
 import { explainExerciseSelection } from '../../src/engine/explanationEngine.js';
@@ -54,16 +53,6 @@ describe('unapproved engine modules — throw, never silently invent an answer',
       allocateFrequency({} as any);
     } catch (err) {
       expect((err as NotApprovedError).decision).toBe('frequency-allocation-model');
-    }
-  });
-
-  it('recoveryEngine.applyRecoveryConstraint throws NotApprovedError("recovery-methodology")', () => {
-    try {
-      applyRecoveryConstraint({} as any);
-      expect.unreachable();
-    } catch (err) {
-      expect(err).toBeInstanceOf(NotApprovedError);
-      expect((err as NotApprovedError).decision).toBe('recovery-methodology');
     }
   });
 
