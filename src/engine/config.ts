@@ -133,6 +133,24 @@ export const GOAL_MATCH = {
   maxCandidates: 5,
 } as const;
 
+/** [DEFAULT] §19 step 18/§6.2 needs *some* per-exercise minutes estimate
+ * to fit a workout to a time budget at all — Blueprint has no per-set
+ * duration data (only a coarse setup_time: DemandLevel label this app
+ * doesn't yet have an approved way to turn into minutes either), so
+ * this is a plain scheduling/logistics estimate, not a training-
+ * methodology coefficient. Centralized here (never inline in
+ * workoutBuilder) so it's a single, visible, easily-tuned number. See
+ * src/engine/workoutBuilder.ts. */
+export const TIME_ESTIMATION = {
+  /** Time under tension + immediate transition for one working set. */
+  secondsPerWorkingSet: 45,
+  /** Rest between working sets of the same exercise. */
+  restSecondsBetweenSets: 90,
+  /** Fixed setup/equipment-transition overhead per exercise in a
+   * session (added once per exercise, not per set). */
+  setupMinutesPerExercise: 2,
+} as const;
+
 export const ENGINE_CONFIG = {
   exposureCoefficients: EXPOSURE_COEFFICIENTS,
   maxActiveAestheticGoals: MAX_ACTIVE_AESTHETIC_GOALS,
@@ -144,4 +162,5 @@ export const ENGINE_CONFIG = {
   lowerBodyPhysiqueRegions: LOWER_BODY_PHYSIQUE_REGIONS,
   forbiddenBodyFocusByDay: FORBIDDEN_BODY_FOCUS_BY_DAY,
   goalMatch: GOAL_MATCH,
+  timeEstimation: TIME_ESTIMATION,
 } as const;

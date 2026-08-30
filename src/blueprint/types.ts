@@ -144,6 +144,49 @@ export interface BlueprintGlobalPrinciples {
   };
 }
 
+/** One exercise's role within a BlueprintDevelopmentPackage — real
+ * per-exercise sets/reps/RIR prescriptions Blueprint itself authored,
+ * not a value this app invented. `reps`/`rir` are ranges as free text
+ * (e.g. "6-12", "1-3") — parsed by
+ * src/blueprint/developmentPackages.ts's parseRange, never
+ * hand-parsed ad hoc by a caller. */
+export interface BlueprintDevelopmentPackageExercise {
+  exercise_id: string;
+  order: number;
+  sets: number;
+  reps: string;
+  rir: string;
+  role: string;
+  contribution: string;
+}
+
+export interface BlueprintDevelopmentPackage {
+  id: string;
+  muscle_group: string;
+  /** Currently always "efficient" or "complete" — the fewer- vs.
+   * more-exercise variant for the same muscle_group. */
+  level: string;
+  display_name: string;
+  objective: string;
+  exercises: BlueprintDevelopmentPackageExercise[];
+  frequency: { sessions_per_week: number };
+  rationale: string;
+}
+
+export interface BlueprintMuscleGroup {
+  id: string;
+  name: string;
+  /** physique_target ids belonging to this muscle_group — the join key
+   * between a Goal's PrioritizedTarget and this muscle_group's
+   * development packages. */
+  target_ids: string[];
+}
+
+export interface BlueprintDevelopmentPackages {
+  muscle_groups: BlueprintMuscleGroup[];
+  packages: BlueprintDevelopmentPackage[];
+}
+
 export interface BlueprintProgramming {
   physiqueTargets: BlueprintPhysiqueTarget[];
   globalPrinciples: BlueprintGlobalPrinciples;
@@ -152,7 +195,7 @@ export interface BlueprintProgramming {
   intensityTechniques: unknown[];
   aestheticOutcomes: BlueprintAestheticOutcome[];
   functionalGoals: BlueprintFunctionalGoal[];
-  developmentPackages: unknown;
+  developmentPackages: BlueprintDevelopmentPackages;
 }
 
 export interface BlueprintManifest {

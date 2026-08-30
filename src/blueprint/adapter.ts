@@ -12,6 +12,7 @@ import programmingSnapshot from './snapshot/programming.json' with { type: 'json
 import manifest from './snapshot/manifest.json' with { type: 'json' };
 import type {
   BlueprintAestheticOutcome,
+  BlueprintDevelopmentPackages,
   BlueprintEquipment,
   BlueprintExercise,
   BlueprintFunctionalGoal,
@@ -124,10 +125,19 @@ export const BlueprintAdapter = {
   getGlobalPrinciples(): BlueprintGlobalPrinciples {
     return programming.globalPrinciples;
   },
+
+  /** Real, Blueprint-authored per-muscle-group exercise/sets/reps/RIR
+   * packages — see BlueprintDevelopmentPackages's doc comment and
+   * src/blueprint/developmentPackages.ts for the lookup helper built on
+   * top of this. */
+  getDevelopmentPackages(): BlueprintDevelopmentPackages {
+    return programming.developmentPackages;
+  },
 };
 
 export type {
   BlueprintAestheticOutcome,
+  BlueprintDevelopmentPackages,
   BlueprintEquipment,
   BlueprintExercise,
   BlueprintFunctionalGoal,

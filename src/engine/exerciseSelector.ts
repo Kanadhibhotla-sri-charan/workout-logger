@@ -57,14 +57,16 @@ export class NoFeasibleExerciseError extends Error {
   }
 }
 
-type Role = 'primary' | 'secondary' | 'none';
+export type ExerciseTargetRole = 'primary' | 'secondary' | 'none';
 
 /** Blueprint muscle-role data (§7's own primary/secondary split) for one
  * exercise against one target — 'none' if the exercise doesn't train
  * this target at all (by this app's own resolution rules; see
  * src/engine/exposureEngine.ts for the identical logic applied to
- * logged sets rather than a selection candidate). */
-function roleFor(exerciseId: BlueprintId, targetType: TargetType, targetId: BlueprintId): Role {
+ * logged sets rather than a selection candidate). Exported so
+ * workoutBuilder.ts can gather candidate exercise ids for a target
+ * without duplicating this resolution logic. */
+export function roleFor(exerciseId: BlueprintId, targetType: TargetType, targetId: BlueprintId): ExerciseTargetRole {
   const exercise = BlueprintAdapter.getExercise(exerciseId);
   if (!exercise) return 'none';
 
@@ -79,9 +81,18 @@ function roleFor(exerciseId: BlueprintId, targetType: TargetType, targetId: Blue
   return 'none';
 }
 
+/** All Blueprint exercise ids that train `targetId` at all (primary or
+ * secondary role) — the starting candidate pool for a target before
+ * equipment/schedule filtering. */
+export function exercisesTrainingTarget(targetType: TargetType, targetId: BlueprintId): BlueprintId[] {
+  return BlueprintAdapter.getExercises()
+    .filter((e) => roleFor(e.id, targetType, targetId) !== 'none')
+    .map((e) => e.id);
+}
+
 interface ScoredCandidate {
   exercise_id: BlueprintId;
-  role: Role;
+  role: ExerciseTargetRole;
   score: number;
   isRecent: boolean;
   isCurrent: boolean;
