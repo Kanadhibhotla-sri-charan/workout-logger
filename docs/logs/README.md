@@ -26,3 +26,4 @@ story of how the app got to its current state.
 - [2026-08-30-18-volume-engine.md](2026-08-30-18-volume-engine.md)
 - [2026-08-30-19-frequency-engine-and-monday-rule.md](2026-08-30-19-frequency-engine-and-monday-rule.md)
 - [2026-08-30-20-exercise-selector-and-explanation.md](2026-08-30-20-exercise-selector-and-explanation.md)
+- [2026-08-30-21-resource-allocation.md](2026-08-30-21-resource-allocation.md)
