@@ -158,6 +158,64 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     expect(skip).toBeDefined();
   });
 
+  it('required test 3: substitutes a feasible Blueprint exercise when the preferred/current one is unavailable', () => {
+    // Only 'cable' equipment is available. flat-barbell-bench-press
+    // (barbell/bench/rack) is infeasible; cable-fly (mid-pec primary,
+    // 'cable' only) is both feasible and has real Blueprint
+    // development-package prescription data — cable-chest-press is
+    // feasible too but has no package prescription, so it must not be
+    // the one selected (proves the substitution lands on a genuinely
+    // usable alternative, not just any feasible one).
+    const result = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: ['cable'],
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [baseTarget({ current_exercise_id: 'flat-barbell-bench-press' })],
+    });
+
+    expect(result.exercises.length).toBe(1);
+    const planned = result.exercises[0]!;
+    expect(planned.exercise_id).not.toBe('flat-barbell-bench-press');
+    expect(['cable-fly']).toContain(planned.exercise_id);
+    expect(planned.reasoning).toContain('replaces');
+  });
+
+  it('required test 11: a heavy recent badminton session changes the pipeline\'s recovery-driven reasoning for a stagnant target', () => {
+    const stagnantTarget = baseTarget({
+      current_weekly_primary_sets: 10,
+      most_recent_assessment: { rating: 3, date: '2026-08-25' },
+    });
+
+    const withoutBadminton = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: CHEST_EQUIPMENT,
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [stagnantTarget],
+    });
+
+    const withHeavyBadminton = buildWorkout({
+      date: '2026-08-31',
+      weekday: 'monday',
+      budget_minutes: 60,
+      available_equipment: CHEST_EQUIPMENT,
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [{ ...stagnantTarget, recent_badminton: { intensity: 'high', post_session_fatigue: null } }],
+    });
+
+    // Both stay in "introspect_needed" territory (neither auto-increases —
+    // required test 10 territory too), but *why* differs: recovery-flagged
+    // vs. plain-stagnation reasoning, because badminton demand actually
+    // reached the recovery decision that feeds volumeEngine.
+    const withoutReasoning = withoutBadminton.reasoning_log.join(' ');
+    const withReasoning = withHeavyBadminton.reasoning_log.join(' ');
+    expect(withReasoning).toContain('recovery is flagged');
+    expect(withoutReasoning).not.toContain('recovery is flagged');
+  });
+
   it('is deterministic: identical input always produces identical output', () => {
     const input = {
       date: '2026-08-31',

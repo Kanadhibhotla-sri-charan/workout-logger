@@ -33,7 +33,7 @@
 
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
-import { getPackageForTarget, lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
+import { lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { TIME_ESTIMATION } from './config.js';
@@ -208,6 +208,26 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       continue;
     }
 
+    // Narrow to candidates that actually have a real Blueprint
+    // development-package prescription for this target BEFORE ranking
+    // — otherwise the top-ranked candidate could be one with no
+    // prescription data, forcing an avoidable skip when a
+    // still-legitimate, still-feasible alternative candidate does have
+    // one (spec §5: substitute when the preferred pick doesn't work
+    // out; §25: never invent a substitute prescription instead).
+    if (target.target_type === 'physique_target') {
+      const withPrescription = candidateExerciseIds.filter((id) => lookupExercisePrescription(target.target_id, id) !== null);
+      if (withPrescription.length === 0) {
+        skipped.push({
+          target_type: target.target_type,
+          target_id: target.target_id,
+          reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription for this target — exposing this gap rather than inventing one (spec §25).',
+        });
+        continue;
+      }
+      candidateExerciseIds = withPrescription;
+    }
+
     const selection = selectExercise({
       target_type: target.target_type,
       target_id: target.target_id,
@@ -218,10 +238,12 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     });
     log.push(selection.reasoning);
 
-    let prescription = null;
-    if (target.target_type === 'physique_target') {
-      prescription = lookupExercisePrescription(target.target_id, selection.exercise_id) ?? getPackageForTarget(target.target_id)?.exercises[0] ?? null;
-    }
+    // Only an exact (target, exercise) match against a real Blueprint
+    // development package counts — falling back to some other
+    // exercise's prescription within the same package would mean
+    // applying one exercise's reps/RIR to a different one, which is
+    // exactly the kind of invented substitute spec §25 forbids.
+    const prescription = target.target_type === 'physique_target' ? lookupExercisePrescription(target.target_id, selection.exercise_id) : null;
 
     if (!prescription) {
       skipped.push({
