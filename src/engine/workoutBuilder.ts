@@ -38,14 +38,17 @@ import type { BadmintonIntensity, BlueprintId, Weekday } from '../contracts/type
 import { WEEKDAYS } from '../contracts/types.js';
 import { TIME_ESTIMATION } from './config.js';
 import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, type FittableItem } from './constraintEngine.js';
+import { daysBetween } from './dateMath.js';
 import { allocateFrequency } from './frequencyEngine.js';
 import { exercisesTrainingTarget, selectExercise } from './exerciseSelector.js';
+import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
 import { applyRecoveryConstraint, type RecentBadmintonSignal } from './recoveryEngine.js';
 import { classifyAestheticTrend, decideVolume, type AestheticProgressTrend } from './volumeEngine.js';
 import { buildTrainingState } from './trainingState.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDetailsRepo.js';
+import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 
 /** Everything buildWorkout needs for one target, already gathered by
  * the caller (normally assembleWorkoutBuildInput) — no database access
@@ -121,6 +124,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   const log: string[] = [];
   const skipped: SkippedTarget[] = [];
   const candidates: Array<FittableItem & { planned: Omit<PlannedExercise, 'estimated_minutes'> }> = [];
+  const plannedExerciseIdsSoFar: BlueprintId[] = [];
 
   const orderedTargets = [...input.targets].sort((a, b) =>
     a.goal_priority !== b.goal_priority ? a.goal_priority - b.goal_priority : a.target_id.localeCompare(b.target_id)
@@ -235,6 +239,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       candidate_exercise_ids: candidateExerciseIds,
       recent_exercise_ids: target.recent_exercise_ids,
       current_exercise_id: target.current_exercise_id,
+      exercises_already_planned_today: plannedExerciseIdsSoFar,
     });
     log.push(selection.reasoning);
 
@@ -256,6 +261,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
 
     const reps = parseRange(prescription.reps);
     const rir = parseRange(prescription.rir);
+    plannedExerciseIdsSoFar.push(selection.exercise_id);
 
     candidates.push({
       id: selection.exercise_id,
@@ -307,20 +313,65 @@ function weekdayOfDate(dateIso: string): Weekday {
   return WEEKDAYS[mondayFirstIndex]!;
 }
 
+interface TargetTouch {
+  date: string;
+  exercise_id: BlueprintId;
+}
+
+/**
+ * Remediation §4-5: builds a `target_type:target_id` -> chronological
+ * (most-recent-first) list of every REAL exercise performance that gave
+ * that target meaningful exposure — spec §5.1's definition exactly:
+ * primary direct work OR secondary compound exposure (the same
+ * primary/secondary resolution `calculateExerciseExposure` already
+ * uses for the exposure numbers themselves, so "meaningfully trained"
+ * means the identical thing here as it does everywhere else in this
+ * app). An uncompleted set contributes nothing (rule D), matching
+ * exposure accounting — `calculateExerciseExposure` only returns
+ * contributions for completed sets, so this falls out for free.
+ *
+ * One pass over every recent session's real logged performances — the
+ * production data flow the remediation spec requires
+ * (`workout history -> history aggregation -> muscle exposure +
+ * exercise history -> programming context -> exercise selection`),
+ * not a placeholder.
+ */
+function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSessions: readonly { session_id: string; date: string }[]): Map<string, TargetTouch[]> {
+  const byTarget = new Map<string, TargetTouch[]>();
+  for (const session of recentSessions) {
+    for (const performance of sessionsRepo.getExercisePerformances(session.session_id)) {
+      const { contributions } = calculateExerciseExposure(performance.exercise_id, performance.sets);
+      for (const c of contributions) {
+        const key = `${c.target_type}:${c.target_id}`;
+        const list = byTarget.get(key) ?? [];
+        list.push({ date: session.date, exercise_id: performance.exercise_id });
+        byTarget.set(key, list);
+      }
+    }
+  }
+  for (const list of byTarget.values()) {
+    list.sort((a, b) => b.date.localeCompare(a.date));
+  }
+  return byTarget;
+}
+
 /**
  * The impure boundary (like trainingState.ts): reads TrainingState plus
- * AestheticAssessmentsRepo and BadmintonSessionDetailsRepo, and hands a
- * plain BuildWorkoutInput to the pure buildWorkout above. This is the
- * only function in this module that touches the database.
+ * AestheticAssessmentsRepo, BadmintonSessionDetailsRepo, and real
+ * exercise-performance history, and hands a plain BuildWorkoutInput to
+ * the pure buildWorkout above. This is the only function in this
+ * module that touches the database.
  */
 export function assembleAndBuildWorkout(db: Database.Database, date: string, budgetMinutes: number): WorkoutBuildResult {
   const state = buildTrainingState(db, date);
   const weekday = weekdayOfDate(date);
   const assessmentsRepo = new AestheticAssessmentsRepo(db);
   const badmintonRepo = new BadmintonSessionDetailsRepo(db);
+  const sessionsRepo = new WorkoutSessionsRepo(db);
 
   const weeklyByTarget = new Map(state.weekly_exposure.map((e) => [`${e.target_type}:${e.target_id}`, e]));
   const rollingByTarget = new Map(state.rolling_exposure.map((e) => [`${e.target_type}:${e.target_id}`, e]));
+  const touchesByTarget = gatherTargetTouches(sessionsRepo, state.recent_sessions);
 
   const recentBadmintonSessions = state.recent_sessions.filter((s) => s.session_type === 'badminton').sort((a, b) => b.date.localeCompare(a.date));
   const mostRecentBadminton = recentBadmintonSessions[0];
@@ -345,6 +396,8 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
 
       const weekly = weeklyByTarget.get(key);
       const rolling = rollingByTarget.get(key);
+      const touches = touchesByTarget.get(key) ?? [];
+      const mostRecentTouch = touches[0];
 
       targets.push({
         target_type: t.target_type,
@@ -358,10 +411,10 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
         rolling_window_days: state.rolling_window_days,
         most_recent_assessment: mostRecentAssessment ? { rating: mostRecentAssessment.rating, date: mostRecentAssessment.date } : null,
         review_cadence_days: goal.review_cadence_days,
-        days_since_target_last_trained: null,
+        days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, date) : null,
         recent_badminton: recentBadmintonSignal,
-        recent_exercise_ids: [],
-        current_exercise_id: null,
+        recent_exercise_ids: [...new Set(touches.map((t2) => t2.exercise_id))],
+        current_exercise_id: mostRecentTouch?.exercise_id ?? null,
       });
     }
   }
