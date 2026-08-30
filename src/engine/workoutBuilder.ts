@@ -1,11 +1,14 @@
-// Workout Builder — spec §25. NOT IMPLEMENTED: assembling target
-// allocation -> exercise selection -> ordering -> sets/reps/rest targets
-// -> a time estimate depends on volumeEngine, frequencyEngine,
-// recoveryEngine, and exerciseSelector all being resolved first — none of
-// which are. This is deliberately the last stub in the pipeline: building
-// it before its dependencies are approved would mean inventing the very
-// formulas the spec says not to invent. See
-// docs/TRAINING_ENGINE_DESIGN.md §25 and §31 (pipeline).
+// Workout Builder — Next Phase spec §19 (the 22-step pipeline).
+// NOT IMPLEMENTED YET: volumeEngine, frequencyEngine, recoveryEngine,
+// progressionEngine, and exerciseSelector are all real now — what this
+// module still needs before it can assemble them into an actual workout
+// is (a) resourceAllocation (§17: competing-goal time/volume/exercise-slot
+// allocation respecting user ranking) and (b) the actual time-fitting
+// algorithm (§6.2: preserve higher-priority work, substitute/trim without
+// truncating arbitrarily) — constraintEngine currently only has the
+// budget-check primitives, not that algorithm. Building the full pipeline
+// before those two exist would mean inventing the very allocation logic
+// the spec says not to invent. See docs/TRAINING_ENGINE_DESIGN.md §19.
 
 import type { BlueprintId, ExerciseRole, SessionType } from '../contracts/types.js';
 import { NotApprovedError } from './errors.js';
@@ -36,7 +39,7 @@ export interface WorkoutBuildResult {
 export function buildWorkout(_input: WorkoutBuildInput): WorkoutBuildResult {
   throw new NotApprovedError(
     'workoutBuilder',
-    'volume-frequency-recovery-and-exercise-selection',
-    'Depends on volumeEngine, frequencyEngine, recoveryEngine, and exerciseSelector, none of which have approved rules yet — see docs/TRAINING_ENGINE_DESIGN.md §25, §31.'
+    'resource-allocation-and-time-fitting',
+    'Depends on resourceAllocation (§17) and a real time-fitting algorithm (§6.2, constraintEngine currently only has budget-check primitives), neither of which exist yet — see docs/TRAINING_ENGINE_DESIGN.md §19.'
   );
 }

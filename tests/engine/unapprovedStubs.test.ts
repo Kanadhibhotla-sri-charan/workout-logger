@@ -8,32 +8,16 @@
 
 import { describe, expect, it } from 'vitest';
 import { NotApprovedError } from '../../src/engine/errors.js';
-import { selectExercise } from '../../src/engine/exerciseSelector.js';
 import { buildWorkout } from '../../src/engine/workoutBuilder.js';
-import { explainExerciseSelection } from '../../src/engine/explanationEngine.js';
 
 describe('unapproved engine modules — throw, never silently invent an answer', () => {
-  it('exerciseSelector.selectExercise throws NotApprovedError("exercise-selection-ranking")', () => {
-    try {
-      selectExercise({} as any);
-      expect.unreachable();
-    } catch (err) {
-      expect(err).toBeInstanceOf(NotApprovedError);
-      expect((err as NotApprovedError).decision).toBe('exercise-selection-ranking');
-    }
-  });
-
   it('workoutBuilder.buildWorkout throws NotApprovedError referencing its unresolved dependencies', () => {
     try {
       buildWorkout({} as any);
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(NotApprovedError);
-      expect((err as NotApprovedError).decision).toBe('volume-frequency-recovery-and-exercise-selection');
+      expect((err as NotApprovedError).decision).toBe('resource-allocation-and-time-fitting');
     }
-  });
-
-  it('explanationEngine.explainExerciseSelection throws — nothing real to explain yet', () => {
-    expect(() => explainExerciseSelection()).toThrow(NotApprovedError);
   });
 });

@@ -1,16 +1,16 @@
-// Explanation Engine — spec §29. Explanations are generated from actual
-// decision inputs/rules, never asked from an LLM after the fact (§33).
+// Explanation Engine — spec §20. Explanations are generated from actual
+// decision inputs/rules, never asked from an LLM after the fact (§21).
 // Functions here explain the parts of the pipeline that ARE decided
-// (exposure contribution, equipment feasibility) with real, deterministic
-// text built directly from the same data the decision used. Explaining a
-// full exercise-selection or workout-construction decision is NOT
-// implemented, because that decision itself isn't (see exerciseSelector.ts,
-// workoutBuilder.ts) — there is nothing real yet to explain.
+// (exposure contribution, equipment feasibility, exercise selection)
+// with real, deterministic text built directly from the same data the
+// decision used. Explaining a full workout-construction decision is NOT
+// implemented yet, because that decision itself isn't (see
+// workoutBuilder.ts) — there is nothing real yet to explain there.
 
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import type { ExposureContribution } from './exposureEngine.js';
+import type { ExerciseSelectionResult } from './exerciseSelector.js';
 import { EXPOSURE_COEFFICIENTS } from './config.js';
-import { NotApprovedError } from './errors.js';
 
 /**
  * Explains one ExposureContribution in plain text, using the same
@@ -52,13 +52,14 @@ export function explainEquipmentFeasibility(
   return `${exerciseId} is NOT equipment-feasible: missing ${missing.join(', ')} (requires ${requiredEquipment.join(', ')}, available: ${availableEquipment.join(', ') || 'none'}).`;
 }
 
-/** Always throws NotApprovedError — see this file's header. Exercise
- * selection itself isn't decided yet (exerciseSelector.ts), so there is
- * no real decision to explain. */
-export function explainExerciseSelection(): never {
-  throw new NotApprovedError(
-    'explanationEngine.explainExerciseSelection',
-    'exercise-selection-ranking',
-    'Cannot explain a decision that exerciseSelector does not yet make — see docs/TRAINING_ENGINE_DESIGN.md §19-20, §29.'
-  );
+/**
+ * Explains an exercise-selection decision. exerciseSelector.selectExercise
+ * already builds its own full reasoning text as part of its result (every
+ * factor that mattered — Blueprint muscle role, redundancy, current-vs-
+ * replaced), so this is a thin, explicit accessor rather than a second
+ * formula: the explanation is generated from the same decision inputs the
+ * selection itself used, never reconstructed after the fact.
+ */
+export function explainExerciseSelection(result: ExerciseSelectionResult): string {
+  return result.reasoning;
 }
