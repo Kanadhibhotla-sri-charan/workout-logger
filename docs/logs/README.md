@@ -19,3 +19,4 @@ story of how the app got to its current state.
 - [2026-08-30-11-open-decisions-and-readme-update.md](2026-08-30-11-open-decisions-and-readme-update.md)
 - [2026-08-30-12-final-foundation-cleanup-and-testability.md](2026-08-30-12-final-foundation-cleanup-and-testability.md)
 - [2026-08-30-13-goal-history-and-outside-blueprint-gate.md](2026-08-30-13-goal-history-and-outside-blueprint-gate.md)
+- [2026-08-30-14-goal-creation-confirmation-flow.md](2026-08-30-14-goal-creation-confirmation-flow.md)

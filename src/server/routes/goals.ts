@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type Database from 'better-sqlite3';
-import { GoalsRepo, UnknownBlueprintGoalReferenceError } from '../../repositories/goalsRepo.js';
+import { GoalsRepo, TooManyActiveAestheticGoalsError, UnknownBlueprintGoalReferenceError } from '../../repositories/goalsRepo.js';
+import { matchGoalCandidates } from '../../engine/goalCreation.js';
 
 export const goalsRouter = Router();
 
@@ -14,8 +15,22 @@ goalsRouter.get('/', (req, res) => {
   res.json(repo.list({ active }));
 });
 
+// Spec §2.1 step 1-4: the natural-language half of the hybrid flow.
+// Read-only — never persists a goal. The client shows these candidates
+// to the user, who must then explicitly confirm one via POST / below
+// (with source: 'natural_language', source_text: the original text) for
+// it to actually exist. An empty candidates array is expected for vague
+// text; it is not an error.
+goalsRouter.post('/match', (req, res) => {
+  const { text } = req.body ?? {};
+  if (typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text is required' });
+  }
+  res.json({ candidates: matchGoalCandidates(text) });
+});
+
 goalsRouter.post('/', (req, res) => {
-  const { goal_type, blueprint_ref, priority, notes, active } = req.body ?? {};
+  const { goal_type, blueprint_ref, priority, notes, active, review_cadence_days, source, source_text } = req.body ?? {};
 
   if (goal_type !== 'aesthetic' && goal_type !== 'functional') {
     return res.status(400).json({ error: 'goal_type must be "aesthetic" or "functional"' });
@@ -26,13 +41,32 @@ goalsRouter.post('/', (req, res) => {
   if (typeof priority !== 'number') {
     return res.status(400).json({ error: 'priority (number) is required' });
   }
+  if (source !== undefined && source !== 'structured' && source !== 'natural_language') {
+    return res.status(400).json({ error: 'source must be "structured" or "natural_language"' });
+  }
+  // Spec §2.1: a natural-language goal is never persisted without the
+  // user's original statement attached — this is what makes the
+  // eventual GoalsRepo row provably a confirmed, attributed activation
+  // rather than a silently inferred one.
+  if (source === 'natural_language' && (typeof source_text !== 'string' || !source_text.trim())) {
+    return res.status(400).json({ error: 'source_text is required when source is "natural_language"' });
+  }
 
   const repo = new GoalsRepo(db(req));
   try {
-    const goal = repo.create({ goal_type, blueprint_ref, priority, notes, active });
+    const goal = repo.create({
+      goal_type,
+      blueprint_ref,
+      priority,
+      notes,
+      active,
+      review_cadence_days,
+      source,
+      source_text: source === 'natural_language' ? source_text : null,
+    });
     res.status(201).json(goal);
   } catch (err) {
-    if (err instanceof UnknownBlueprintGoalReferenceError) {
+    if (err instanceof UnknownBlueprintGoalReferenceError || err instanceof TooManyActiveAestheticGoalsError) {
       return res.status(400).json({ error: err.message });
     }
     throw err;

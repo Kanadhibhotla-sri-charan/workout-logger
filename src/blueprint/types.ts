@@ -77,6 +77,12 @@ export interface BlueprintAestheticOutcome {
   primary_targets: string[];
   supporting_targets: string[];
   technical_explanation: string;
+  /** Example phrasings a user might type to describe this outcome
+   * (e.g. "My chest looks flat from the side.") — the only
+   * natural-language matching input Blueprint provides; see
+   * src/engine/goalCreation.ts. Blueprint's functional goals have no
+   * equivalent field. */
+  common_user_phrasings: string[];
 }
 
 export interface BlueprintFunctionalGoal {

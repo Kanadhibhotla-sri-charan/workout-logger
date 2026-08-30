@@ -104,6 +104,22 @@ export const FORBIDDEN_BODY_FOCUS_BY_DAY: Partial<Record<Weekday, readonly strin
   monday: ['lower', 'legs'],
 };
 
+/** [DEFAULT] §2.1: natural-language goal matching needs *some* minimum
+ * similarity and result-count cap to avoid presenting noise as a
+ * candidate. Not a training-methodology number — a text-matching
+ * operational default, centralized here per spec §22 anyway rather than
+ * left as a magic number inside the matcher. See
+ * src/engine/goalCreation.ts. */
+export const GOAL_MATCH = {
+  /** Minimum Dice coefficient (2*|intersection| / (|A|+|B|) over
+   * normalized word-token sets) for a Blueprint goal to be surfaced as a
+   * candidate at all. */
+  minScore: 0.2,
+  /** Never show more than this many ranked candidates — confirmation
+   * requires the user to read and pick, so the list must stay short. */
+  maxCandidates: 5,
+} as const;
+
 export const ENGINE_CONFIG = {
   exposureCoefficients: EXPOSURE_COEFFICIENTS,
   maxActiveAestheticGoals: MAX_ACTIVE_AESTHETIC_GOALS,
@@ -113,4 +129,5 @@ export const ENGINE_CONFIG = {
   recoveryThresholds: RECOVERY_THRESHOLDS,
   defaultWeeklySchedule: DEFAULT_WEEKLY_SCHEDULE,
   forbiddenBodyFocusByDay: FORBIDDEN_BODY_FOCUS_BY_DAY,
+  goalMatch: GOAL_MATCH,
 } as const;
