@@ -636,7 +636,13 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
         date: '2026-09-03', // Thursday — the legs day in this rotation (see quadsInput above)
         weekday: 'thursday',
         budget_minutes: 60,
-        available_equipment: QUADS_EQUIPMENT,
+        // Restricted to back-squat's own equipment only (Strict Bug-Fix
+        // Fix C: quads' Blueprint package also lists leg-press/leg-
+        // extension, both needing 'machine' — excluding it keeps this
+        // test isolated to the volume/badminton interaction it's
+        // actually about, rather than entangling it with multi-exercise
+        // construction, which has its own dedicated coverage).
+        available_equipment: ['barbell', 'rack'],
         available_training_days: ['tuesday', 'wednesday', 'thursday'],
         targets: [
           baseTarget({

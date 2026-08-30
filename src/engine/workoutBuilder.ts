@@ -33,7 +33,7 @@
 
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
-import { lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
+import { getPackageForTarget, lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
@@ -348,25 +348,51 @@ interface TargetRanking {
    * real, Blueprint-grounded, data-driven signal that replaces
    * `current_weekly_primary_sets === 0` as the classification input. */
   needDeficit: number;
+  /** Strict Bug-Fix §3.3's `recoveryNeed`/`recencyNeed` information
+   * requirement: 0 = no recovery caution for this target today, 1 =
+   * recoveryEngine flagged 'reduce', 2 = 'avoid' (already trained today
+   * — this target will be skipped outright regardless of rank, but
+   * still carries a real, non-zero value here so its position in
+   * reasoning/explainability output is never arbitrary). A target
+   * already flagged for recovery caution is genuinely less due for
+   * fresh scarce-time-budget work RIGHT NOW than an equally-classified
+   * target with no such flag — so higher recoveryNeed sorts LATER
+   * (dropped first under a time squeeze), used only as a late tie-break
+   * (see compareRankings) so it never overrides the primary
+   * need/recency signal already driving each tier. */
+  recoveryNeed: number;
 }
 
-/** Final Pass §6/§7/§12/§14: classifies one target and computes its
- * real programming-need deficit from actual weekly exposure — the
- * single source of truth `orderedTargets`' sort and the per-target
- * loop's own `classification` both read, so the two can never drift
- * apart. */
-function rankTarget(target: TargetBuildContext, startingPointMin: number): TargetRanking {
-  if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0 };
+/** Final Pass §6/§7/§12/§14, Strict Bug-Fix §3.3: classifies one target
+ * and computes its real programming-need deficit from actual weekly
+ * exposure plus its real recovery-caution level — the single source of
+ * truth `orderedTargets`' sort and the per-target loop's own
+ * `classification`/`recovery` both read, so the two can never drift
+ * apart. `recovery` is precomputed once, before ranking, purely from
+ * this target's own data (see buildWorkout's `recoveryByKey` map) — a
+ * pure per-target function, so precomputing it ahead of the per-target
+ * loop changes nothing about what it returns. */
+function rankTarget(target: TargetBuildContext, startingPointMin: number, recovery: RecoveryConstraintResult): TargetRanking {
+  const recoveryNeed = recovery.priority_adjustment === 'avoid' ? 2 : recovery.priority_adjustment === 'reduce' ? 1 : 0;
+  if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0, recoveryNeed };
   const needDeficit = Math.max(0, startingPointMin - target.weekly_exposure_units);
-  return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit };
+  return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit, recoveryNeed };
 }
 
 /**
- * Final Pass §7: "Normal-development targets MUST NOT receive
- * artificial priority because of alphabetical ordering, target ID,
- * array position, or arbitrary numeric constants... use a deterministic
- * tie-breaker based on stable Blueprint/ID ordering only after all
- * actual programming criteria are equal." Sort order, in priority:
+ * Final Pass §7, Strict Bug-Fix §3.4: "Normal-development targets MUST
+ * NOT receive artificial priority because of alphabetical ordering,
+ * target ID, array position, or arbitrary numeric constants... use a
+ * deterministic tie-breaker based on stable Blueprint/ID ordering only
+ * after all actual programming criteria are equal." This is the ONE
+ * canonical comparator (§3.4: "if the repository already has a
+ * canonical rankTarget()/compareRankings(), extend and reuse it instead
+ * of creating a second competing comparator") — buildWorkout's own
+ * iteration order AND the real rank index fed into time-fitting (see
+ * `targetRankIndex` below) both come from this single sorted order, so
+ * a later stage can never silently replace it with ID/array-position
+ * (Bug-Fix §3.2's "no later stage may replace programming priority").
+ * Sort order, in priority:
  *   1. tier — Goal 1's own targets, then Goal 2's, then every
  *      normal_development target, then every maintenance target (the
  *      exact 4-layer hierarchy §2.3 requires);
@@ -375,7 +401,10 @@ function rankTarget(target: TargetBuildContext, startingPointMin: number): Targe
  *   3. within maintenance — longer since the target was last
  *      meaningfully trained sorts first (more due for upkeep; never
  *      trained sorts first of all);
- *   4. ONLY once 1-3 are genuinely tied does target_id break the tie —
+ *   4. recoveryNeed — a target with a live recovery-caution flag sorts
+ *      after an otherwise-equal target with none (§3.3's required
+ *      recoveryNeed dimension; see TargetRanking's doc comment);
+ *   5. ONLY once 1-4 are genuinely tied does target_id break the tie —
  *      a stable fallback, never the deciding criterion.
  */
 function compareRankings(a: TargetRanking, b: TargetRanking): number {
@@ -392,6 +421,8 @@ function compareRankings(a: TargetRanking, b: TargetRanking): number {
     if (daysA !== daysB) return daysB - daysA;
   }
 
+  if (a.recoveryNeed !== b.recoveryNeed) return a.recoveryNeed - b.recoveryNeed;
+
   return a.target.target_id.localeCompare(b.target.target_id);
 }
 
@@ -407,7 +438,15 @@ function compareRankings(a: TargetRanking, b: TargetRanking): number {
 export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   const log: string[] = [];
   const skipped: SkippedTarget[] = [];
-  const candidates: Array<FittableItem & { goal_id: string; planned: Omit<PlannedExercise, 'estimated_minutes'> }> = [];
+  // `FittableItem.priority` (below) now carries the real, per-target
+  // compareRankings-derived rank (Strict Bug-Fix §3.5) so fitToTimeBudget
+  // sorts WITHIN a goal's own bucket correctly — that is a different
+  // number from the goal's own resourceAllocation-level priority (real
+  // goal rank 1/2/... or the flat NON_SPECIALIZATION_PRIORITY sentinel
+  // marking "below every real goal"), which decides ordering BETWEEN
+  // goal buckets (§17, unchanged). `goal_priority` keeps that second,
+  // distinct number available so the two concerns never collide again.
+  const candidates: Array<FittableItem & { goal_id: string; goal_priority: number; planned: Omit<PlannedExercise, 'estimated_minutes'> }> = [];
   const plannedExerciseIdsSoFar: BlueprintId[] = [];
   // Remediation §17/resourceAllocation.ts: this target's aesthetic
   // trend is identical across every target belonging to the same real
@@ -433,19 +472,54 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   const { typical_starting_range_per_week } = BlueprintAdapter.getGlobalPrinciples().frequency;
   const [, sessionsRangeMax] = typical_starting_range_per_week;
 
-  const rankedTargets = input.targets.map((t) => rankTarget(t, starting_point_sets[0])).sort(compareRankings);
+  // Strict Bug-Fix §3.3: recoveryNeed must be real INFORMATION in the
+  // canonical rank, not just a same-day skip gate discovered later — so
+  // it has to exist before ranking runs. applyRecoveryConstraint is a
+  // pure function of one target's own data (no dependency on iteration
+  // order or on any other target), so precomputing it here changes
+  // nothing about what it returns for the per-target loop below; it's
+  // computed once and reused (never re-derived) in both places.
+  const recoveryByKey = new Map<string, RecoveryConstraintResult>(
+    input.targets.map((target) => [
+      `${target.target_type}:${target.target_id}`,
+      applyRecoveryConstraint({
+        target_type: target.target_type,
+        target_id: target.target_id,
+        weekly_exposure_units: target.weekly_exposure_units,
+        rolling_exposure_units: target.rolling_exposure_units,
+        rolling_window_days: target.rolling_window_days,
+        days_since_target_last_trained: target.days_since_target_last_trained,
+        recent_badminton: target.recent_badminton,
+        other_activity_today: [],
+      }),
+    ])
+  );
+
+  const rankedTargets = input.targets
+    .map((t) => rankTarget(t, starting_point_sets[0], recoveryByKey.get(`${t.target_type}:${t.target_id}`)!))
+    .sort(compareRankings);
+
+  // Strict Bug-Fix §3.2/§3.5: "Once the weekly planner determines
+  // priority, that priority must survive every later stage... time
+  // fitting MUST NOT do priority=1000 for a whole class, or
+  // sortByPriorityThenId() where priority is identical for a whole
+  // class." rankedTargets above is already the ONE real, canonical,
+  // fully-tiebroken order (compareRankings) — this map turns that real
+  // order into a dense, per-target-unique rank index, so every exercise
+  // this target produces downstream (see EXERCISE_ORDER_SPAN below) can
+  // carry a FittableItem.priority that provably reflects this exact
+  // order, never a flat/duplicated number that would force
+  // fitToTimeBudget's own tie-break back onto alphabetical exercise ID.
+  const targetRankIndex = new Map<string, number>(rankedTargets.map((r, i) => [`${r.target.target_type}:${r.target.target_id}`, i]));
+  // Real per-target exercise count never gets anywhere near this many
+  // (Blueprint's own richest development package tops out at 3 — see
+  // developmentPackages.ts) — generous headroom so a target's own
+  // additional-exercise ordering (first exercise = most essential, per
+  // §14) can never spill into the next target's rank band.
+  const EXERCISE_ORDER_SPAN = 100;
 
   for (const { target, classification } of rankedTargets) {
-    const recovery = applyRecoveryConstraint({
-      target_type: target.target_type,
-      target_id: target.target_id,
-      weekly_exposure_units: target.weekly_exposure_units,
-      rolling_exposure_units: target.rolling_exposure_units,
-      rolling_window_days: target.rolling_window_days,
-      days_since_target_last_trained: target.days_since_target_last_trained,
-      recent_badminton: target.recent_badminton,
-      other_activity_today: [],
-    });
+    const recovery = recoveryByKey.get(`${target.target_type}:${target.target_id}`)!;
 
     // Remediation §16: the machine-readable explanation object, built
     // incrementally as this target's own real decisions actually run —
@@ -537,32 +611,55 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       continue;
     }
 
-    // Final Pass §8/§9: frequency is now an OUTPUT of contextual weekly
-    // allocation, never spreadDays' even mathematical spreading. A
+    // Strict Bug-Fix §4/§7/§22: the weekly plan must be durable within
+    // this generation run — "when generating Friday for the same week,
+    // use the SAME deterministic weeklyPlan... do not derive Friday's
+    // intended allocation from weekly target requirement / remaining
+    // number of days alone." Eligibility is therefore computed over the
+    // WHOLE real week (every gym day this target's PPL+Upper purpose is
+    // compatible with), never filtered to "today forward" — that
+    // filtering was the exact bug §22 forbids: it silently shrank the
+    // eligible-day denominator as the week progressed, so calling this
+    // function for Monday vs. Friday of the identical week (identical
+    // stored exposure/goals/schedule) could compute a DIFFERENT
+    // sessions_remaining_this_week, and therefore a different setsToday,
+    // for the same target's same weekly requirement — a real day-count
+    // spread mechanism wearing eligibility-filter clothing. A
     // physique_target may only train on a day whose PPL+Upper purpose
     // it's actually compatible with (sessionPurpose.ts); a
-    // functional_goal isn't purpose-gated, just gym-day-gated. Eligible
-    // days are counted from TODAY forward within this same real week —
-    // days already past don't need "re-planning," their real exposure
-    // is already reflected in current_weekly_primary_sets.
+    // functional_goal isn't purpose-gated, just gym-day-gated.
     const isPhysique = target.target_type === 'physique_target';
     const purposeToday = isPhysique ? todayPurpose : null;
-    const eligibleDaysThisWeek = orderedGymDays.filter((d) => {
-      if (WEEKDAY_INDEX[d] < WEEKDAY_INDEX[input.weekday]) return false;
+    const compatibleDaysThisWeek = orderedGymDays.filter((d) => {
       if (!isPhysique) return true;
       const purpose = sessionPurposes.get(d);
       return purpose !== undefined && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purpose);
     });
-    const sessionsRemainingThisWeek = Math.max(1, Math.min(eligibleDaysThisWeek.length, sessionsRangeMax));
+    const sessionsRemainingThisWeek = Math.max(1, Math.min(compatibleDaysThisWeek.length, sessionsRangeMax));
+    // Strict Bug-Fix §7 Stage 7 / §21: when more compatible days exist
+    // than Blueprint's own frequency range's upper bound allows, select
+    // a deterministic subset — the first sessionsRemainingThisWeek
+    // compatible days in real Monday-first week order (orderedGymDays
+    // is already that canonical order — see its own definition above) —
+    // rather than the target silently training on every compatible day
+    // regardless of the cap (a real correctness gap for a target
+    // compatible with more session purposes than Blueprint's own
+    // frequency cap, e.g. a universal target like obliques against a
+    // 4-gym-day week with a 3-session/week cap).
+    const eligibleDaysThisWeek = compatibleDaysThisWeek.slice(0, sessionsRemainingThisWeek);
     const weeklyAllocation: WeeklyAllocationDecision = {
       session_purpose_today: purposeToday,
       eligible_days_this_week: eligibleDaysThisWeek,
       sessions_remaining_this_week: sessionsRemainingThisWeek,
       reasoning:
         eligibleDaysThisWeek.length === 0
-          ? `${target.target_type} "${target.target_id}": no remaining gym day this week is compatible with this target` +
+          ? `${target.target_type} "${target.target_id}": no gym day this week is compatible with this target` +
             (isPhysique ? ` (today's session purpose is ${todayPurpose ?? 'none — not a gym day'}).` : ' (no gym days remain this week).')
-          : `${target.target_type} "${target.target_id}": eligible on ${eligibleDaysThisWeek.join(', ')} (${sessionsRemainingThisWeek} session(s) remaining this week, capped at Blueprint's own frequency range's upper bound of ${sessionsRangeMax}); ${desiredWeekly} desired weekly sets spread across them.`,
+          : `${target.target_type} "${target.target_id}": eligible on ${eligibleDaysThisWeek.join(', ')} (${sessionsRemainingThisWeek} session(s)/week, capped at Blueprint's own frequency range's upper bound of ${sessionsRangeMax}` +
+            (compatibleDaysThisWeek.length > eligibleDaysThisWeek.length
+              ? `; ${compatibleDaysThisWeek.length - eligibleDaysThisWeek.length} additional compatible day(s) not used this week under that cap`
+              : '') +
+            `); ${desiredWeekly} desired weekly sets spread evenly across them — this same weekly allocation applies on every day of this real week, not re-derived per day (spec §22).`,
     };
     log.push(weeklyAllocation.reasoning);
 
@@ -652,138 +749,212 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       if (withPrescription.length > 0) candidateExerciseIds = withPrescription;
     }
 
-    const selection = selectExercise({
-      target_type: target.target_type,
-      target_id: target.target_id,
-      target_tier: target.tier,
-      candidate_exercise_ids: candidateExerciseIds,
-      recent_exercise_ids: target.recent_exercise_ids,
-      current_exercise_id: target.current_exercise_id,
-      exercises_already_planned_today: plannedExerciseIdsSoFar,
-      outside_blueprint_candidates: new Map([...outsideCandidatesById].map(([id, e]) => [id, { role: e.role, name: e.name }])),
-      prefer_lower_fatigue_cost: badmintonLowerBodyReduce,
-    });
-    log.push(selection.reasoning);
+    // Strict Bug-Fix §11-15: 0/1/multiple exercises per target — a real
+    // decision the exercise-selection hierarchy and Blueprint's own
+    // development-package data drive, never a hard one-exercise
+    // architectural constraint. A second (or third) exercise is only
+    // ever added when Blueprint's OWN development package for this
+    // target lists more than one exercise AND this session's real
+    // required sets (setsToday) exceed what the first-selected
+    // exercise's own Blueprint-authored per-session `sets` figure
+    // covers (§16's own worked example: "Exercise A — 3 sets, Exercise
+    // B — 2 sets" — Blueprint's own numbers, never an app-invented
+    // split). A target with no development package (a functional_goal,
+    // or a physique_target with none) has no such data to justify or
+    // size a second exercise, so it always stays single-exercise,
+    // exactly as before this change.
+    const packageForTarget = target.target_type === 'physique_target' ? getPackageForTarget(target.target_id) : null;
+    const maxExercisesForTarget = Math.max(1, packageForTarget?.exercises.length ?? 1);
 
-    // Remediation §16's "substitutions": the prior exercise this pick
-    // actually replaced, distinct from mere continuity (winner === the
-    // target's own current_exercise_id) or a genuinely first-time pick
-    // (no current_exercise_id to replace at all).
-    const selectionDecision: NonNullable<DecisionExplanation['selection']> = {
-      decisive_gate: selection.decisive_gate,
-      rejected_candidates: selection.rejected_candidates,
-      substituted_from: target.current_exercise_id && target.current_exercise_id !== selection.exercise_id ? target.current_exercise_id : null,
-    };
+    // Remediation §9's session-level badminton trim is a real reduction
+    // to this target's TOTAL work today, applied once up front (not
+    // per-exercise) — trimming only the first exercise's own capped
+    // assignment would let a second exercise silently "back-fill" the
+    // trimmed set from the target's still-unreduced remaining need,
+    // defeating the trim entirely once multi-exercise construction is
+    // in play. badmintonLowerBodyReduce is target-level (independent of
+    // which exercise ends up selected), so it's safe to apply before
+    // exercise selection even runs.
+    let remainingSets = badmintonLowerBodyReduce ? Math.max(1, setsToday - 1) : setsToday;
+    let candidatePool = candidateExerciseIds;
+    const plannedForThisTarget: BlueprintId[] = [];
 
-    const outsideSelection = outsideCandidatesById.get(selection.exercise_id);
-
-    // Only an exact (target, exercise) match against a real Blueprint
-    // development package (or an approved outside-Blueprint exercise's
-    // own human-supplied range) counts — falling back to some other
-    // exercise's prescription within the same package would mean
-    // applying one exercise's reps/RIR to a different one, which is
-    // exactly the kind of invented substitute spec §25 forbids.
-    const prescription = outsideSelection
-      ? { reps: outsideSelection.reps_range, rir: outsideSelection.rir_range }
-      : target.target_type === 'physique_target'
-        ? lookupExercisePrescription(target.target_id, selection.exercise_id)
-        : null;
-
-    if (!prescription) {
-      skipped.push({
+    while (remainingSets > 0 && candidatePool.length > 0 && plannedForThisTarget.length < maxExercisesForTarget) {
+      const exerciseIndex = plannedForThisTarget.length;
+      const selection = selectExercise({
         target_type: target.target_type,
         target_id: target.target_id,
-        classification,
-        reason: `No Blueprint development-package rep/RIR prescription is available for "${selection.exercise_id}" against this target — exposing this gap rather than inventing a rep range (spec §25).`,
-        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation, selection: selectionDecision }),
+        target_tier: target.tier,
+        candidate_exercise_ids: candidatePool,
+        recent_exercise_ids: target.recent_exercise_ids,
+        current_exercise_id: target.current_exercise_id,
+        exercises_already_planned_today: [...plannedExerciseIdsSoFar, ...plannedForThisTarget],
+        outside_blueprint_candidates: new Map([...outsideCandidatesById].map(([id, e]) => [id, { role: e.role, name: e.name }])),
+        prefer_lower_fatigue_cost: badmintonLowerBodyReduce,
       });
-      continue;
-    }
+      log.push(selection.reasoning);
 
-    const reps = parseRange(prescription.reps);
-    const rir = parseRange(prescription.rir);
-    plannedExerciseIdsSoFar.push(selection.exercise_id);
+      // Remediation §16's "substitutions": the prior exercise this pick
+      // actually replaced, distinct from mere continuity (winner === the
+      // target's own current_exercise_id) or a genuinely first-time pick
+      // (no current_exercise_id to replace at all). Only meaningful for
+      // this target's first exercise — an additional exercise is new
+      // coverage, not a substitution for anything.
+      const selectionDecision: NonNullable<DecisionExplanation['selection']> = {
+        decisive_gate: selection.decisive_gate,
+        rejected_candidates: selection.rejected_candidates,
+        substituted_from:
+          exerciseIndex === 0 && target.current_exercise_id && target.current_exercise_id !== selection.exercise_id ? target.current_exercise_id : null,
+      };
 
-    // Remediation §6: a progression engine that is not consumed by the
-    // workout builder is incomplete. Only exercises with usable prior
-    // history for THIS exact exercise (not merely this target) get a
-    // real progression decision — a first-time prescription has
-    // nothing to progress from yet, and stays at Blueprint's own
-    // baseline reps/RIR (progression_decision: null is the honest
-    // answer, not a gap).
-    const exerciseHistory = target.exercise_history[selection.exercise_id] ?? [];
-    let sessionSets = setsToday;
-    let progressionDecision: ProgressionResult | null = null;
-    let previousPerformance: PlannedExercise['previous_performance'] = null;
+      const outsideSelection = outsideCandidatesById.get(selection.exercise_id);
 
-    // Remediation §9's session-level badminton effect (see the
-    // badmintonLowerBodyReduce computation above) — bounded to one set,
-    // floored at 1, and stacks independently of (never replaces) the
-    // progression-driven 'reduce' below; the weekly volume decision
-    // itself (desiredWeekly) is never touched by either.
-    if (badmintonLowerBodyReduce) {
-      sessionSets = Math.max(1, sessionSets - 1);
-    }
+      // Only an exact (target, exercise) match against a real Blueprint
+      // development package (or an approved outside-Blueprint exercise's
+      // own human-supplied range) counts — falling back to some other
+      // exercise's prescription within the same package would mean
+      // applying one exercise's reps/RIR to a different one, which is
+      // exactly the kind of invented substitute spec §25 forbids.
+      // `sets` (this exercise's own Blueprint-authored per-session
+      // figure) is null for an outside-Blueprint candidate — there is
+      // no Blueprint data to size a multi-exercise split against it, so
+      // it always absorbs whatever's left and ends this target's loop.
+      const outsidePrescription = outsideSelection ? { reps: outsideSelection.reps_range, rir: outsideSelection.rir_range, sets: null as number | null } : null;
+      const blueprintPrescription = !outsideSelection && target.target_type === 'physique_target' ? lookupExercisePrescription(target.target_id, selection.exercise_id) : null;
+      const prescription = outsidePrescription ?? (blueprintPrescription ? { reps: blueprintPrescription.reps, rir: blueprintPrescription.rir, sets: blueprintPrescription.sets } : null);
 
-    if (exerciseHistory.length > 0) {
-      const mostRecent = exerciseHistory[0]!;
-      const lastCompletedSet = [...mostRecent.sets].reverse().find((s) => s.completed) ?? null;
-      previousPerformance = { date: mostRecent.date, weight: lastCompletedSet?.weight ?? null, reps: lastCompletedSet?.reps ?? null };
-
-      progressionDecision = computeProgression({
-        exercise_id: selection.exercise_id,
-        target_reps_min: reps.min,
-        target_reps_max: reps.max,
-        recent_sessions_actual_sets: exerciseHistory.map((h) => h.sets),
-      });
-      log.push(progressionDecision.reasoning);
-
-      // 'reduce' is the one progression outcome with a real, bounded
-      // session-level effect here: one fewer set than the weekly-volume
-      // math alone would call for, floored at 1 — never touching the
-      // weekly volume decision itself (that stays volumeEngine's job).
-      if (progressionDecision.recommendation === 'reduce') {
-        sessionSets = Math.max(1, sessionSets - 1);
+      if (!prescription) {
+        // Reachable only if the earlier prescription pre-filter's
+        // invariant were ever violated (every candidate reaching this
+        // pool is already guaranteed to have one) — stays as the same
+        // honest, non-inventing skip spec §25 requires, and only
+        // counts as a whole-target skip if no exercise was secured yet.
+        if (plannedForThisTarget.length === 0) {
+          skipped.push({
+            target_type: target.target_type,
+            target_id: target.target_id,
+            classification,
+            reason: `No Blueprint development-package rep/RIR prescription is available for "${selection.exercise_id}" against this target — exposing this gap rather than inventing a rep range (spec §25).`,
+            decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation, selection: selectionDecision }),
+          });
+        }
+        break;
       }
-    }
 
-    candidates.push({
-      id: selection.exercise_id,
-      priority: target.goal_priority,
-      estimated_minutes: estimateMinutes(sessionSets),
-      goal_id: target.goal_id,
-      planned: {
-        exercise_id: selection.exercise_id,
-        target_type: target.target_type,
-        target_id: target.target_id,
-        role: target.tier,
-        classification,
-        target_sets: sessionSets,
-        target_reps_min: reps.min,
-        target_reps_max: reps.max,
-        target_rir_min: rir.min,
-        target_rir_max: rir.max,
-        previous_performance: previousPerformance,
-        progression_decision: progressionDecision,
-        reasoning:
-          `${selection.reasoning} ${sessionSets} sets/session (${desiredWeekly} desired weekly, spread across ${sessionsRemainingThisWeek} eligible session(s) this week: ${eligibleDaysThisWeek.join(', ')}). ` +
-          `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
-          (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.') +
-          (badmintonLowerBodyReduce ? ` Badminton (remediation §9): ${recovery.reasoning}` : ''),
-        decision: {
+      const reps = parseRange(prescription.reps);
+      const rir = parseRange(prescription.rir);
+      candidatePool = candidatePool.filter((id) => id !== selection.exercise_id);
+      plannedForThisTarget.push(selection.exercise_id);
+      plannedExerciseIdsSoFar.push(selection.exercise_id);
+
+      // Remediation §6: a progression engine that is not consumed by the
+      // workout builder is incomplete. Only exercises with usable prior
+      // history for THIS exact exercise (not merely this target) get a
+      // real progression decision — a first-time prescription has
+      // nothing to progress from yet, and stays at Blueprint's own
+      // baseline reps/RIR (progression_decision: null is the honest
+      // answer, not a gap).
+      const exerciseHistory = target.exercise_history[selection.exercise_id] ?? [];
+      let progressionDecision: ProgressionResult | null = null;
+      let previousPerformance: PlannedExercise['previous_performance'] = null;
+
+      if (exerciseHistory.length > 0) {
+        const mostRecent = exerciseHistory[0]!;
+        const lastCompletedSet = [...mostRecent.sets].reverse().find((s) => s.completed) ?? null;
+        previousPerformance = { date: mostRecent.date, weight: lastCompletedSet?.weight ?? null, reps: lastCompletedSet?.reps ?? null };
+
+        progressionDecision = computeProgression({
+          exercise_id: selection.exercise_id,
+          target_reps_min: reps.min,
+          target_reps_max: reps.max,
+          recent_sessions_actual_sets: exerciseHistory.map((h) => h.sets),
+        });
+        log.push(progressionDecision.reasoning);
+
+        // 'reduce' is the one progression outcome with a real, bounded
+        // session-level effect here: one fewer set than the weekly-
+        // volume math alone would call for, floored at 1 — applied to
+        // this target's TOTAL remaining need (same reasoning as the
+        // badminton trim above), only ever from this target's first
+        // (most-essential, currently-progressing) exercise, and only
+        // BEFORE that exercise's own sessionSets is capped below — so
+        // it's a genuine total-session reduction, never something a
+        // later exercise silently backfills. Never touches the weekly
+        // volume decision itself (that stays volumeEngine's job).
+        if (exerciseIndex === 0 && progressionDecision.recommendation === 'reduce') {
+          remainingSets = Math.max(1, remainingSets - 1);
+        }
+      }
+
+      // Strict Bug-Fix §15: deterministic set distribution. While a
+      // genuinely different, still-usable candidate remains under this
+      // target's own package-exercise cap, this pick is capped at its
+      // own Blueprint-authored per-session `sets` figure. Once it's the
+      // LAST usable exercise for this target (no candidates left, the
+      // package's own exercise cap is reached, or there is no further
+      // Blueprint sets figure to split against), it absorbs whatever
+      // remains — volumeEngine's already-decided weekly requirement
+      // (§13, retained methodology) must never be silently dropped just
+      // because Blueprint's package ran out of listed exercises.
+      const isLastUsable = candidatePool.length === 0 || plannedForThisTarget.length >= maxExercisesForTarget;
+      const sessionSets = prescription.sets === null || isLastUsable ? remainingSets : Math.min(remainingSets, prescription.sets);
+      remainingSets -= sessionSets;
+
+      candidates.push({
+        id: selection.exercise_id,
+        // Strict Bug-Fix §3.5: a real, per-target-unique rank derived
+        // directly from compareRankings' own total order (targetRankIndex),
+        // never a flat/duplicated number — see targetRankIndex's own doc
+        // comment above for why this is the actual fix, not the
+        // forbidden "priority=1000 for a whole class" pattern. This
+        // target's additional exercises share its band but sort after
+        // its first (exerciseIndex is the real "primary pick first"
+        // ordering §14 describes, not an arbitrary array position).
+        priority: targetRankIndex.get(`${target.target_type}:${target.target_id}`)! * EXERCISE_ORDER_SPAN + exerciseIndex,
+        estimated_minutes: estimateMinutes(sessionSets),
+        goal_id: target.goal_id,
+        goal_priority: target.goal_priority,
+        planned: {
+          exercise_id: selection.exercise_id,
+          target_type: target.target_type,
+          target_id: target.target_id,
+          role: target.tier,
           classification,
-          weekly_exposure: weeklyExposure,
-          last_trained: lastTrained,
-          recent_exercise_ids: target.recent_exercise_ids,
-          badminton_context: target.recent_badminton,
-          recovery,
-          volume_decision: volumeDecision,
-          session_purpose: purposeToday,
-          weekly_allocation: weeklyAllocation,
-          selection: selectionDecision,
+          target_sets: sessionSets,
+          target_reps_min: reps.min,
+          target_reps_max: reps.max,
+          target_rir_min: rir.min,
+          target_rir_max: rir.max,
+          previous_performance: previousPerformance,
+          progression_decision: progressionDecision,
+          reasoning:
+            `${selection.reasoning} ${sessionSets} sets/session` +
+            (maxExercisesForTarget > 1 ? ` (exercise ${exerciseIndex + 1} of this target's own Blueprint development package, of up to ${maxExercisesForTarget})` : '') +
+            ` (${desiredWeekly} desired weekly, spread across ${sessionsRemainingThisWeek} eligible session(s) this week: ${eligibleDaysThisWeek.join(', ')}). ` +
+            `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
+            (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.') +
+            (exerciseIndex === 0 && badmintonLowerBodyReduce ? ` Badminton (remediation §9): ${recovery.reasoning}` : ''),
+          decision: {
+            classification,
+            weekly_exposure: weeklyExposure,
+            last_trained: lastTrained,
+            recent_exercise_ids: target.recent_exercise_ids,
+            badminton_context: target.recent_badminton,
+            recovery,
+            volume_decision: volumeDecision,
+            session_purpose: purposeToday,
+            weekly_allocation: weeklyAllocation,
+            selection: selectionDecision,
+          },
         },
-      },
-    });
+      });
+
+      // No more Blueprint-authored structure to split further once a
+      // candidate without its own package `sets` figure (an approved
+      // outside-Blueprint exercise) has been used — stop rather than
+      // guessing how a further exercise's volume should be sized.
+      if (prescription.sets === null) break;
+    }
   }
 
   // Remediation §17: goals literally compete for the day's time budget
@@ -797,12 +968,13 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   // (they all carry the same NON_SPECIALIZATION_GOAL_ID goal_id) — in
   // strict priority order, each capped at its own desired_amount (the
   // total minutes its own already-selected candidates would need).
-  // Level 2: within each bucket's own capped sub-budget,
-  // fitToTimeBudget picks which of that goal's own candidates actually
-  // fit, using their original priority for internal tie-break exactly
-  // as before this change (so within the synthetic bucket, each
-  // individual non-specialization target's own 1000+index priority
-  // still governs which of THOSE get dropped first).
+  // Level 2: within each bucket's own capped sub-budget, fitToTimeBudget
+  // picks which of that goal's own candidates actually fit, using each
+  // candidate's real compareRankings-derived rank (targetRankIndex,
+  // Strict Bug-Fix §3.5) — so within the synthetic non-specialization
+  // bucket, real programming need (exposure deficit / recency) governs
+  // which of those candidates get dropped first, never array position
+  // or ID.
   const candidatesByGoal = new Map<string, typeof candidates>();
   for (const c of candidates) {
     const list = candidatesByGoal.get(c.goal_id) ?? [];
@@ -815,7 +987,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     total_available: input.budget_minutes,
     goals: [...candidatesByGoal.entries()].map(([goalId, group]) => ({
       goal_id: goalId,
-      priority: Math.min(...group.map((c) => c.priority)),
+      priority: Math.min(...group.map((c) => c.goal_priority)),
       desired_amount: group.reduce((sum, c) => sum + c.estimated_minutes, 0),
       progress_status: goalTrend.get(goalId),
     })),
@@ -868,8 +1040,6 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     constraints: { available_equipment: input.available_equipment, budget_minutes: input.budget_minutes },
   };
 }
-
-const WEEKDAY_INDEX: Record<Weekday, number> = Object.fromEntries(WEEKDAYS.map((d, i) => [d, i])) as Record<Weekday, number>;
 
 function weekdayOfDate(dateIso: string): Weekday {
   // dateIso is a plain YYYY-MM-DD date string (no time component) — see

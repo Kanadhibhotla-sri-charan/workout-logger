@@ -69,8 +69,15 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
     goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: 'chest-upper-shelf', priority: 2 });
 
     // A scarce budget that can serve one goal's own push-day work but
-    // not both.
-    const result = assembleAndBuildWorkout(db, MONDAY, 12);
+    // not both. mid-pec's real weekly requirement (Strict Bug-Fix Fix C:
+    // 0/1/multiple exercises, drawn from the real shared chest
+    // development package) now needs 2 exercises (cable-fly + flat-
+    // barbell-bench-press) to fully cover itself — 7 minutes is tight
+    // enough to fit only the first of those, with nothing left over for
+    // upper-pec's own (separate, lower-ranked — see chest-front-width's
+    // own supporting_targets) work, proving Goal 1's real need still
+    // wins the scarce budget entirely under the real multi-exercise path.
+    const result = assembleAndBuildWorkout(db, MONDAY, 7);
     expect(result.exercises.find((e) => e.target_id === 'mid-pec')).toBeDefined();
     expect(result.exercises.find((e) => e.target_id === 'upper-pec')).toBeUndefined();
   });
