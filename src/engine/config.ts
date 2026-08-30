@@ -117,6 +117,78 @@ export const FORBIDDEN_BODY_FOCUS_BY_DAY: Partial<Record<Weekday, readonly strin
   monday: LOWER_BODY_PHYSIQUE_REGIONS,
 };
 
+/** [SPEC] Final Programming-Engine Pass §5: "The current training
+ * structure is PPL + Upper. The planner must understand the purpose of
+ * the four gym sessions relative to each other." Blueprint has no
+ * session-purpose taxonomy of its own (docs already note
+ * TrainingProfile.preferred_split is deliberately a free string, e.g.
+ * "push-pull-legs" — this app doesn't invent a closed enum there
+ * either) — this is the one place that operationalizes the specific
+ * split this user already runs into Blueprint's own physique_target
+ * vocabulary, at target-id granularity (not the coarser parent_region
+ * LOWER_BODY_PHYSIQUE_REGIONS uses above) because "arms" alone can't
+ * distinguish a push muscle (triceps) from a pull muscle (biceps).
+ * See src/engine/sessionPurpose.ts for how these are actually assigned
+ * to specific weekdays. */
+export type SessionPurpose = 'push' | 'pull' | 'legs' | 'upper';
+
+/** [SPEC] The exact rotation order §5's PPL+Upper structure implies —
+ * push, then pull, then legs, then upper — applied to the user's
+ * actual ordered gym days by src/engine/sessionPurpose.ts. A rotation
+ * order is a scheduling convention, not a target-priority weight (spec
+ * §7's prohibition is about which MUSCLE gets resources first, never
+ * about the well-known, standard order a 4-day PPL+Upper split itself
+ * runs in). */
+export const SESSION_PURPOSE_ROTATION: readonly SessionPurpose[] = ['push', 'pull', 'legs', 'upper'];
+
+/** [DEFAULT] Blueprint physique_target ids (verified against
+ * src/blueprint/snapshot/programming.json's physiqueTargets list) a
+ * standard Push session trains: chest, front/side delts (the
+ * push-dominant shoulder heads — rear-delt is pull), and triceps. */
+export const PUSH_PHYSIQUE_TARGETS: readonly string[] = ['upper-pec', 'mid-pec', 'lower-pec', 'front-delt', 'side-delt', 'triceps', 'triceps-long-head'];
+
+/** [DEFAULT] A standard Pull session trains: back, rear-delt, biceps,
+ * and forearms (grip work is conventionally paired with pulling). */
+export const PULL_PHYSIQUE_TARGETS: readonly string[] = [
+  'lat-width',
+  'back-thickness',
+  'upper-traps',
+  'rear-delt',
+  'biceps',
+  'brachialis-arm-thickness',
+  'forearm-flexors',
+  'forearm-extensors',
+];
+
+/** [DEFAULT] A standard Legs session — every LOWER_BODY_PHYSIQUE_REGIONS
+ * region resolved down to its own target ids, plus the glutes (Blueprint
+ * groups them under `hips`, alongside adductors). Deliberately the same
+ * "lower body" concept the Monday rule already uses, at target
+ * granularity. */
+export const LEGS_PHYSIQUE_TARGETS: readonly string[] = ['quads', 'hamstrings', 'gluteus-maximus', 'gluteus-medius-minimus', 'adductors', 'gastrocnemius', 'soleus'];
+
+/** [DEFAULT] Upper is the 4th PPL+Upper day: a genuine second upper-body
+ * session, not a distinct muscle set of its own — compatible with every
+ * target Push or Pull already trains, since that's literally what
+ * "upper body" means in this split. Computed as a union, never
+ * duplicated by hand, so PUSH/PULL and UPPER can never silently drift
+ * apart. */
+export const UPPER_PHYSIQUE_TARGETS: readonly string[] = [...PUSH_PHYSIQUE_TARGETS, ...PULL_PHYSIQUE_TARGETS];
+
+/** [DEFAULT] Targets with no clear push/pull/legs identity (abs, neck) —
+ * commonly trained on any session in real programs, so compatible with
+ * every session purpose rather than arbitrarily assigned to one. */
+export const UNIVERSAL_PHYSIQUE_TARGETS: readonly string[] = ['obliques', 'rectus-abdominis', 'neck-thickness'];
+
+/** [DEFAULT] The full session-purpose -> compatible-target-id-list map
+ * src/engine/sessionPurpose.ts's eligibility check reads. */
+export const SESSION_PURPOSE_TARGETS: Record<SessionPurpose, readonly string[]> = {
+  push: PUSH_PHYSIQUE_TARGETS,
+  pull: PULL_PHYSIQUE_TARGETS,
+  legs: LEGS_PHYSIQUE_TARGETS,
+  upper: UPPER_PHYSIQUE_TARGETS,
+};
+
 /** [DEFAULT] §2.1: natural-language goal matching needs *some* minimum
  * similarity and result-count cap to avoid presenting noise as a
  * candidate. Not a training-methodology number — a text-matching
@@ -161,6 +233,9 @@ export const ENGINE_CONFIG = {
   defaultWeeklySchedule: DEFAULT_WEEKLY_SCHEDULE,
   lowerBodyPhysiqueRegions: LOWER_BODY_PHYSIQUE_REGIONS,
   forbiddenBodyFocusByDay: FORBIDDEN_BODY_FOCUS_BY_DAY,
+  sessionPurposeRotation: SESSION_PURPOSE_ROTATION,
+  sessionPurposeTargets: SESSION_PURPOSE_TARGETS,
+  universalPhysiqueTargets: UNIVERSAL_PHYSIQUE_TARGETS,
   goalMatch: GOAL_MATCH,
   timeEstimation: TIME_ESTIMATION,
 } as const;

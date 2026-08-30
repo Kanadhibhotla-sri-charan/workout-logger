@@ -10,9 +10,10 @@ import { OutsideBlueprintExercisesRepo } from '../../src/repositories/outsideBlu
 import { BadmintonSessionDetailsRepo } from '../../src/repositories/badmintonSessionDetailsRepo.js';
 import { BlueprintAdapter } from '../../src/blueprint/adapter.js';
 
-// 2026-08-31 is a Monday; 2026-09-01 is the following Tuesday.
+// 2026-08-31 is a Monday; 2026-09-01/03 are the following Tuesday/Thursday.
 const MONDAY = '2026-08-31';
 const TUESDAY = '2026-09-01';
+const THURSDAY = '2026-09-03';
 const PRIOR_THURSDAY = '2026-08-27';
 
 let db: Database.Database;
@@ -272,7 +273,11 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     new TrainingProfileRepo(db).upsert(user.id, {
       timezone: 'Asia/Kolkata',
       week_start_day: 'monday',
-      training_days: ['tuesday'],
+      // Session purposes rotate push/pull/legs/upper across ordered gym
+      // days (in real Monday-first week order) — tuesday/wednesday/
+      // thursday land as push/pull/legs, so quads (a legs-only target)
+      // is only eligible on Thursday this week.
+      training_days: ['tuesday', 'wednesday', 'thursday'],
       default_session_duration_minutes: 60,
       minimum_session_duration_minutes: 30,
       maximum_session_duration_minutes: 90,
@@ -286,7 +291,7 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     // dropped for time. Equipment is scoped tight enough that quads'
     // own candidates (back-squat/leg-press/leg-extension) are close to
     // the only equipment-feasible, Blueprint-prescribed work available.
-    const withoutBadminton = assembleAndBuildWorkout(db, TUESDAY, 240);
+    const withoutBadminton = assembleAndBuildWorkout(db, THURSDAY, 240);
     const planWithout = withoutBadminton.exercises.find((e) => e.target_id === 'quads');
     expect(planWithout).toBeDefined();
 
@@ -294,7 +299,7 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     const badmintonSession = sessionsRepo.createSession({ date: MONDAY, session_type: 'badminton', status: 'completed' });
     new BadmintonSessionDetailsRepo(db).record({ workout_session_id: badmintonSession.session_id, intensity: 'high' });
 
-    const withBadminton = assembleAndBuildWorkout(db, TUESDAY, 240);
+    const withBadminton = assembleAndBuildWorkout(db, THURSDAY, 240);
     const planWith = withBadminton.exercises.find((e) => e.target_id === 'quads');
 
     expect(planWith).toBeDefined();

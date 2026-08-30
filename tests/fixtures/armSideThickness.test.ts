@@ -65,7 +65,7 @@ describe('fixture: "arms look thin from side"', () => {
     const aestheticOutcome = outcome as import('../../src/blueprint/adapter.js').BlueprintAestheticOutcome;
 
     const primary = BlueprintAdapter.getTarget(aestheticOutcome.primary_targets[0]!);
-    const supporting = BlueprintAdapter.getTarget(aestheticOutcome.supporting_targets[0]!);
+    const supporting = BlueprintAdapter.getTarget((aestheticOutcome.supporting_targets ?? [])[0]!);
 
     expect(primary?.id).toBe('brachialis-arm-thickness');
     expect(primary?.name.toLowerCase()).toContain('brachialis');
@@ -76,7 +76,7 @@ describe('fixture: "arms look thin from side"', () => {
     const goalsRepo = new GoalsRepo(db);
     const goal = goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: BLUEPRINT_OUTCOME_ID, priority: 1 });
     const outcome = goalsRepo.resolveBlueprint(goal.id)! as import('../../src/blueprint/adapter.js').BlueprintAestheticOutcome;
-    const relevantTargets = new Set([...outcome.primary_targets, ...outcome.supporting_targets]);
+    const relevantTargets = new Set([...outcome.primary_targets, ...(outcome.supporting_targets ?? [])]);
 
     // Find a real exercise whose physique_targets overlap this goal —
     // proof the chain is walkable, not a hand-picked/hard-coded id.

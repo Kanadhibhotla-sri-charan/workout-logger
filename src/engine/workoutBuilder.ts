@@ -39,7 +39,7 @@ import { WEEKDAYS } from '../contracts/types.js';
 import { REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
 import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { daysBetween } from './dateMath.js';
-import { allocateFrequency, type FrequencyAllocation } from './frequencyEngine.js';
+import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
 import { exercisesTrainingTarget, selectExercise, type ExerciseSelectionResult } from './exerciseSelector.js';
 import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
@@ -63,15 +63,20 @@ export interface ExerciseSessionHistory {
   sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
 }
 
-/** Remediation §7.1/§14: every relevant target is classified so the
- * two-active-aesthetic-goal limit never means "only two muscles get
- * trained." 'specialization' = tied to an active goal's own
- * PriorityMap; 'normal_development' = not goal-tied, currently at zero
- * direct volume, needs building up; 'maintenance' = not goal-tied,
- * already carries some volume, gets upkeep work rather than
- * unnecessary extra. The last two are both derived from the SAME
- * volumeEngine.decideVolume call every target already goes through —
- * no separate classification formula, just reading its real action. */
+/** Remediation §7.1/§14, Final Pass §6/§7/§12: every relevant target is
+ * classified so the two-active-aesthetic-goal limit never means "only
+ * two muscles get trained." 'specialization' = tied to an active
+ * goal's own PriorityMap; 'normal_development' = not goal-tied and
+ * this week's real exposure (primary 1.00 + secondary 0.33 — the same
+ * weekly_exposure_units every other engine already uses) sits below
+ * Blueprint's own conservative starting_point_sets threshold, i.e.
+ * genuinely under-trained; 'maintenance' = not goal-tied and already
+ * at/above that threshold this week, whether from direct sets or
+ * substantial compound overlap. Final Pass §6/§12 is explicit:
+ * `current_weekly_primary_sets === 0` must NOT be treated as "zero
+ * meaningful training" — compound secondary exposure counts, so this
+ * classification reads the combined exposure number, never the raw
+ * primary-set count alone. See rankTarget() below for exactly how. */
 export type TargetClassification = 'specialization' | 'normal_development' | 'maintenance';
 
 /** An approved outside-Blueprint exercise, already resolved into
@@ -160,20 +165,61 @@ export interface BuildWorkoutInput {
 }
 
 /**
- * Remediation §16: "every generated workout must include a machine-
- * readable reasoning object" covering (its exact list): weekly
- * exposure, secondary exposure contributions, last-trained dates,
- * recent exercise history, progression input/output, badminton
- * context, selected exercises, rejected candidates, substitutions, and
- * the volume decision + reason. Every field here is a value this
- * pipeline already computed somewhere in `buildWorkout` — nothing is
- * re-derived or invented for this object; it exists so a caller/UI can
- * read the *why* as data instead of parsing `reasoning` prose (which
- * stays, unchanged, alongside this for a human-readable summary).
- * "Active goals, rankings" and "equipment/time constraints" are the two
- * §16 items that are necessarily whole-workout (not per-exercise)
- * concerns — see WorkoutBuildResult.active_goals/resource_allocation/
- * constraints below instead.
+ * Final Programming-Engine Pass §8/§9: frequency (how many days/week a
+ * target actually trains) is now an OUTPUT of contextual weekly
+ * allocation, never spreadDays' even mathematical spreading. This
+ * object records exactly how that output was reached for one target on
+ * one real day: which of the week's real gym days (from today onward)
+ * are actually compatible with this target's PPL+Upper session
+ * purpose, and how many of them remain to spread the already-decided
+ * weekly total (volumeEngine's own `desiredWeekly` — §13 says "retain
+ * the existing methodology" for that decision, so this object never
+ * re-derives or second-guesses it) across.
+ *
+ * §12's "compound exposure already allocated this week must reduce
+ * what's prescribed, never stack blindly on top" is handled upstream
+ * of this object entirely, by classification (rankTarget() reads the
+ * real primary+secondary weekly_exposure_units, not a raw primary-set
+ * count) — deliberately NOT by subtracting current_weekly_primary_sets
+ * a second time here, which would double-count against
+ * volumeEngine.decideVolume's own 'maintain' semantics (where
+ * recommended_weekly_primary_sets already equals
+ * current_weekly_primary_sets, making any further subtraction always
+ * zero and silently starving every steady-state target).
+ */
+export interface WeeklyAllocationDecision {
+  /** This target's PPL+Upper-compatible session purpose today, or null
+   * for a functional_goal (purpose-agnostic — see
+   * sessionPurpose.isTargetCompatibleWithPurpose). */
+  session_purpose_today: SessionPurpose | null;
+  /** The week's remaining real gym days (today included) whose session
+   * purpose this target is actually compatible with — the real
+   * eligibility set spreadDays never computed. */
+  eligible_days_this_week: readonly Weekday[];
+  /** eligible_days_this_week.length, clamped to Blueprint's own
+   * typical_starting_range_per_week upper bound (never more sessions
+   * than Blueprint itself suggests, even if more eligible days exist),
+   * floored at 1. The actual denominator setsToday is computed from. */
+  sessions_remaining_this_week: number;
+  reasoning: string;
+}
+
+/**
+ * Remediation §16 / Final Pass §22: "every generated workout must
+ * expose machine-readable reasoning" covering (the exact list): active
+ * goals, goal ranking, priority layer, weekly exposure, primary/
+ * secondary exposure, last-trained dates, exercise history, progression
+ * result, badminton context, recovery context, session purpose,
+ * equipment/time constraints, selected exercises, rejected candidates,
+ * substitutions, volume decision, weekly allocation decision. Every
+ * field here is a value this pipeline already computed somewhere in
+ * `buildWorkout` — nothing is re-derived or invented for this object;
+ * it exists so a caller/UI can read the *why* as data instead of
+ * parsing `reasoning` prose (which stays, unchanged, alongside this for
+ * a human-readable summary). "Active goals, rankings" and "equipment/
+ * time constraints" are the two items that are necessarily whole-
+ * workout (not per-exercise) concerns — see WorkoutBuildResult.
+ * active_goals/resource_allocation/constraints below instead.
  */
 export interface DecisionExplanation {
   classification: TargetClassification;
@@ -189,14 +235,20 @@ export interface DecisionExplanation {
   badminton_context: RecentBadmintonSignal | null;
   recovery: RecoveryConstraintResult;
   volume_decision: VolumeDecision;
-  /** Null when a target was skipped before frequency allocation ran
-   * (e.g. an 'avoid' recovery signal, or no weekly volume recommended
-   * yet) — there is nothing genuine to report yet, and this stays null
-   * rather than a fabricated placeholder. */
-  frequency: FrequencyAllocation | null;
-  /** Null under the identical conditions as `frequency` above, plus
-   * whenever no feasible/prescribed candidate existed to select from at
-   * all. */
+  /** Final Pass §5/§10: today's own PPL+Upper purpose (null on a day
+   * with no gym session at all). Whole-day, not per-target — every
+   * target processed on the same call shares the identical value — but
+   * carried here per §22's explicit "session purpose" explainability
+   * requirement rather than forcing a caller to a separate lookup. */
+  session_purpose: SessionPurpose | null;
+  /** Null when a target was skipped before weekly allocation ran (e.g.
+   * an 'avoid' recovery signal, or no weekly volume recommended yet) —
+   * there is nothing genuine to report yet, and this stays null rather
+   * than a fabricated placeholder. */
+  weekly_allocation: WeeklyAllocationDecision | null;
+  /** Null under the identical conditions as `weekly_allocation` above,
+   * plus whenever no feasible/prescribed candidate existed to select
+   * from at all. */
   selection: {
     decisive_gate: ExerciseSelectionResult['decisive_gate'];
     rejected_candidates: readonly BlueprintId[];
@@ -247,12 +299,12 @@ export interface SkippedTarget {
   /** As much of the same machine-readable explanation as had actually
    * been computed before this target was skipped — e.g. a target
    * skipped on an 'avoid' recovery signal carries `recovery` but null
-   * `volume_decision`/`frequency`/`selection`, since this pipeline
-   * never fabricates a decision it didn't reach (spec §25's rule
-   * applied to explainability itself, not just prescriptions). */
-  decision: Omit<DecisionExplanation, 'volume_decision' | 'frequency' | 'selection'> & {
+   * `volume_decision`/`weekly_allocation`/`selection`, since this
+   * pipeline never fabricates a decision it didn't reach (spec §25's
+   * rule applied to explainability itself, not just prescriptions). */
+  decision: Omit<DecisionExplanation, 'volume_decision' | 'weekly_allocation' | 'selection'> & {
     volume_decision: VolumeDecision | null;
-    frequency: FrequencyAllocation | null;
+    weekly_allocation: WeeklyAllocationDecision | null;
     selection: DecisionExplanation['selection'];
   };
 }
@@ -285,9 +337,69 @@ function estimateMinutes(sets: number): number {
   return Math.round((workMinutes + TIME_ESTIMATION.setupMinutesPerExercise) * 10) / 10;
 }
 
+interface TargetRanking {
+  target: TargetBuildContext;
+  classification: TargetClassification;
+  /** How far below Blueprint's own conservative starting_point_sets
+   * threshold this week's REAL combined exposure (primary 1.00 +
+   * secondary 0.33) sits — 0 once that threshold is met or exceeded.
+   * Only meaningful for 'normal_development'; always 0 for
+   * 'specialization'/'maintenance'. Final Pass §6/§12: this is the
+   * real, Blueprint-grounded, data-driven signal that replaces
+   * `current_weekly_primary_sets === 0` as the classification input. */
+  needDeficit: number;
+}
+
+/** Final Pass §6/§7/§12/§14: classifies one target and computes its
+ * real programming-need deficit from actual weekly exposure — the
+ * single source of truth `orderedTargets`' sort and the per-target
+ * loop's own `classification` both read, so the two can never drift
+ * apart. */
+function rankTarget(target: TargetBuildContext, startingPointMin: number): TargetRanking {
+  if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0 };
+  const needDeficit = Math.max(0, startingPointMin - target.weekly_exposure_units);
+  return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit };
+}
+
+/**
+ * Final Pass §7: "Normal-development targets MUST NOT receive
+ * artificial priority because of alphabetical ordering, target ID,
+ * array position, or arbitrary numeric constants... use a deterministic
+ * tie-breaker based on stable Blueprint/ID ordering only after all
+ * actual programming criteria are equal." Sort order, in priority:
+ *   1. tier — Goal 1's own targets, then Goal 2's, then every
+ *      normal_development target, then every maintenance target (the
+ *      exact 4-layer hierarchy §2.3 requires);
+ *   2. within normal_development — bigger real exposure deficit sorts
+ *      first (more urgently under-trained);
+ *   3. within maintenance — longer since the target was last
+ *      meaningfully trained sorts first (more due for upkeep; never
+ *      trained sorts first of all);
+ *   4. ONLY once 1-3 are genuinely tied does target_id break the tie —
+ *      a stable fallback, never the deciding criterion.
+ */
+function compareRankings(a: TargetRanking, b: TargetRanking): number {
+  const tierOf = (r: TargetRanking) => (r.target.is_specialization ? r.target.goal_priority : r.classification === 'normal_development' ? 3 : 4);
+  const tierA = tierOf(a);
+  const tierB = tierOf(b);
+  if (tierA !== tierB) return tierA - tierB;
+
+  if (a.classification === 'normal_development') {
+    if (a.needDeficit !== b.needDeficit) return b.needDeficit - a.needDeficit;
+  } else if (a.classification === 'maintenance') {
+    const daysA = a.target.days_since_target_last_trained ?? Number.POSITIVE_INFINITY;
+    const daysB = b.target.days_since_target_last_trained ?? Number.POSITIVE_INFINITY;
+    if (daysA !== daysB) return daysB - daysA;
+  }
+
+  return a.target.target_id.localeCompare(b.target.target_id);
+}
+
 /**
  * Pure pipeline: composes exposureEngine's numbers (already in each
- * TargetBuildContext), volumeEngine, frequencyEngine, recoveryEngine,
+ * TargetBuildContext), volumeEngine, recoveryEngine, sessionPurpose's
+ * real PPL+Upper weekly allocation (replacing frequencyEngine's
+ * spreadDays as the primary day-assignment mechanism — Final Pass §8),
  * exerciseSelector, Blueprint's development-package rep/RIR data, and
  * constraintEngine.fitToTimeBudget into a concrete workout for one day.
  * Deterministic — identical input always produces identical output.
@@ -307,26 +419,23 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   // per-goal value falls out with no separate aggregation step.
   const goalTrend = new Map<string, AestheticProgressTrend>();
 
-  const orderedTargets = [...input.targets].sort((a, b) =>
-    a.goal_priority !== b.goal_priority ? a.goal_priority - b.goal_priority : a.target_id.localeCompare(b.target_id)
-  );
+  // Final Pass §5/§9/§10: every real gym day this week gets a real
+  // PPL+Upper purpose, computed once for the whole week so "Tuesday is
+  // always Pull" regardless of which day within the week is being
+  // built for — see sessionPurpose.ts. This is the actual replacement
+  // for spreadDays as the day-assignment mechanism.
+  const orderedGymDays = WEEKDAYS.filter((d) => input.available_training_days.includes(d));
+  const { purposes: sessionPurposes, reasoning: purposeReasoning } = assignSessionPurposes(orderedGymDays, input.recurring_badminton_days ?? []);
+  if (orderedGymDays.length > 0) log.push(purposeReasoning);
+  const todayPurpose: SessionPurpose | null = sessionPurposes.get(input.weekday) ?? null;
 
-  for (const target of orderedTargets) {
-    // Remediation §7.1/§14: classification is derived once, up front,
-    // from data already on the target — not a separate formula, and
-    // not something later steps can silently override. A
-    // specialization target is always 'specialization' regardless of
-    // its current volume; a non-goal target is 'normal_development'
-    // when it currently has zero direct volume (this pipeline's only
-    // path to volumeEngine returning 'increase' for a non-specialization
-    // target — see volumeEngine.decideVolume's §9 starting-volume
-    // branch) and 'maintenance' otherwise.
-    const classification: TargetClassification = target.is_specialization
-      ? 'specialization'
-      : target.current_weekly_primary_sets === 0
-        ? 'normal_development'
-        : 'maintenance';
+  const { starting_point_sets } = BlueprintAdapter.getGlobalPrinciples().weekly_volume;
+  const { typical_starting_range_per_week } = BlueprintAdapter.getGlobalPrinciples().frequency;
+  const [, sessionsRangeMax] = typical_starting_range_per_week;
 
+  const rankedTargets = input.targets.map((t) => rankTarget(t, starting_point_sets[0])).sort(compareRankings);
+
+  for (const { target, classification } of rankedTargets) {
     const recovery = applyRecoveryConstraint({
       target_type: target.target_type,
       target_id: target.target_id,
@@ -356,7 +465,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     };
     const lastTrained: DecisionExplanation['last_trained'] = { date: target.last_trained_date, days_since: target.days_since_target_last_trained };
     const makeSkipDecision = (
-      overrides: { volume_decision?: VolumeDecision | null; frequency?: FrequencyAllocation | null; selection?: DecisionExplanation['selection'] } = {}
+      overrides: { volume_decision?: VolumeDecision | null; weekly_allocation?: WeeklyAllocationDecision | null; selection?: DecisionExplanation['selection'] } = {}
     ): SkippedTarget['decision'] => ({
       classification,
       weekly_exposure: weeklyExposure,
@@ -365,7 +474,8 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       badminton_context: target.recent_badminton,
       recovery,
       volume_decision: overrides.volume_decision ?? null,
-      frequency: overrides.frequency ?? null,
+      session_purpose: target.target_type === 'physique_target' ? todayPurpose : null,
+      weekly_allocation: overrides.weekly_allocation ?? null,
       selection: overrides.selection ?? null,
     });
 
@@ -427,27 +537,47 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       continue;
     }
 
-    const frequency = allocateFrequency({
-      target_type: target.target_type,
-      target_id: target.target_id,
-      desired_weekly_exposure_units: desiredWeekly,
-      available_training_days: input.available_training_days,
-      recurring_badminton_days: input.recurring_badminton_days,
+    // Final Pass §8/§9: frequency is now an OUTPUT of contextual weekly
+    // allocation, never spreadDays' even mathematical spreading. A
+    // physique_target may only train on a day whose PPL+Upper purpose
+    // it's actually compatible with (sessionPurpose.ts); a
+    // functional_goal isn't purpose-gated, just gym-day-gated. Eligible
+    // days are counted from TODAY forward within this same real week —
+    // days already past don't need "re-planning," their real exposure
+    // is already reflected in current_weekly_primary_sets.
+    const isPhysique = target.target_type === 'physique_target';
+    const purposeToday = isPhysique ? todayPurpose : null;
+    const eligibleDaysThisWeek = orderedGymDays.filter((d) => {
+      if (WEEKDAY_INDEX[d] < WEEKDAY_INDEX[input.weekday]) return false;
+      if (!isPhysique) return true;
+      const purpose = sessionPurposes.get(d);
+      return purpose !== undefined && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purpose);
     });
-    log.push(`${target.target_type} "${target.target_id}": ${frequency.reasoning}`);
+    const sessionsRemainingThisWeek = Math.max(1, Math.min(eligibleDaysThisWeek.length, sessionsRangeMax));
+    const weeklyAllocation: WeeklyAllocationDecision = {
+      session_purpose_today: purposeToday,
+      eligible_days_this_week: eligibleDaysThisWeek,
+      sessions_remaining_this_week: sessionsRemainingThisWeek,
+      reasoning:
+        eligibleDaysThisWeek.length === 0
+          ? `${target.target_type} "${target.target_id}": no remaining gym day this week is compatible with this target` +
+            (isPhysique ? ` (today's session purpose is ${todayPurpose ?? 'none — not a gym day'}).` : ' (no gym days remain this week).')
+          : `${target.target_type} "${target.target_id}": eligible on ${eligibleDaysThisWeek.join(', ')} (${sessionsRemainingThisWeek} session(s) remaining this week, capped at Blueprint's own frequency range's upper bound of ${sessionsRangeMax}); ${desiredWeekly} desired weekly sets spread across them.`,
+    };
+    log.push(weeklyAllocation.reasoning);
 
-    if (!frequency.assigned_days.includes(input.weekday)) {
+    if (!eligibleDaysThisWeek.includes(input.weekday)) {
       skipped.push({
         target_type: target.target_type,
         target_id: target.target_id,
         classification,
-        reason: `Not scheduled for ${input.weekday} — assigned days are ${frequency.assigned_days.join(', ') || 'none'}.`,
-        decision: makeSkipDecision({ volume_decision: volumeDecision, frequency }),
+        reason: `Not scheduled for ${input.weekday}: ${weeklyAllocation.reasoning}`,
+        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
       });
       continue;
     }
 
-    const setsToday = Math.max(1, Math.ceil(desiredWeekly / frequency.sessions_per_week));
+    const setsToday = Math.max(1, Math.ceil(desiredWeekly / sessionsRemainingThisWeek));
 
     let candidateExerciseIds = exercisesTrainingTarget(target.target_type, target.target_id);
     candidateExerciseIds = filterEquipmentFeasible(
@@ -466,10 +596,12 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
       if (!candidateExerciseIds.includes(outside.id)) candidateExerciseIds.push(outside.id);
     }
 
-    // Defensive double-check of §16's Monday rule: frequencyEngine
-    // already refuses to assign a lower-body target to Monday (so the
-    // "not scheduled for {weekday}" skip above should already have
-    // caught this), but this guards against reaching here anyway.
+    // Defensive double-check of §16's Monday rule: sessionPurpose's
+    // assignSessionPurposes already refuses to put 'legs' on Monday (so
+    // the eligibility check above should already have caught this for
+    // a legs-only target), but this guards against reaching here anyway
+    // for any target whose compatible purposes still somehow included
+    // an actually-forbidden Monday slot.
     if (target.target_type === 'physique_target' && !isBodyFocusAllowedOnDay(target.target_id, input.weekday)) {
       candidateExerciseIds = [];
     }
@@ -480,7 +612,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_id: target.target_id,
         classification,
         reason: 'No equipment-feasible (and, for a lower-body target, Monday-compliant) Blueprint or approved outside-Blueprint exercise trains this target.',
-        decision: makeSkipDecision({ volume_decision: volumeDecision, frequency }),
+        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
       });
       continue;
     }
@@ -503,7 +635,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
           target_id: target.target_id,
           classification,
           reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription (or an approved outside-Blueprint one) for this target — exposing this gap rather than inventing one (spec §25).',
-          decision: makeSkipDecision({ volume_decision: volumeDecision, frequency }),
+          decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
         });
         continue;
       }
@@ -563,7 +695,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         target_id: target.target_id,
         classification,
         reason: `No Blueprint development-package rep/RIR prescription is available for "${selection.exercise_id}" against this target — exposing this gap rather than inventing a rep range (spec §25).`,
-        decision: makeSkipDecision({ volume_decision: volumeDecision, frequency, selection: selectionDecision }),
+        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation, selection: selectionDecision }),
       });
       continue;
     }
@@ -634,7 +766,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
         previous_performance: previousPerformance,
         progression_decision: progressionDecision,
         reasoning:
-          `${selection.reasoning} ${sessionSets} sets/session (${desiredWeekly} desired weekly, ${frequency.sessions_per_week} sessions/week). ` +
+          `${selection.reasoning} ${sessionSets} sets/session (${desiredWeekly} desired weekly, spread across ${sessionsRemainingThisWeek} eligible session(s) this week: ${eligibleDaysThisWeek.join(', ')}). ` +
           `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
           (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.') +
           (badmintonLowerBodyReduce ? ` Badminton (remediation §9): ${recovery.reasoning}` : ''),
@@ -646,7 +778,8 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
           badminton_context: target.recent_badminton,
           recovery,
           volume_decision: volumeDecision,
-          frequency,
+          session_purpose: purposeToday,
+          weekly_allocation: weeklyAllocation,
           selection: selectionDecision,
         },
       },
@@ -911,14 +1044,24 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
   // priority — it does NOT remove chest, back, legs, shoulders, arms,
   // other relevant musculature from normal programming." Every real
   // Blueprint physique target not already covered by an active goal
-  // still gets programmed here, at a synthetic priority number that
-  // sorts after every real goal (1000+) so specialization work is
-  // always protected first by the exact same priority-ordering
-  // mechanism buildWorkout and fitToTimeBudget already use — no
-  // separate "protect specialization" rule needed.
+  // still gets programmed here.
+  //
+  // Final Pass §7 explicitly forbids `1000 + index` (or any array-
+  // position/alphabetical/ID-based mechanism) driving WHICH of these
+  // targets gets resources first — so every one of them shares the
+  // exact same flat, non-differentiating goal_priority number. That
+  // number still needs to sort after every real user goal (so
+  // specialization is always protected first at the resourceAllocation
+  // goal-BUCKET level — see buildWorkout's allocateResource call, which
+  // only ever needs the bucket's own priority, not a per-target one),
+  // but WITHIN this bucket, real ordering comes entirely from
+  // buildWorkout's own rankTarget()/compareRankings() — actual exposure
+  // deficit for normal-development, actual days-since-trained for
+  // maintenance, target_id only as the final tie-break once those are
+  // genuinely equal.
   const NON_SPECIALIZATION_GOAL_ID = '__normal_development_or_maintenance__';
-  const allPhysiqueTargets = [...BlueprintAdapter.getTargets()].sort((a, b) => a.id.localeCompare(b.id));
-  for (const [index, physiqueTarget] of allPhysiqueTargets.entries()) {
+  const NON_SPECIALIZATION_PRIORITY = 1000;
+  for (const physiqueTarget of BlueprintAdapter.getTargets()) {
     const key = `physique_target:${physiqueTarget.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -930,7 +1073,7 @@ export function assembleAndBuildWorkout(db: Database.Database, date: string, bud
         'supporting',
         false,
         NON_SPECIALIZATION_GOAL_ID,
-        1000 + index,
+        NON_SPECIALIZATION_PRIORITY,
         REVIEW_CADENCE_DEFAULT_DAYS.aesthetic,
         null // no goal, so no aesthetic-assessment history applies
       )

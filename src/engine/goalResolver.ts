@@ -68,7 +68,10 @@ export function buildPriorityMap(goal: Pick<Goal, 'id' | 'goal_type' | 'blueprin
           target_id,
           tier: 'primary',
         })),
-        ...outcome.supporting_targets.map((target_id): PrioritizedTarget => ({
+        // §24: a legitimate Blueprint aesthetic outcome may have no
+        // supporting_targets field at all, not an empty array — never
+        // assume it exists.
+        ...(outcome.supporting_targets ?? []).map((target_id): PrioritizedTarget => ({
           target_type: 'physique_target',
           target_id,
           tier: 'supporting',

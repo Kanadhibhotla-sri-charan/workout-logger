@@ -25,6 +25,20 @@ describe('goalResolver — aesthetic goals', () => {
       UnresolvedGoalReferenceError
     );
   });
+
+  it('§24: does not crash for a legitimate aesthetic outcome with no supporting_targets field at all', () => {
+    // chest-upper-shelf is a real, displayed Blueprint outcome whose raw
+    // snapshot data has no supporting_targets key (confirmed: 22 of ~46
+    // aesthetic outcomes are like this) — buildPriorityMap must treat
+    // that as "no supporting targets," never throw.
+    const outcome = BlueprintAdapter.getAestheticGoal('chest-upper-shelf')!;
+    expect(outcome).toBeDefined();
+    expect('supporting_targets' in outcome).toBe(false);
+
+    const map = buildPriorityMap({ id: 'goal_1', goal_type: 'aesthetic', blueprint_ref: 'chest-upper-shelf' });
+    expect(map.targets.every((t) => t.tier === 'primary')).toBe(true);
+    expect(map.targets.length).toBeGreaterThan(0);
+  });
 });
 
 describe('goalResolver — functional goals', () => {

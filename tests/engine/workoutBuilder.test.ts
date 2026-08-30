@@ -413,7 +413,8 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       expect(planned.decision.badminton_context).toBeNull();
       expect(planned.decision.recovery.priority_adjustment).not.toBe('avoid');
       expect(planned.decision.volume_decision.action).toBeDefined();
-      expect(planned.decision.frequency?.assigned_days).toContain('monday');
+      expect(planned.decision.session_purpose).toBe('push');
+      expect(planned.decision.weekly_allocation?.eligible_days_this_week).toContain('monday');
       expect(planned.decision.selection?.decisive_gate).toBeDefined();
       expect(Array.isArray(planned.decision.selection?.rejected_candidates)).toBe(true);
     });
@@ -449,7 +450,7 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       expect(planned.decision.selection?.substituted_from).toBeNull();
     });
 
-    it('a target skipped before frequency allocation carries recovery but null volume_decision/frequency/selection — never a fabricated decision', () => {
+    it('a target skipped before weekly allocation carries recovery but null volume_decision/weekly_allocation/selection — never a fabricated decision', () => {
       const result = buildWorkout({
         date: '2026-08-31',
         weekday: 'monday',
@@ -461,7 +462,7 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       const skip = result.skipped_targets.find((s) => s.target_id === 'mid-pec')!;
       expect(skip.decision.recovery.priority_adjustment).toBe('avoid');
       expect(skip.decision.volume_decision).toBeNull();
-      expect(skip.decision.frequency).toBeNull();
+      expect(skip.decision.weekly_allocation).toBeNull();
       expect(skip.decision.selection).toBeNull();
     });
 
@@ -541,7 +542,7 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       const result = buildWorkout({
         date: '2026-08-31',
         weekday: 'monday',
-        budget_minutes: 9, // enough for goal_A alone (~8.8 min), not goal_B too
+        budget_minutes: 12, // enough for goal_A alone (~11 min, 2 eligible push/upper sessions this week), not goal_B too
         available_equipment: CHEST_EQUIPMENT,
         available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
         targets: [
@@ -559,13 +560,19 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
   describe('remediation §9: badminton actually changes programming, not just explanation text', () => {
     const QUADS_EQUIPMENT = ['barbell', 'rack', 'machine'];
 
+    // Session purposes rotate push/pull/legs/upper across the ordered
+    // gym days — tuesday/wednesday/thursday here land as push/pull/legs,
+    // so a legs-only target (quads) is only ever eligible on Thursday,
+    // with exactly one eligible session remaining once Thursday itself
+    // is "today" (matching the single-session-per-week math these tests
+    // were originally written against).
     function quadsInput(recentBadminton: TargetBuildContext['recent_badminton']) {
       return {
-        date: '2026-09-01', // a Tuesday
-        weekday: 'tuesday' as const,
+        date: '2026-09-03', // a Thursday
+        weekday: 'thursday' as const,
         budget_minutes: 60,
         available_equipment: QUADS_EQUIPMENT,
-        available_training_days: ['tuesday'] as const, // forces exactly one session, on tuesday
+        available_training_days: ['tuesday', 'wednesday', 'thursday'] as const,
         targets: [
           baseTarget({
             target_id: 'quads',
@@ -626,11 +633,11 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       // 'reduce' cause — badminton never gets a special volume-level
       // bypass or a special volume-level penalty.
       const result = buildWorkout({
-        date: '2026-09-01',
-        weekday: 'tuesday',
+        date: '2026-09-03', // Thursday — the legs day in this rotation (see quadsInput above)
+        weekday: 'thursday',
         budget_minutes: 60,
         available_equipment: QUADS_EQUIPMENT,
-        available_training_days: ['tuesday'],
+        available_training_days: ['tuesday', 'wednesday', 'thursday'],
         targets: [
           baseTarget({
             target_id: 'quads',
@@ -642,8 +649,8 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       });
       const plan = result.exercises.find((e) => e.target_id === 'quads');
       // Weekly volume held at the pre-existing 6 (minus the single
-      // session-level trim, since sessions_per_week === 1 here) — never
-      // pushed up OR down by badminton itself.
+      // session-level trim, since exactly one eligible session remains
+      // this week) — never pushed up OR down by badminton itself.
       expect(plan?.target_sets).toBe(5);
     });
   });

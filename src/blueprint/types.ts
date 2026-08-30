@@ -75,7 +75,15 @@ export interface BlueprintAestheticOutcome {
   region: string;
   viewpoint: string;
   primary_targets: string[];
-  supporting_targets: string[];
+  /** Optional in the raw Blueprint snapshot data — a real minority of
+   * aesthetic outcomes (verified: 22 of ~46 in
+   * src/blueprint/snapshot/programming.json) have no supporting_targets
+   * field at all, not an empty array. Every reader must treat it as
+   * possibly absent (`?? []`), never assume it exists — see
+   * src/engine/goalResolver.ts's buildPriorityMap, the one real
+   * consumer, and this type's own regression test in
+   * tests/blueprintAdapter.test.ts. */
+  supporting_targets?: string[];
   technical_explanation: string;
   /** Example phrasings a user might type to describe this outcome
    * (e.g. "My chest looks flat from the side.") — the only
