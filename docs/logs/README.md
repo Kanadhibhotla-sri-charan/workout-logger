@@ -12,3 +12,8 @@ story of how the app got to its current state.
 - [2026-08-29-04-add-change-logs.md](2026-08-29-04-add-change-logs.md)
 - [2026-08-29-05-phase1.5-fixes-1-2-3-5.md](2026-08-29-05-phase1.5-fixes-1-2-3-5.md)
 - [2026-08-29-06-phase1.5-fixes-4-6-docs.md](2026-08-29-06-phase1.5-fixes-4-6-docs.md)
+- [2026-08-30-07-phase2-foundation-fixes.md](2026-08-30-07-phase2-foundation-fixes.md)
+- [2026-08-30-08-exposure-model-and-engine.md](2026-08-30-08-exposure-model-and-engine.md)
+- [2026-08-30-09-training-state-and-module-boundaries.md](2026-08-30-09-training-state-and-module-boundaries.md)
+- [2026-08-30-10-training-engine-design-and-fixtures.md](2026-08-30-10-training-engine-design-and-fixtures.md)
+- [2026-08-30-11-open-decisions-and-readme-update.md](2026-08-30-11-open-decisions-and-readme-update.md)

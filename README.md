@@ -1,17 +1,21 @@
-# Workout Programmer — Phase 1 / 1.5
+# Workout Programmer — Phase 1 / 1.5 / 2
 
-Infrastructure and contracts for a standalone workout programming and
-logging app: goal/program context, a training profile, a workout logger,
-and read-only integration with two sibling apps — **workout-blueprint**
-(the fitness knowledge layer) and **Calorie Tracker**
+Infrastructure, contracts, and a deterministic Training Engine foundation
+for a standalone workout programming and logging app: goal/program
+context, a training profile, a workout logger, exposure tracking, and
+read-only integration with two sibling apps — **workout-blueprint** (the
+fitness knowledge layer) and **Calorie Tracker**
 (`food_and_workout_tracker`).
 
-Phase 1/1.5 deliberately does **not** include an AI layer or a
-volume/frequency/recovery decision engine. It builds the contracts,
-storage, and design boundaries that engine will plug into later. See
-`docs/open-decisions.md` for what's still unresolved before Phase 2, and
-`docs/TRAINING_EXPOSURE_MODEL.md` for the specific design boundary the
-future programming engine needs.
+This app deliberately does **not** include an AI layer or a full
+automatic workout generator. Phase 2 built the deterministic engine
+*boundary* (`src/engine/`) — goal resolution, training state, exposure
+tracking, and equipment/time constraint checking are real and tested; six
+further modules (volume, frequency, recovery, exercise selection, workout
+construction, progression) have stable interfaces but deliberately throw
+`NotApprovedError` until their underlying methodology is approved. See
+`docs/TRAINING_ENGINE_DESIGN.md` for the full pipeline and module-by-module
+status, and `docs/open-decisions.md` for what's still unresolved.
 
 ## What this is
 
@@ -36,6 +40,12 @@ future programming engine needs.
   actual logged sets/reps/load/duration for **completed sessions only**,
   to produce a **better estimate** of workout expenditure — never an exact
   calorie figure. See `docs/CALORIE_TRACKER_INTEGRATION.md`.
+- A deterministic **Training Engine foundation** (`src/engine/`) resolves
+  goals to Blueprint targets, tracks how much training a target has
+  actually received (`exposure_units` — deliberately not "effective
+  sets"), and checks equipment/time constraints as hard facts — all pure,
+  testable functions with zero AI/LLM involvement. See
+  `docs/TRAINING_ENGINE_DESIGN.md`.
 
 See `docs/architecture.md` for the full picture (Blueprint's data model as
 found, Calorie Tracker's existing schema, the responsibility boundary
@@ -92,34 +102,47 @@ src/
   blueprint/     BlueprintAdapter + types + vendored data snapshot
   contracts/     canonical, versioned data contract (Goal, Program, ...)
   db/            SQLite schema + client
+  engine/        Training Engine: goal resolution, training state,
+                 exposure tracking, constraints, and 6 stubbed modules
+                 pending approved design decisions (see docs below)
+  lib/           timezone contract helpers
   repositories/  persistence for users/training profiles/goals/programs/
                  workout sessions
   services/      Calorie Tracker export contract
   server/        Express app, routes
 public/          minimal static UI
 scripts/         sync-blueprint.mts, migrate-workout-log-dry-run.mts
-tests/           vitest suite (incl. tests/fixtures/ goal-resolution fixture)
+tests/           vitest suite (incl. tests/engine/, tests/fixtures/)
 docs/            architecture note, deployment guide, open decisions,
-                 training exposure model, Calorie Tracker integration
-                 contract, migration plan, per-change logs
+                 training exposure model, training engine design,
+                 Calorie Tracker integration contract, migration plan,
+                 per-change logs
 ```
 
 ## Docs
 
 - [`docs/architecture.md`](docs/architecture.md) — Blueprint's data model,
-  Calorie Tracker's schema, the three-app responsibility boundary, and how
-  this app sits between them.
+  Calorie Tracker's schema, the three-app responsibility boundary, the
+  timezone contract, single-user scope, and how this app sits between the
+  three apps.
 - [`docs/TRAINING_EXPOSURE_MODEL.md`](docs/TRAINING_EXPOSURE_MODEL.md) —
   design boundary for translating exercise performance into muscle/target
-  training exposure; what's directly supported by Blueprint data today vs.
-  what needs an explicitly approved new rule.
+  training exposure (`exposure_units`); separates Training Exposure,
+  Hypertrophy Volume, and Functional Exposure as distinct concepts; what's
+  adopted (Strategy A) vs. what needs further sign-off.
+- [`docs/TRAINING_ENGINE_DESIGN.md`](docs/TRAINING_ENGINE_DESIGN.md) — the
+  full Training Engine pipeline and module boundary, goal resolution and
+  priority, training state, constraints, and exactly which of the twelve
+  engine modules are implemented vs. deliberately blocked pending
+  approval.
 - [`docs/CALORIE_TRACKER_INTEGRATION.md`](docs/CALORIE_TRACKER_INTEGRATION.md)
   — the formal one-way export contract to Calorie Tracker.
 - [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md) — field-by-field plan
   and dry-run tool for a possible future historical-CSV import; no import
   has been performed.
 - [`docs/deployment.md`](docs/deployment.md) — local vs. production setup.
-- [`docs/open-decisions.md`](docs/open-decisions.md) — what Charan needs to
-  decide before Phase 2.
+- [`docs/open-decisions.md`](docs/open-decisions.md) — every open design
+  decision Charan needs to weigh in on, organized by area, with status
+  (open / proposed / adopted-pending-sign-off).
 - [`docs/logs/`](docs/logs/) — a dated log file per major change to this
   repo (what changed, why, how it was verified).
