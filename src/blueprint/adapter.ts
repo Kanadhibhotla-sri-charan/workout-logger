@@ -15,6 +15,7 @@ import type {
   BlueprintEquipment,
   BlueprintExercise,
   BlueprintFunctionalGoal,
+  BlueprintGlobalPrinciples,
   BlueprintManifest,
   BlueprintPhysiqueTarget,
   BlueprintProgramming,
@@ -114,6 +115,22 @@ export const BlueprintAdapter = {
   getManifest(): BlueprintManifest {
     return deepFreeze(manifest) as BlueprintManifest;
   },
+
+  /** Blueprint's generic training-methodology guidance (RIR ranges,
+   * weekly-volume reference ranges, frequency, the double-progression
+   * model) — see BlueprintGlobalPrinciples's doc comment. Not
+   * per-target: one shared set of principles Blueprint applies
+   * generically to any muscle/target. */
+  getGlobalPrinciples(): BlueprintGlobalPrinciples {
+    return programming.globalPrinciples;
+  },
 };
 
-export type { BlueprintAestheticOutcome, BlueprintEquipment, BlueprintExercise, BlueprintFunctionalGoal, BlueprintPhysiqueTarget };
+export type {
+  BlueprintAestheticOutcome,
+  BlueprintEquipment,
+  BlueprintExercise,
+  BlueprintFunctionalGoal,
+  BlueprintGlobalPrinciples,
+  BlueprintPhysiqueTarget,
+};

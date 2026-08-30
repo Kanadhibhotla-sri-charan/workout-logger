@@ -13,7 +13,6 @@ import { allocateFrequency } from '../../src/engine/frequencyEngine.js';
 import { applyRecoveryConstraint } from '../../src/engine/recoveryEngine.js';
 import { selectExercise } from '../../src/engine/exerciseSelector.js';
 import { buildWorkout } from '../../src/engine/workoutBuilder.js';
-import { computeProgression } from '../../src/engine/progressionEngine.js';
 import { explainExerciseSelection } from '../../src/engine/explanationEngine.js';
 
 describe('unapproved engine modules — throw, never silently invent an answer', () => {
@@ -85,16 +84,6 @@ describe('unapproved engine modules — throw, never silently invent an answer',
     } catch (err) {
       expect(err).toBeInstanceOf(NotApprovedError);
       expect((err as NotApprovedError).decision).toBe('volume-frequency-recovery-and-exercise-selection');
-    }
-  });
-
-  it('progressionEngine.computeProgression throws NotApprovedError("progression-methodology")', () => {
-    try {
-      computeProgression({} as any);
-      expect.unreachable();
-    } catch (err) {
-      expect(err).toBeInstanceOf(NotApprovedError);
-      expect((err as NotApprovedError).decision).toBe('progression-methodology');
     }
   });
 

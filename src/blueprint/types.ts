@@ -93,9 +93,60 @@ export interface BlueprintFunctionalGoal {
   why_it_matters: string;
 }
 
+/**
+ * Blueprint's own generic training-methodology guidance — not
+ * per-exercise or per-target data, one shared set of principles. This is
+ * the closest thing Blueprint provides to an approved volume/progression
+ * model; see src/engine/volumeEngine.ts and src/engine/progressionEngine.ts,
+ * which build directly on these fields rather than inventing their own
+ * numbers. Verified directly against
+ * src/blueprint/snapshot/programming.json (was typed `unknown` before —
+ * a real, stable field this app was simply not exposing yet).
+ */
+export interface BlueprintGlobalPrinciples {
+  rir: {
+    /** [min, max] reps-in-reserve considered usable at all. */
+    full_range: [number, number];
+    /** [min, max] — where most working sets should sit. */
+    typical_working_range: [number, number];
+    explanation: string;
+    guidance: string;
+  };
+  weekly_volume: {
+    /** [min, max] hard sets/muscle/week — a conservative starting point. */
+    starting_point_sets: [number, number];
+    /** [min, max] — the broader typical productive range beyond the
+     * starting point. */
+    practical_range_sets: [number, number];
+    /** [min, max] — achievable only with good individual recovery
+     * management; not a target to reach for its own sake. */
+    higher_recovery_dependent_sets: [number, number];
+    explanation: string;
+  };
+  frequency: {
+    /** [min, max] sessions/week a given muscle is typically trained. */
+    typical_starting_range_per_week: [number, number];
+    explanation: string;
+  };
+  progression: {
+    /** Currently always "double-progression" — see `explanation` for
+     * the exact rule: add reps at a fixed load until the top of the
+     * target rep range is reached at the target RIR, then increase load
+     * and let reps fall back toward the bottom of the range. */
+    model: string;
+    explanation: string;
+    scope_note: string;
+  };
+  wording_rules: {
+    prefer: string[];
+    avoid: string[];
+    note: string;
+  };
+}
+
 export interface BlueprintProgramming {
   physiqueTargets: BlueprintPhysiqueTarget[];
-  globalPrinciples: unknown;
+  globalPrinciples: BlueprintGlobalPrinciples;
   repRanges: unknown;
   programmingProfiles: unknown;
   intensityTechniques: unknown[];
