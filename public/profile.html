@@ -22,6 +22,9 @@
 
   <section>
     <form id="profile-form">
+      <label>Timezone (IANA name, e.g. "Asia/Kolkata")
+        <input id="timezone" type="text" required />
+      </label>
       <label>Training days
         <select id="training-days" multiple size="7"></select>
       </label>
@@ -95,7 +98,13 @@
 
     async function loadProfile() {
       const profile = await api('/api/training-profile');
-      if (!profile) return;
+      if (!profile) {
+        // Pre-fill with the browser's own IANA zone as a starting guess —
+        // the user still confirms/edits it before saving.
+        document.getElementById('timezone').value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return;
+      }
+      document.getElementById('timezone').value = profile.timezone;
       for (const opt of document.getElementById('training-days').options) opt.selected = profile.training_days.includes(opt.value);
       document.getElementById('preferred-split').value = profile.preferred_split || '';
       document.getElementById('default-duration').value = profile.default_session_duration_minutes;
@@ -114,6 +123,7 @@
         await api('/api/training-profile', {
           method: 'PUT',
           body: {
+            timezone: document.getElementById('timezone').value,
             training_days,
             preferred_split: document.getElementById('preferred-split').value || null,
             default_session_duration_minutes: Number(document.getElementById('default-duration').value),

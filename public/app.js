@@ -21,6 +21,12 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
+// Local calendar date (YYYY-MM-DD) in the BROWSER's own timezone — never
+// toISOString(), which is always UTC regardless of where the browser is.
+// This is a convenience default for pre-filling forms; the server is the
+// source of truth for "today" and resolves it from the user's configured
+// TrainingProfile.timezone (see src/lib/timezone.ts), not from this value.
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return d.toLocaleDateString('en-CA'); // en-CA formats as YYYY-MM-DD
 }

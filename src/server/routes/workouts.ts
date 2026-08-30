@@ -1,15 +1,12 @@
 import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { UnknownBlueprintExerciseError, WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
+import { todayForUser } from '../../lib/userTimezone.js';
 
 export const workoutsRouter = Router();
 
 function db(req: import('express').Request): Database.Database {
   return req.app.locals.db;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 workoutsRouter.get('/', (req, res) => {
@@ -18,9 +15,12 @@ workoutsRouter.get('/', (req, res) => {
   res.json(date ? repo.listSessionsByDate(date) : repo.listSessions());
 });
 
+// "Today" per the user's configured TrainingProfile.timezone — never the
+// server process's own timezone. See docs/architecture.md's timezone
+// contract and src/lib/timezone.ts.
 workoutsRouter.get('/today', (req, res) => {
   const repo = new WorkoutSessionsRepo(db(req));
-  res.json(repo.listSessionsByDate(todayIso()));
+  res.json(repo.listSessionsByDate(todayForUser(db(req))));
 });
 
 workoutsRouter.post('/', (req, res) => {

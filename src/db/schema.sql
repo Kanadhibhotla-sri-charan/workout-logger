@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS training_profiles (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  timezone TEXT NOT NULL, -- IANA name, e.g. 'Asia/Kolkata'; see src/lib/timezone.ts
   training_days TEXT NOT NULL, -- JSON array of Weekday
   preferred_split TEXT,
   default_session_duration_minutes INTEGER NOT NULL,

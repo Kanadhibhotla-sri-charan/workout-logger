@@ -18,6 +18,7 @@ trainingProfileRouter.get('/', (req, res) => {
 
 trainingProfileRouter.put('/', (req, res) => {
   const {
+    timezone,
     training_days,
     preferred_split,
     default_session_duration_minutes,
@@ -27,6 +28,9 @@ trainingProfileRouter.put('/', (req, res) => {
     other_activity_schedule,
   } = req.body ?? {};
 
+  if (typeof timezone !== 'string' || !timezone) {
+    return res.status(400).json({ error: 'timezone (IANA name, e.g. "Asia/Kolkata") is required' });
+  }
   if (!Array.isArray(training_days) || training_days.some((d: unknown) => !WEEKDAYS.includes(d as any))) {
     return res.status(400).json({ error: `training_days must be an array of ${WEEKDAYS.join('|')}` });
   }
@@ -50,6 +54,7 @@ trainingProfileRouter.put('/', (req, res) => {
   const repo = new TrainingProfileRepo(db(req));
   try {
     const profile = repo.upsert(user.id, {
+      timezone,
       training_days,
       preferred_split: preferred_split ?? null,
       default_session_duration_minutes,

@@ -210,6 +210,10 @@ export interface RecurringActivity {
 export interface TrainingProfile {
   id: string;
   user_id: string;
+  /** IANA timezone name (e.g. "Asia/Kolkata"). All of this user's
+   * WorkoutSession.date/start_time/end_time values are interpreted in
+   * this zone — see docs/architecture.md's timezone contract. */
+  timezone: string;
   training_days: Weekday[];
   /** Open string — Blueprint does not define a split taxonomy, so this
    * app doesn't invent a closed enum for it either (e.g. "push-pull-legs",

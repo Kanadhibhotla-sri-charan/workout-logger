@@ -171,3 +171,62 @@ dev. `better-sqlite3` is synchronous and simple; the schema
 `src/db/client.ts`. See `docs/deployment.md` for the production caveat this
 choice implies, and `docs/open-decisions.md` for why the final storage
 choice is still open.
+
+## Timezone and date semantics
+
+**Workout dates and times are interpreted in the user's configured local
+timezone.** Concretely:
+
+- `TrainingProfile.timezone` (an IANA name, e.g. `"Asia/Kolkata"`) is the
+  single source of truth. `src/lib/timezone.ts` and
+  `src/lib/userTimezone.ts` are the only places allowed to reason about
+  timezones; everywhere else just passes plain strings through.
+- `WorkoutSession.date` is a plain `YYYY-MM-DD` string with **no**
+  timezone offset attached. `start_time`/`end_time` are plain `HH:MM`
+  wall-clock strings in that same configured zone. This app never stores
+  or compares a UTC instant for these fields, and never calls
+  `Date#toISOString()` to derive "today" — that method is always UTC
+  regardless of server or browser locale, which does not match the
+  contract. `todayForUser(db)` (server) resolves "today" from the
+  configured `TrainingProfile.timezone`, falling back to
+  `DEFAULT_TIMEZONE` (`'UTC'`) only when no profile has been created yet.
+- **Date filtering for the completed-workout export follows this same
+  convention**: `GET /api/export/completed-workouts` without an explicit
+  `?date=` defaults to `todayForUser(db)`, not the server process's own
+  clock/timezone (which, in a container, is typically UTC and would
+  silently disagree with the user's actual day on either side of
+  midnight).
+- **A workout crossing midnight has deterministic date semantics**: a
+  `WorkoutSession` has exactly one `date` field, which is the date of
+  record for the *entire* session regardless of what wall-clock
+  `end_time` reads. If `end_time`'s clock value is numerically earlier
+  than `start_time`'s (e.g. `start_time: "23:30"`, `end_time: "00:15"`),
+  that means the session crossed midnight but stays recorded under its
+  single `date` (the date the session started) — this app never
+  auto-splits a session across two `WorkoutSession` rows and never
+  infers a second calendar date from `end_time` alone.
+- This is deliberately a thin, explicit contract, not a general timezone
+  system — no per-field timezone storage, no DST-transition edge-case
+  handling beyond what `Intl.DateTimeFormat` already gets right, no
+  timezone conversion between a user's stored data and a different
+  display timezone. If multi-timezone use (e.g. travel) becomes a real
+  need, that's a deliberate future decision, not something to build
+  speculatively now.
+
+## Scope: single-user
+
+```text
+Phase 1/2: single-user scope
+Authentication: out of scope
+Multi-user authorization: out of scope
+```
+
+This application has exactly one implicit user (`UsersRepo
+.getOrCreateDefault()` — see `src/repositories/usersRepo.ts`). There is no
+login, no session/auth token, no per-request user identification, and no
+authorization model of any kind. Every repository and route operates
+against "the" user, not "a" user. This is a deliberate scope limit, not an
+oversight — multi-user support would need real authentication and
+per-resource ownership checks added deliberately if a future version
+requires it; nothing here should be read as multi-user-ready, and no
+multi-user complexity has been added speculatively.
