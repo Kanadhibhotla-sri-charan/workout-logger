@@ -1,8 +1,13 @@
-// Exposure Engine — implements docs/TRAINING_EXPOSURE_MODEL.md's adopted
-// rules A (direct exposure), C (set contribution), D (uncompleted sets),
-// and G (weekly/rolling aggregation). Strategy A (§B): indirect exposure
-// is not tracked at all — only an exercise's own listed
-// physique_targets/functional_goals produce exposure.
+// Exposure Engine — implements docs/TRAINING_EXPOSURE_MODEL.md's rules A
+// (direct exposure) and D (uncompleted sets), both plain facts, plus C
+// (set contribution) and the Strategy A indirect-exposure choice (§B),
+// both IMPLEMENTED — PROVISIONAL: real, tested code, but a conservative
+// engineering representation of exposure, not an approved final
+// training/physiology methodology. Indirect exposure is not tracked at
+// all under Strategy A — only an exercise's own listed
+// physique_targets/functional_goals produce exposure. G (weekly/rolling
+// aggregation) is implemented and is not itself a physiology claim, but
+// it aggregates C's provisional numbers.
 //
 // Pure functions throughout (§32): every function here takes already-
 // fetched plain data and returns a value — none of them touch the
@@ -29,8 +34,9 @@ export interface ExposureContribution {
   target_type: TargetType;
   target_id: BlueprintId;
   completed_sets: number;
-  /** = completed_sets under the adopted rule (C): full credit per listed
-   * target, no fractional split. See docs/TRAINING_EXPOSURE_MODEL.md §C. */
+  /** = completed_sets under the provisional rule (C): full credit per
+   * listed target, no fractional split. NOT a claim of physiological
+   * precision — see docs/TRAINING_EXPOSURE_MODEL.md §C, §6. */
   exposure_units: number;
 }
 

@@ -1,16 +1,21 @@
 # Open decisions for Phase 2+
 
-Phase 1/1.5/2 deliberately picked pragmatic defaults, adopted rules, or
-built proposals for these rather than silently deciding them for good.
-None of them block what's been built so far — but each needs a conscious
-choice from Charan before the next layer (the actual Training Engine
-implementation, or production deployment) builds on top of it.
+Phase 1/1.5/2 deliberately picked pragmatic defaults, built provisional
+implementations, or wrote up proposals for these rather than silently
+deciding them for good. None of them block what's been built so far —
+but each needs a conscious choice from Charan before the next layer (the
+actual Training Engine methodology, or production deployment) builds on
+top of it.
 
-Status legend: **OPEN** (nothing proposed or adopted yet), **PROPOSED**
-(a specific rule is written up for review, not adopted), **ADOPTED,
-PENDING SIGN-OFF** (implemented in code on this recommendation, but not
-yet formally approved — safe to keep using, but a "no" here means
-revisiting the implementation, not just the docs).
+Status legend: **OPEN** (nothing proposed or implemented yet),
+**PROPOSED** (a specific rule is written up for review, no code
+implements it), **IMPLEMENTED — PROVISIONAL** (real, tested code exists
+on this recommendation — safe to keep running — but it is a conservative
+engineering representation, explicitly **not yet approved as final
+training/physiology methodology**; a "no" here means revisiting the
+implementation, not just the docs, and nothing in this codebase describes
+a provisional rule's output as more physiologically precise than it is —
+see `docs/TRAINING_EXPOSURE_MODEL.md` §6).
 
 ## Infrastructure
 
@@ -84,24 +89,34 @@ revisiting the implementation, not just the docs).
 
 ## Training Exposure (see `docs/TRAINING_EXPOSURE_MODEL.md` for full detail)
 
-6. **Direct vs. indirect contribution strategy.** [ADOPTED, PENDING
-   SIGN-OFF] Strategy A (conservative — count only canonical Blueprint
-   `physique_targets`/`functional_goals` membership; indirect/compound
-   secondary contribution is not tracked at all) is implemented in
-   `src/engine/exposureEngine.ts`. Strategy B (extend Blueprint itself
-   with a canonical `secondary_physique_targets` field) was the
-   alternative and was not chosen, because it requires a change to a
-   different repository outside this app's authority. See
+6. **Direct vs. indirect contribution strategy.** [IMPLEMENTED —
+   PROVISIONAL] How indirect contribution should be handled is a core
+   Training Engine methodology decision for the next phase — it is not
+   treated as settled just because code exists. Strategy A (conservative
+   — count only canonical Blueprint `physique_targets`/`functional_goals`
+   membership; indirect/compound secondary contribution is not tracked at
+   all) is the current provisional implementation
+   (`src/engine/exposureEngine.ts`), because the current Blueprint
+   snapshot provides canonical exercise targets but does not provide
+   reliable fractional contribution weights for all secondary targets.
+   Strategy B (extend Blueprint itself with a canonical
+   `secondary_physique_targets` field) remains the legitimate alternative
+   and was not chosen here, because it requires a change to a different
+   repository outside this app's authority. See
    `docs/TRAINING_EXPOSURE_MODEL.md` §B for the full comparison. **Needs
-   Charan's explicit sign-off** — if Strategy B is preferred instead, that
-   conversation belongs in workout-blueprint's repo, not a workaround here.
+   Charan's explicit sign-off before being treated as final** — if
+   Strategy B is preferred instead, that conversation belongs in
+   workout-blueprint's repo, and those relationships must live there, not
+   as a hidden mapping table inside Workout Programmer.
 
-7. **Set contribution / uncompleted sets.** [ADOPTED, PENDING SIGN-OFF]
+7. **Set contribution / uncompleted sets.** [IMPLEMENTED — PROVISIONAL]
    One completed set = one `exposure_unit` toward every target the
    exercise directly lists (full credit each, no fractional split); an
    uncompleted set contributes zero. Implemented
-   (`exposureEngine.calculateExerciseExposure`). See
-   `docs/TRAINING_EXPOSURE_MODEL.md` §C-D.
+   (`exposureEngine.calculateExerciseExposure`) and testable today, but
+   `exposure_units` is a neutral engineering metric, not a claim that one
+   completed set equals one effective hypertrophy set — see
+   `docs/TRAINING_EXPOSURE_MODEL.md` §C-D, §6.
 
 8. **Week boundary / rolling window.** [Decided as a *mechanism*, not a
    specific value] `TrainingProfile.week_start_day` makes the week

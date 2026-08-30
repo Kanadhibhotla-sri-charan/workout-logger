@@ -7,13 +7,17 @@ will eventually answer:
 > equipment, recovery state, and Blueprint knowledge, what should they do
 > today?
 
-This is a **design boundary, not a workout generator**. Per the spec that
-requested it, the goal of this phase was not to build automatic
-programming — it was to build the contracts, module boundaries, and
-proposed (not adopted) rules that a later, explicitly-approved
-implementation will use. See `docs/open-decisions.md` for the running
-list of what needs Charan's sign-off before anything below marked
-"proposed" or "not implemented" becomes real.
+This is a **design boundary, not a workout generator, and not a
+physiological model**. Per the spec that requested it, the goal of this
+phase was not to build automatic programming — it was to build the
+contracts, module boundaries, and proposed rules that a later,
+explicitly-approved implementation will use. Where code already exists
+for a rule that involves a training/physiology judgment call, that code
+is a conservative engineering placeholder, not a finished, approved
+methodology — see the status legend below for exactly what that
+distinction means in this document. See `docs/open-decisions.md` for the
+running list of what needs Charan's sign-off before anything marked
+🔶 or 📝 or 🚫 below becomes final/real.
 
 Companion document: `docs/TRAINING_EXPOSURE_MODEL.md` covers exposure/
 volume/functional-exposure in full detail (§0-§G there) and is not
@@ -24,7 +28,8 @@ constraints, and everything downstream of exposure.
 
 | Status | Meaning |
 |---|---|
-| ✅ **Implemented** | Real code, real tests, in `src/engine/`. Safe because it's a pure fact-check or query — no invented physiological/programming precision. |
+| ✅ **Implemented** | Real code, real tests, in `src/engine/`, and not a training/physiology judgment call in the first place — a pure fact-check or query (equipment availability, a stored id resolving, a date falling in a range). Nothing here needs methodology sign-off. |
+| 🔶 **Implemented — Provisional** | Real code, real tests, in `src/engine/` — but the rule it encodes *is* a training/physiology judgment call (e.g. how a completed set counts as exposure). Working and safe to keep running, but **not approved as final training/physiology methodology** — see `docs/TRAINING_EXPOSURE_MODEL.md` §6 for why that distinction is load-bearing, and never describe a 🔶 rule's output as if it carries more precision than it does (e.g. never "effective hypertrophy sets" for what is really `exposure_units`). |
 | 📝 **Proposed** | A concrete rule or ranking order is written up below for review, but no code implements it. Marked so a reviewer can approve, reject, or amend it without needing to read code. |
 | 🚫 **Blocked** | A module exists (`src/engine/`) with a real interface/type signature, but its function body throws `NotApprovedError` — see `src/engine/errors.ts`. Nothing about it is decided yet. |
 
@@ -37,7 +42,7 @@ resolveGoals()              ✅ src/engine/goalResolver.ts
         ↓
 buildTrainingState()        ✅ src/engine/trainingState.ts
         ↓
-calculateExposure()         ✅ src/engine/exposureEngine.ts
+calculateExposure()         🔶 src/engine/exposureEngine.ts (provisional Strategy A/rule C — see docs/TRAINING_EXPOSURE_MODEL.md §6)
         ↓
 prioritizeTargets()         ✅ folded into goalResolver's PriorityMap (primary/supporting tiers)
         ↓
@@ -71,7 +76,7 @@ module's interface was designed against.
 |---|---|---|---|
 | Goal Resolver | `src/engine/goalResolver.ts` | ✅ | — |
 | Training State | `src/engine/trainingState.ts` | ✅ | — |
-| Exposure Engine | `src/engine/exposureEngine.ts` | ✅ | — (Strategy A adopted, `docs/TRAINING_EXPOSURE_MODEL.md` §B) |
+| Exposure Engine | `src/engine/exposureEngine.ts` | 🔶 IMPLEMENTED — PROVISIONAL | not approved as final methodology — `docs/TRAINING_EXPOSURE_MODEL.md` §B, §6 |
 | Priority Engine | folded into `goalResolver.PriorityMap` | ✅ (single-goal only) | multi-goal composition — §5 below |
 | Constraint Engine (equipment) | `src/engine/constraintEngine.ts` | ✅ | — |
 | Constraint Engine (time) | `src/engine/constraintEngine.ts` | ✅ (budget arithmetic only) | per-exercise time estimation — §8 below |
@@ -430,7 +435,7 @@ fixture file's own comment for exactly what it does and does not claim.
 - [x] Single-user scope is explicitly documented. (`docs/architecture.md`)
 - [x] Training Exposure remains separate from hypertrophy volume. (`docs/TRAINING_EXPOSURE_MODEL.md` §0, distinct contract types)
 - [x] Functional exposure is not assumed to equal hypertrophy volume. (`docs/TRAINING_EXPOSURE_MODEL.md` §0, distinct contract types)
-- [x] Direct vs indirect contribution has an explicit approved strategy. (Strategy A adopted — pending Charan's formal sign-off, see `docs/open-decisions.md`)
+- [x] Direct vs indirect contribution has an explicit strategy, clearly marked provisional. (Strategy A — IMPLEMENTED — PROVISIONAL, not yet approved as final methodology, see `docs/open-decisions.md`)
 - [x] No fuzzy text matching is used to invent canonical relationships. (verified: `exposureEngine` never reads `secondary_targets`)
 - [x] Goal resolution works through local Goal → Blueprint reference. (`goalResolver.ts`, tested)
 - [x] Training State has a defined deterministic interface. (`trainingState.ts`)
@@ -465,11 +470,11 @@ Blueprint Adapter        ✅ (Phase 1)
 Training Profile         ✅ (Phase 1.5, extended: timezone, week_start_day)
 Goal Resolver             ✅ (this phase)
 Training State             ✅ (this phase)
-Exposure Model               ✅ (this phase, extended from Phase 1.5)
+Exposure Model               🔶 (this phase, extended from Phase 1.5 — IMPLEMENTED, PROVISIONAL)
 Rule Specifications             📝 (this document + docs/TRAINING_EXPOSURE_MODEL.md)
-Engine Interfaces                 ✅ (this phase — 12 modules, 6 real + 6 documented-blocked)
+Engine Interfaces                 ✅ (this phase — 12 modules, 6 real (some 🔶) + 6 documented-blocked)
 Test Fixtures                       ✅ (this phase, A-G)
-Deterministic Core                    ✅ (everything ✅ above; zero AI/LLM anywhere)
+Deterministic Core                    ✅ (everything ✅/🔶 above; zero AI/LLM anywhere)
 ```
 
 ## 27. Final principle (§39)

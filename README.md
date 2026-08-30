@@ -62,15 +62,32 @@ between all three apps, and how this app sits between them).
 
 ```bash
 npm install
-npm run sync-blueprint   # pulls the vendored Blueprint data snapshot (see below)
 npm run dev               # starts the API + UI on http://localhost:3000
-npm test
 ```
 
 Open `http://localhost:3000/index.html` for goals/programs,
 `/today.html` to start a workout, `/logger.html?session=<id>` to log sets,
 `/profile.html` for the training profile, `/history.html` for past
 sessions.
+
+`npm run sync-blueprint` (see below) regenerates the vendored Blueprint
+data snapshot from a live `workout-blueprint` checkout — it's a manual
+maintenance step, not part of normal local dev; the snapshot it produces
+is already committed to this repo.
+
+## Testing
+
+```bash
+npm test        # run the test suite once
+npm run typecheck
+npm run verify   # typecheck + test, exits non-zero on any failure
+```
+
+Every test runs against a fresh in-memory SQLite database and the
+committed Blueprint snapshot — no live services, no credentials, no
+database file to prepare by hand. See [`TESTING.md`](TESTING.md) for the
+full reproduction steps, offline-behavior guarantees, and
+troubleshooting.
 
 ### Environment variables
 
@@ -141,6 +158,9 @@ docs/            architecture note, deployment guide, open decisions,
   and dry-run tool for a possible future historical-CSV import; no import
   has been performed.
 - [`docs/deployment.md`](docs/deployment.md) — local vs. production setup.
+- [`TESTING.md`](TESTING.md) — how to reproduce the test suite from a
+  clean checkout: prerequisites, commands, offline-behavior guarantees,
+  troubleshooting.
 - [`docs/open-decisions.md`](docs/open-decisions.md) — every open design
   decision Charan needs to weigh in on, organized by area, with status
   (open / proposed / adopted-pending-sign-off).

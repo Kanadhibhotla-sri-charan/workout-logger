@@ -8,10 +8,17 @@ implemented in this change. Nothing invented here without direct Blueprint
 data backing it up is treated as decided; every such gap is marked
 **Phase 2 — undecided** below, not silently defaulted.
 
-Originally written for the Phase 1.5 remediation; extended here (Phase 2)
-per the Training Engine Design spec's §3-§6 to separate three concepts
-that must not be conflated, answer §4's five questions explicitly, and
-adopt an explicit direct/indirect-contribution strategy per §5.
+Originally written for the Phase 1.5 remediation; extended in Phase 2 per
+the Training Engine Design spec's §3-§6 to separate three concepts that
+must not be conflated, answer §4's five questions explicitly, and adopt
+an explicit — but still provisional, not physiologically final —
+direct/indirect-contribution strategy per §5. Revised again in this pass
+to make that provisional status unambiguous throughout: **IMPLEMENTED —
+PROVISIONAL** is this document's status for anything with working code
+behind it, never "adopted" or "decided" standing alone, because none of
+it has been approved as final training/physiology methodology — only as
+a defensible, documented engineering placeholder. See §6 below for the
+exact distinction this status implies.
 
 ## 0. Three concepts that must not be conflated
 
@@ -123,9 +130,11 @@ without approval.
 appears in `Exercise.physique_targets` (aesthetic) or
 `Exercise.functional_goals` (functional).
 
-**Status: directly supported by Blueprint data.** This is unambiguous —
-the id either appears in the list or it doesn't — and requires no new
-rule. This is the one part of the exposure model safe to implement as-is.
+**Status: IMPLEMENTED — directly supported by Blueprint data, not merely
+provisional.** This is the one part of the exposure model that needs no
+"provisional" caveat: the id either appears in the list or it doesn't,
+which is a fact, not an engineering placeholder standing in for an
+undecided methodology.
 
 ## B. Indirect exposure — Strategy decision (§5)
 
@@ -157,31 +166,50 @@ guess. Disadvantage: requires a change to a different repository, outside
 this app's authority, and depends on Blueprint's own authors curating it
 (the same discipline that makes `physique_targets` trustworthy today).
 
-**Decision: Strategy A is adopted for this app's own exposure
-computation** (`src/engine/exposureEngine.ts`, Phase 2 foundation). It is
-the only option that requires zero new invented data and follows every
-"do not implement fuzzy matching against free-text secondary-target
-descriptions" instruction directly — `Exercise.secondary_targets` is free
-text (see the field table above) and is **never** used as an exposure
-signal by this app, matched or otherwise. **This is a recommendation
-pending Charan's sign-off** (see `docs/open-decisions.md`), not a
-unilateral final answer — the direct/indirect treatment is explicitly
-listed as something the user approves, not something a developer silently
-decides. If Strategy B is preferred, that's a Blueprint-repo decision to
-raise with Charan, not something this app should work around with a
-guess in the meantime.
+**Status: IMPLEMENTED — PROVISIONAL.** Strategy A is the current
+provisional implementation (`src/engine/exposureEngine.ts`) because the
+current Blueprint snapshot provides canonical exercise targets but does
+not provide reliable fractional contribution weights for all secondary
+targets. It is the only option that requires zero new invented data and
+follows every "do not implement fuzzy matching against free-text
+secondary-target descriptions" instruction directly —
+`Exercise.secondary_targets` is free text (see the field table above) and
+is **never** used as an exposure signal by this app, matched or
+otherwise.
+
+**How indirect contribution should be handled is a core Training Engine
+methodology decision for the next phase** — not something this document
+or its code treats as settled. This implementation is real, tested, and
+safe to keep running, but it is not yet approved as the final
+training/physiology methodology, and must never be described as
+physiologically complete. The two legitimate future strategies remain
+open (see `docs/open-decisions.md`):
+
+- **Strategy A — Conservative** (current, provisional): use only
+  canonical Blueprint target relationships, as implemented today.
+- **Strategy B — Blueprint enhancement**: add structured, canonical
+  secondary-target relationships to Blueprint itself. If chosen, those
+  relationships must live in Blueprint — never become a hidden,
+  proprietary exercise → muscle mapping table inside Workout Programmer.
 
 No indirect-exposure logic exists in this codebase, by design — Strategy
-A means there is none to implement.
+A's current, provisional form means there is none to implement. No fuzzy
+text matching, hidden mapping tables, arbitrary fractions, undocumented
+coefficients, or LLM-generated physiological weights exist anywhere in
+this codebase, and none should be added to approximate indirect
+contribution before Strategy A vs. B is explicitly resolved.
 
-## C. Set contribution — adopted as the neutral exposure_units default
+## C. Set contribution — IMPLEMENTED — PROVISIONAL, as the neutral exposure_units default
 
 **Definition**: how much one completed set contributes to a target it
 trains, measured in **`exposure_units`** — deliberately not "effective
 sets" (see §6 below for why the naming distinction is load-bearing).
 
-**Status: adopted for Training Exposure only, implemented in
-`src/engine/exposureEngine.ts`.** Because `physique_targets` is flat and
+**Status: IMPLEMENTED — PROVISIONAL, for Training Exposure only**
+(`src/engine/exposureEngine.ts`). "Implemented" because the rule is real,
+tested code; "provisional" because it is a conservative engineering
+representation of training exposure, not an approved final
+training/physiology methodology — see §6. Because `physique_targets` is flat and
 unweighted (see §2), the rule is: *one completed set = one exposure_unit
 toward every target listed in that exercise's `physique_targets` (or
 `functional_goals`)* — no fractional split between multiple listed
@@ -195,16 +223,17 @@ sufficient, or hypertrophy-effective. **What `exposure_units` do *not*
 mean** — and must never be silently promoted into meaning — is covered
 next.
 
-## D. Uncompleted sets — adopted
+## D. Uncompleted sets — IMPLEMENTED
 
 **Definition**: how a skipped/failed/uncompleted set (`Set.completed ===
 false`) should be treated.
 
-**Status: adopted, implemented.** An uncompleted set produced no
-exposure — it contributes zero `exposure_units`. This is a definitional
-fact (an uncompleted set is not training that happened), not a judgment
-call, so it's implemented directly in `exposureEngine.ts` rather than
-listed as pending.
+**Status: IMPLEMENTED**, and not merely provisional — this one is a
+definitional fact, not a methodology placeholder: an uncompleted set
+produced no exposure, contributing zero `exposure_units`. Unlike C, there
+is no alternative physiological interpretation waiting on approval here,
+so it's implemented directly in `exposureEngine.ts` without a
+"provisional" caveat.
 
 ## §6. Do not accept "one set = one effective set" as physiological truth
 
@@ -258,15 +287,19 @@ numbers reusable across goals rather than baking one goal's weighting
 into a fact about what was actually trained. No weighting formula (how
 much more a primary target should count than a supporting one) is decided.
 
-## G. Aggregation — implemented, with an explicit (not silently assumed) week boundary
+## G. Aggregation — IMPLEMENTED, with an explicit (not silently assumed) week boundary
 
 **Definition**: exercise-level exposure rolled up to daily, weekly, and
 rolling windows (spec §13-§14).
 
-**Status: implemented in `src/engine/exposureEngine.ts`**, since A/C/D
-(the parts it depends on) are adopted above and this is a query shape
-over already-indexed data (`workout_sessions.date`,
-`idx_workout_sessions_date`), not a new data source or a judgment call.
+**Status: IMPLEMENTED in `src/engine/exposureEngine.ts`** (inherits C's
+"provisional" caveat only insofar as it aggregates C's provisional
+per-set rule — the aggregation *mechanism* itself, date-range summing, is
+not a physiology claim and needs no further approval). Safe to build now
+because A/C/D (the parts it depends on) are already implemented above and
+this is a query shape over already-indexed data
+(`workout_sessions.date`, `idx_workout_sessions_date`), not a new data
+source or a judgment call.
 
 - **Week boundary**: `TrainingProfile.week_start_day` (a `Weekday`,
   defaults to `'monday'` but is stored data, never a hard-coded
@@ -316,27 +349,30 @@ Contribution rule (C), commit b018abc1049cb578e13ece8af442852af1dfacfe
 Note what this trace does **not** claim: it never says "3 effective
 hypertrophy sets" — see §6.
 
-## Summary — what's implemented vs. still open
+## Summary — status of each part
 
 | Part | Status | Implemented in |
 |---|---|---|
-| A. Direct exposure | ✅ adopted & implemented | `src/engine/exposureEngine.ts` |
-| B. Indirect exposure | ✅ **decided: Strategy A (not tracked)** — pending Charan's sign-off | n/a by design |
-| C. Set contribution | ✅ adopted & implemented (`exposure_units`, full credit per listed target) | `src/engine/exposureEngine.ts` |
-| D. Uncompleted sets | ✅ adopted & implemented (zero exposure) | `src/engine/exposureEngine.ts` |
-| E. Intensity (RIR/RPE) | ❌ still open — blocked on logger UI collecting RIR/RPE first | — |
-| F. Goal weighting | ❌ still open — design direction only, no formula | — |
-| G. Aggregation (weekly/rolling) | ✅ adopted & implemented, explicit configurable week boundary | `src/engine/exposureEngine.ts` |
-| Hypertrophy Volume (§0) | ❌ not started — separate future type, depends on E and F | — |
-| Functional Exposure (§0) | ❌ not started — separate future type, may not share Hypertrophy Volume's rules | — |
+| A. Direct exposure | ✅ IMPLEMENTED (fact, not provisional) | `src/engine/exposureEngine.ts` |
+| B. Indirect exposure | 🔶 IMPLEMENTED — PROVISIONAL: Strategy A (not tracked) | n/a by design |
+| C. Set contribution | 🔶 IMPLEMENTED — PROVISIONAL (`exposure_units`, full credit per listed target) | `src/engine/exposureEngine.ts` |
+| D. Uncompleted sets | ✅ IMPLEMENTED (fact, not provisional) | `src/engine/exposureEngine.ts` |
+| E. Intensity (RIR/RPE) | ❌ OPEN — blocked on logger UI collecting RIR/RPE first | — |
+| F. Goal weighting | ❌ OPEN — design direction only, no formula | — |
+| G. Aggregation (weekly/rolling) | ✅ IMPLEMENTED, explicit configurable week boundary | `src/engine/exposureEngine.ts` |
+| Hypertrophy Volume (§0) | ❌ OPEN — separate future type, depends on E and F | — |
+| Functional Exposure (§0) | ❌ OPEN — separate future type, may not share Hypertrophy Volume's rules | — |
 
-What changed from Phase 1.5: A/C/D/G are now implemented, because each
-one is a pure counting/query rule over facts Blueprint or this app's own
-`Set.completed` flag already state — no physiological precision invented.
-B is now a documented, adopted decision (Strategy A) rather than an open
-question, though still pending formal user sign-off per §37. E and F
-remain genuinely open — E because the data to weight by doesn't exist yet
-in the logger, F because it requires a formula this document deliberately
-does not invent. Hypertrophy Volume and Functional Exposure (§0) are new
-placeholder types with zero computation, reserved for once E/F are
-resolved.
+What changed from Phase 1.5: A/C/D/G now have working, tested code,
+because each is a pure counting/query rule over facts Blueprint or this
+app's own `Set.completed` flag already state — no physiological precision
+invented. B has a concrete, documented, **provisional** implementation
+(Strategy A) rather than being an open question with no code at all — but
+"implemented" here explicitly does **not** mean "approved as final
+methodology." Nothing in this document should be read as claiming
+sign-off has happened; `docs/open-decisions.md` is the single place that
+tracks whether it has. E and F remain genuinely open — E because the data
+to weight by doesn't exist yet in the logger, F because it requires a
+formula this document deliberately does not invent. Hypertrophy Volume
+and Functional Exposure (§0) are new placeholder types with zero
+computation, reserved for once E/F are resolved.
