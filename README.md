@@ -164,6 +164,10 @@ docs/            architecture note, deployment guide, open decisions,
   — focused design notes for the volume-decision model, natural-language
   goal matching, and the compound-exercise secondary-target mapping,
   respectively.
+- [`docs/IMPLEMENTATION_REPORT.md`](docs/IMPLEMENTATION_REPORT.md) — the
+  Next Phase Implementation Specification's own required report: files
+  changed, schema changes, rules implemented, tests run/passed/failed,
+  and genuinely blocked dependencies.
 - [`docs/CALORIE_TRACKER_INTEGRATION.md`](docs/CALORIE_TRACKER_INTEGRATION.md)
   — the formal one-way export contract to Calorie Tracker.
 - [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md) — field-by-field plan
