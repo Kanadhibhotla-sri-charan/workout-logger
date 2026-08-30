@@ -83,13 +83,14 @@ describe('fixture G: actual vs. planned performance', () => {
     });
 
     const performance = sessionsRepo.getExercisePerformances(workoutSession.session_id)[0]!;
-    const contributions = calculateExerciseExposure(
+    const { contributions } = calculateExerciseExposure(
       performance.exercise_id,
       performance.sets.map((s) => ({ completed: s.completed }))
     );
 
     // Exposure reflects 2 completed sets — not the 3 that were planned
     // or logged, and not silently assuming the abandoned set counted.
+    expect(contributions.length).toBeGreaterThan(0);
     for (const c of contributions) {
       expect(c.completed_sets).toBe(2);
     }

@@ -9,13 +9,14 @@
 
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import type { ExposureContribution } from './exposureEngine.js';
+import { EXPOSURE_COEFFICIENTS } from './config.js';
 import { NotApprovedError } from './errors.js';
 
 /**
  * Explains one ExposureContribution in plain text, using the same
  * Blueprint data the calculation used — matches
  * docs/TRAINING_EXPOSURE_MODEL.md's "Explainability" worked example
- * exactly (target name, exercise name, set count, Strategy A note).
+ * exactly (target name, role, coefficient, exercise name, set count).
  */
 export function explainExposureContribution(contribution: ExposureContribution): string {
   const exercise = BlueprintAdapter.getExercise(contribution.exercise_id);
@@ -24,12 +25,15 @@ export function explainExposureContribution(contribution: ExposureContribution):
     contribution.target_type === 'physique_target'
       ? BlueprintAdapter.getTarget(contribution.target_id)?.name
       : BlueprintAdapter.getFunctionalGoal(contribution.target_id)?.name;
+  const coefficient = contribution.role === 'primary' ? EXPOSURE_COEFFICIENTS.primary : EXPOSURE_COEFFICIENTS.secondary;
+  const relationship =
+    contribution.role === 'primary'
+      ? `direct/primary — "${contribution.target_id}" is listed in ${exercise?.id ?? contribution.exercise_id}'s Blueprint target list`
+      : `secondary — resolved from ${exercise?.id ?? contribution.exercise_id}'s Blueprint secondary_targets text via this app's curated mapping (docs/SECONDARY_TARGET_MAPPING.md, not a Blueprint canonical field)`;
 
   return (
     `${exerciseName} contributed ${contribution.exposure_units} exposure_units to ${targetName ?? contribution.target_id} ` +
-    `(${contribution.completed_sets} completed set${contribution.completed_sets === 1 ? '' : 's'}, direct relationship — ` +
-    `"${contribution.target_id}" is listed in ${exercise?.id ?? contribution.exercise_id}'s Blueprint target list). ` +
-    `Indirect contribution is not tracked (Strategy A — see docs/TRAINING_EXPOSURE_MODEL.md §B).`
+    `(${contribution.completed_sets} completed set${contribution.completed_sets === 1 ? '' : 's'} × ${coefficient} ${contribution.role} coefficient, ${relationship}).`
   );
 }
 

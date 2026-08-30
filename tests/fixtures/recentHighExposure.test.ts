@@ -14,7 +14,9 @@ import { describe, expect, it } from 'vitest';
 import { aggregateRollingExposure, aggregateWeeklyExposure, type SessionExposureInput } from '../../src/engine/exposureEngine.js';
 import { BlueprintAdapter } from '../../src/blueprint/adapter.js';
 
-const EXERCISE = BlueprintAdapter.getExercises().find((e) => (e.physique_targets ?? []).length === 1)!;
+const EXERCISE = BlueprintAdapter.getExercises().find(
+  (e) => (e.physique_targets ?? []).length === 1 && !(e.secondary_targets ?? []).length
+)!;
 const TARGET_ID = EXERCISE.physique_targets![0]!;
 
 describe('fixture F: recent high exposure (yesterday, just outside this week)', () => {
