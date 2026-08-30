@@ -110,3 +110,121 @@ describe('exerciseSelector — spec §5', () => {
     expect(explainExerciseSelection(result)).toBe(result.reasoning);
   });
 });
+
+describe('exerciseSelector — Strict Remediation Spec §3: gate hierarchy, no arbitrary scoring', () => {
+  it('never assigns a numeric score — the result carries no such field', () => {
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [TRICEPS_PRIMARY],
+      recent_exercise_ids: [],
+    });
+    expect(result).not.toHaveProperty('score');
+  });
+
+  it('Gate 2 throws for a genuinely irrelevant candidate list', () => {
+    expect(() =>
+      selectExercise({
+        target_type: 'physique_target',
+        target_id: 'quads', // leg target
+        target_tier: 'primary',
+        candidate_exercise_ids: [TRICEPS_PRIMARY], // an arm exercise, trains neither role for quads
+        recent_exercise_ids: [],
+      })
+    ).toThrow(NoFeasibleExerciseError);
+  });
+
+  it('Gate 3 avoids an exercise already claimed for a different target earlier in the session, when an equal alternative exists', () => {
+    const other = 'close-grip-bench-press';
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [TRICEPS_PRIMARY, other],
+      recent_exercise_ids: [],
+      exercises_already_planned_today: [TRICEPS_PRIMARY],
+    });
+    expect(result.exercise_id).toBe(other);
+    expect(result.decisive_gate).toBe('gate3_programming_need');
+  });
+
+  it('Gate 4 avoids a recently-used-but-not-current candidate in favor of a fresh one', () => {
+    const fresh = 'dip-triceps-biased';
+    const recentButNotCurrent = 'machine-triceps-extension';
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [recentButNotCurrent, fresh],
+      recent_exercise_ids: [recentButNotCurrent],
+      current_exercise_id: null,
+    });
+    expect(result.exercise_id).toBe(fresh);
+    expect(result.decisive_gate).toBe('gate4_historical_context');
+  });
+
+  it('Gate 4 never penalizes the current exercise even if it is also the most recently used one', () => {
+    const fresh = 'dip-triceps-biased';
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [TRICEPS_PRIMARY, fresh],
+      recent_exercise_ids: [TRICEPS_PRIMARY],
+      current_exercise_id: TRICEPS_PRIMARY,
+    });
+    expect(result.exercise_id).toBe(TRICEPS_PRIMARY);
+    expect(result.decisive_gate).toBe('gate5_progression_continuity');
+  });
+
+  it('Gate 5 prefers the current exercise for progression continuity when the programming need is otherwise tied', () => {
+    const other = 'close-grip-bench-press';
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [TRICEPS_PRIMARY, other],
+      recent_exercise_ids: [],
+      current_exercise_id: TRICEPS_PRIMARY,
+    });
+    expect(result.exercise_id).toBe(TRICEPS_PRIMARY);
+    expect(result.decisive_gate).toBe('gate5_progression_continuity');
+  });
+
+  it('Gate 6 is a stable alphabetical tie-break when nothing else distinguishes the candidates', () => {
+    const a = 'close-grip-bench-press';
+    const b = 'cable-pushdown';
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [a, b],
+      recent_exercise_ids: [],
+    });
+    expect(result.exercise_id).toBe([a, b].sort((x, y) => x.localeCompare(y))[0]);
+    expect(result.decisive_gate).toBe('gate6_tie_break');
+  });
+
+  it('rejected_candidates lists every candidate that did not win, for explainability', () => {
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [TRICEPS_SECONDARY_ONLY, TRICEPS_PRIMARY],
+      recent_exercise_ids: [],
+    });
+    expect(result.rejected_candidates).toEqual([TRICEPS_SECONDARY_ONLY]);
+  });
+
+  it('reasoning names the decisive gate explicitly', () => {
+    const result = selectExercise({
+      target_type: 'physique_target',
+      target_id: 'triceps',
+      target_tier: 'primary',
+      candidate_exercise_ids: [TRICEPS_SECONDARY_ONLY, TRICEPS_PRIMARY],
+      recent_exercise_ids: [],
+    });
+    expect(result.reasoning).toContain(result.decisive_gate);
+  });
+});

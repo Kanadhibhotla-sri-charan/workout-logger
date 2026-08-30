@@ -1,26 +1,23 @@
-// Exercise Selector — Next Phase spec §5.
+// Exercise Selector — Strict Remediation Specification §3.
 //
-// Feasibility filtering (equipment/time) already happens upstream
-// (constraintEngine.filterEquipmentFeasible) — every id in
-// candidate_exercise_ids is assumed already feasible. This module's job
-// is choosing among them for one target, using only factors §5 actually
-// names that are decidable from data already in this codebase:
-//   - "Blueprint muscle-role data" -> is the candidate this target's
-//     primary role, or only secondary (exposureEngine's own primary/
-//     secondary split, §7);
-//   - "recent history" / "redundancy" -> recent_exercise_ids;
-//   - "if the current exercise is best feasible option, keep it" ->
-//     a same-score tie-break toward current_exercise_id, never an
-//     override of a genuinely better option (§5: "do not preserve an
-//     exercise merely because it has been used successfully").
+// PREVIOUSLY this module ranked candidates with an arbitrary numeric
+// score (+2 primary / +1 secondary / -1 recent / +0.5 current). The
+// remediation spec explicitly forbids that ("Remove them from
+// production programming logic. Do not replace them with another
+// arbitrary numerical scoring system.") and mandates a strict ORDERED
+// hierarchy instead: each gate narrows the candidate set by category
+// membership, never by a summed/weighted value. A gate that would
+// eliminate every remaining candidate is skipped (the narrower set
+// from the previous gate carries forward) rather than ever returning
+// zero candidates because of its own preference.
 //
-// §5 also lists exposure, progression evidence, fatigue/recovery,
-// schedule, other goals, and badminton workload as evaluation factors —
-// those are volumeEngine's, progressionEngine's, recoveryEngine's,
-// frequencyEngine's, and resourceAllocation's respective jobs; the
-// pipeline (workoutBuilder, still a stub) is what will eventually feed
-// their conclusions in as additional selection input. This module does
-// not re-decide them.
+// Gate 1 (feasibility — equipment/time/schedule/Blueprint-or-approved-
+// outside-Blueprint validity) is NOT re-implemented here: it already
+// happens upstream (constraintEngine.filterEquipmentFeasible,
+// constraintEngine.fitToTimeBudget, constraintEngine
+// .isBodyFocusAllowedOnDay, exerciseUniverse's resolution) and every id
+// in candidate_exercise_ids is assumed already feasible by the time it
+// reaches this module. Gates 2-6 below are this module's actual job.
 
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { resolveSecondaryTarget } from '../blueprint/secondaryTargetMapping.js';
@@ -31,23 +28,38 @@ export interface ExerciseSelectionInput {
   target_type: TargetType;
   target_id: BlueprintId;
   target_tier: TargetPriorityTier;
-  /** Already equipment/time-feasible candidates — see
-   * constraintEngine.filterEquipmentFeasible. This module's job is
-   * choosing among them, not filtering. */
+  /** Already equipment/time/schedule-feasible candidates (Gate 1,
+   * applied upstream). This module's job starts at Gate 2. */
   candidate_exercise_ids: readonly BlueprintId[];
-  /** Exercise ids already used elsewhere in the session/recent history —
-   * redundancy avoidance input. */
+  /** Exercise ids used for this target within the recent history
+   * window — Gate 4's "avoid inappropriate repetition" input. */
   recent_exercise_ids: readonly BlueprintId[];
-  /** The exercise currently prescribed for this target/slot, if any —
-   * used only as a tie-breaker (§5: keep it when it's still the best
-   * feasible option; never as an automatic override of a clearly
-   * better candidate). */
+  /** The exercise most recently prescribed/performed for this target,
+   * if any — the one candidate with genuinely "usable prior
+   * performance history" in the sense Gate 5 means (continuing it
+   * enables measurable load/rep progression; see progressionEngine).
+   * Never overrides Gate 2/3 — a current pick that no longer serves
+   * the target at all, or is no longer feasible, was already removed
+   * from candidate_exercise_ids before this module sees it. */
   current_exercise_id?: BlueprintId | null;
+  /** Exercise ids already selected for a DIFFERENT target earlier in
+   * the same session being built — Gate 3's "missing movement/muscle
+   * coverage; avoidance of unnecessary redundancy" input. Optional;
+   * defaults to none (a caller building one target in isolation, e.g.
+   * a unit test, has nothing to avoid yet). */
+  exercises_already_planned_today?: readonly BlueprintId[];
 }
 
 export interface ExerciseSelectionResult {
   exercise_id: BlueprintId;
   reasoning: string;
+  /** Which gate actually made the final cut to one candidate — Gate 6
+   * only when genuine ties survived every earlier gate. Machine-
+   * readable, so a caller/UI can show *why* without parsing prose. */
+  decisive_gate: 'gate2_goal_relevance' | 'gate3_programming_need' | 'gate4_historical_context' | 'gate5_progression_continuity' | 'gate6_tie_break';
+  /** Candidates present after Gate 2 that did NOT win — for
+   * explainability (remediation §16: "rejected candidates"). */
+  rejected_candidates: BlueprintId[];
 }
 
 export class NoFeasibleExerciseError extends Error {
@@ -90,75 +102,114 @@ export function exercisesTrainingTarget(targetType: TargetType, targetId: Bluepr
     .map((e) => e.id);
 }
 
-interface ScoredCandidate {
-  exercise_id: BlueprintId;
-  role: ExerciseTargetRole;
-  score: number;
-  isRecent: boolean;
-  isCurrent: boolean;
+/** Narrows `candidates` to the subset matching `predicate`, UNLESS
+ * doing so would eliminate every candidate — in which case the
+ * unnarrowed input is returned unchanged. This is the one primitive
+ * every gate below is built from: category-membership narrowing,
+ * never a score. */
+function narrow<T>(candidates: readonly T[], predicate: (item: T) => boolean): T[] {
+  const kept = candidates.filter(predicate);
+  return kept.length > 0 ? kept : [...candidates];
 }
 
 /**
- * Ranks `input.candidate_exercise_ids` for `input.target_type`/`target_id`
- * and returns the single best one. Deterministic: identical inputs
- * always produce the identical output (ties broken alphabetically by
- * exercise_id, never randomly).
+ * Applies Gates 2-6 to `input.candidate_exercise_ids` and returns the
+ * single surviving exercise. Deterministic: identical inputs always
+ * produce the identical output (Gate 6's alphabetical tie-break is the
+ * final, stable fallback — never random, never a summed score).
  *
- * Scoring (documented, not opaque — see `reasoning` on the result,
- * which names every factor that applied):
- *   +2  role === 'primary' for this target (Blueprint muscle-role data)
- *   +1  role === 'secondary'
- *    0  role === 'none' (should not occur if candidates were filtered
- *       correctly upstream; still ranked last, never selected over a
- *       real candidate, via the score itself)
- *   -1  exercise_id is in recent_exercise_ids (redundancy — §5, a mild
- *       preference for variety, not exclusion: the spec doesn't forbid
- *       ever repeating an exercise)
- * +0.5  exercise_id === current_exercise_id (§5's "if the current
- *       exercise is best feasible option, keep it" — a tie-break only,
- *       never enough to beat a genuinely higher-scoring alternative)
- *
- * Throws NoFeasibleExerciseError if given no candidates at all — this
- * module has nothing to select from, which is a caller error (upstream
- * feasibility filtering should never hand it an empty list for a target
- * that needs programming).
+ * Throws NoFeasibleExerciseError if given no candidates at all — Gate 1
+ * (feasibility) is this module's caller's job; an empty list reaching
+ * here means the caller has nothing left to choose from.
  */
 export function selectExercise(input: ExerciseSelectionInput): ExerciseSelectionResult {
   if (input.candidate_exercise_ids.length === 0) {
     throw new NoFeasibleExerciseError(input.target_type, input.target_id);
   }
 
-  const scored: ScoredCandidate[] = input.candidate_exercise_ids.map((exercise_id) => {
-    const role = roleFor(exercise_id, input.target_type, input.target_id);
-    const isRecent = input.recent_exercise_ids.includes(exercise_id);
-    const isCurrent = input.current_exercise_id != null && exercise_id === input.current_exercise_id;
+  const allCandidates = [...input.candidate_exercise_ids];
+  const plannedToday = input.exercises_already_planned_today ?? [];
+  let decisiveGate: ExerciseSelectionResult['decisive_gate'] = 'gate2_goal_relevance';
 
-    let score = 0;
-    if (role === 'primary') score += 2;
-    else if (role === 'secondary') score += 1;
-    if (isRecent) score -= 1;
-    if (isCurrent) score += 0.5;
+  // Gate 2 — goal relevance: only exercises that actually train this
+  // target (Blueprint muscle-role data) survive at all.
+  let pool = allCandidates.filter((id) => roleFor(id, input.target_type, input.target_id) !== 'none');
+  if (pool.length === 0) {
+    // Every supplied "candidate" was actually irrelevant to this
+    // target — a caller error upstream, but fail loudly rather than
+    // silently picking an exercise that doesn't train the target.
+    throw new NoFeasibleExerciseError(input.target_type, input.target_id);
+  }
 
-    return { exercise_id, role, score, isRecent, isCurrent };
-  });
+  // Gate 3 — programming need: primary role fills the target's direct
+  // exposure need first; only fall back to secondary-role candidates
+  // when no primary-role candidate is feasible. Then prefer an
+  // exercise not already claimed for a different target today
+  // (avoids redundant coverage of the same movement pattern twice in
+  // one session).
+  if (pool.length > 1) {
+    const before = pool;
+    pool = narrow(pool, (id) => roleFor(id, input.target_type, input.target_id) === 'primary');
+    if (pool.length !== before.length) decisiveGate = 'gate3_programming_need';
+  }
+  if (pool.length > 1) {
+    const before = pool;
+    pool = narrow(pool, (id) => !plannedToday.includes(id));
+    if (pool.length !== before.length) decisiveGate = 'gate3_programming_need';
+  }
 
-  scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.exercise_id.localeCompare(b.exercise_id)));
-  const winner = scored[0]!;
+  // Gate 4 — historical context: avoid repeating an exercise that was
+  // used recently for this target BUT was NOT the established current
+  // pick — mechanically cycling through recently-tried-and-abandoned
+  // options is the "inappropriate repetition" this gate screens for.
+  // The current, ongoing exercise is deliberately exempted here: Gate 5
+  // is what decides whether continuity with it is warranted.
+  if (pool.length > 1) {
+    const before = pool;
+    pool = narrow(pool, (id) => id === input.current_exercise_id || !input.recent_exercise_ids.includes(id));
+    if (pool.length !== before.length) decisiveGate = 'gate4_historical_context';
+  }
 
-  const exercise = BlueprintAdapter.getExercise(winner.exercise_id);
-  const exerciseName = exercise?.name ?? winner.exercise_id;
+  // Gate 5 — progression continuity: when multiple candidates still
+  // satisfy the programming need equally, prefer the one with usable
+  // prior performance history (the current/ongoing pick) — it is the
+  // only candidate progressionEngine can actually progress from
+  // session to session.
+  if (pool.length > 1 && input.current_exercise_id && pool.includes(input.current_exercise_id)) {
+    pool = [input.current_exercise_id];
+    decisiveGate = 'gate5_progression_continuity';
+  }
+
+  // Gate 6 — stable tie-break: Blueprint has no stored per-exercise
+  // ordering/priority field (verified against src/blueprint/types.ts),
+  // so alphabetical exercise-id ordering is the documented fallback —
+  // never randomness, never a new invented weight.
+  if (pool.length > 1) {
+    pool = [...pool].sort((a, b) => a.localeCompare(b));
+    decisiveGate = 'gate6_tie_break';
+  }
+
+  const winnerId = pool[0]!;
+  const winnerRole = roleFor(winnerId, input.target_type, input.target_id);
+  const rejected = allCandidates.filter((id) => id !== winnerId);
+
+  const exercise = BlueprintAdapter.getExercise(winnerId);
+  const exerciseName = exercise?.name ?? winnerId;
   const reasonParts: string[] = [
-    `Blueprint muscle-role for this target is "${winner.role}"` + (winner.role === 'primary' ? ' (direct target)' : winner.role === 'secondary' ? ' (indirect/secondary)' : ''),
+    `Blueprint muscle-role for this target is "${winnerRole}"` + (winnerRole === 'primary' ? ' (direct target)' : winnerRole === 'secondary' ? ' (indirect/secondary)' : ''),
+    `decisive gate: ${decisiveGate}`,
   ];
-  if (winner.isRecent) reasonParts.push('used recently (redundancy noted, still selected as the best-ranked option)');
-  if (winner.isCurrent) reasonParts.push('is the currently prescribed exercise (kept — still the best feasible option, not replaced merely for the sake of change)');
-  if (!winner.isCurrent && input.current_exercise_id) {
+  if (winnerId === input.current_exercise_id) {
+    reasonParts.push('is the currently prescribed exercise — kept for progression continuity (Gate 5), not merely for the sake of no change');
+  } else if (input.current_exercise_id) {
     const previous = BlueprintAdapter.getExercise(input.current_exercise_id)?.name ?? input.current_exercise_id;
-    reasonParts.push(`replaces "${previous}" — a demonstrably better-ranked candidate was available (§5)`);
+    reasonParts.push(`replaces "${previous}" — a better-ranked candidate under the gate hierarchy`);
   }
 
   return {
-    exercise_id: winner.exercise_id,
+    exercise_id: winnerId,
     reasoning: `Selected ${exerciseName} for ${input.target_type} "${input.target_id}" (${input.target_tier} tier): ${reasonParts.join('; ')}.`,
+    decisive_gate: decisiveGate,
+    rejected_candidates: rejected,
   };
 }
