@@ -35,31 +35,38 @@ gone.
 ## Production deployment
 
 This is a plain Node process (`npm run build && npm start`) serving both
-the REST API and the static UI — deployable to any Node host (Render,
-Fly.io, Railway, a VPS, etc.).
+the REST API and the static UI.
 
 ```bash
 npm run build   # tsc -> dist/
 npm start        # node dist/server/index.js
 ```
 
+**The decided production target is an Oracle Cloud Infrastructure
+Always Free VM** — chosen specifically because it gives this app a
+filesystem that survives process restarts and redeploys, which SQLite
+requires. See **`docs/PRODUCTION_DEPLOYMENT.md`** for the complete,
+ordered deployment runbook (VM setup, systemd service, Nginx + HTTPS,
+database persistence, backups) and the `ops/` directory for the
+committed systemd units, Nginx config template, and backup script it
+references.
+
 ### The SQLite caveat
 
-The previous app in this repo was deployed to **Render's free tier**,
+The previous app in this repo was once deployed to Render's free tier,
 whose filesystem is **ephemeral and resets on every redeploy/restart** —
-its own `DEPLOY.md` had to route around this with a separate managed
-Postgres database. The same problem applies here: if you deploy
-workout-logger to a host with an ephemeral filesystem, `DB_PATH`'s SQLite
-file will be wiped on every restart/redeploy unless the host gives you a
-**persistent volume/disk** mounted at that path (e.g. Render's paid
-persistent disks, a Fly.io volume, a Railway volume). Set `DB_PATH` to a
-path inside that volume.
+that's exactly why Render (and similarly Cloud Run) is **not** an
+acceptable target for this repository's current SQLite-based
+architecture, and why the Oracle VM approach above was chosen instead:
+if `DB_PATH`'s SQLite file isn't on a filesystem that survives
+restarts/redeploys, all data is lost. `docs/PRODUCTION_DEPLOYMENT.md`'s
+persistence test (deploy → write data → restart the service → reboot
+the VM → confirm the data survives) exists specifically to verify this.
 
 Do **not** switch this to Postgres or another server-backed DB without
 deciding to — that's an explicit open decision (see
-`docs/open-decisions.md`); SQLite-on-a-persistent-volume is the Phase 1
-default because it's simplest for a single user, not because it's the
-final answer.
+`docs/open-decisions.md`); SQLite-on-persistent-VM-storage is the
+current, decided default, not a placeholder pending a "real" answer.
 
 ### Regenerating the Blueprint snapshot in CI/production
 

@@ -30,8 +30,11 @@ export function createApp(db: Database.Database): Express {
   app.use('/api/outside-blueprint-exercises', outsideBlueprintExercisesRouter);
   app.use('/api/programming', programmingRouter);
 
+  // Deployment Phase §5: exists solely for deployment verification/uptime
+  // checks — never database contents, user data, env vars, filesystem
+  // paths, secrets, or stack traces.
   app.get('/api/health', (req, res) => {
-    res.json({ ok: true });
+    res.status(200).json({ status: 'ok' });
   });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

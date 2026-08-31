@@ -50,3 +50,4 @@ story of how the app got to its current state.
 - [2026-09-01-42-core-engine-surgical-fix-pass.md](2026-09-01-42-core-engine-surgical-fix-pass.md)
 - [2026-09-01-43-ui-build-phase.md](2026-09-01-43-ui-build-phase.md)
 - [2026-09-01-44-ui-final-surgical-fix-pass.md](2026-09-01-44-ui-final-surgical-fix-pass.md)
+- [2026-09-01-45-production-deployment-prep.md](2026-09-01-45-production-deployment-prep.md)

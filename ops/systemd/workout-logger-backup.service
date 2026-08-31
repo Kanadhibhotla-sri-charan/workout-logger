@@ -1,0 +1,11 @@
+[Unit]
+Description=Workout Programmer SQLite backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=workout
+Group=workout
+Environment=DB_PATH=/var/lib/workout-logger/workout-logger.sqlite
+Environment=BACKUP_DIR=/var/lib/workout-logger/backups
+ExecStart=/usr/local/bin/backup-workout-logger.sh
