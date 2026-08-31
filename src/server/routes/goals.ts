@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { GoalsRepo, TooManyActiveAestheticGoalsError, UnknownBlueprintGoalReferenceError } from '../../repositories/goalsRepo.js';
+import { GoalEventsRepo } from '../../repositories/goalEventsRepo.js';
 import { matchGoalCandidates } from '../../engine/goalCreation.js';
 
 export const goalsRouter = Router();
@@ -78,6 +79,54 @@ goalsRouter.get('/:id', (req, res) => {
   const goal = repo.get(req.params.id);
   if (!goal) return res.status(404).json({ error: 'goal not found' });
   res.json(goal);
+});
+
+// UI Build Phase §20: the only mutation the Goal priority UI is allowed
+// to make — a user-driven rank change, straight through the existing
+// GoalsRepo.setPriority (never inferred/auto-adjusted here).
+goalsRouter.patch('/:id/priority', (req, res) => {
+  const { priority } = req.body ?? {};
+  if (typeof priority !== 'number') {
+    return res.status(400).json({ error: 'priority (number) is required' });
+  }
+  const repo = new GoalsRepo(db(req));
+  const goal = repo.setPriority(req.params.id, priority);
+  if (!goal) return res.status(404).json({ error: 'goal not found' });
+  res.json(goal);
+});
+
+// UI Build Phase §19: "[ Deactivate ]" — frees a slot under the
+// active-aesthetic-goal cap; the goal row and its full history remain
+// (GoalsRepo.deactivate never deletes).
+goalsRouter.post('/:id/deactivate', (req, res) => {
+  const repo = new GoalsRepo(db(req));
+  const goal = repo.deactivate(req.params.id, req.body?.notes ?? null);
+  if (!goal) return res.status(404).json({ error: 'goal not found' });
+  res.json(goal);
+});
+
+goalsRouter.post('/:id/reactivate', (req, res) => {
+  const repo = new GoalsRepo(db(req));
+  try {
+    const goal = repo.reactivate(req.params.id);
+    if (!goal) return res.status(404).json({ error: 'goal not found' });
+    res.json(goal);
+  } catch (err) {
+    if (err instanceof TooManyActiveAestheticGoalsError) {
+      return res.status(400).json({ error: err.message });
+    }
+    throw err;
+  }
+});
+
+// UI Build Phase §21: real goal history (created/activated/deactivated/
+// priority_changed/...), chronological — never fabricated in the
+// frontend if this route is missing.
+goalsRouter.get('/:id/events', (req, res) => {
+  const repo = new GoalsRepo(db(req));
+  const goal = repo.get(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'goal not found' });
+  res.json(new GoalEventsRepo(db(req)).listForGoal(req.params.id));
 });
 
 // Resolves a local goal's blueprint_ref through BlueprintAdapter — proves

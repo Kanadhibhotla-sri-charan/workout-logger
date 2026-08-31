@@ -7,88 +7,197 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <nav>
-    <a href="/index.html">Goals &amp; Programs</a>
-    <a href="/today.html">Today</a>
-    <a href="/profile.html">Training Profile</a>
-    <a href="/history.html">History</a>
-  </nav>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header id="app-header" class="app-header"></header>
 
-  <h1>Today's workouts</h1>
-  <div id="session-list"></div>
+  <main id="main-content">
+    <h1>Today</h1>
+    <div id="today-container"></div>
 
-  <h1>Start a workout</h1>
-  <section>
-    <form id="session-form">
-      <label>Session type
-        <select id="session-type">
-          <option value="gym">Gym</option>
-          <option value="badminton">Badminton</option>
-          <option value="other">Other</option>
-        </select>
-      </label>
-      <label>Goal
-        <select id="session-goal"><option value="">(none)</option></select>
-      </label>
-      <label>Start time
-        <input id="session-start" type="time" />
-      </label>
-      <label>Notes
-        <input id="session-notes" type="text" />
-      </label>
-      <button type="submit">Start workout</button>
-    </form>
-  </section>
+    <section>
+      <h2>Log something else</h2>
+      <p class="muted">For an activity outside today's generated plan (e.g. an unplanned badminton session).</p>
+      <form id="other-session-form">
+        <label>Session type
+          <select id="other-session-type">
+            <option value="badminton">Badminton</option>
+            <option value="gym">Gym</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>Notes
+          <input id="other-session-notes" type="text" />
+        </label>
+        <div class="btn-row">
+          <button type="submit">Start</button>
+        </div>
+        <div id="other-session-status"></div>
+      </form>
+    </section>
+  </main>
 
   <script src="/app.js"></script>
   <script>
-    async function loadGoalOptions() {
-      const goals = await api('/api/goals?active=true');
-      const select = document.getElementById('session-goal');
-      select.innerHTML = '<option value="">(none)</option>';
-      for (const g of goals) {
-        select.appendChild(el('option', { value: g.id, text: `[${g.goal_type}] ${g.blueprint_ref}` }));
+    renderAppHeader('/today.html');
+
+    let todayData = null;
+
+    async function load() {
+      const container = document.getElementById('today-container');
+      showLoading(container, "Loading today's program…");
+      try {
+        todayData = await api('/api/programming/today');
+        render();
+      } catch (err) {
+        showError(container, "We couldn't load today's program.", load);
       }
-      select.dataset.goals = JSON.stringify(goals);
     }
 
-    async function loadSessions() {
-      const sessions = await api(`/api/workouts?date=${todayIso()}`);
-      const container = document.getElementById('session-list');
+    function render() {
+      const container = document.getElementById('today-container');
       container.innerHTML = '';
-      if (sessions.length === 0) container.appendChild(el('div', { class: 'muted', text: 'No workouts logged for today yet.' }));
-      for (const s of sessions) {
-        const card = el('div', { class: 'card' });
-        card.appendChild(el('div', { text: `${s.session_type} — ${s.status}${s.duration_minutes ? ` (${s.duration_minutes} min)` : ''}` }));
-        const link = el('a', { href: `/logger.html?session=${s.session_id}`, text: 'Open logger' });
-        card.appendChild(link);
-        container.appendChild(card);
+
+      const headCard = el('div', { class: 'card' });
+      headCard.appendChild(el('div', { class: 'card-subtitle', text: formatDate(todayData.date, { weekday: 'long' }) }));
+      const titleText = todayData.exercises.length > 0 || todayData.sessionPurpose ? formatSessionType(todayData.sessionPurpose || 'gym') : formatSessionType(todayData.sessionType);
+      headCard.appendChild(el('h2', { text: titleText, style: 'margin:0.15rem 0 0' }));
+
+      const goal = (todayData.activeGoals || [])[0];
+      if (goal) {
+        headCard.appendChild(el('p', { class: 'muted', text: `Today's focus: your #${goal.priority} priority goal`, style: 'margin-top:0.5rem' }));
+      }
+      container.appendChild(headCard);
+
+      if (todayData.exercises.length > 0) {
+        const why = el('div', { class: 'card' });
+        why.appendChild(el('div', { class: 'card-title', text: 'Why this workout?' }));
+        why.appendChild(el('p', { text: describeWork(todayData.exercises[0]), style: 'margin:0.3rem 0 0' }));
+        container.appendChild(why);
+      }
+
+      if (todayData.sessionType !== 'gym') {
+        showEmptyInline(container, `No gym session planned today — ${formatSessionType(todayData.sessionType).toLowerCase()} day.`);
+      } else if (todayData.exercises.length === 0) {
+        showEmptyInline(container, 'No exercises were placed for today. Check your training profile and goals on the Program page for details.');
+      } else {
+        for (const ex of todayData.exercises) container.appendChild(buildExerciseCard(ex));
+        container.appendChild(el('p', { class: 'muted', text: `Planned duration: ${formatDuration(todayData.estimatedMinutes)}` }));
+      }
+
+      renderSessionStatus(container);
+    }
+
+    function showEmptyInline(container, message) {
+      container.appendChild(el('div', { class: 'state-block' }, [el('p', { text: message })]));
+    }
+
+    function buildExerciseCard(item) {
+      const card = createCard();
+      card.classList.add('exercise-card');
+      const header = el('div', { class: 'exercise-header' });
+      const left = el('div');
+      left.appendChild(el('div', { class: 'exercise-name', text: item.exercise_name }));
+      left.appendChild(el('div', { class: 'exercise-targets', text: item.target_name }));
+      header.appendChild(left);
+      header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(item.target_sets, item.target_reps_min, item.target_reps_max) }));
+      card.appendChild(header);
+
+      const explain = el('details', { class: 'exercise-explanation' });
+      explain.appendChild(el('summary', { text: 'Why this exercise' }));
+      explain.appendChild(el('p', { text: item.reasoning, style: 'margin:0.4rem 0 0' }));
+      card.appendChild(explain);
+      return card;
+    }
+
+    function renderSessionStatus(container) {
+      const section = el('section');
+      section.appendChild(el('h2', { text: "Today's session" }));
+
+      const relevant = (todayData.loggedSessions || []).filter((s) => todayData.sessionType !== 'gym' || s.session_type !== 'badminton');
+      const gymSession = todayData.loggedSessions.find((s) => s.session_type === 'gym');
+
+      if (gymSession) {
+        const card = createCard([
+          el('div', { class: 'card-row' }, [
+            el('div', { text: `${formatSessionType(gymSession.session_type)} — ${gymSession.duration_minutes ? formatDuration(gymSession.duration_minutes) : 'in progress'}` }),
+            createStatusBadge(gymSession.status, formatSessionType(gymSession.status)),
+          ]),
+        ]);
+        section.appendChild(card);
+        const cta = createButton({
+          label: gymSession.status === 'completed' ? 'View workout' : 'Continue workout',
+          onClick: () => (window.location.href = `/logger.html?session=${gymSession.session_id}`),
+        });
+        section.appendChild(cta);
+      } else if (todayData.sessionType === 'gym' && todayData.exercises.length > 0) {
+        const cta = createButton({ label: 'Start workout', onClick: startGeneratedWorkout });
+        section.appendChild(cta);
+      } else {
+        section.appendChild(el('p', { class: 'muted', text: 'No gym workout logged for today yet.' }));
+      }
+
+      for (const s of todayData.loggedSessions) {
+        if (s.session_type === 'gym') continue;
+        const card = createCard([
+          el('div', { class: 'card-row' }, [
+            el('div', { text: formatSessionType(s.session_type) }),
+            createStatusBadge(s.status, formatSessionType(s.status)),
+          ]),
+          el('a', { href: `/logger.html?session=${s.session_id}`, text: 'Open' }),
+        ]);
+        section.appendChild(card);
+      }
+
+      container.appendChild(section);
+    }
+
+    let startInFlight = false;
+    async function startGeneratedWorkout(e) {
+      if (startInFlight) return;
+      startInFlight = true;
+      e.target.disabled = true;
+      try {
+        const goal = (todayData.activeGoals || [])[0];
+        const session = await api('/api/workouts', {
+          method: 'POST',
+          body: {
+            date: todayData.date,
+            session_type: 'gym',
+            status: 'in_progress',
+            goal_context: goal ? { goal_type: goal.goal_type, goal_id: goal.goal_id, priority: goal.priority, program_phase: null } : null,
+          },
+        });
+        window.location.href = `/logger.html?session=${session.session_id}`;
+      } catch (err) {
+        e.target.disabled = false;
+        startInFlight = false;
+        showInlineStatus(document.getElementById('today-container'), 'error', err.message);
       }
     }
 
-    document.getElementById('session-form').addEventListener('submit', async (e) => {
+    document.getElementById('other-session-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const goalId = document.getElementById('session-goal').value;
-      const goals = JSON.parse(document.getElementById('session-goal').dataset.goals || '[]');
-      const goal = goals.find((g) => g.id === goalId);
-      const session = await api('/api/workouts', {
-        method: 'POST',
-        body: {
-          date: todayIso(),
-          session_type: document.getElementById('session-type').value,
-          start_time: document.getElementById('session-start').value || null,
-          status: 'in_progress',
-          notes: document.getElementById('session-notes').value || null,
-          goal_context: goal
-            ? { goal_type: goal.goal_type, goal_id: goal.id, priority: goal.priority, program_phase: null }
-            : null,
-        },
-      });
-      window.location.href = `/logger.html?session=${session.session_id}`;
+      const button = e.target.querySelector('button[type="submit"]');
+      const statusEl = document.getElementById('other-session-status');
+      try {
+        const session = await withSaving(button, statusEl, () =>
+          api('/api/workouts', {
+            method: 'POST',
+            body: {
+              date: todayIso(),
+              session_type: document.getElementById('other-session-type').value,
+              status: 'in_progress',
+              notes: document.getElementById('other-session-notes').value || null,
+            },
+          })
+        );
+        window.location.href = `/logger.html?session=${session.session_id}`;
+      } catch (err) {
+        // entered values are preserved (spec §61) — form is left as-is
+      }
     });
 
-    loadGoalOptions();
-    loadSessions();
+    load();
   </script>
 </body>
 </html>

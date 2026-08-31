@@ -269,6 +269,46 @@ export class WorkoutSessionsRepo {
     };
   }
 
+  /** UI Build Phase §35: every real performance of one exact exercise,
+   * across every real session, most-recent-session-first — the History
+   * page's exercise filter. A thin, direct join reusing the exact same
+   * table shape getExercisePerformances already reads; no new domain
+   * logic, no computed metrics (e.g. no 1RM — spec §35 forbids inventing
+   * one). */
+  listPerformancesForExercise(exerciseId: string): Array<{ session_id: string; date: string; sets: Set[] }> {
+    const exerciseRows = this.db
+      .prepare(
+        `SELECT we.id, we.workout_session_id, ws.date
+         FROM workout_exercises we
+         JOIN workout_sessions ws ON ws.session_id = we.workout_session_id
+         WHERE we.exercise_id = ?
+         ORDER BY ws.date DESC, ws.created_at DESC`
+      )
+      .all(exerciseId) as Array<{ id: string; workout_session_id: string; date: string }>;
+
+    const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
+
+    return exerciseRows.map((row) => {
+      const setRows = setsStmt.all(row.id) as Array<{
+        set_number: number;
+        weight: number | null;
+        reps: number | null;
+        completed: number;
+        rir: number | null;
+        rpe: number | null;
+        rest_seconds: number | null;
+        technique: string | null;
+        tempo: string | null;
+        notes: string | null;
+      }>;
+      return {
+        session_id: row.workout_session_id,
+        date: row.date,
+        sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
+      };
+    });
+  }
+
   getExercisePerformances(workoutSessionId: string): ExercisePerformance[] {
     const exerciseRows = this.db
       .prepare('SELECT * FROM workout_exercises WHERE workout_session_id = ? ORDER BY order_index ASC')

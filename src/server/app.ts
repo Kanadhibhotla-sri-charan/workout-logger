@@ -9,6 +9,7 @@ import { workoutsRouter } from './routes/workouts.js';
 import { exportRouter } from './routes/export.js';
 import { trainingProfileRouter } from './routes/trainingProfile.js';
 import { outsideBlueprintExercisesRouter } from './routes/outsideBlueprintExercises.js';
+import { programmingRouter } from './routes/programming.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', '..', 'public');
@@ -27,6 +28,7 @@ export function createApp(db: Database.Database): Express {
   app.use('/api/export', exportRouter);
   app.use('/api/training-profile', trainingProfileRouter);
   app.use('/api/outside-blueprint-exercises', outsideBlueprintExercisesRouter);
+  app.use('/api/programming', programmingRouter);
 
   app.get('/api/health', (req, res) => {
     res.json({ ok: true });

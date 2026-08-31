@@ -7,169 +7,472 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <nav>
-    <a href="/index.html">Goals &amp; Programs</a>
-    <a href="/today.html">Today</a>
-    <a href="/profile.html">Training Profile</a>
-    <a href="/history.html">History</a>
-  </nav>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header id="app-header" class="app-header"></header>
 
-  <h1>Workout logger</h1>
-  <div id="session-summary" class="card"></div>
-
-  <h1>Exercises</h1>
-  <div id="exercise-list"></div>
-
-  <section>
-    <h2>Add exercise</h2>
-    <label>Exercise
-      <input id="exercise-search" list="exercise-options" placeholder="Search Blueprint exercises..." />
-      <datalist id="exercise-options"></datalist>
-    </label>
-    <label>Role
-      <select id="exercise-role">
-        <option value="primary">Primary</option>
-        <option value="secondary">Secondary</option>
-        <option value="accessory">Accessory</option>
-        <option value="finisher">Finisher</option>
-      </select>
-    </label>
-    <div id="sets-editor"></div>
-    <button id="add-set" type="button">Add set</button>
-    <button id="save-exercise" type="button">Save exercise</button>
-  </section>
-
-  <section>
-    <h2>Finish workout</h2>
-    <label>End time
-      <input id="end-time" type="time" />
-    </label>
-    <label>Duration (minutes)
-      <input id="duration" type="number" min="0" />
-    </label>
-    <button id="finish-session" type="button">Mark completed</button>
-  </section>
+  <main id="main-content">
+    <div id="logger-root"></div>
+  </main>
+  <div id="day-modal-root"></div>
 
   <script src="/app.js"></script>
   <script>
+    renderAppHeader(null); // logger is a dedicated execution screen, not a nav destination
     const sessionId = new URLSearchParams(window.location.search).get('session');
-    let exercisesById = {};
-    let sets = [];
 
-    function addSetRow(setNumber) {
-      sets.push({ set_number: setNumber, weight: null, reps: null, completed: false });
-      renderSets();
+    let session = null; // GET /api/workouts/:id result
+    let generated = null; // GET /api/programming/today?date=session.date result (gym sessions only)
+    let skippedExerciseIds = new Set(); // locally tracked — no persisted "skipped" concept at the exercise level
+    let substitutions = new Map(); // generated exercise_id -> {id, name} chosen substitute
+    let dirty = false; // unsaved set values entered but not yet saved (spec §62)
+    let startedAt = Date.now();
+    let elapsedTimer = null;
+
+    window.addEventListener('beforeunload', (e) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
+    async function load() {
+      const root = document.getElementById('logger-root');
+      if (!sessionId) {
+        root.innerHTML = '';
+        root.appendChild(el('div', { class: 'state-block' }, [
+          el('p', { text: 'No session selected.' }),
+          el('a', { class: 'btn', href: '/today.html', text: 'Back to Today' }),
+        ]));
+        return;
+      }
+      showLoading(root, 'Loading session…');
+      try {
+        session = await api(`/api/workouts/${sessionId}`);
+        if (session.session_type === 'gym') {
+          generated = await api(`/api/programming/today?date=${session.date}`).catch(() => null);
+        }
+        render();
+      } catch (err) {
+        showError(root, "We couldn't load this workout.", load);
+      }
     }
 
-    function renderSets() {
-      const container = document.getElementById('sets-editor');
+    function render() {
+      const root = document.getElementById('logger-root');
+      root.innerHTML = '';
+      root.appendChild(buildHeader());
+
+      if (session.session_type === 'badminton') {
+        root.appendChild(buildBadmintonSection());
+      } else {
+        root.appendChild(buildExerciseSection());
+        if (session.status !== 'completed') root.appendChild(buildAddExerciseSection());
+      }
+
+      if (session.status !== 'completed') root.appendChild(buildFinishBar());
+      else root.appendChild(buildCompletedFooter());
+
+      startElapsedTimer();
+    }
+
+    // ---------- Header ----------
+
+    function buildHeader() {
+      const header = el('div', { class: 'logger-header' });
+      header.appendChild(el('a', { class: 'back-link', href: '/today.html', text: '← Back to Today' }));
+      const titleText = session.session_type === 'gym'
+        ? `${formatWeekday(weekdayFromDate(session.date))} · ${generated && generated.sessionPurpose ? formatSessionType(generated.sessionPurpose) : 'Gym'}`
+        : formatSessionType(session.session_type);
+      header.appendChild(el('div', { class: 'logger-title', text: titleText }));
+      const meta = el('div', { class: 'logger-meta' });
+      if (session.goal_context) meta.appendChild(el('span', { text: `Goal priority #${session.goal_context.priority}` }));
+      if (generated) meta.appendChild(el('span', { text: `Planned: ${formatDuration(generated.estimatedMinutes)}` }));
+      meta.appendChild(el('span', { id: 'elapsed-meta', text: 'Elapsed: 0 min' }));
+      meta.appendChild(createStatusBadge(session.status, formatSessionType(session.status)));
+      header.appendChild(meta);
+      return header;
+    }
+
+    function weekdayFromDate(dateIso) {
+      const [y, m, d] = dateIso.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }).toLowerCase();
+    }
+
+    function startElapsedTimer() {
+      if (elapsedTimer) clearInterval(elapsedTimer);
+      if (session.status === 'completed') return;
+      const base = session.start_time ? 0 : 0; // start_time is a wall-clock time-of-day, not a timestamp we can diff reliably client-side
+      elapsedTimer = setInterval(() => {
+        const el = document.getElementById('elapsed-meta');
+        if (!el) return clearInterval(elapsedTimer);
+        el.textContent = `Elapsed: ${formatDuration((Date.now() - startedAt) / 60000)}`;
+      }, 30000);
+    }
+
+    // ---------- Exercise section (gym) ----------
+
+    function buildExerciseSection() {
+      const section = el('section');
+      section.appendChild(el('h2', { text: 'Exercises' }));
+
+      const loggedIds = new Set(session.exercises.map((p) => p.exercise_id));
+      const readOnly = session.status === 'completed';
+      const generatedItems = readOnly ? [] : (generated ? generated.exercises : []).filter((g) => !loggedIds.has(effectiveExerciseId(g)));
+
+      if (session.exercises.length === 0 && generatedItems.length === 0) {
+        section.appendChild(el('div', { class: 'state-block' }, [el('p', { text: 'No exercises yet.' })]));
+      }
+
+      for (const perf of session.exercises) {
+        section.appendChild(buildLoggedExerciseCard(perf));
+      }
+
+      for (const g of generatedItems) {
+        if (skippedExerciseIds.has(g.exercise_id)) {
+          section.appendChild(buildSkippedCard(g));
+        } else {
+          section.appendChild(buildPreloadedExerciseCard(g));
+        }
+      }
+
+      return section;
+    }
+
+    function effectiveExerciseId(generatedItem) {
+      const sub = substitutions.get(generatedItem.exercise_id);
+      return sub ? sub.id : generatedItem.exercise_id;
+    }
+
+    function buildSkippedCard(g) {
+      const card = createCard();
+      card.classList.add('exercise-card', 'exercise-skipped');
+      card.appendChild(el('div', { class: 'exercise-name', text: g.exercise_name }));
+      card.appendChild(el('div', { class: 'card-subtitle', text: 'Skipped — not performed today' }));
+      const undo = createButton({ label: 'Undo skip', variant: 'ghost', onClick: () => { skippedExerciseIds.delete(g.exercise_id); render(); } });
+      card.appendChild(undo);
+      return card;
+    }
+
+    function buildLoggedExerciseCard(perf) {
+      const generatedMatch = generated ? generated.exercises.find((g) => effectiveExerciseId(g) === perf.exercise_id) : null;
+      const card = createCard();
+      card.classList.add('exercise-card');
+      const header = el('div', { class: 'exercise-header' });
+      header.appendChild(el('div', { class: 'exercise-name', text: exerciseDisplayName(perf, generatedMatch) }));
+      if (!generatedMatch) header.appendChild(el('span', { class: 'badge badge-warning', text: 'Unplanned exercise' }));
+      card.appendChild(header);
+
+      if (generatedMatch) {
+        const completed = perf.sets.filter((s) => s.completed).length;
+        const skipped = perf.sets.length - completed;
+        const pva = el('div', { class: 'planned-vs-actual' });
+        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Planned' }), document.createTextNode(formatSets(generatedMatch.target_sets, generatedMatch.target_reps_min, generatedMatch.target_reps_max))]));
+        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(`${completed} completed${skipped ? `, ${skipped} skipped` : ''}`)]));
+        card.appendChild(pva);
+        if (generatedMatch.previous_performance) {
+          card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'} (${formatDate(generatedMatch.previous_performance.date)})` }));
+        }
+      }
+
+      const table = el('table');
+      const headRow = el('tr');
+      for (const h of ['Set', 'Weight', 'Reps', 'Done']) headRow.appendChild(el('th', { text: h }));
+      table.appendChild(headRow);
+      for (const s of perf.sets) {
+        const row = el('tr');
+        row.appendChild(el('td', { text: String(s.set_number) }));
+        row.appendChild(el('td', { text: s.weight ?? '—' }));
+        row.appendChild(el('td', { text: s.reps ?? '—' }));
+        row.appendChild(el('td', { text: s.completed ? 'Yes' : 'No' }));
+        table.appendChild(row);
+      }
+      card.appendChild(table);
+      return card;
+    }
+
+    function exerciseDisplayName(perf, generatedMatch) {
+      return generatedMatch ? generatedMatch.exercise_name : perf.exercise_id;
+    }
+
+    function buildPreloadedExerciseCard(g) {
+      const sub = substitutions.get(g.exercise_id);
+      const card = createCard();
+      card.classList.add('exercise-card');
+
+      const header = el('div', { class: 'exercise-header' });
+      const left = el('div');
+      left.appendChild(el('div', { class: 'exercise-name', text: sub ? sub.name : g.exercise_name }));
+      left.appendChild(el('div', { class: 'exercise-targets', text: g.target_name }));
+      if (sub) left.appendChild(el('div', { class: 'faint', text: `Substituted for ${g.exercise_name}` }));
+      header.appendChild(left);
+      header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(g.target_sets, g.target_reps_min, g.target_reps_max) }));
+      card.appendChild(header);
+
+      if (g.previous_performance) {
+        card.appendChild(el('p', { class: 'faint', text: `Last time: ${g.previous_performance.weight ?? '—'} × ${g.previous_performance.reps ?? '—'} (${formatDate(g.previous_performance.date)})` }));
+      } else {
+        card.appendChild(el('p', { class: 'faint', text: 'No previous performance recorded.' }));
+      }
+
+      const explain = el('details', { class: 'exercise-explanation' });
+      explain.appendChild(el('summary', { text: 'Why this exercise' }));
+      explain.appendChild(el('p', { text: g.reasoning, style: 'margin:0.4rem 0 0' }));
+      card.appendChild(explain);
+
+      const state = { sets: buildInitialSets(g.target_sets) };
+      const setsContainer = el('div');
+      renderSetEditor(setsContainer, state, () => { dirty = true; });
+      card.appendChild(setsContainer);
+
+      const addSetBtn = createButton({ label: '+ Add set', variant: 'secondary', onClick: () => {
+        state.sets.push({ set_number: state.sets.length + 1, weight: null, reps: null, completed: false });
+        renderSetEditor(setsContainer, state, () => { dirty = true; });
+        dirty = true;
+      }});
+      card.appendChild(addSetBtn);
+
+      const statusEl = el('div');
+      const actions = el('div', { class: 'btn-row' });
+      const saveBtn = createButton({ label: 'Save exercise', onClick: async () => {
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/exercises`, {
+            method: 'POST',
+            body: { exercise_id: sub ? sub.id : g.exercise_id, order: session.exercises.length + 1, role: 'primary', sets: state.sets },
+          }), 'Exercise saved.');
+          dirty = false;
+          await reload();
+        } catch (err) { /* values preserved — card stays as-is (spec §61) */ }
+      }});
+      actions.appendChild(saveBtn);
+      actions.appendChild(createButton({ label: 'Skip exercise', variant: 'secondary', onClick: () => { skippedExerciseIds.add(g.exercise_id); render(); } }));
+      actions.appendChild(createButton({ label: sub ? 'Change substitute' : 'Substitute', variant: 'ghost', onClick: () => openSubstitutePicker(g) }));
+      card.appendChild(actions);
+      card.appendChild(statusEl);
+
+      return card;
+    }
+
+    function buildInitialSets(count) {
+      const sets = [];
+      for (let i = 1; i <= count; i++) sets.push({ set_number: i, weight: null, reps: null, completed: false });
+      return sets;
+    }
+
+    function renderSetEditor(container, state, onDirty) {
       container.innerHTML = '';
-      sets.forEach((set, i) => {
+      state.sets.forEach((set, i) => {
         const row = el('div', { class: 'set-row' });
-        row.appendChild(el('span', { text: `#${set.set_number}` }));
-        const weight = el('input', { type: 'number', step: '0.5', placeholder: 'weight' });
-        weight.addEventListener('input', () => (set.weight = weight.value === '' ? null : Number(weight.value)));
-        const reps = el('input', { type: 'number', placeholder: 'reps' });
-        reps.addEventListener('input', () => (set.reps = reps.value === '' ? null : Number(reps.value)));
-        const completedLabel = el('label');
-        const completed = el('input', { type: 'checkbox' });
-        completed.addEventListener('change', () => (set.completed = completed.checked));
-        completedLabel.appendChild(completed);
-        completedLabel.appendChild(document.createTextNode(' done'));
-        const remove = el('button', { type: 'button', text: 'x' });
-        remove.addEventListener('click', () => {
-          sets.splice(i, 1);
-          sets.forEach((s, idx) => (s.set_number = idx + 1));
-          renderSets();
-        });
-        row.append(weight, reps, completedLabel, remove);
+        row.appendChild(el('div', { class: 'set-index', text: `#${set.set_number}` }));
+        const weight = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'kg', 'aria-label': `Set ${set.set_number} weight` });
+        if (set.weight !== null) weight.value = set.weight;
+        weight.addEventListener('input', () => { set.weight = weight.value === '' ? null : Number(weight.value); onDirty(); });
+        const reps = el('input', { type: 'number', inputmode: 'numeric', placeholder: 'reps', 'aria-label': `Set ${set.set_number} reps` });
+        if (set.reps !== null) reps.value = set.reps;
+        reps.addEventListener('input', () => { set.reps = reps.value === '' ? null : Number(reps.value); onDirty(); });
+        const done = el('button', { type: 'button', class: 'set-done-toggle', 'aria-pressed': String(!!set.completed), 'aria-label': `Set ${set.set_number} done` }, [document.createTextNode('✓')]);
+        done.addEventListener('click', () => { set.completed = !set.completed; done.setAttribute('aria-pressed', String(set.completed)); onDirty(); });
+        const remove = createButton({ label: '×', variant: 'ghost', ariaLabel: `Remove set ${set.set_number}`, onClick: () => {
+          const idx = state.sets.indexOf(set);
+          state.sets.splice(idx, 1);
+          state.sets.forEach((s, i2) => (s.set_number = i2 + 1));
+          renderSetEditor(container, state, onDirty);
+          onDirty();
+        }});
+        row.append(weight, reps, done, remove);
         container.appendChild(row);
       });
     }
 
-    async function loadExerciseOptions() {
-      const exercises = await api('/api/blueprint/exercises');
-      const datalist = document.getElementById('exercise-options');
-      for (const ex of exercises) {
-        exercisesById[ex.name] = ex.id;
-        datalist.appendChild(el('option', { value: ex.name }));
-      }
+    function closeSubstituteModal() {
+      document.getElementById('day-modal-root').innerHTML = '';
+      document.removeEventListener('keydown', onSubstituteModalKeydown);
+    }
+    function onSubstituteModalKeydown(e) {
+      if (e.key === 'Escape') closeSubstituteModal();
     }
 
-    async function loadSession() {
-      const session = await api(`/api/workouts/${sessionId}`);
-      const summary = document.getElementById('session-summary');
-      summary.innerHTML = '';
-      summary.appendChild(el('div', { text: `${session.date} — ${session.session_type} — ${session.status}` }));
-      if (session.goal_context) {
-        summary.appendChild(el('div', { class: 'muted', text: `Goal: [${session.goal_context.goal_type}] ${session.goal_context.goal_id}` }));
-      }
+    async function openSubstitutePicker(g) {
+      const root = document.getElementById('day-modal-root');
+      root.innerHTML = '';
+      const panel = el('div', { class: 'modal-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Substitute exercise' });
+      panel.appendChild(el('h2', { text: `Substitute for ${g.exercise_name}` }));
+      panel.appendChild(el('p', { class: 'muted', text: 'Loading feasible alternatives…' }));
+      const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeSubstituteModal(); });
+      document.addEventListener('keydown', onSubstituteModalKeydown);
+      root.appendChild(backdrop);
 
-      const list = document.getElementById('exercise-list');
-      list.innerHTML = '';
-      for (const perf of session.exercises) {
-        const card = el('div', { class: 'card' });
-        card.appendChild(el('div', { text: `${perf.exercise_id} (${perf.role})` }));
-        const table = el('table');
-        const header = el('tr');
-        for (const h of ['set', 'weight', 'reps', 'done']) header.appendChild(el('th', { text: h }));
-        table.appendChild(header);
-        for (const s of perf.sets) {
-          const row = el('tr');
-          row.appendChild(el('td', { text: String(s.set_number) }));
-          row.appendChild(el('td', { text: s.weight ?? '-' }));
-          row.appendChild(el('td', { text: s.reps ?? '-' }));
-          row.appendChild(el('td', { text: s.completed ? 'yes' : 'no' }));
-          table.appendChild(row);
+      try {
+        const candidates = await api(`/api/programming/substitutes?target_type=${g.target_type}&target_id=${g.target_id}`);
+        panel.innerHTML = '';
+        panel.appendChild(el('h2', { text: `Substitute for ${g.exercise_name}` }));
+        const list = [...candidates.blueprint.map((c) => ({ ...c, source: 'Blueprint' })), ...candidates.outsideBlueprint.map((c) => ({ ...c, source: 'Approved outside-Blueprint' }))]
+          .filter((c) => c.id !== g.exercise_id);
+        if (list.length === 0) panel.appendChild(el('p', { class: 'muted', text: 'No feasible alternative found.' }));
+        for (const c of list) {
+          const row = createButton({ label: `${c.name} (${c.source})`, variant: 'secondary', onClick: () => {
+            substitutions.set(g.exercise_id, { id: c.id, name: c.name });
+            closeSubstituteModal();
+            render();
+          }});
+          row.classList.add('btn-block');
+          row.style.marginTop = '0.5rem';
+          panel.appendChild(row);
         }
-        card.appendChild(table);
-        list.appendChild(card);
+        panel.appendChild(createButton({ label: 'Cancel', variant: 'ghost', onClick: closeSubstituteModal }));
+      } catch (err) {
+        panel.innerHTML = '';
+        panel.appendChild(el('p', { class: 'muted', text: "Couldn't load alternatives." }));
       }
     }
 
-    document.getElementById('add-set').addEventListener('click', () => addSetRow(sets.length + 1));
+    // ---------- Add unplanned exercise ----------
 
-    document.getElementById('save-exercise').addEventListener('click', async () => {
-      const name = document.getElementById('exercise-search').value;
-      const exerciseId = exercisesById[name];
-      if (!exerciseId) {
-        alert('Pick a valid Blueprint exercise from the list.');
-        return;
-      }
-      await api(`/api/workouts/${sessionId}/exercises`, {
-        method: 'POST',
-        body: {
-          exercise_id: exerciseId,
-          order: document.getElementById('exercise-list').children.length + 1,
-          role: document.getElementById('exercise-role').value,
-          sets,
-        },
+    function buildAddExerciseSection() {
+      const section = el('section');
+      section.appendChild(el('h2', { text: 'Add unplanned exercise' }));
+      section.appendChild(el('p', { class: 'muted', text: "Clearly separate from today's generated program." }));
+
+      let exercisesById = {};
+      const search = el('input', { id: 'unplanned-exercise-search', list: 'unplanned-exercise-options', placeholder: 'Search Blueprint exercises…', 'aria-label': 'Exercise name' });
+      const datalist = el('datalist', { id: 'unplanned-exercise-options' });
+      const label = el('label', { for: 'unplanned-exercise-search' }, [document.createTextNode('Exercise'), search, datalist]);
+      section.appendChild(label);
+
+      api('/api/blueprint/exercises').then((exercises) => {
+        for (const ex of exercises) {
+          exercisesById[ex.name] = ex.id;
+          datalist.appendChild(el('option', { value: ex.name }));
+        }
       });
-      sets = [];
-      renderSets();
-      document.getElementById('exercise-search').value = '';
-      await loadSession();
-    });
 
-    document.getElementById('finish-session').addEventListener('click', async () => {
-      await api(`/api/workouts/${sessionId}`, {
-        method: 'PATCH',
-        body: {
-          end_time: document.getElementById('end-time').value || null,
-          duration_minutes: document.getElementById('duration').value ? Number(document.getElementById('duration').value) : null,
-          status: 'completed',
-        },
-      });
-      await loadSession();
-    });
+      const roleSelect = el('select', {}, [
+        el('option', { value: 'primary', text: 'Primary' }),
+        el('option', { value: 'secondary', text: 'Secondary' }),
+        el('option', { value: 'accessory', text: 'Accessory' }),
+        el('option', { value: 'finisher', text: 'Finisher' }),
+      ]);
+      section.appendChild(el('label', { text: 'Role' }, [roleSelect]));
 
-    if (!sessionId) {
-      document.body.innerHTML = '<p>No session selected. Go to <a href="/today.html">Today</a> to start one.</p>';
-    } else {
-      addSetRow(1);
-      loadExerciseOptions();
-      loadSession();
+      const state = { sets: [{ set_number: 1, weight: null, reps: null, completed: false }] };
+      const setsContainer = el('div');
+      renderSetEditor(setsContainer, state, () => { dirty = true; });
+      section.appendChild(setsContainer);
+      section.appendChild(createButton({ label: '+ Add set', variant: 'secondary', onClick: () => {
+        state.sets.push({ set_number: state.sets.length + 1, weight: null, reps: null, completed: false });
+        renderSetEditor(setsContainer, state, () => { dirty = true; });
+      }}));
+
+      const statusEl = el('div');
+      const saveBtn = createButton({ label: 'Add exercise', onClick: async () => {
+        const exerciseId = exercisesById[search.value];
+        if (!exerciseId) {
+          showInlineStatus(statusEl, 'error', 'Pick a valid Blueprint exercise from the list.');
+          return;
+        }
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/exercises`, {
+            method: 'POST',
+            body: { exercise_id: exerciseId, order: session.exercises.length + 1, role: roleSelect.value, sets: state.sets },
+          }), 'Added.');
+          dirty = false;
+          search.value = '';
+          await reload();
+        } catch (err) { /* values preserved */ }
+      }});
+      section.appendChild(saveBtn);
+      section.appendChild(statusEl);
+      return section;
     }
+
+    // ---------- Badminton ----------
+
+    function buildBadmintonSection() {
+      const section = el('section');
+      section.appendChild(el('h2', { text: 'Badminton session' }));
+      const details = session.badminton_details || {};
+      const readOnly = session.status === 'completed';
+
+      const intensity = el('select', { id: 'bm-intensity' }, ['low', 'medium', 'high'].map((v) => el('option', { value: v, text: v, ...(details.intensity === v ? { selected: 'selected' } : {}) })));
+      const format = el('select', { id: 'bm-format' }, ['singles', 'doubles'].map((v) => el('option', { value: v, text: v, ...(details.format === v ? { selected: 'selected' } : {}) })));
+      const games = el('input', { id: 'bm-games', type: 'number', min: '0' });
+      if (details.games_count != null) games.value = details.games_count;
+      const quality = el('select', { id: 'bm-quality' }, [1, 2, 3, 4, 5].map((v) => el('option', { value: String(v), text: String(v), ...(details.session_quality === v ? { selected: 'selected' } : {}) })));
+      const fatigue = el('select', { id: 'bm-fatigue' }, [1, 2, 3, 4, 5].map((v) => el('option', { value: String(v), text: String(v), ...(details.post_session_fatigue === v ? { selected: 'selected' } : {}) })));
+      const notes = el('input', { id: 'bm-notes', type: 'text' });
+      if (details.notes) notes.value = details.notes;
+
+      for (const [label, input] of [['Intensity', intensity], ['Format', format], ['Games', games], ['Session quality (1-5)', quality], ['Post-session fatigue (1-5)', fatigue], ['Notes', notes]]) {
+        if (readOnly) input.disabled = true;
+        section.appendChild(el('label', { text: label }, [input]));
+      }
+
+      if (!readOnly) {
+        const statusEl = el('div');
+        const saveBtn = createButton({ label: 'Save badminton details', onClick: async () => {
+          try {
+            await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/badminton-details`, {
+              method: 'PUT',
+              body: {
+                intensity: intensity.value,
+                format: format.value,
+                games_count: games.value ? Number(games.value) : null,
+                session_quality: Number(quality.value),
+                post_session_fatigue: Number(fatigue.value),
+                notes: notes.value || null,
+              },
+            }), 'Saved.');
+          } catch (err) { /* values preserved */ }
+        }});
+        section.appendChild(saveBtn);
+        section.appendChild(statusEl);
+      }
+      return section;
+    }
+
+    // ---------- Finish / completed ----------
+
+    function buildFinishBar() {
+      const bar = el('div', { class: 'logger-finish-bar' });
+      const completedSets = session.exercises.reduce((sum, p) => sum + p.sets.filter((s) => s.completed).length, 0);
+      bar.appendChild(el('p', { class: 'faint', text: `${session.exercises.length} exercise(s) logged, ${completedSets} completed set(s), ${skippedExerciseIds.size} skipped.`, style: 'margin:0 0 0.5rem' }));
+      const statusEl = el('div');
+      const finishBtn = createButton({ label: 'Finish workout', variant: 'primary' });
+      finishBtn.classList.add('btn-block');
+      finishBtn.addEventListener('click', async () => {
+        try {
+          await withSaving(finishBtn, statusEl, () => api(`/api/workouts/${sessionId}`, {
+            method: 'PATCH',
+            body: { status: 'completed', duration_minutes: Math.max(1, Math.round((Date.now() - startedAt) / 60000)) },
+          }), 'Workout completed');
+          await reload();
+        } catch (err) { /* preserved */ }
+      });
+      bar.appendChild(finishBtn);
+      bar.appendChild(statusEl);
+      return bar;
+    }
+
+    function buildCompletedFooter() {
+      const bar = el('div', { class: 'logger-finish-bar' });
+      bar.appendChild(el('p', { text: 'Workout completed', style: 'font-weight:700;margin:0 0 0.5rem' }));
+      const row = el('div', { class: 'btn-row' });
+      row.appendChild(el('a', { class: 'btn', href: '/history.html', text: 'View History' }));
+      row.appendChild(el('a', { class: 'btn btn-secondary', href: '/today.html', text: 'Back to Today' }));
+      row.appendChild(createButton({ label: 'Edit workout', variant: 'ghost', onClick: async () => {
+        await api(`/api/workouts/${sessionId}`, { method: 'PATCH', body: { status: 'in_progress' } });
+        await reload();
+      }}));
+      bar.appendChild(row);
+      return bar;
+    }
+
+    async function reload() {
+      session = await api(`/api/workouts/${sessionId}`);
+      render();
+    }
+
+    load();
   </script>
 </body>
 </html>

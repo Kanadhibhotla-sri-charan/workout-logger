@@ -3,81 +3,98 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Training Profile - Workout Programmer</title>
+  <title>Profile - Workout Programmer</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <nav>
-    <a href="/index.html">Goals &amp; Programs</a>
-    <a href="/today.html">Today</a>
-    <a href="/profile.html">Training Profile</a>
-    <a href="/history.html">History</a>
-  </nav>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header id="app-header" class="app-header"></header>
 
-  <h1>Training profile</h1>
-  <p class="muted">
-    These are constraints the future programming engine reads as data — not
-    assumptions baked into any code.
-  </p>
+  <main id="main-content">
+    <h1>Training profile</h1>
+    <p class="muted">These are constraints the programming engine reads as data — never assumptions baked into any code.</p>
 
-  <section>
     <form id="profile-form">
-      <label>Timezone (IANA name, e.g. "Asia/Kolkata")
-        <input id="timezone" type="text" required />
-      </label>
-      <label>Week starts on
-        <select id="week-start-day"></select>
-      </label>
-      <label>Training days
-        <select id="training-days" multiple size="7"></select>
-      </label>
-      <label>Preferred split (free text, e.g. "push-pull-legs")
-        <input id="preferred-split" type="text" />
-      </label>
-      <label>Default session duration (minutes)
-        <input id="default-duration" type="number" min="0" value="60" />
-      </label>
-      <label>Minimum session duration (minutes)
-        <input id="min-duration" type="number" min="0" value="30" />
-      </label>
-      <label>Maximum session duration (minutes)
-        <input id="max-duration" type="number" min="0" value="90" />
-      </label>
-      <label>Available equipment
-        <select id="equipment" multiple size="8"></select>
-      </label>
+      <section>
+        <h2>Training schedule</h2>
+        <label>Training days
+          <select id="training-days" multiple size="7"></select>
+        </label>
+        <label>Preferred split (free text, e.g. "push-pull-legs")
+          <input id="preferred-split" type="text" />
+        </label>
+        <label>Week starts on
+          <select id="week-start-day"></select>
+        </label>
+      </section>
 
-      <h2>Other recurring activity</h2>
-      <div id="activity-list"></div>
-      <button type="button" id="add-activity">Add recurring activity</button>
+      <section>
+        <h2>Session constraints</h2>
+        <label>Default duration (minutes)
+          <input id="default-duration" type="number" min="0" value="60" />
+        </label>
+        <label>Minimum duration (minutes)
+          <input id="min-duration" type="number" min="0" value="30" />
+        </label>
+        <label>Maximum duration (minutes)
+          <input id="max-duration" type="number" min="0" value="90" />
+        </label>
+        <div id="duration-error" class="field-error" role="alert"></div>
+      </section>
 
-      <button type="submit">Save profile</button>
+      <section>
+        <h2>Equipment</h2>
+        <label>Available equipment
+          <select id="equipment" multiple size="10"></select>
+        </label>
+      </section>
+
+      <section>
+        <h2>Recurring activities</h2>
+        <p class="muted">Any recurring commitment that competes for training/recovery capacity — not only badminton.</p>
+        <div id="activity-list" class="day-list"></div>
+        <div class="btn-row"><button type="button" id="add-activity" class="btn-secondary">Add recurring activity</button></div>
+      </section>
+
+      <section>
+        <h2>Timezone</h2>
+        <label>IANA timezone name (e.g. "Asia/Kolkata")
+          <input id="timezone" type="text" required />
+        </label>
+      </section>
+
+      <div class="btn-row">
+        <button type="submit">Save profile</button>
+      </div>
+      <div id="save-status"></div>
     </form>
-  </section>
+  </main>
 
   <script src="/app.js"></script>
   <script>
+    renderAppHeader('/profile.html');
+
     const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
     let activities = [];
+
+    function formatEquipmentLabel(id) {
+      return id.replace(/(^|\s)\w/g, (m) => m.toUpperCase());
+    }
 
     function renderActivities() {
       const container = document.getElementById('activity-list');
       container.innerHTML = '';
       activities.forEach((a, i) => {
-        const row = el('div', { class: 'set-row' });
-        const day = el('select');
-        for (const d of WEEKDAYS) day.appendChild(el('option', { value: d, text: d, ...(a.day === d ? { selected: 'selected' } : {}) }));
+        const row = el('div', { class: 'day-list-row' });
+        const day = el('select', { 'aria-label': 'Day' });
+        for (const d of WEEKDAYS) day.appendChild(el('option', { value: d, text: formatWeekday(d) }));
         day.value = a.day;
         day.addEventListener('change', () => (a.day = day.value));
-        const type = el('input', { type: 'text', value: a.activity_type, placeholder: 'gym / badminton / rest / other' });
+        const type = el('input', { type: 'text', value: a.activity_type, placeholder: 'gym / badminton / rest / other', 'aria-label': 'Activity type' });
         type.addEventListener('input', () => (a.activity_type = type.value));
-        const notes = el('input', { type: 'text', value: a.notes || '', placeholder: 'notes' });
+        const notes = el('input', { type: 'text', value: a.notes || '', placeholder: 'notes', 'aria-label': 'Notes' });
         notes.addEventListener('input', () => (a.notes = notes.value || null));
-        const remove = el('button', { type: 'button', text: 'x' });
-        remove.addEventListener('click', () => {
-          activities.splice(i, 1);
-          renderActivities();
-        });
+        const remove = createButton({ label: '×', variant: 'ghost', ariaLabel: 'Remove this activity', onClick: () => { activities.splice(i, 1); renderActivities(); } });
         row.append(day, type, notes, remove);
         container.appendChild(row);
       });
@@ -91,22 +108,20 @@
     async function loadEquipmentOptions() {
       const equipment = await api('/api/blueprint/equipment');
       const select = document.getElementById('equipment');
-      for (const e of equipment) select.appendChild(el('option', { value: e.id, text: `${e.id} (${e.exerciseCount})` }));
+      for (const e of equipment) select.appendChild(el('option', { value: e.id, text: `${formatEquipmentLabel(e.id)} (${e.exerciseCount} exercises)` }));
     }
 
     function loadDayOptions() {
       const select = document.getElementById('training-days');
-      for (const d of WEEKDAYS) select.appendChild(el('option', { value: d, text: d }));
+      for (const d of WEEKDAYS) select.appendChild(el('option', { value: d, text: formatWeekday(d) }));
       const weekStart = document.getElementById('week-start-day');
-      for (const d of WEEKDAYS) weekStart.appendChild(el('option', { value: d, text: d }));
+      for (const d of WEEKDAYS) weekStart.appendChild(el('option', { value: d, text: formatWeekday(d) }));
       weekStart.value = 'monday';
     }
 
     async function loadProfile() {
       const profile = await api('/api/training-profile');
       if (!profile) {
-        // Pre-fill with the browser's own IANA zone as a starting guess —
-        // the user still confirms/edits it before saving.
         document.getElementById('timezone').value = Intl.DateTimeFormat().resolvedOptions().timeZone;
         return;
       }
@@ -122,12 +137,32 @@
       renderActivities();
     }
 
+    function validateDurations() {
+      const min = Number(document.getElementById('min-duration').value);
+      const def = Number(document.getElementById('default-duration').value);
+      const max = Number(document.getElementById('max-duration').value);
+      const errorEl = document.getElementById('duration-error');
+      const invalid = !(min <= def && def <= max);
+      errorEl.textContent = invalid ? 'Minimum duration must be ≤ default duration ≤ maximum duration.' : '';
+      for (const id of ['min-duration', 'default-duration', 'max-duration']) {
+        document.getElementById(id).classList.toggle('field-invalid', invalid);
+      }
+      return !invalid;
+    }
+    for (const id of ['min-duration', 'default-duration', 'max-duration']) {
+      document.getElementById(id).addEventListener('input', validateDurations);
+    }
+
     document.getElementById('profile-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!validateDurations()) return; // spec §39: do not submit; inline error already shown
+
       const training_days = [...document.getElementById('training-days').selectedOptions].map((o) => o.value);
       const available_equipment = [...document.getElementById('equipment').selectedOptions].map((o) => o.value);
+      const button = e.target.querySelector('button[type="submit"]');
+      const statusEl = document.getElementById('save-status');
       try {
-        await api('/api/training-profile', {
+        await withSaving(button, statusEl, () => api('/api/training-profile', {
           method: 'PUT',
           body: {
             timezone: document.getElementById('timezone').value,
@@ -140,10 +175,12 @@
             available_equipment,
             other_activity_schedule: activities,
           },
-        });
-        alert('Saved.');
+        }), 'Profile saved.');
+        // spec §50: invalidate + reload anything that depends on this — the
+        // next visit to Program/Today will naturally re-fetch (no manual
+        // refresh needed since those pages always load fresh on entry).
       } catch (err) {
-        alert(err.message);
+        // entered values are preserved — form untouched on failure (spec §61)
       }
     });
 

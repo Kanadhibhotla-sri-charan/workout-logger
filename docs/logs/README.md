@@ -48,3 +48,4 @@ story of how the app got to its current state.
 - [2026-08-30-40-strict-bug-fix-priority-weekly-plan-multi-exercise.md](2026-08-30-40-strict-bug-fix-priority-weekly-plan-multi-exercise.md)
 - [2026-08-31-41-surgical-fix-weekly-programming-plan.md](2026-08-31-41-surgical-fix-weekly-programming-plan.md)
 - [2026-09-01-42-core-engine-surgical-fix-pass.md](2026-09-01-42-core-engine-surgical-fix-pass.md)
+- [2026-09-01-43-ui-build-phase.md](2026-09-01-43-ui-build-phase.md)

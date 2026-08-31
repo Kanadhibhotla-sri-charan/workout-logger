@@ -8,6 +8,7 @@ import {
   UnknownWorkoutSessionError,
 } from '../../repositories/badmintonSessionDetailsRepo.js';
 import { todayForUser } from '../../lib/userTimezone.js';
+import { BlueprintAdapter } from '../../blueprint/adapter.js';
 
 export const workoutsRouter = Router();
 
@@ -50,6 +51,20 @@ workoutsRouter.post('/', (req, res) => {
     notes,
   });
   res.status(201).json(session);
+});
+
+// UI Build Phase §35: History page's exercise filter — real performances
+// of one exact exercise, across every real session, most-recent-first.
+// Registered before the generic '/:id' route below so 'exercises' is
+// never swallowed as a session id.
+workoutsRouter.get('/exercises/:exerciseId/history', (req, res) => {
+  const repo = new WorkoutSessionsRepo(db(req));
+  const performances = repo.listPerformancesForExercise(req.params.exerciseId);
+  res.json({
+    exercise_id: req.params.exerciseId,
+    exercise_name: BlueprintAdapter.getExercise(req.params.exerciseId)?.name ?? req.params.exerciseId,
+    performances,
+  });
 });
 
 workoutsRouter.get('/:id', (req, res) => {

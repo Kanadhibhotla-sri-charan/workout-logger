@@ -3,126 +3,325 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Workout Programmer</title>
+  <title>Goals - Workout Programmer</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <nav>
-    <a href="/index.html">Goals &amp; Programs</a>
-    <a href="/today.html">Today</a>
-    <a href="/profile.html">Training Profile</a>
-    <a href="/history.html">History</a>
-  </nav>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header id="app-header" class="app-header"></header>
 
-  <h1>Goals</h1>
-  <section>
+  <main id="main-content">
+    <h1>Goals</h1>
     <div id="goal-list"></div>
-    <form id="goal-form">
-      <label>Type
-        <select id="goal-type">
-          <option value="aesthetic">Aesthetic</option>
-          <option value="functional">Functional</option>
-        </select>
-      </label>
-      <label>Blueprint outcome/goal
-        <select id="goal-ref"></select>
-      </label>
-      <label>Priority (1 = highest)
-        <input id="goal-priority" type="number" value="1" min="1" />
-      </label>
-      <label>Notes
-        <input id="goal-notes" type="text" />
-      </label>
-      <button type="submit">Add goal</button>
-    </form>
-  </section>
 
-  <h1>Programs</h1>
-  <section>
-    <div id="program-list"></div>
-    <form id="program-form">
-      <label>Name
-        <input id="program-name" type="text" required />
-      </label>
-      <label>Goals (select one or more)
-        <select id="program-goals" multiple size="4"></select>
-      </label>
-      <button type="submit">Create program</button>
-    </form>
-  </section>
+    <section>
+      <h2>Describe what you want to improve</h2>
+      <form id="nl-form">
+        <label>What do you want to improve?
+          <input id="nl-text" type="text" placeholder="e.g. My arms look thin from the side" required />
+        </label>
+        <div class="btn-row"><button type="submit">Find goal</button></div>
+      </form>
+      <div id="nl-candidates"></div>
+    </section>
+
+    <section>
+      <h2>Or choose directly</h2>
+      <form id="goal-form">
+        <label>Type
+          <select id="goal-type">
+            <option value="aesthetic">Aesthetic</option>
+            <option value="functional">Functional</option>
+          </select>
+        </label>
+        <label>Blueprint outcome/goal
+          <select id="goal-ref"></select>
+        </label>
+        <label>Priority (1 = highest)
+          <input id="goal-priority" type="number" value="1" min="1" />
+        </label>
+        <label>Notes
+          <input id="goal-notes" type="text" />
+        </label>
+        <div class="btn-row"><button type="submit">Add goal</button></div>
+        <div id="goal-form-status"></div>
+      </form>
+    </section>
+  </main>
+  <div id="day-modal-root"></div>
 
   <script src="/app.js"></script>
   <script>
+    renderAppHeader('/index.html');
+
+    let blueprintGoalsByRef = {}; // blueprint_ref -> {display_name, ...}
+
     async function loadBlueprintGoalOptions() {
       const type = document.getElementById('goal-type').value;
-      const list = type === 'aesthetic'
-        ? await api('/api/blueprint/aesthetic-goals')
-        : await api('/api/blueprint/functional-goals');
+      const list = type === 'aesthetic' ? await api('/api/blueprint/aesthetic-goals') : await api('/api/blueprint/functional-goals');
       const select = document.getElementById('goal-ref');
       select.innerHTML = '';
       for (const g of list) {
         const label = g.display_name || g.name;
-        select.appendChild(el('option', { value: g.id, text: `${label} (${g.id})` }));
+        blueprintGoalsByRef[g.id] = g;
+        select.appendChild(el('option', { value: g.id, text: label }));
       }
     }
+
+    async function loadAllBlueprintGoals() {
+      const [aesthetic, functional] = await Promise.all([api('/api/blueprint/aesthetic-goals'), api('/api/blueprint/functional-goals')]);
+      for (const g of [...aesthetic, ...functional]) blueprintGoalsByRef[g.id] = g;
+    }
+
+    function blueprintDisplayName(blueprintRef) {
+      return blueprintGoalsByRef[blueprintRef]?.display_name || blueprintGoalsByRef[blueprintRef]?.name || blueprintRef;
+    }
+
+    // ---------- Goal list ----------
 
     async function loadGoals() {
-      const goals = await api('/api/goals');
       const container = document.getElementById('goal-list');
-      container.innerHTML = '';
-      const programGoalsSelect = document.getElementById('program-goals');
-      programGoalsSelect.innerHTML = '';
-      for (const g of goals) {
-        const card = el('div', { class: 'card' });
-        card.appendChild(el('div', { text: `[${g.goal_type}] ${g.blueprint_ref} — priority ${g.priority}${g.active ? '' : ' (inactive)'}` }));
-        if (g.notes) card.appendChild(el('div', { class: 'muted', text: g.notes }));
-        container.appendChild(card);
-        programGoalsSelect.appendChild(el('option', { value: g.id, text: `[${g.goal_type}] ${g.blueprint_ref}` }));
+      showLoading(container, 'Loading goals…');
+      try {
+        const goals = await api('/api/goals');
+        renderGoals(goals);
+      } catch (err) {
+        showError(container, "We couldn't load your goals.", loadGoals);
       }
     }
 
-    async function loadPrograms() {
-      const programs = await api('/api/programs');
-      const container = document.getElementById('program-list');
+    function renderGoals(goals) {
+      const container = document.getElementById('goal-list');
       container.innerHTML = '';
-      for (const p of programs) {
-        const card = el('div', { class: 'card' });
-        card.appendChild(el('div', { text: `${p.name} — ${p.status}` }));
-        card.appendChild(el('div', { class: 'muted', text: `${p.goal_ids.length} goal(s)` }));
+      if (goals.length === 0) {
+        showEmpty(container, 'No active goals yet. Add an aesthetic or functional goal below to let the programmer personalize your training.');
+        return;
+      }
+
+      const activeAesthetic = goals.filter((g) => g.active && g.goal_type === 'aesthetic').sort((a, b) => a.priority - b.priority);
+      const aestheticRank = new Map(activeAesthetic.map((g, i) => [g.id, i + 1]));
+
+      const active = goals.filter((g) => g.active).sort((a, b) => a.priority - b.priority);
+      const inactive = goals.filter((g) => !g.active);
+
+      for (const g of active) container.appendChild(buildGoalCard(g, aestheticRank.get(g.id)));
+      if (inactive.length > 0) {
+        container.appendChild(el('h3', { text: 'Inactive' }));
+        for (const g of inactive) container.appendChild(buildGoalCard(g, null));
+      }
+    }
+
+    function buildGoalCard(goal, aestheticRank) {
+      const card = createCard();
+      const header = el('div', { class: 'card-row' });
+      const left = el('div', { style: 'display:flex;align-items:center;gap:0.6rem' });
+      if (aestheticRank) left.appendChild(el('span', { class: 'goal-rank-badge', text: `G${aestheticRank}`, 'aria-label': `Goal ${aestheticRank}` }));
+      const titleWrap = el('div');
+      titleWrap.appendChild(el('div', { class: 'card-title', text: blueprintDisplayName(goal.blueprint_ref) }));
+      titleWrap.appendChild(el('div', { class: 'card-subtitle', text: `${formatGoalType(goal.goal_type)} · Priority ${goal.priority}${goal.active ? '' : ' · Inactive'}` }));
+      left.appendChild(titleWrap);
+      header.appendChild(left);
+      card.appendChild(header);
+
+      if (goal.source === 'natural_language' && goal.source_text) {
+        card.appendChild(el('div', { class: 'goal-insight', text: `"${goal.source_text}"` }));
+      } else {
+        card.appendChild(el('p', { class: 'faint', text: 'No original insight provided.' }));
+      }
+      if (goal.notes) card.appendChild(el('p', { class: 'muted', text: goal.notes }));
+
+      const statusEl = el('div');
+      const actions = el('div', { class: 'btn-row' });
+
+      actions.appendChild(createButton({ label: 'View Blueprint context', variant: 'secondary', onClick: () => viewBlueprintContext(goal) }));
+
+      if (goal.active) {
+        const priorityInput = el('input', { type: 'number', min: '1', value: String(goal.priority), style: 'width:5rem;display:inline-block;margin:0' });
+        const changePriorityBtn = createButton({
+          label: 'Change priority', variant: 'secondary',
+          onClick: async () => {
+            if (actions.contains(priorityInput)) {
+              try {
+                await withSaving(changePriorityBtn, statusEl, () => api(`/api/goals/${goal.id}/priority`, { method: 'PATCH', body: { priority: Number(priorityInput.value) } }), 'Priority updated.');
+                await loadGoals();
+              } catch (err) { /* backend error shown inline; form untouched */ }
+            } else {
+              actions.insertBefore(priorityInput, changePriorityBtn);
+              changePriorityBtn.textContent = 'Save priority';
+            }
+          },
+        });
+        actions.appendChild(changePriorityBtn);
+
+        actions.appendChild(createButton({
+          label: 'Deactivate', variant: 'danger',
+          onClick: async (e) => {
+            try {
+              await withSaving(e.currentTarget, statusEl, () => api(`/api/goals/${goal.id}/deactivate`, { method: 'POST' }), 'Deactivated.');
+              await loadGoals();
+            } catch (err) { /* inline error shown */ }
+          },
+        }));
+      } else {
+        actions.appendChild(createButton({
+          label: 'Reactivate', variant: 'secondary',
+          onClick: async (e) => {
+            try {
+              await withSaving(e.currentTarget, statusEl, () => api(`/api/goals/${goal.id}/reactivate`, { method: 'POST' }), 'Reactivated.');
+              await loadGoals();
+            } catch (err) { /* inline error — e.g. backend's real 3rd-active-aesthetic-goal rejection */ }
+          },
+        }));
+      }
+
+      actions.appendChild(createButton({ label: 'History', variant: 'ghost', onClick: () => viewGoalHistory(goal) }));
+
+      card.appendChild(actions);
+      card.appendChild(statusEl);
+      return card;
+    }
+
+    function openModal(titleText, bodyEls) {
+      const root = document.getElementById('day-modal-root');
+      root.innerHTML = '';
+      const panel = el('div', { class: 'modal-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': titleText });
+      const header = el('div', { class: 'modal-header' }, [el('h2', { text: titleText, style: 'margin:0' })]);
+      const closeBtn = el('button', { class: 'modal-close', type: 'button', 'aria-label': 'Close' }, [document.createTextNode('×')]);
+      const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); };
+      const onKey = (e) => { if (e.key === 'Escape') close(); };
+      closeBtn.addEventListener('click', close);
+      header.appendChild(closeBtn);
+      panel.appendChild(header);
+      for (const b of bodyEls) panel.appendChild(b);
+      const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+      document.addEventListener('keydown', onKey);
+      root.appendChild(backdrop);
+      closeBtn.focus();
+    }
+
+    async function viewBlueprintContext(goal) {
+      openModal(blueprintDisplayName(goal.blueprint_ref), [el('p', { class: 'muted', text: 'Loading…' })]);
+      try {
+        const context = await api(`/api/goals/${goal.id}/blueprint`);
+        const body = [];
+        if (context.definition) body.push(el('p', { text: context.definition }));
+        if (context.technical_explanation) body.push(el('p', { class: 'muted', text: context.technical_explanation }));
+        if (context.visual_description) body.push(el('p', { text: context.visual_description }));
+        if (body.length === 0) body.push(el('p', { class: 'muted', text: 'No additional Blueprint detail available.' }));
+        openModal(blueprintDisplayName(goal.blueprint_ref), body);
+      } catch (err) {
+        openModal(blueprintDisplayName(goal.blueprint_ref), [el('p', { class: 'muted', text: "Couldn't load Blueprint context." })]);
+      }
+    }
+
+    async function viewGoalHistory(goal) {
+      openModal(`History — ${blueprintDisplayName(goal.blueprint_ref)}`, [el('p', { class: 'muted', text: 'Loading…' })]);
+      try {
+        const events = await api(`/api/goals/${goal.id}/events`);
+        const body = events.length === 0
+          ? [el('p', { class: 'muted', text: 'No history yet.' })]
+          : events.map((ev) => el('div', { class: 'card' }, [
+              el('div', { class: 'card-title', text: formatEventType(ev.event_type) }),
+              el('div', { class: 'faint', text: new Date(ev.occurred_at).toLocaleString() }),
+              ev.notes ? el('div', { class: 'muted', text: ev.notes }) : null,
+            ].filter(Boolean)));
+        openModal(`History — ${blueprintDisplayName(goal.blueprint_ref)}`, body);
+      } catch (err) {
+        openModal('History', [el('p', { class: 'muted', text: "Couldn't load goal history." })]);
+      }
+    }
+
+    const EVENT_TYPE_LABEL = {
+      created: 'Created', activated: 'Activated', deactivated: 'Deactivated',
+      priority_changed: 'Priority changed', cadence_changed: 'Review cadence changed',
+      exercise_changed: 'Exercise changed', programming_modified: 'Programming modified',
+    };
+    function formatEventType(type) { return EVENT_TYPE_LABEL[type] || type; }
+
+    // ---------- Natural-language matching (spec §18) ----------
+
+    document.getElementById('nl-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const container = document.getElementById('nl-candidates');
+      const text = document.getElementById('nl-text').value;
+      showLoading(container, 'Finding matching goals…');
+      try {
+        const { candidates } = await api('/api/goals/match', { method: 'POST', body: { text } });
+        renderCandidates(container, candidates, text);
+      } catch (err) {
+        showError(container, err.message, () => document.getElementById('nl-form').requestSubmit());
+      }
+    });
+
+    function renderCandidates(container, candidates, originalText) {
+      container.innerHTML = '';
+      if (candidates.length === 0) {
+        showEmpty(container, 'No close match found. Try the "Or choose directly" section below instead.');
+        return;
+      }
+      for (const c of candidates) {
+        const card = createCard();
+        card.appendChild(el('div', { class: 'card-title', text: c.display_name }));
+        card.appendChild(el('div', { class: 'card-subtitle', text: `${formatGoalType(c.goal_type)} · matched on "${c.matched_on}"` }));
+
+        const priorityInput = el('input', { type: 'number', min: '1', value: '1', style: 'width:5rem;display:inline-block;margin-top:0.5rem' });
+        card.appendChild(el('label', { text: 'Priority' }, [priorityInput]));
+
+        const statusEl = el('div');
+        const confirmBtn = createButton({
+          label: 'Confirm this goal', onClick: async () => {
+            try {
+              await withSaving(confirmBtn, statusEl, () => api('/api/goals', {
+                method: 'POST',
+                body: {
+                  goal_type: c.goal_type,
+                  blueprint_ref: c.blueprint_ref,
+                  priority: Number(priorityInput.value),
+                  source: 'natural_language',
+                  source_text: originalText,
+                },
+              }), 'Goal added.');
+              document.getElementById('nl-text').value = '';
+              container.innerHTML = '';
+              await loadGoals();
+            } catch (err) { /* backend error (e.g. 3rd active aesthetic goal) shown inline — never worked around */ }
+          },
+        });
+        card.appendChild(confirmBtn);
+        card.appendChild(statusEl);
         container.appendChild(card);
       }
     }
+
+    // ---------- Structured creation ----------
 
     document.getElementById('goal-type').addEventListener('change', loadBlueprintGoalOptions);
 
     document.getElementById('goal-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      await api('/api/goals', {
-        method: 'POST',
-        body: {
-          goal_type: document.getElementById('goal-type').value,
-          blueprint_ref: document.getElementById('goal-ref').value,
-          priority: Number(document.getElementById('goal-priority').value),
-          notes: document.getElementById('goal-notes').value || null,
-        },
-      });
-      document.getElementById('goal-notes').value = '';
-      await loadGoals();
+      const button = e.target.querySelector('button[type="submit"]');
+      const statusEl = document.getElementById('goal-form-status');
+      try {
+        await withSaving(button, statusEl, () => api('/api/goals', {
+          method: 'POST',
+          body: {
+            goal_type: document.getElementById('goal-type').value,
+            blueprint_ref: document.getElementById('goal-ref').value,
+            priority: Number(document.getElementById('goal-priority').value),
+            notes: document.getElementById('goal-notes').value || null,
+          },
+        }), 'Goal added.');
+        document.getElementById('goal-notes').value = '';
+        await loadGoals();
+      } catch (err) {
+        // Real backend error (e.g. TooManyActiveAestheticGoalsError) shown
+        // inline via withSaving — never worked around client-side (spec §20).
+      }
     });
 
-    document.getElementById('program-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const selected = [...document.getElementById('program-goals').selectedOptions].map((o) => o.value);
-      await api('/api/programs', {
-        method: 'POST',
-        body: { name: document.getElementById('program-name').value, goal_ids: selected },
-      });
-      document.getElementById('program-name').value = '';
-      await loadPrograms();
-    });
-
-    loadBlueprintGoalOptions().then(loadGoals);
-    loadPrograms();
+    loadAllBlueprintGoals().then(loadGoals);
+    loadBlueprintGoalOptions();
   </script>
 </body>
 </html>

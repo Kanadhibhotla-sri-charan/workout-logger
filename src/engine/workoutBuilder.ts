@@ -319,6 +319,16 @@ export interface SkippedTarget {
 
 export interface WorkoutBuildResult {
   date: string;
+  weekday: Weekday;
+  /** UI Build Phase §10/§11: this exact real day's own PPL+Upper
+   * session purpose (null on a real non-gym day — rest or another
+   * recurring activity) — the same value already computed once per day
+   * inside buildWeeklyProgrammingPlan (WeeklyPlanSession.sessionPurpose),
+   * just also surfaced on this single-day slice so a caller never has to
+   * re-derive "why today looks like this" from the exercise list alone
+   * (a day can legitimately have real session_purpose with zero placed
+   * exercises, e.g. every target skipped). */
+  session_purpose: SessionPurpose | null;
   exercises: PlannedExercise[];
   estimated_minutes: number;
   skipped_targets: SkippedTarget[];
@@ -1472,6 +1482,8 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
 
   return {
     date: input.date,
+    weekday: input.weekday,
+    session_purpose: today?.sessionPurpose ?? null,
     exercises,
     estimated_minutes: today?.estimatedMinutes ?? 0,
     skipped_targets: today?.skipped ?? [],
@@ -1482,7 +1494,12 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
   };
 }
 
-function weekdayOfDate(dateIso: string): Weekday {
+// UI Build Phase §47: exported (was module-private) so the read-only
+// `/api/programming` route can label each real calendar date with its
+// real weekday using this app's own existing timezone-safe rule, rather
+// than re-implementing (or worse, re-deriving via a local Date object)
+// the identical calculation a second time.
+export function weekdayOfDate(dateIso: string): Weekday {
   // dateIso is a plain YYYY-MM-DD date string (no time component) — see
   // docs/architecture.md's timezone contract: this app never derives a
   // weekday via a Date object's own (potentially UTC-shifted) day-of-week,
@@ -1544,8 +1561,15 @@ function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSessions: 
  * real DB state (TrainingState, AestheticAssessmentsRepo,
  * BadmintonSessionDetailsRepo, real exercise-performance history)
  * differently. This is the only function in this module that touches
- * the database. */
-function assembleWeeklyPlanInput(db: Database.Database, date: string, budgetMinutes: number): WeeklyPlanInput {
+ * the database.
+ *
+ * UI Build Phase §47/§55: exported (was module-private) so the read-only
+ * `/api/programming` route can build the identical real `targets[]`
+ * (each with its own real `goal_id`/`goal_priority`/`is_specialization`)
+ * the engine itself used, to enrich a `WeeklyProgrammingPlan`'s
+ * `targetAllocations` with which real goal a target belongs to for
+ * display (spec §16) — never a second, re-derived goal/target mapping. */
+export function assembleWeeklyPlanInput(db: Database.Database, date: string, budgetMinutes: number): WeeklyPlanInput {
   const state = buildTrainingState(db, date);
   const weekday = weekdayOfDate(date);
   const assessmentsRepo = new AestheticAssessmentsRepo(db);

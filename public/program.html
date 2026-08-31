@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Program - Workout Programmer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header id="app-header" class="app-header"></header>
+
+  <main class="wide" id="main-content">
+    <h1>Weekly program</h1>
+    <div id="week-container"></div>
+
+    <section>
+      <h2>This week's goals</h2>
+      <div id="goal-summary"></div>
+    </section>
+  </main>
+
+  <div id="day-modal-root"></div>
+
+  <script src="/app.js"></script>
+  <script>
+    renderAppHeader('/program.html');
+
+    let weekData = null;
+    let lastFocusedEl = null;
+
+    async function loadWeek() {
+      const container = document.getElementById('week-container');
+      showLoading(container, 'Loading weekly program…');
+      try {
+        weekData = await api('/api/programming/week');
+        renderWeek();
+      } catch (err) {
+        showError(container, "We couldn't load your weekly program.", loadWeek);
+        showEmpty(document.getElementById('goal-summary'), 'Not enough information yet.');
+      }
+    }
+
+    function renderWeek() {
+      const container = document.getElementById('week-container');
+      container.innerHTML = '';
+      const hasAnyGymDay = weekData.days.some((d) => d.type === 'gym');
+      if (!hasAnyGymDay) {
+        const cta = el('a', { class: 'btn', href: '/profile.html', text: 'Set up training profile' });
+        showEmpty(
+          container,
+          'A weekly program cannot be generated yet. Complete your training profile and add your goals.',
+          cta
+        );
+        renderGoalSummary();
+        return;
+      }
+
+      const grid = el('div', { class: 'week-grid' });
+      for (const day of weekData.days) grid.appendChild(buildDayCard(day));
+      container.appendChild(grid);
+      renderGoalSummary();
+    }
+
+    function buildDayCard(day) {
+      const isToday = day.date === todayIso();
+      const btn = el('button', { class: 'week-day', type: 'button' });
+      if (isToday) btn.setAttribute('aria-current', 'date');
+      btn.setAttribute('aria-label', `${formatWeekday(day.weekday)} ${formatDate(day.date)} — ${day.type === 'gym' ? (day.sessionPurpose || 'gym') : formatSessionType(day.type)}`);
+
+      const head = el('div', { class: 'wd-head' });
+      head.appendChild(el('div', { class: 'wd-weekday', text: formatWeekday(day.weekday) }));
+      head.appendChild(el('div', { class: 'wd-date', text: formatDate(day.date) }));
+      head.appendChild(
+        el('div', { class: 'wd-purpose', text: day.type === 'gym' ? (day.sessionPurpose ? formatSessionType(day.sessionPurpose) : 'Gym') : formatSessionType(day.type) })
+      );
+      if (day.type === 'gym') {
+        head.appendChild(el('div', { class: 'wd-meta', text: `${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} · ${formatDuration(day.estimatedMinutes)}` }));
+      }
+      btn.appendChild(head);
+      const statusWord = day.type === 'gym' ? day.status : day.type;
+      const statusLabel = day.type === 'gym' ? formatSessionType(day.status) : formatSessionType(day.type);
+      btn.appendChild(createStatusBadge(statusWord, statusLabel));
+
+      btn.addEventListener('click', () => openDayModal(day, btn));
+      return btn;
+    }
+
+    function openDayModal(day, triggerEl) {
+      lastFocusedEl = triggerEl;
+      const root = document.getElementById('day-modal-root');
+      root.innerHTML = '';
+
+      const panel = el('div', { class: 'modal-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': `${formatWeekday(day.weekday)} details` });
+      const header = el('div', { class: 'modal-header' });
+      const titleWrap = el('div');
+      titleWrap.appendChild(el('div', { class: 'card-subtitle', text: formatDate(day.date, { weekday: 'long' }) }));
+      titleWrap.appendChild(el('h2', { text: day.type === 'gym' ? formatSessionType(day.sessionPurpose || 'gym') : formatSessionType(day.type), style: 'margin:0.1rem 0 0' }));
+      header.appendChild(titleWrap);
+      const closeBtn = el('button', { class: 'modal-close', type: 'button', 'aria-label': 'Close' }, [document.createTextNode('×')]);
+      closeBtn.addEventListener('click', closeDayModal);
+      header.appendChild(closeBtn);
+      panel.appendChild(header);
+
+      if (day.type === 'gym') {
+        panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
+
+        if (day.plannedWork.length === 0) {
+          panel.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
+        }
+        for (const item of day.plannedWork) {
+          panel.appendChild(buildExerciseDetailCard(item));
+        }
+        if (day.skipped && day.skipped.length > 0) {
+          panel.appendChild(el('h3', { text: 'Unmet / dropped work' }));
+          for (const s of day.skipped) {
+            const card = createCard([
+              el('div', { class: 'card-title', text: s.target_id }),
+              el('div', { class: 'card-subtitle', text: s.reason }),
+            ]);
+            panel.appendChild(card);
+          }
+        }
+      } else {
+        panel.appendChild(el('p', { class: 'muted', text: `No gym session planned — ${formatSessionType(day.type).toLowerCase()} day.` }));
+      }
+
+      const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) closeDayModal();
+      });
+      document.addEventListener('keydown', onModalKeydown);
+      root.appendChild(backdrop);
+      closeBtn.focus();
+    }
+
+    function onModalKeydown(e) {
+      if (e.key === 'Escape') closeDayModal();
+    }
+
+    function closeDayModal() {
+      document.getElementById('day-modal-root').innerHTML = '';
+      document.removeEventListener('keydown', onModalKeydown);
+      if (lastFocusedEl) lastFocusedEl.focus();
+    }
+
+    function buildExerciseDetailCard(item) {
+      const card = createCard();
+      card.classList.add('exercise-card');
+      const header = el('div', { class: 'exercise-header' });
+      const left = el('div');
+      left.appendChild(el('div', { class: 'exercise-name', text: item.exercise_name }));
+      left.appendChild(el('div', { class: 'exercise-targets', text: item.target_name }));
+      header.appendChild(left);
+      header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(item.sets, item.reps_min, item.reps_max) }));
+      card.appendChild(header);
+
+      const explain = el('details', { class: 'exercise-explanation' });
+      explain.appendChild(el('summary', { text: 'Why included' }));
+      explain.appendChild(el('p', { text: describeWork(item), style: 'margin:0.4rem 0' }));
+      explain.appendChild(el('p', { class: 'faint', text: item.reasoning, style: 'margin:0' }));
+      card.appendChild(explain);
+
+      return card;
+    }
+
+    const GROUP_ORDER = ['Goal 1', 'Goal 2', 'Normal development', 'Maintenance'];
+
+    function renderGoalSummary() {
+      const container = document.getElementById('goal-summary');
+      container.innerHTML = '';
+      if (!weekData.targetAllocations || weekData.targetAllocations.length === 0) {
+        showEmpty(container, 'Not enough information yet.');
+        return;
+      }
+
+      const groups = new Map();
+      for (const a of weekData.targetAllocations) {
+        const label = a.goal_label || 'Other';
+        if (!groups.has(label)) groups.set(label, []);
+        groups.get(label).push(a);
+      }
+      const orderedLabels = [...groups.keys()].sort((a, b) => {
+        const ai = GROUP_ORDER.indexOf(a);
+        const bi = GROUP_ORDER.indexOf(b);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+
+      const grid = el('div', { class: 'summary-grid' });
+      for (const label of orderedLabels) {
+        const allocations = groups.get(label);
+        const required = allocations.reduce((sum, a) => sum + a.requiredDirectSets, 0);
+        const delivered = allocations.reduce((sum, a) => sum + a.deliveredDirectSets, 0);
+        const unmet = allocations.reduce((sum, a) => sum + a.unmetDirectSets, 0);
+        const pct = required > 0 ? Math.min(100, Math.round((delivered / required) * 100)) : 0;
+
+        const card = createCard();
+        card.appendChild(el('div', { class: 'card-title', text: label }));
+        card.appendChild(el('div', { class: 'card-subtitle', text: `${delivered} of ${required} planned sets delivered this week` }));
+        const track = el('div', { class: 'summary-bar-track' });
+        track.appendChild(el('div', { class: 'summary-bar-fill', style: `width:${pct}%` }));
+        card.appendChild(track);
+        if (unmet > 0) card.appendChild(el('div', { class: 'faint', text: `${unmet} set(s) unmet this week`, style: 'margin-top:0.4rem' }));
+        grid.appendChild(card);
+      }
+      container.appendChild(grid);
+    }
+
+    loadWeek();
+  </script>
+</body>
+</html>
