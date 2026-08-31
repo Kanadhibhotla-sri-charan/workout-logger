@@ -151,6 +151,49 @@ describe('GET /api/programming/today matches its exact real slice of GET /api/pr
   });
 });
 
+// Final Surgical Fix Pass §9-12: /api/programming/today must classify a
+// day's sessionType using gym > activity > rest — never defaulting a
+// non-gym day straight to "rest" when a real recurring activity
+// (badminton or otherwise) is configured for it — and must always agree
+// with /api/programming/week's own canonical type for the same date.
+describe('GET /api/programming/today activity-type classification (gym > activity > rest)', () => {
+  const SAT = '2026-09-05'; // configured badminton day, no gym session
+  const WED = '2026-09-02'; // no training day, no recurring activity — true rest
+
+  beforeEach(() => {
+    setupProfile(); // monday/tuesday/thursday/friday gym; saturday+sunday badminton; wednesday genuinely free
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+  });
+
+  it('§9 badminton regression: a configured non-gym activity day is classified as that activity, never "rest"', async () => {
+    const today = await request(app).get(`/api/programming/today?date=${SAT}`).expect(200);
+    expect(today.body.sessionType).toBe('badminton');
+
+    const week = await request(app).get(`/api/programming/week?date=${MON}`).expect(200);
+    const saturdayFromWeek = week.body.days.find((d: any) => d.date === SAT);
+    expect(saturdayFromWeek.type).toBe('badminton');
+
+    expect(today.body.sessionType).toBe(saturdayFromWeek.type);
+  });
+
+  it('§10 rest regression: a genuine rest day (no gym session, no recurring activity) is classified as "rest"', async () => {
+    const today = await request(app).get(`/api/programming/today?date=${WED}`).expect(200);
+    expect(today.body.sessionType).toBe('rest');
+  });
+
+  it('§11 gym regression: a real gym day is classified as "gym", even though Saturday/Sunday elsewhere in the week have a recurring activity', async () => {
+    const today = await request(app).get(`/api/programming/today?date=${MON}`).expect(200);
+    expect(today.body.sessionType).toBe('gym');
+  });
+
+  it('§12 today/week agreement: canonical day type matches for the same date, exercised for the badminton scenario', async () => {
+    const today = await request(app).get(`/api/programming/today?date=${SAT}`).expect(200);
+    const week = await request(app).get(`/api/programming/week?date=${MON}`).expect(200);
+    const saturdayFromWeek = week.body.days.find((d: any) => d.date === SAT);
+    expect(today.body.sessionType).toEqual(saturdayFromWeek.type);
+  });
+});
+
 describe('GET /api/programming/substitutes', () => {
   beforeEach(() => setupProfile());
 

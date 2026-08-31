@@ -190,17 +190,23 @@
       for (const label of orderedLabels) {
         const allocations = groups.get(label);
         const required = allocations.reduce((sum, a) => sum + a.requiredDirectSets, 0);
-        const delivered = allocations.reduce((sum, a) => sum + a.deliveredDirectSets, 0);
+        // Final Surgical Fix Pass §13-16: `deliveredDirectSets` is a
+        // PROGRAMMING concept (what survived resource/time fitting into
+        // the final program), never a claim about actual workout
+        // completion — that distinction lives only in the Logger's own
+        // real Planned-vs-Actual display. The backend field name is
+        // unchanged (spec §16); only this presentation-time local is
+        // named/labeled "Programmed".
+        const programmed = allocations.reduce((sum, a) => sum + a.deliveredDirectSets, 0);
         const unmet = allocations.reduce((sum, a) => sum + a.unmetDirectSets, 0);
-        const pct = required > 0 ? Math.min(100, Math.round((delivered / required) * 100)) : 0;
+        const pct = required > 0 ? Math.min(100, Math.round((programmed / required) * 100)) : 0;
 
         const card = createCard();
         card.appendChild(el('div', { class: 'card-title', text: label }));
-        card.appendChild(el('div', { class: 'card-subtitle', text: `${delivered} of ${required} planned sets delivered this week` }));
+        card.appendChild(el('div', { class: 'card-subtitle', text: `Required: ${required} · Programmed: ${programmed}${unmet > 0 ? ` · Unmet: ${unmet}` : ''}` }));
         const track = el('div', { class: 'summary-bar-track' });
         track.appendChild(el('div', { class: 'summary-bar-fill', style: `width:${pct}%` }));
         card.appendChild(track);
-        if (unmet > 0) card.appendChild(el('div', { class: 'faint', text: `${unmet} set(s) unmet this week`, style: 'margin-top:0.4rem' }));
         grid.appendChild(card);
       }
       container.appendChild(grid);

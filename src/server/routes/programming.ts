@@ -193,6 +193,19 @@ programmingRouter.get('/today', (req, res) => {
   const status = realSessionStatus(database, date);
   const loggedSessions = new WorkoutSessionsRepo(database).listSessionsByDate(date);
 
+  // Final Surgical Fix Pass §2/§3: gym > activity > rest, using the exact
+  // same canonical sources /week already uses — `training_days` decides
+  // whether this weekday is a real gym day at all (identical to the
+  // condition that puts a session into buildWeeklyProgrammingPlan's own
+  // `sessions[]`, so this can never disagree with /week), and
+  // `other_activity_schedule` (via the shared `nonGymDayType` helper)
+  // supplies the real configured non-gym activity otherwise. Never a
+  // second, Today-only activity configuration, and never a hard-coded
+  // "Saturday = badminton".
+  const profileForType = new TrainingProfileRepo(database).get(new UsersRepo(database).getOrCreateDefault().id);
+  const isGymDay = profileForType?.training_days.includes(result.weekday) ?? false;
+  const sessionType = isGymDay ? 'gym' : nonGymDayType(result.weekday, profileForType?.other_activity_schedule ?? []);
+
   // Real active_goals only carries goal_id/priority/trend (the engine
   // has no reason to track goal_type at that layer) — resolved here
   // straight from the real Goal row so a caller (e.g. "Start workout")
@@ -215,7 +228,7 @@ programmingRouter.get('/today', (req, res) => {
     date: result.date,
     weekday: result.weekday,
     sessionPurpose: result.session_purpose,
-    sessionType: result.exercises.length > 0 || result.session_purpose ? 'gym' : 'rest',
+    sessionType,
     status: loggedSessions.length > 0 ? status : 'planned',
     exercises: result.exercises.map((e) => enrichPlannedWork(e, targetGoalMap, labels)),
     estimatedMinutes: result.estimated_minutes,

@@ -170,9 +170,14 @@
         if (allocations.length === 0) {
           card.appendChild(el('p', { class: 'muted', text: 'Not enough history yet.' }));
         } else {
+          // Final Surgical Fix Pass §13-16: same programming concept as
+          // the Program page — required/programmed/unmet, never a claim
+          // about actual physical completion (that's the Logger's own
+          // Planned-vs-Actual display).
           const required = allocations.reduce((sum, a) => sum + a.requiredDirectSets, 0);
-          const delivered = allocations.reduce((sum, a) => sum + a.deliveredDirectSets, 0);
-          card.appendChild(el('p', { text: `Programming this week: ${delivered} of ${required} planned sets delivered.` }));
+          const programmed = allocations.reduce((sum, a) => sum + a.deliveredDirectSets, 0);
+          const unmet = allocations.reduce((sum, a) => sum + a.unmetDirectSets, 0);
+          card.appendChild(el('p', { text: `Required: ${required} · Programmed: ${programmed}${unmet > 0 ? ` · Unmet: ${unmet}` : ''}` }));
         }
         container.appendChild(card);
       }
