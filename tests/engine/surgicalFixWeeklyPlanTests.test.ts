@@ -78,7 +78,7 @@ describe('Surgical Fix Pass §16: the real weekly plan itself (assembleWeeklyPro
     const midPecAllocation = plan.targetAllocations.find((a) => a.target_id === 'mid-pec');
     expect(midPecAllocation).toBeDefined();
     expect(midPecAllocation!.layer).toBe('specialization');
-    expect(midPecAllocation!.plannedDirectSets).toBeGreaterThan(0);
+    expect(midPecAllocation!.deliveredDirectSets).toBeGreaterThan(0);
     // mid-pec is push+upper compatible — its real allocated dates should
     // span BOTH Monday and Friday (this week's push and upper days),
     // never a single-day figure.
@@ -168,7 +168,7 @@ describe('Surgical Fix Pass §7: real cross-target planned-exposure propagation 
     // just because a higher-priority target's real exposure existed).
     const tricepsAlone = buildWeeklyProgrammingPlan(weeklyInput({ targets: [tricepsTarget] }));
     const tricepsAloneAllocation = tricepsAlone.targetAllocations.find((a) => a.target_id === 'triceps')!;
-    expect(tricepsAllocation.plannedDirectSets).toBeLessThanOrEqual(tricepsAloneAllocation.plannedDirectSets);
+    expect(tricepsAllocation.deliveredDirectSets).toBeLessThanOrEqual(tricepsAloneAllocation.deliveredDirectSets);
   });
 
   it('a normal_development target already adequately exposed via real planned compound work this week gets no redundant direct work — never fabricating "direct sets = 0 means untrained"', () => {
@@ -202,7 +202,7 @@ describe('Surgical Fix Pass §7: real cross-target planned-exposure propagation 
     // mid-pec's compound work) is genuinely reflected, never zero
     // merely because front-delt itself has no direct sets of its own.
     expect(frontDeltAllocation.plannedSecondaryExposure).toBeGreaterThanOrEqual(0);
-    expect(frontDeltAllocation.layer === 'maintenance' || frontDeltAllocation.plannedDirectSets >= 0).toBe(true);
+    expect(frontDeltAllocation.layer === 'maintenance' || frontDeltAllocation.deliveredDirectSets >= 0).toBe(true);
   });
 });
 

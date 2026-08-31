@@ -33,7 +33,7 @@
 
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
-import { getPackageForTarget, lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
+import { lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
@@ -389,6 +389,18 @@ export interface PlannedWorkItem {
   role: string;
   classification: TargetClassification;
   sets: number;
+  /** Surgical Fix Pass §6/§9: this exercise's own real primary/
+   * secondary exposure contribution TO ITS OWN TARGET (not to other
+   * targets — see `plannedExposureByTarget` inside
+   * buildWeeklyProgrammingPlan for that propagation), so
+   * `rebuildTargetAllocationsFromFinalSessions` can sum a target's real
+   * exposure straight from the FINAL, post-fitting `plannedWork`
+   * entries that actually survived, never from a pre-fitting
+   * construction-time total. Exactly one of the two is non-zero for any
+   * given item (an exercise is primary or secondary for its own
+   * target, never both). */
+  primary_exposure: number;
+  secondary_exposure: number;
   reps_min: number;
   reps_max: number;
   rir_min: number;
@@ -422,14 +434,40 @@ export interface WeeklyPlanSession {
   resourceAllocation: readonly ResourceAllocationEntry[];
 }
 
-/** §4's own `targetAllocations[]` entry — what the weekly planner
+/**
+ * §4's own `targetAllocations[]` entry — what the weekly planner
  * actually decided for one target across the WHOLE week, independent
- * of any single day's slice. */
+ * of any single day's slice. Surgical Fix Pass §4/§6: built ONLY by
+ * `rebuildTargetAllocationsFromFinalSessions`, from `sessions[]
+ * .plannedWork` AFTER all resource/time fitting has already run — never
+ * from pre-fitting construction totals, so this can never disagree with
+ * the sessions a caller would actually see. `requiredDirectSets`,
+ * `deliveredDirectSets`, and `unmetDirectSets` are three genuinely
+ * different numbers, named so a reader can never mistake one for
+ * another (spec §6: "do not call both values plannedDirectSets").
+ */
 export interface WeeklyPlanTargetAllocation {
   target_type: TargetType;
   target_id: BlueprintId;
   layer: TargetClassification;
-  plannedDirectSets: number;
+  /** What programming determined was desirable for this target this
+   * week (volumeEngine's own `desiredWeekly`, retained methodology,
+   * unchanged by this pass) — captured once, independent of whatever
+   * later survives fitting. */
+  requiredDirectSets: number;
+  /** What actually survived into the final, post-fitting
+   * `sessions[].plannedWork` — the authoritative final programmed
+   * amount. Always <= requiredDirectSets. */
+  deliveredDirectSets: number;
+  /** requiredDirectSets - deliveredDirectSets. Zero when everything
+   * required was actually delivered. Never negative — a target can
+   * never deliver more than was actually required, since construction
+   * never starts from a higher number than volumeEngine decided. */
+  unmetDirectSets: number;
+  /** Summed directly from the final, post-fitting `plannedWork` items'
+   * own `primary_exposure`/`secondary_exposure` fields — real exposure
+   * this target actually ends up with this week, not a construction-
+   * time estimate that fitting might have since invalidated. */
   plannedPrimaryExposure: number;
   plannedSecondaryExposure: number;
   allocatedSessionDates: readonly string[];
@@ -606,7 +644,19 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   // static snapshot from before this plan started running.
   const plannedExposureByTarget = new Map<string, number>();
   const goalTrend = new Map<string, AestheticProgressTrend>();
-  const targetAllocations: WeeklyPlanTargetAllocation[] = [];
+  // Surgical Fix Pass §4/§5: targetAllocations is NOT accumulated here
+  // during construction — construction can request more than final
+  // fitting actually delivers, and exposing that raw total as though it
+  // were the final result is exactly the contradiction §3/§4 forbid.
+  // `requiredDirectSetsByTarget` and `classificationByTarget` capture
+  // the two pieces of real, construction-time-only information
+  // (what programming decided was desirable, and this target's live
+  // classification) that genuinely can't be recovered from the final
+  // sessions alone; the real, authoritative targetAllocations[] is
+  // rebuilt from `sessions[].plannedWork` AFTER fitting — see
+  // rebuildTargetAllocationsFromFinalSessions below.
+  const requiredDirectSetsByTarget = new Map<string, number>();
+  const classificationByTarget = new Map<string, TargetClassification>();
 
   const orderedGymDays = WEEKDAYS.filter((d) => input.available_training_days.includes(d));
   const { purposes: sessionPurposes, reasoning: purposeReasoning } = assignSessionPurposes(orderedGymDays, input.recurring_badminton_days ?? []);
@@ -642,8 +692,12 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   const rankedTargets = input.targets.map((t) => rankTarget(t, starting_point_sets[0], recoveryByKey.get(targetKey(t))!)).sort(compareRankings);
   const targetRankIndex = new Map<string, number>(rankedTargets.map((r, i) => [targetKey(r.target), i]));
   // Real per-target exercise count never gets anywhere near this many
-  // (Blueprint's own richest development package tops out at 3 — see
-  // developmentPackages.ts) — generous headroom so a target's own
+  // (bounded by the target's own real candidate pool — Blueprint
+  // package members plus any approved outside-Blueprint exercises,
+  // realistically well under 10; Surgical Fix Pass §12/§13 removed the
+  // package-length CEILING on exercise count, but this headroom number
+  // is just a safe upper bound for rank-band spacing, never a
+  // programming decision) — generous headroom so a target's own
   // additional-exercise ordering (first exercise = most essential) can
   // never spill into the next target's rank band.
   const EXERCISE_ORDER_SPAN = 100;
@@ -663,15 +717,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     const liveNeedDeficit = target.is_specialization ? 0 : Math.max(0, starting_point_sets[0] - effectiveExposureUnits);
     const classification: TargetClassification = target.is_specialization ? 'specialization' : liveNeedDeficit > 0 ? 'normal_development' : 'maintenance';
 
-    const emptyAllocation = (): WeeklyPlanTargetAllocation => ({
-      target_type: target.target_type,
-      target_id: target.target_id,
-      layer: classification,
-      plannedDirectSets: 0,
-      plannedPrimaryExposure: 0,
-      plannedSecondaryExposure: 0,
-      allocatedSessionDates: [],
-    });
+    classificationByTarget.set(tKey, classification);
 
     // Remediation §16: the machine-readable explanation object, built
     // incrementally as this target's own real decisions actually run —
@@ -714,7 +760,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         reason: `recovery: ${recovery.reasoning}`,
         decision: makeSkipDecision(),
       });
-      targetAllocations.push(emptyAllocation());
       continue;
     }
 
@@ -771,7 +816,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         reason: `Already adequately exposed via compound work (${effectiveExposureUnits.toFixed(2)} real+planned exposure_units this week, at/above Blueprint's own ${starting_point_sets[0]}-set starting threshold) — no redundant direct work added merely because direct sets = 0 (spec §7/§8).`,
         decision: makeSkipDecision({ volume_decision: volumeDecision }),
       });
-      targetAllocations.push(emptyAllocation());
       continue;
     }
 
@@ -783,9 +827,13 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         reason: 'No weekly volume recommended yet for this target.',
         decision: makeSkipDecision({ volume_decision: volumeDecision }),
       });
-      targetAllocations.push(emptyAllocation());
       continue;
     }
+
+    // Surgical Fix Pass §6: the real requirement — captured once, here,
+    // independent of whatever construction/fitting later actually
+    // manages to deliver. Never touched again for this target.
+    requiredDirectSetsByTarget.set(tKey, desiredWeekly);
 
     // Strict Bug-Fix §4/§7/§22: the weekly plan must be durable within
     // this generation run — "when generating Friday for the same week,
@@ -845,7 +893,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         reason: `No gym day this week is compatible with this target: ${weeklyAllocation.reasoning}`,
         decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
       });
-      targetAllocations.push(emptyAllocation());
       continue;
     }
 
@@ -874,7 +921,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         reason: 'No equipment-feasible Blueprint or approved outside-Blueprint exercise trains this target.',
         decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
       });
-      targetAllocations.push(emptyAllocation());
       continue;
     }
 
@@ -898,8 +944,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription (or an approved outside-Blueprint one) for this target — exposing this gap rather than inventing one (spec §25).',
           decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
         });
-        targetAllocations.push(emptyAllocation());
-        continue;
+          continue;
       }
       candidateExerciseIds = withPrescription;
     } else {
@@ -914,11 +959,15 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       if (withPrescription.length > 0) candidateExerciseIds = withPrescription;
     }
 
-    // Strict Bug-Fix §11-15 (retained) / Surgical Fix Pass §8-13: 0/1/
-    // multiple exercises per target, sized from Blueprint's own
-    // development-package `sets` figures, never an app-invented split.
-    const packageForTarget = target.target_type === 'physique_target' ? getPackageForTarget(target.target_id) : null;
-    const maxExercisesForTarget = Math.max(1, packageForTarget?.exercises.length ?? 1);
+    // Strict Bug-Fix §11-15 (retained) / Surgical Fix Pass §8-16: 0/1/
+    // multiple exercises per target, each one's own sets sized from
+    // Blueprint's own development-package `sets` figure when it has
+    // one — never an app-invented split. Surgical Fix Pass §12/§13:
+    // Blueprint's package EXERCISE COUNT is deliberately not read here
+    // at all anymore — how many exercises a target can use is governed
+    // purely by real remaining need and real candidate availability
+    // (see the day-construction loop below), never by how many
+    // exercises happen to be listed in a package.
 
     // Surgical Fix Pass §2/§6: this target's real weekly requirement is
     // distributed session-by-session across its real eligible days, in
@@ -928,10 +977,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // front (before any day is planned) so a later day can never
     // silently backfill it.
     let remainingWeeklySets = badmintonLowerBodyReduce ? Math.max(1, desiredWeekly - 1) : desiredWeekly;
-    const allocatedDates: string[] = [];
-    let plannedPrimaryExposureThisTarget = 0;
-    let plannedSecondaryExposureThisTarget = 0;
-    let plannedDirectSetsThisTarget = 0;
     let globalExerciseIndex = 0;
 
     /** One real Gate-1-6 selection attempt, restricted to `pool`, plus
@@ -996,7 +1041,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       prescription: { reps: string; rir: string },
       progressionDecision: ProgressionResult | null,
       previousPerformance: PlannedExercise['previous_performance'],
-      sets: number
+      sets: number,
+      requested: number = sets
     ) => {
       const reps = parseRange(prescription.reps);
       const rir = parseRange(prescription.rir);
@@ -1009,8 +1055,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       };
 
       plannedExerciseIdsByDate.set(date, [...(plannedExerciseIdsByDate.get(date) ?? []), selection.exercise_id]);
-      if (!allocatedDates.includes(date)) allocatedDates.push(date);
-      plannedDirectSetsThisTarget += sets;
 
       // §7: this exact real exposure (calculateExerciseExposure — the
       // same engine every logged-history number in this app already
@@ -1022,6 +1066,14 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // human-approved role still tells us its real contribution to
       // THIS target (never invented), but it has no Blueprint
       // secondary_targets data to propagate to any OTHER target.
+      // `ownPrimaryExposure`/`ownSecondaryExposure` are this exercise's
+      // own real contribution TO ITS OWN TARGET specifically — carried
+      // on the PlannedWorkItem itself (Surgical Fix Pass §4/§6) so
+      // rebuildTargetAllocationsFromFinalSessions can sum a target's
+      // real exposure straight from whichever items actually survive
+      // fitting, never from this construction-time running total.
+      let ownPrimaryExposure = 0;
+      let ownSecondaryExposure = 0;
       const syntheticSets = Array.from({ length: sets }, () => ({ completed: true as const }));
       const isKnownBlueprintExercise = BlueprintAdapter.getExercise(selection.exercise_id) !== undefined;
       if (isKnownBlueprintExercise) {
@@ -1030,8 +1082,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           const ck = targetKey(c);
           plannedExposureByTarget.set(ck, (plannedExposureByTarget.get(ck) ?? 0) + c.exposure_units);
           if (ck === tKey) {
-            if (c.role === 'primary') plannedPrimaryExposureThisTarget += c.exposure_units;
-            else plannedSecondaryExposureThisTarget += c.exposure_units;
+            if (c.role === 'primary') ownPrimaryExposure += c.exposure_units;
+            else ownSecondaryExposure += c.exposure_units;
           }
         }
       } else {
@@ -1039,8 +1091,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         if (outsideRole !== 'none') {
           const exposureUnits = sets * EXPOSURE_COEFFICIENTS[outsideRole];
           plannedExposureByTarget.set(tKey, (plannedExposureByTarget.get(tKey) ?? 0) + exposureUnits);
-          if (outsideRole === 'primary') plannedPrimaryExposureThisTarget += exposureUnits;
-          else plannedSecondaryExposureThisTarget += exposureUnits;
+          if (outsideRole === 'primary') ownPrimaryExposure += exposureUnits;
+          else ownSecondaryExposure += exposureUnits;
         }
       }
 
@@ -1051,6 +1103,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         role: target.tier,
         classification,
         sets,
+        primary_exposure: ownPrimaryExposure,
+        secondary_exposure: ownSecondaryExposure,
         reps_min: reps.min,
         reps_max: reps.max,
         rir_min: rir.min,
@@ -1058,8 +1112,12 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         previous_performance: previousPerformance,
         progression_decision: progressionDecision,
         reasoning:
-          `${selection.reasoning} ${sets} sets on ${date}` +
-          (maxExercisesForTarget > 1 || eligibleDaysThisWeek.length > 1 ? ` (exercise ${exerciseIndex + 1} of this target's own real weekly plan)` : '') +
+          `${selection.reasoning} ${sets} sets on ${date} (exercise ${exerciseIndex + 1} of this target's own real weekly plan)` +
+          // Surgical Fix Pass §9: explicit requested-vs-delivered
+          // accounting whenever they genuinely differ — never silently
+          // presenting a reduced delivery as though it were the full
+          // request.
+          (requested !== sets ? ` — requested ${requested}, delivered ${sets} (reason: progression/recovery constraint)` : '') +
           ` (${desiredWeekly} desired weekly, ${eligibleDaysThisWeek.length} session(s)/week: ${eligibleDaysThisWeek.join(', ')} — session-by-session, not divided evenly, per Surgical Fix Pass §2/§6). ` +
           `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
           (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.') +
@@ -1115,7 +1173,15 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         // silently dropped just because the week ran out of days.
         let pool = [...dayCandidatePool];
         const placedTodayIds: BlueprintId[] = [];
-        while (remainingWeeklySets > 0 && pool.length > 0 && placedTodayIds.length < maxExercisesForTarget) {
+        // Surgical Fix Pass §12-16: Blueprint's own package exercise
+        // count is NOT the ceiling here — the loop continues purely on
+        // real remaining need and real candidate availability (stop
+        // conditions: required work satisfied, no suitable candidate
+        // remains, or session resources exhausted — spec §14 steps
+        // 9/10/13). `pool` already shrinks by one real candidate per
+        // iteration, so this is bounded by the real number of feasible/
+        // prescribed candidates for this target, never an invented cap.
+        while (remainingWeeklySets > 0 && pool.length > 0) {
           const attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
           if (!attempt.prescription) {
             if (globalExerciseIndex === 0 && placedTodayIds.length === 0) {
@@ -1131,19 +1197,19 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           }
           pool = pool.filter((id) => id !== attempt.selection.exercise_id);
           placedTodayIds.push(attempt.selection.exercise_id);
-          const isLastUsableExercise = pool.length === 0 || placedTodayIds.length >= maxExercisesForTarget;
-          // Charge the FULL natural amount against the week's real
-          // remaining need (so no later day/exercise silently backfills
-          // a progression-driven trim), but DELIVER one fewer set on
-          // this specific (declining) exercise — matching remediation
-          // §6's "reduce" outcome being about THIS exercise's own next
-          // prescription, visible on whichever real day it's actually
-          // placed, never masked by Blueprint's own per-exercise cap.
-          const naturalSets = attempt.prescription.sets === null || isLastUsableExercise ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
+          const isLastUsableExercise = pool.length === 0;
+          // Surgical Fix Pass §7-10: charge the week's remaining need by
+          // the DELIVERED amount, never the pre-reduction natural cap —
+          // an undelivered set was never actually placed, so it must
+          // stay available for a later session to genuinely deliver
+          // (never silently written off). `requested` is kept only for
+          // this exercise's own reasoning text (§9's "Requested: 3,
+          // Delivered: 2, Reason: ...").
+          const requested = attempt.prescription.sets === null || isLastUsableExercise ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
           const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
-          const deliveredSets = reduceThisExercise ? Math.max(1, naturalSets - 1) : naturalSets;
-          remainingWeeklySets -= naturalSets;
-          finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, deliveredSets);
+          const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
+          remainingWeeklySets -= delivered;
+          finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, delivered, requested);
           if (attempt.prescription.sets === null) break;
         }
       } else {
@@ -1154,29 +1220,20 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         // total evenly across sessions.
         const attempt = attemptSelection(dayCandidatePool, [], plannedTodayIds);
         if (attempt.prescription) {
-          // Same charge-vs-deliver split as the last-day branch above:
-          // the full natural amount is charged against the week's real
-          // remaining need (no later day backfills the trim), but this
-          // specific exercise's own visible/estimated sets reflect the
-          // real -1 reduction directly.
-          const naturalSets = attempt.prescription.sets === null ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
+          // Same requested-vs-delivered accounting as the last-day
+          // branch above: only the delivered amount is charged against
+          // the week's real remaining need (§7-10) — an undelivered set
+          // stays available for a later session, never silently
+          // consumed.
+          const requested = attempt.prescription.sets === null ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
           const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
-          const deliveredSets = reduceThisExercise ? Math.max(1, naturalSets - 1) : naturalSets;
-          remainingWeeklySets -= naturalSets;
-          finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, deliveredSets);
+          const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
+          remainingWeeklySets -= delivered;
+          finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, delivered, requested);
         }
       }
     }
 
-    targetAllocations.push({
-      target_type: target.target_type,
-      target_id: target.target_id,
-      layer: classification,
-      plannedDirectSets: plannedDirectSetsThisTarget,
-      plannedPrimaryExposure: plannedPrimaryExposureThisTarget,
-      plannedSecondaryExposure: plannedSecondaryExposureThisTarget,
-      allocatedSessionDates: allocatedDates,
-    });
   }
 
   // Remediation §17 / Surgical Fix Pass §11: goals literally compete for
@@ -1284,9 +1341,84 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   return {
     weekStart: input.weekStart,
     sessions,
-    targetAllocations,
+    targetAllocations: rebuildTargetAllocationsFromFinalSessions(sessions, requiredDirectSetsByTarget, classificationByTarget),
     decisions: log,
   };
+}
+
+/**
+ * Surgical Fix Pass §3-6: the ONLY place `WeeklyPlanTargetAllocation[]`
+ * is ever produced — deterministically, from the FINAL, already-fitted
+ * `sessions[].plannedWork` (never from a pre-fitting construction-time
+ * total), so it can never disagree with what a caller would actually
+ * see in the real sessions. `requiredDirectSetsByTarget` supplies the
+ * one real number the final sessions alone can't recover (what
+ * programming decided was desirable before fitting ever ran);
+ * everything else is summed straight from the survived work itself.
+ */
+function rebuildTargetAllocationsFromFinalSessions(
+  sessions: readonly WeeklyPlanSession[],
+  requiredDirectSetsByTarget: ReadonlyMap<string, number>,
+  classificationByTarget: ReadonlyMap<string, TargetClassification>
+): WeeklyPlanTargetAllocation[] {
+  interface Accumulator {
+    target_type: TargetType;
+    target_id: BlueprintId;
+    deliveredDirectSets: number;
+    plannedPrimaryExposure: number;
+    plannedSecondaryExposure: number;
+    allocatedSessionDates: string[];
+  }
+  const byTarget = new Map<string, Accumulator>();
+
+  for (const session of sessions) {
+    for (const work of session.plannedWork) {
+      const key = targetKey(work);
+      let acc = byTarget.get(key);
+      if (!acc) {
+        acc = { target_type: work.target_type, target_id: work.target_id, deliveredDirectSets: 0, plannedPrimaryExposure: 0, plannedSecondaryExposure: 0, allocatedSessionDates: [] };
+        byTarget.set(key, acc);
+      }
+      acc.deliveredDirectSets += work.sets;
+      acc.plannedPrimaryExposure += work.primary_exposure;
+      acc.plannedSecondaryExposure += work.secondary_exposure;
+      if (!acc.allocatedSessionDates.includes(session.date)) acc.allocatedSessionDates.push(session.date);
+    }
+  }
+
+  // Every target that ever had a real requirement this week gets a real
+  // entry here too, even one that ended up with zero delivered sets
+  // (dropped entirely by fitting, or never had a feasible/prescribed
+  // candidate) — §6's "record any unmet work explicitly" applies
+  // whether or not any of it survived into a real session.
+  for (const key of requiredDirectSetsByTarget.keys()) {
+    if (!byTarget.has(key)) {
+      const [target_type, target_id] = key.split(':') as [TargetType, BlueprintId];
+      byTarget.set(key, { target_type, target_id, deliveredDirectSets: 0, plannedPrimaryExposure: 0, plannedSecondaryExposure: 0, allocatedSessionDates: [] });
+    }
+  }
+
+  const allocations: WeeklyPlanTargetAllocation[] = [...byTarget.entries()].map(([key, acc]) => {
+    const requiredDirectSets = requiredDirectSetsByTarget.get(key) ?? 0;
+    return {
+      target_type: acc.target_type,
+      target_id: acc.target_id,
+      layer: classificationByTarget.get(key) ?? 'maintenance',
+      requiredDirectSets,
+      deliveredDirectSets: acc.deliveredDirectSets,
+      unmetDirectSets: Math.max(0, requiredDirectSets - acc.deliveredDirectSets),
+      plannedPrimaryExposure: acc.plannedPrimaryExposure,
+      plannedSecondaryExposure: acc.plannedSecondaryExposure,
+      allocatedSessionDates: acc.allocatedSessionDates,
+    };
+  });
+
+  // Deterministic order — target_id, the same stable fallback every
+  // other comparator in this module already uses once real criteria
+  // are exhausted (there is no real "priority" left to sort by once
+  // fitting has already happened; this is purely presentational).
+  allocations.sort((a, b) => a.target_id.localeCompare(b.target_id));
+  return allocations;
 }
 
 /**
