@@ -24,6 +24,7 @@ import { exercisesTrainingTarget } from '../../engine/exerciseSelector.js';
 import { filterEquipmentFeasible } from '../../engine/constraintEngine.js';
 import { addDays } from '../../engine/dateMath.js';
 import { WEEKDAYS, type BlueprintId, type Weekday } from '../../contracts/types.js';
+import { deriveDailyActivity } from '../../lib/dailyActivity.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import { GoalsRepo } from '../../repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../repositories/trainingProfileRepo.js';
@@ -140,12 +141,21 @@ programmingRouter.get('/week', (req, res) => {
   const sessionsByDate = new Map(plan.sessions.map((s) => [s.date, s]));
   const days = WEEKDAYS.map((weekday, i) => {
     const dayDate = addDays(plan.weekStart, i);
+    // Blueprint Picker/Daily Activity spec §6-§8: the real four-state
+    // activity (gym/badminton/both/unselected), additive alongside the
+    // existing `type` field (gym/badminton/rest/other) that other code
+    // already depends on — `type` never changes meaning here. This is
+    // what lets the UI show "Both" for a day that already has both a
+    // real gym session (`type: 'gym'`) AND a recurring badminton entry,
+    // which `type` alone cannot represent.
+    const activity = deriveDailyActivity(weekday, profile?.training_days ?? [], otherActivitySchedule);
     const gymSession = sessionsByDate.get(dayDate);
     if (gymSession) {
       return {
         date: dayDate,
         weekday,
         type: 'gym' as const,
+        activity,
         status: realSessionStatus(database, dayDate),
         sessionPurpose: gymSession.sessionPurpose,
         availableMinutes: gymSession.availableMinutes,
@@ -159,6 +169,7 @@ programmingRouter.get('/week', (req, res) => {
       date: dayDate,
       weekday,
       type: nonGymDayType(weekday, otherActivitySchedule),
+      activity,
       status: 'rest' as const,
       sessionPurpose: null,
       availableMinutes: 0,
@@ -205,6 +216,12 @@ programmingRouter.get('/today', (req, res) => {
   const profileForType = new TrainingProfileRepo(database).get(new UsersRepo(database).getOrCreateDefault().id);
   const isGymDay = profileForType?.training_days.includes(result.weekday) ?? false;
   const sessionType = isGymDay ? 'gym' : nonGymDayType(result.weekday, profileForType?.other_activity_schedule ?? []);
+  // Additive alongside sessionType, for the same reason as /week's
+  // `activity` field — lets a "Both" day surface its badminton component
+  // even though sessionType/exercises are gym-only (spec §8: a Both day's
+  // gym programming already accounts for badminton internally; this only
+  // makes that visible).
+  const activity = deriveDailyActivity(result.weekday, profileForType?.training_days ?? [], profileForType?.other_activity_schedule ?? []);
 
   // Real active_goals only carries goal_id/priority/trend (the engine
   // has no reason to track goal_type at that layer) — resolved here
@@ -229,6 +246,7 @@ programmingRouter.get('/today', (req, res) => {
     weekday: result.weekday,
     sessionPurpose: result.session_purpose,
     sessionType,
+    activity,
     status: loggedSessions.length > 0 ? status : 'planned',
     exercises: result.exercises.map((e) => enrichPlannedWork(e, targetGoalMap, labels)),
     estimatedMinutes: result.estimated_minutes,

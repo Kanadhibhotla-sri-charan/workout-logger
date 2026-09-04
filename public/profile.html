@@ -16,10 +16,9 @@
 
     <form id="profile-form">
       <section>
-        <h2>Training schedule</h2>
-        <label>Training days
-          <select id="training-days" multiple size="7"></select>
-        </label>
+        <h2>Weekly training schedule</h2>
+        <p class="muted">Each day is Gym, Badminton, Both, or Rest — an unselected day is rest. Change any day any time.</p>
+        <div id="daily-activity-list" class="day-list"></div>
         <label>Preferred split (free text, e.g. "push-pull-legs")
           <input id="preferred-split" type="text" />
         </label>
@@ -50,13 +49,6 @@
       </section>
 
       <section>
-        <h2>Recurring activities</h2>
-        <p class="muted">Any recurring commitment that competes for training/recovery capacity — not only badminton.</p>
-        <div id="activity-list" class="day-list"></div>
-        <div class="btn-row"><button type="button" id="add-activity" class="btn-secondary">Add recurring activity</button></div>
-      </section>
-
-      <section>
         <h2>Timezone</h2>
         <label>IANA timezone name (e.g. "Asia/Kolkata")
           <input id="timezone" type="text" required />
@@ -75,35 +67,55 @@
     renderAppHeader('/profile.html');
 
     const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    let activities = [];
+    const DAILY_ACTIVITY_OPTIONS = [
+      { value: 'gym', text: 'Gym' },
+      { value: 'badminton', text: 'Badminton' },
+      { value: 'both', text: 'Both' },
+      { value: 'unselected', text: 'Rest' },
+    ];
+
+    // Blueprint Picker/Daily Activity spec §5/§6: one Gym/Badminton/Both/
+    // Rest state per weekday, replacing the old separate "Training days"
+    // multi-select + free-text "Recurring activities" list. Derived the
+    // same way the backend derives it (src/lib/dailyActivity.ts) — gym =
+    // training_days membership, badminton = a 'badminton'-typed
+    // other_activity_schedule entry for that day, both = both, otherwise
+    // rest — kept client-side since the full profile (which already has
+    // both underlying arrays) is already loaded here.
+    let dailyActivities = WEEKDAYS.map((weekday) => ({ weekday, activity: 'unselected' }));
+    // Any non-badminton recurring activity (e.g. a custom "hiking" entry)
+    // is not part of this Gym/Badminton/Both/Rest model and has no editor
+    // here, but must never be silently dropped on Save (spec §5: "do not
+    // delete old data") — carried through untouched.
+    let preservedNonBadmintonActivities = [];
+
+    function deriveDailyActivities(trainingDays, otherActivitySchedule) {
+      return WEEKDAYS.map((weekday) => {
+        const gym = trainingDays.includes(weekday);
+        const badminton = otherActivitySchedule.some((a) => a.day === weekday && a.activity_type === 'badminton');
+        const activity = gym && badminton ? 'both' : gym ? 'gym' : badminton ? 'badminton' : 'unselected';
+        return { weekday, activity };
+      });
+    }
 
     function formatEquipmentLabel(id) {
       return id.replace(/(^|\s)\w/g, (m) => m.toUpperCase());
     }
 
-    function renderActivities() {
-      const container = document.getElementById('activity-list');
+    function renderDailyActivities() {
+      const container = document.getElementById('daily-activity-list');
       container.innerHTML = '';
-      activities.forEach((a, i) => {
-        const row = el('div', { class: 'day-list-row' });
-        const day = el('select', { 'aria-label': 'Day' });
-        for (const d of WEEKDAYS) day.appendChild(el('option', { value: d, text: formatWeekday(d) }));
-        day.value = a.day;
-        day.addEventListener('change', () => (a.day = day.value));
-        const type = el('input', { type: 'text', value: a.activity_type, placeholder: 'gym / badminton / rest / other', 'aria-label': 'Activity type' });
-        type.addEventListener('input', () => (a.activity_type = type.value));
-        const notes = el('input', { type: 'text', value: a.notes || '', placeholder: 'notes', 'aria-label': 'Notes' });
-        notes.addEventListener('input', () => (a.notes = notes.value || null));
-        const remove = createButton({ label: '×', variant: 'ghost', ariaLabel: 'Remove this activity', onClick: () => { activities.splice(i, 1); renderActivities(); } });
-        row.append(day, type, notes, remove);
+      dailyActivities.forEach((entry) => {
+        const row = el('div', { class: 'day-list-row daily-activity-row' });
+        row.appendChild(el('span', { class: 'day-label', text: formatWeekday(entry.weekday) }));
+        const select = el('select', { 'aria-label': `${formatWeekday(entry.weekday)} activity` },
+          DAILY_ACTIVITY_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text, ...(entry.activity === opt.value ? { selected: 'selected' } : {}) }))
+        );
+        select.addEventListener('change', () => { entry.activity = select.value; });
+        row.appendChild(select);
         container.appendChild(row);
       });
     }
-
-    document.getElementById('add-activity').addEventListener('click', () => {
-      activities.push({ day: 'monday', activity_type: 'badminton', notes: null });
-      renderActivities();
-    });
 
     async function loadEquipmentOptions() {
       const equipment = await api('/api/blueprint/equipment');
@@ -112,12 +124,17 @@
     }
 
     function loadDayOptions() {
-      const select = document.getElementById('training-days');
-      for (const d of WEEKDAYS) select.appendChild(el('option', { value: d, text: formatWeekday(d) }));
       const weekStart = document.getElementById('week-start-day');
       for (const d of WEEKDAYS) weekStart.appendChild(el('option', { value: d, text: formatWeekday(d) }));
       weekStart.value = 'monday';
+      renderDailyActivities();
     }
+
+    // Notes on an existing badminton day are carried forward on Save
+    // (spec §5: do not delete old data) even though this trimmed UI has
+    // no notes field of its own — keyed by weekday so a day that stays
+    // badminton/both keeps whatever notes it already had.
+    let originalBadmintonNotesByDay = {};
 
     async function loadProfile() {
       const profile = await api('/api/training-profile');
@@ -127,14 +144,19 @@
       }
       document.getElementById('timezone').value = profile.timezone;
       document.getElementById('week-start-day').value = profile.week_start_day;
-      for (const opt of document.getElementById('training-days').options) opt.selected = profile.training_days.includes(opt.value);
       document.getElementById('preferred-split').value = profile.preferred_split || '';
       document.getElementById('default-duration').value = profile.default_session_duration_minutes;
       document.getElementById('min-duration').value = profile.minimum_session_duration_minutes;
       document.getElementById('max-duration').value = profile.maximum_session_duration_minutes;
       for (const opt of document.getElementById('equipment').options) opt.selected = profile.available_equipment.includes(opt.value);
-      activities = profile.other_activity_schedule.map((a) => ({ ...a }));
-      renderActivities();
+
+      dailyActivities = deriveDailyActivities(profile.training_days, profile.other_activity_schedule);
+      preservedNonBadmintonActivities = profile.other_activity_schedule.filter((a) => a.activity_type !== 'badminton').map((a) => ({ ...a }));
+      originalBadmintonNotesByDay = {};
+      for (const a of profile.other_activity_schedule) {
+        if (a.activity_type === 'badminton') originalBadmintonNotesByDay[a.day] = a.notes ?? null;
+      }
+      renderDailyActivities();
     }
 
     function validateDurations() {
@@ -157,7 +179,11 @@
       e.preventDefault();
       if (!validateDurations()) return; // spec §39: do not submit; inline error already shown
 
-      const training_days = [...document.getElementById('training-days').selectedOptions].map((o) => o.value);
+      const training_days = dailyActivities.filter((d) => d.activity === 'gym' || d.activity === 'both').map((d) => d.weekday);
+      const badmintonEntries = dailyActivities
+        .filter((d) => d.activity === 'badminton' || d.activity === 'both')
+        .map((d) => ({ day: d.weekday, activity_type: 'badminton', notes: originalBadmintonNotesByDay[d.weekday] ?? null }));
+      const other_activity_schedule = [...preservedNonBadmintonActivities, ...badmintonEntries];
       const available_equipment = [...document.getElementById('equipment').selectedOptions].map((o) => o.value);
       const button = e.target.querySelector('button[type="submit"]');
       const statusEl = document.getElementById('save-status');
@@ -173,7 +199,7 @@
             minimum_session_duration_minutes: Number(document.getElementById('min-duration').value),
             maximum_session_duration_minutes: Number(document.getElementById('max-duration').value),
             available_equipment,
-            other_activity_schedule: activities,
+            other_activity_schedule,
           },
         }), 'Profile saved.');
         // spec §50: invalidate + reload anything that depends on this — the

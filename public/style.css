@@ -439,4 +439,48 @@ hr { border: none; border-top: 1px solid var(--border); margin: var(--space-4) 0
 
 .day-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .day-list-row { display: flex; align-items: center; gap: var(--space-2); }
+
+/* ---------- Blueprint exercise picker ---------- */
+
+.exercise-picker { position: relative; }
+.exercise-picker-results {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.15rem);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-1);
+}
+.exercise-picker-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.exercise-picker-item:hover, .exercise-picker-item:focus-visible { background: var(--surface-muted); }
+.exercise-picker-empty { padding: 0.5rem 0.6rem; color: var(--text-muted); font-size: 0.85rem; }
+.exercise-picker-selected:empty { display: none; }
+.exercise-picker-selected { margin-top: var(--space-2); }
+
+/* ---------- Daily activity picker ---------- */
+
+.daily-activity-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.daily-activity-row .day-label { min-width: 6rem; font-weight: 600; }
+.daily-activity-row select { width: auto; flex: 1; }
+
+.change-activity { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); background: var(--surface-muted); }
+.change-activity select { width: auto; }
+.change-activity .btn-row { margin-top: 0; }
 .day-list-row select { width: auto; flex: 1; }

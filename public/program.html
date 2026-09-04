@@ -29,6 +29,19 @@
     let weekData = null;
     let lastFocusedEl = null;
 
+    // Blueprint Picker/Daily Activity spec §11: Gym/Badminton/Both/Rest,
+    // matching the same labels used on the Profile page's weekly
+    // schedule editor.
+    const DAILY_ACTIVITY_OPTIONS = [
+      { value: 'gym', text: 'Gym' },
+      { value: 'badminton', text: 'Badminton' },
+      { value: 'both', text: 'Both' },
+      { value: 'unselected', text: 'Rest / clear' },
+    ];
+    function formatDailyActivity(activity) {
+      return (DAILY_ACTIVITY_OPTIONS.find((o) => o.value === activity) || {}).text || activity;
+    }
+
     async function loadWeek() {
       const container = document.getElementById('week-container');
       showLoading(container, 'Loading weekly program…');
@@ -71,8 +84,9 @@
       const head = el('div', { class: 'wd-head' });
       head.appendChild(el('div', { class: 'wd-weekday', text: formatWeekday(day.weekday) }));
       head.appendChild(el('div', { class: 'wd-date', text: formatDate(day.date) }));
+      const purposeText = day.type === 'gym' ? (day.sessionPurpose ? formatSessionType(day.sessionPurpose) : 'Gym') : formatSessionType(day.type);
       head.appendChild(
-        el('div', { class: 'wd-purpose', text: day.type === 'gym' ? (day.sessionPurpose ? formatSessionType(day.sessionPurpose) : 'Gym') : formatSessionType(day.type) })
+        el('div', { class: 'wd-purpose', text: day.activity === 'both' ? `${purposeText} + Badminton` : purposeText })
       );
       if (day.type === 'gym') {
         head.appendChild(el('div', { class: 'wd-meta', text: `${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} · ${formatDuration(day.estimatedMinutes)}` }));
@@ -101,6 +115,7 @@
       closeBtn.addEventListener('click', closeDayModal);
       header.appendChild(closeBtn);
       panel.appendChild(header);
+      panel.appendChild(buildChangeActivitySection(day));
 
       if (day.type === 'gym') {
         panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
@@ -142,6 +157,36 @@
       document.getElementById('day-modal-root').innerHTML = '';
       document.removeEventListener('keydown', onModalKeydown);
       if (lastFocusedEl) lastFocusedEl.focus();
+    }
+
+    // Blueprint Picker/Daily Activity spec §9/§11: an obvious way to
+    // change a single day's activity from the existing weekly program,
+    // without a full profile-form resubmission or "regenerate the whole
+    // week" action. The change takes effect immediately server-side
+    // (see setDailyActivity's doc comment — /week always recomputes live
+    // from the profile) — this only re-fetches the week to reflect it.
+    function buildChangeActivitySection(day) {
+      const section = el('div', { class: 'change-activity' });
+      section.appendChild(el('p', { class: 'faint', text: `Current activity: ${formatDailyActivity(day.activity)}`, style: 'margin:0 0 0.4rem' }));
+
+      const select = el('select', { 'aria-label': 'Change activity' },
+        DAILY_ACTIVITY_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text, ...(day.activity === opt.value ? { selected: 'selected' } : {}) }))
+      );
+      const statusEl = el('div');
+      const saveBtn = createButton({ label: 'Change activity', variant: 'secondary', onClick: async () => {
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/training-profile/daily-activities/${day.weekday}`, {
+            method: 'PUT',
+            body: { activity: select.value },
+          }), 'Activity updated.');
+          closeDayModal();
+          await loadWeek();
+        } catch (err) { /* values preserved — panel stays open with the error shown */ }
+      }});
+
+      const row = el('div', { class: 'btn-row' }, [select, saveBtn]);
+      section.append(row, statusEl);
+      return section;
     }
 
     function buildExerciseDetailCard(item) {

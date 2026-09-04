@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
-import { WEEKDAYS, type RecurringActivity, type TrainingProfile, type Weekday } from '../contracts/types.js';
+import { WEEKDAYS, type DailyActivity, type RecurringActivity, type TrainingProfile, type Weekday } from '../contracts/types.js';
 import { isValidTimezone } from '../lib/timezone.js';
 import { newId, nowIso } from './ids.js';
 
@@ -8,6 +8,13 @@ export class UnknownBlueprintEquipmentError extends Error {
   constructor(public equipmentId: string) {
     super(`"${equipmentId}" is not a known Blueprint equipment id`);
     this.name = 'UnknownBlueprintEquipmentError';
+  }
+}
+
+export class NoTrainingProfileError extends Error {
+  constructor() {
+    super('No training profile exists for this user yet — create one first (PUT /api/training-profile)');
+    this.name = 'NoTrainingProfileError';
   }
 }
 
@@ -136,6 +143,49 @@ export class TrainingProfileRepo {
     tx();
 
     return this.get(userId)!;
+  }
+
+  /** Blueprint Picker/Daily Activity spec §9/§10/§14: change exactly one
+   * weekday's Gym/Badminton/Both/Unselected activity, touching only
+   * `training_days` membership and the 'badminton'-typed
+   * `other_activity_schedule` entry for THIS day — every other day, and
+   * any non-badminton recurring activity on this same day (e.g. a
+   * hypothetical 'hiking' entry), is carried over unchanged (spec §5: do
+   * not delete old data). Reuses upsert() itself rather than duplicating
+   * its validation/transaction. There is nothing else to "reconcile":
+   * /api/programming/week and /today always recompute live from this
+   * profile on every read (see docs/architecture.md), so the very next
+   * read already reflects the change — and completed/logged
+   * WorkoutSessions live in an entirely separate table this never
+   * touches (spec §10's history-safety requirement). */
+  setDailyActivity(userId: string, day: Weekday, activity: DailyActivity): TrainingProfile {
+    const current = this.get(userId);
+    if (!current) throw new NoTrainingProfileError();
+
+    const wantsGym = activity === 'gym' || activity === 'both';
+    const wantsBadminton = activity === 'badminton' || activity === 'both';
+
+    const training_days = WEEKDAYS.filter((d) =>
+      d === day ? wantsGym : current.training_days.includes(d)
+    );
+
+    const existingBadmintonEntry = current.other_activity_schedule.find((a) => a.day === day && a.activity_type === 'badminton');
+    const untouchedActivities = current.other_activity_schedule.filter((a) => !(a.day === day && a.activity_type === 'badminton'));
+    const other_activity_schedule = wantsBadminton
+      ? [...untouchedActivities, { day, activity_type: 'badminton' as const, notes: existingBadmintonEntry?.notes ?? null }]
+      : untouchedActivities;
+
+    return this.upsert(userId, {
+      timezone: current.timezone,
+      week_start_day: current.week_start_day,
+      training_days,
+      preferred_split: current.preferred_split,
+      default_session_duration_minutes: current.default_session_duration_minutes,
+      minimum_session_duration_minutes: current.minimum_session_duration_minutes,
+      maximum_session_duration_minutes: current.maximum_session_duration_minutes,
+      available_equipment: current.available_equipment,
+      other_activity_schedule,
+    });
   }
 
   get(userId: string): TrainingProfile | undefined {

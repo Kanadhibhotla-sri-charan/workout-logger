@@ -331,19 +331,18 @@
     function buildAddExerciseSection() {
       const section = el('section');
       section.appendChild(el('h2', { text: 'Add unplanned exercise' }));
-      section.appendChild(el('p', { class: 'muted', text: "Clearly separate from today's generated program." }));
+      section.appendChild(el('p', { class: 'muted', text: "Search the complete Blueprint library — clearly separate from today's generated program." }));
 
-      let exercisesById = {};
-      const search = el('input', { id: 'unplanned-exercise-search', list: 'unplanned-exercise-options', placeholder: 'Search Blueprint exercises…', 'aria-label': 'Exercise name' });
-      const datalist = el('datalist', { id: 'unplanned-exercise-options' });
-      const label = el('label', { for: 'unplanned-exercise-search' }, [document.createTextNode('Exercise'), search, datalist]);
-      section.appendChild(label);
+      const pickerHolder = { picker: null };
+      const pickerContainer = el('div');
+      section.appendChild(el('label', { text: 'Exercise' }, [pickerContainer]));
 
       api('/api/blueprint/exercises').then((exercises) => {
-        for (const ex of exercises) {
-          exercisesById[ex.name] = ex.id;
-          datalist.appendChild(el('option', { value: ex.name }));
-        }
+        pickerHolder.picker = createBlueprintExercisePicker(exercises, { onChange: updateSaveButtonState });
+        pickerContainer.appendChild(pickerHolder.picker.root);
+        updateSaveButtonState();
+      }).catch(() => {
+        pickerContainer.appendChild(el('p', { class: 'muted', text: "Couldn't load the Blueprint exercise library." }));
       });
 
       const roleSelect = el('select', {}, [
@@ -364,24 +363,29 @@
       }}));
 
       const statusEl = el('div');
-      const saveBtn = createButton({ label: 'Add exercise', onClick: async () => {
-        const exerciseId = exercisesById[search.value];
-        if (!exerciseId) {
+      const saveBtn = createButton({ label: 'Add exercise', disabled: true, onClick: async () => {
+        const selected = pickerHolder.picker ? pickerHolder.picker.getSelected() : null;
+        if (!selected) {
           showInlineStatus(statusEl, 'error', 'Pick a valid Blueprint exercise from the list.');
           return;
         }
         try {
           await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/exercises`, {
             method: 'POST',
-            body: { exercise_id: exerciseId, order: session.exercises.length + 1, role: roleSelect.value, sets: state.sets },
+            body: { exercise_id: selected.id, order: session.exercises.length + 1, role: roleSelect.value, sets: state.sets },
           }), 'Added.');
           dirty = false;
-          search.value = '';
+          if (pickerHolder.picker) pickerHolder.picker.reset();
+          updateSaveButtonState();
           await reload();
         } catch (err) { /* values preserved */ }
       }});
       section.appendChild(saveBtn);
       section.appendChild(statusEl);
+
+      function updateSaveButtonState() {
+        saveBtn.disabled = !(pickerHolder.picker && pickerHolder.picker.getSelected());
+      }
       return section;
     }
 

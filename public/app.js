@@ -257,6 +257,105 @@ function createStatusBadge(status, label) {
   return el('span', { class: `badge ${variant}` }, [document.createTextNode(label || formatSessionType(status))]);
 }
 
+// ---------- Blueprint exercise picker (spec: Blueprint Picker/Daily Activity §3) ----------
+
+/** A searchable dropdown over the COMPLETE Blueprint exercise library —
+ * plain case-insensitive name substring search only, deliberately no
+ * relevance/muscle-group/goal/equipment filtering (that filtering
+ * belongs only to the separate, unchanged Substitute picker — see
+ * openSubstitutePicker in logger.html, which this function is never
+ * used by). The caller must explicitly click a result; typed text alone
+ * is never a valid selection, so it can never bypass backend Blueprint-
+ * ID validation.
+ *
+ * Returns { root, getSelected, reset }:
+ *   - root: the DOM subtree to insert wherever the picker belongs.
+ *   - getSelected(): the currently selected { id, name }, or null.
+ *   - reset(): clears the search text and selection (e.g. after a
+ *     successful "Add exercise" submit).
+ */
+function createBlueprintExercisePicker(exercises, { onChange } = {}) {
+  const MAX_RESULTS = 50;
+  let selected = null;
+
+  const search = el('input', {
+    type: 'text',
+    placeholder: 'Search Blueprint exercises…',
+    'aria-label': 'Search Blueprint exercises',
+    autocomplete: 'off',
+  });
+  const results = el('div', { class: 'exercise-picker-results', role: 'listbox' });
+  const selectedIndicator = el('div', { class: 'exercise-picker-selected' });
+  const root = el('div', { class: 'exercise-picker' }, [search, results, selectedIndicator]);
+
+  function renderResults() {
+    results.innerHTML = '';
+    const query = search.value.trim().toLowerCase();
+    // Plain substring match on name only — the entire library when the
+    // search is empty (capped, per spec: "do not create a giant
+    // unusable DOM list"), narrowed as the user types. No ranking: the
+    // result order is always the library's own order.
+    const matches = exercises.filter((ex) => ex.name.toLowerCase().includes(query)).slice(0, MAX_RESULTS);
+    if (matches.length === 0) {
+      results.appendChild(el('div', { class: 'exercise-picker-empty', text: 'No Blueprint exercises found.' }));
+      return;
+    }
+    for (const ex of matches) {
+      const item = el('button', { type: 'button', class: 'exercise-picker-item', role: 'option' }, [document.createTextNode(ex.name)]);
+      item.addEventListener('click', () => {
+        selected = { id: ex.id, name: ex.name };
+        search.value = ex.name;
+        renderSelected();
+        results.innerHTML = '';
+        results.hidden = true;
+        if (onChange) onChange(selected);
+      });
+      results.appendChild(item);
+    }
+  }
+
+  function renderSelected() {
+    selectedIndicator.innerHTML = '';
+    if (selected) {
+      selectedIndicator.appendChild(el('span', { class: 'badge badge-success', text: `Selected: ${selected.name} (Blueprint)` }));
+    }
+  }
+
+  search.addEventListener('input', () => {
+    // Typing after a selection invalidates it — the only way to select
+    // is to explicitly click a result again (spec: "arbitrary typed text
+    // without selection is rejected").
+    if (selected && search.value !== selected.name) {
+      selected = null;
+      renderSelected();
+      if (onChange) onChange(null);
+    }
+    results.hidden = false;
+    renderResults();
+  });
+  search.addEventListener('focus', () => {
+    results.hidden = false;
+    renderResults();
+  });
+  document.addEventListener('click', (e) => {
+    if (!root.contains(e.target)) results.hidden = true;
+  });
+
+  results.hidden = true;
+
+  return {
+    root,
+    getSelected: () => selected,
+    reset: () => {
+      selected = null;
+      search.value = '';
+      renderSelected();
+      results.innerHTML = '';
+      results.hidden = true;
+    },
+  };
+}
+
 // ---------- Save-in-flight helper (spec §8) ----------
 
 /** Wraps a save button: disables it (preventing duplicate POST/PATCH),

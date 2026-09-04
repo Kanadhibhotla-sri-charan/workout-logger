@@ -366,6 +366,17 @@ export interface RecurringActivity {
   notes: string | null;
 }
 
+/** The one first-class training-activity state for a single weekday, per
+ * the Blueprint Picker/Daily Activity spec (§4/§6): every weekday is
+ * exactly one of these four — there is deliberately no separate 'rest'
+ * value in storage (an 'unselected' day already means rest). This is a
+ * DERIVED view over `training_days` (gym) + `other_activity_schedule`'s
+ * 'badminton'-typed entries (badminton) — see src/lib/dailyActivity.ts —
+ * never a third, independently-stored representation. */
+export type DailyActivity = 'gym' | 'badminton' | 'both' | 'unselected';
+
+export const DAILY_ACTIVITIES: readonly DailyActivity[] = ['gym', 'badminton', 'both', 'unselected'];
+
 /**
  * User-specific training constraints the programming engine must read as
  * data, never assume or hard-code: which days the user trains, how long

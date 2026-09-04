@@ -194,6 +194,64 @@ describe('GET /api/programming/today activity-type classification (gym > activit
   });
 });
 
+// Blueprint Picker/Daily Activity spec §6-§8: the additive `activity`
+// field (gym/badminton/both/unselected) on both /week and /today —
+// distinct from and never changing the existing `type`/`sessionType`
+// fields tested above.
+describe('GET /api/programming/week and /today expose the real DailyActivity (spec §6-§8)', () => {
+  it('/week: gym-only, badminton-only, and unselected days each report the correct activity', async () => {
+    setupProfile(); // monday/tuesday/thursday/friday gym; saturday+sunday badminton; wednesday free
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+
+    const res = await request(app).get(`/api/programming/week?date=${MON}`).expect(200);
+    const byWeekday = Object.fromEntries(res.body.days.map((d: any) => [d.weekday, d.activity]));
+    expect(byWeekday.monday).toBe('gym');
+    expect(byWeekday.saturday).toBe('badminton');
+    expect(byWeekday.wednesday).toBe('unselected');
+  });
+
+  it('/week: a day that is both a training day AND has a badminton entry reports "both", while `type` stays "gym"', async () => {
+    const user = new UsersRepo(db).getOrCreateDefault();
+    new TrainingProfileRepo(db).upsert(user.id, {
+      timezone: 'Asia/Kolkata',
+      week_start_day: 'monday',
+      training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      default_session_duration_minutes: 60,
+      minimum_session_duration_minutes: 30,
+      maximum_session_duration_minutes: 90,
+      available_equipment: FULL_EQUIPMENT,
+      other_activity_schedule: [{ day: 'monday', activity_type: 'badminton', notes: null }],
+    });
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+
+    const res = await request(app).get(`/api/programming/week?date=${MON}`).expect(200);
+    const monday = res.body.days.find((d: any) => d.weekday === 'monday');
+    expect(monday.type).toBe('gym'); // unchanged — existing consumers still see a real gym session
+    expect(monday.activity).toBe('both'); // additive — the new signal a "both" day needs
+  });
+
+  it('/today agrees with /week on the same date\'s activity, including for a "both" day', async () => {
+    const user = new UsersRepo(db).getOrCreateDefault();
+    new TrainingProfileRepo(db).upsert(user.id, {
+      timezone: 'Asia/Kolkata',
+      week_start_day: 'monday',
+      training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      default_session_duration_minutes: 60,
+      minimum_session_duration_minutes: 30,
+      maximum_session_duration_minutes: 90,
+      available_equipment: FULL_EQUIPMENT,
+      other_activity_schedule: [{ day: 'monday', activity_type: 'badminton', notes: null }],
+    });
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+
+    const today = await request(app).get(`/api/programming/today?date=${MON}`).expect(200);
+    const week = await request(app).get(`/api/programming/week?date=${MON}`).expect(200);
+    const mondayFromWeek = week.body.days.find((d: any) => d.date === MON);
+    expect(today.body.activity).toBe('both');
+    expect(today.body.activity).toBe(mondayFromWeek.activity);
+  });
+});
+
 describe('GET /api/programming/substitutes', () => {
   beforeEach(() => setupProfile());
 
