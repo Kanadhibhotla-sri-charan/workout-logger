@@ -45,6 +45,27 @@ CREATE TABLE IF NOT EXISTS training_profile_activities (
   notes TEXT
 );
 
+-- Current-Week Reconciliation Fix: a per-day activity OVERRIDE for one
+-- specific week, kept entirely separate from the recurring
+-- TrainingProfile default above (training_days/
+-- training_profile_activities). Absence of a row for
+-- (training_profile_id, week_start, day) means "use the profile's
+-- recurring default for that day" — an override row is the ONLY way
+-- this table's data is ever consulted; changing one never writes to
+-- training_profiles/training_profile_activities, and vice versa. See
+-- src/repositories/weekActivityOverridesRepo.ts and
+-- src/lib/dailyActivity.ts's applyWeekOverrides.
+CREATE TABLE IF NOT EXISTS week_activity_overrides (
+  id TEXT PRIMARY KEY,
+  training_profile_id TEXT NOT NULL REFERENCES training_profiles(id) ON DELETE CASCADE,
+  week_start TEXT NOT NULL, -- ISO date (YYYY-MM-DD) of the Monday-anchored week this override applies to
+  day TEXT NOT NULL CHECK (day IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')),
+  activity TEXT NOT NULL CHECK (activity IN ('gym', 'badminton', 'both', 'unselected')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (training_profile_id, week_start, day)
+);
+
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY,
   goal_type TEXT NOT NULL CHECK (goal_type IN ('aesthetic', 'functional')),

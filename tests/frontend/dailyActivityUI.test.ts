@@ -56,8 +56,13 @@ describe('program.html: an obvious way to change a day\'s activity from the exis
     expect(html).toMatch(/Change activity/);
   });
 
-  it('writes through the small, focused single-day endpoint, not a full profile resubmission', () => {
-    expect(html).toMatch(/\/api\/training-profile\/daily-activities\/\$\{day\.weekday\}/);
+  it('writes through the small, focused current-week endpoint — never the recurring-profile endpoint (Current-Week Reconciliation Fix §11/§13)', () => {
+    expect(html).toMatch(/\/api\/programming\/week\/days\/\$\{day\.weekday\}\/activity/);
+    expect(html).not.toMatch(/\/api\/training-profile\/daily-activities/);
+  });
+
+  it('tells the user this changes only the current week, not the recurring Training Profile default (spec §13)', () => {
+    expect(html).toMatch(/only the current week/i);
   });
 
   it('reloads the week after a successful change instead of requiring a manual refresh', () => {

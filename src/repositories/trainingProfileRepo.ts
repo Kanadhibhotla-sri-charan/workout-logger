@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { WEEKDAYS, type DailyActivity, type RecurringActivity, type TrainingProfile, type Weekday } from '../contracts/types.js';
 import { isValidTimezone } from '../lib/timezone.js';
+import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import { newId, nowIso } from './ids.js';
 
 export class UnknownBlueprintEquipmentError extends Error {
@@ -146,34 +147,31 @@ export class TrainingProfileRepo {
   }
 
   /** Blueprint Picker/Daily Activity spec §9/§10/§14: change exactly one
-   * weekday's Gym/Badminton/Both/Unselected activity, touching only
-   * `training_days` membership and the 'badminton'-typed
-   * `other_activity_schedule` entry for THIS day — every other day, and
-   * any non-badminton recurring activity on this same day (e.g. a
-   * hypothetical 'hiking' entry), is carried over unchanged (spec §5: do
-   * not delete old data). Reuses upsert() itself rather than duplicating
-   * its validation/transaction. There is nothing else to "reconcile":
-   * /api/programming/week and /today always recompute live from this
-   * profile on every read (see docs/architecture.md), so the very next
-   * read already reflects the change — and completed/logged
-   * WorkoutSessions live in an entirely separate table this never
-   * touches (spec §10's history-safety requirement). */
+   * weekday's Gym/Badminton/Both/Unselected activity **on the recurring
+   * Training Profile default** — touching only `training_days`
+   * membership and the 'badminton'-typed `other_activity_schedule` entry
+   * for THIS day — every other day, and any non-badminton recurring
+   * activity on this same day (e.g. a hypothetical 'hiking' entry), is
+   * carried over unchanged (spec §5: do not delete old data). Reuses
+   * upsert() itself rather than duplicating its validation/transaction.
+   *
+   * Current-Week Reconciliation Fix §3/§13: this is deliberately NOT how
+   * the weekly-program page's "Change activity" control works anymore —
+   * that writes a scoped override via WeekActivityOverridesRepo instead
+   * (see src/server/routes/programming.ts's PUT
+   * /week/days/:day/activity), which never reaches this method or the
+   * recurring profile at all. This method still exists for genuinely
+   * editing the recurring default itself, and for existing callers/tests
+   * that already depend on it. */
   setDailyActivity(userId: string, day: Weekday, activity: DailyActivity): TrainingProfile {
     const current = this.get(userId);
     if (!current) throw new NoTrainingProfileError();
 
-    const wantsGym = activity === 'gym' || activity === 'both';
-    const wantsBadminton = activity === 'badminton' || activity === 'both';
-
-    const training_days = WEEKDAYS.filter((d) =>
-      d === day ? wantsGym : current.training_days.includes(d)
+    const { trainingDays: training_days, otherActivitySchedule: other_activity_schedule } = applyWeekOverrides(
+      current.training_days,
+      current.other_activity_schedule,
+      new Map([[day, activity]])
     );
-
-    const existingBadmintonEntry = current.other_activity_schedule.find((a) => a.day === day && a.activity_type === 'badminton');
-    const untouchedActivities = current.other_activity_schedule.filter((a) => !(a.day === day && a.activity_type === 'badminton'));
-    const other_activity_schedule = wantsBadminton
-      ? [...untouchedActivities, { day, activity_type: 'badminton' as const, notes: existingBadmintonEntry?.notes ?? null }]
-      : untouchedActivities;
 
     return this.upsert(userId, {
       timezone: current.timezone,

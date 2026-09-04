@@ -159,26 +159,34 @@
       if (lastFocusedEl) lastFocusedEl.focus();
     }
 
-    // Blueprint Picker/Daily Activity spec §9/§11: an obvious way to
-    // change a single day's activity from the existing weekly program,
-    // without a full profile-form resubmission or "regenerate the whole
-    // week" action. The change takes effect immediately server-side
-    // (see setDailyActivity's doc comment — /week always recomputes live
-    // from the profile) — this only re-fetches the week to reflect it.
+    // Current-Week Reconciliation Fix §9/§11/§12/§13: an obvious way to
+    // change a single day's activity from the existing weekly program —
+    // WITHOUT a full profile-form resubmission or "regenerate the whole
+    // week" action, and WITHOUT touching the recurring Training Profile
+    // default at all. This writes a scoped override for the current
+    // week only (PUT /api/programming/week/days/:day/activity, not the
+    // training-profile endpoint), so it never silently changes what the
+    // Profile page shows as this weekday's normal default. The change
+    // takes effect immediately server-side (/week always recomputes
+    // live from profile + this week's overrides) — this only re-fetches
+    // the week to reflect it. On failure, the panel stays open with the
+    // error shown and nothing is re-fetched (spec §12: no partial UI
+    // update).
     function buildChangeActivitySection(day) {
       const section = el('div', { class: 'change-activity' });
       section.appendChild(el('p', { class: 'faint', text: `Current activity: ${formatDailyActivity(day.activity)}`, style: 'margin:0 0 0.4rem' }));
+      section.appendChild(el('p', { class: 'faint', text: 'This changes only the current week — your recurring Training Profile schedule is unchanged.', style: 'margin:0 0 0.6rem' }));
 
-      const select = el('select', { 'aria-label': 'Change activity' },
+      const select = el('select', { 'aria-label': 'Change activity (this week only)' },
         DAILY_ACTIVITY_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text, ...(day.activity === opt.value ? { selected: 'selected' } : {}) }))
       );
       const statusEl = el('div');
-      const saveBtn = createButton({ label: 'Change activity', variant: 'secondary', onClick: async () => {
+      const saveBtn = createButton({ label: 'Change activity (this week)', variant: 'secondary', onClick: async () => {
         try {
-          await withSaving(saveBtn, statusEl, () => api(`/api/training-profile/daily-activities/${day.weekday}`, {
+          await withSaving(saveBtn, statusEl, () => api(`/api/programming/week/days/${day.weekday}/activity`, {
             method: 'PUT',
             body: { activity: select.value },
-          }), 'Activity updated.');
+          }), 'Activity updated for this week.');
           closeDayModal();
           await loadWeek();
         } catch (err) { /* values preserved — panel stays open with the error shown */ }

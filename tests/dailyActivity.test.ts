@@ -5,7 +5,8 @@
 // Unselected model — pure function, no I/O.
 
 import { describe, expect, it } from 'vitest';
-import { deriveDailyActivity, deriveWeeklyActivities } from '../src/lib/dailyActivity.js';
+import { applyWeekOverrides, deriveDailyActivity, deriveWeeklyActivities } from '../src/lib/dailyActivity.js';
+import type { DailyActivity, Weekday } from '../src/contracts/types.js';
 
 describe('deriveDailyActivity', () => {
   it('is "gym" when the day is a training day with no badminton entry', () => {
@@ -59,5 +60,87 @@ describe('deriveWeeklyActivities', () => {
       { weekday: 'saturday', activity: 'badminton' },
       { weekday: 'sunday', activity: 'badminton' },
     ]);
+  });
+});
+
+// Current-Week Reconciliation Fix §4/§6/§7: applyWeekOverrides is the one
+// pure function both the recurring-profile write path
+// (TrainingProfileRepo.setDailyActivity) and the current-week override
+// read path (assembleWeeklyPlanInput, GET/PUT .../week) share — pure, no
+// I/O, never mutates its inputs.
+describe('applyWeekOverrides', () => {
+  const ALL_TRANSITIONS: Array<{ from: DailyActivity; to: DailyActivity }> = [
+    { from: 'gym', to: 'badminton' },
+    { from: 'badminton', to: 'gym' },
+    { from: 'gym', to: 'both' },
+    { from: 'both', to: 'gym' },
+    { from: 'badminton', to: 'both' },
+    { from: 'both', to: 'badminton' },
+    { from: 'unselected', to: 'gym' },
+    { from: 'unselected', to: 'badminton' },
+    { from: 'unselected', to: 'both' },
+    { from: 'gym', to: 'unselected' },
+    { from: 'badminton', to: 'unselected' },
+    { from: 'both', to: 'unselected' },
+  ];
+
+  function baseArraysFor(activity: DailyActivity, day: Weekday) {
+    const trainingDays = activity === 'gym' || activity === 'both' ? [day] : [];
+    const otherActivitySchedule = activity === 'badminton' || activity === 'both' ? [{ day, activity_type: 'badminton' as const, notes: null }] : [];
+    return { trainingDays, otherActivitySchedule };
+  }
+
+  for (const { from, to } of ALL_TRANSITIONS) {
+    it(`${from} -> ${to}`, () => {
+      const day: Weekday = 'saturday';
+      const { trainingDays, otherActivitySchedule } = baseArraysFor(from, day);
+      expect(deriveDailyActivity(day, trainingDays, otherActivitySchedule)).toBe(from);
+
+      const result = applyWeekOverrides(trainingDays, otherActivitySchedule, new Map([[day, to]]));
+      expect(deriveDailyActivity(day, result.trainingDays, result.otherActivitySchedule)).toBe(to);
+    });
+  }
+
+  it('touches only the overridden day — every other day is untouched', () => {
+    const result = applyWeekOverrides(
+      ['monday', 'wednesday'],
+      [{ day: 'friday', activity_type: 'badminton', notes: null }],
+      new Map([['monday', 'unselected']])
+    );
+    expect(deriveDailyActivity('monday', result.trainingDays, result.otherActivitySchedule)).toBe('unselected');
+    expect(deriveDailyActivity('wednesday', result.trainingDays, result.otherActivitySchedule)).toBe('gym');
+    expect(deriveDailyActivity('friday', result.trainingDays, result.otherActivitySchedule)).toBe('badminton');
+  });
+
+  it('preserves a non-badminton recurring activity on the overridden day (spec §5/§7: do not delete old data)', () => {
+    const result = applyWeekOverrides(
+      [],
+      [{ day: 'tuesday', activity_type: 'hiking', notes: 'weekly hike' }],
+      new Map([['tuesday', 'gym']])
+    );
+    expect(result.otherActivitySchedule).toContainEqual({ day: 'tuesday', activity_type: 'hiking', notes: 'weekly hike' });
+    expect(deriveDailyActivity('tuesday', result.trainingDays, result.otherActivitySchedule)).toBe('gym');
+  });
+
+  it('preserves existing badminton notes when the day stays badminton/both', () => {
+    const result = applyWeekOverrides(
+      ['wednesday'],
+      [{ day: 'wednesday', activity_type: 'badminton', notes: 'club night' }],
+      new Map([['wednesday', 'badminton']]) // both -> badminton
+    );
+    expect(result.otherActivitySchedule).toContainEqual({ day: 'wednesday', activity_type: 'badminton', notes: 'club night' });
+  });
+
+  it('does not mutate its input arrays', () => {
+    const trainingDays: Weekday[] = ['monday'];
+    const otherActivitySchedule = [{ day: 'saturday' as Weekday, activity_type: 'badminton', notes: null }];
+    applyWeekOverrides(trainingDays, otherActivitySchedule, new Map([['monday', 'unselected']]));
+    expect(trainingDays).toEqual(['monday']);
+    expect(otherActivitySchedule).toEqual([{ day: 'saturday', activity_type: 'badminton', notes: null }]);
+  });
+
+  it('accepts overrides as a plain array of {day, activity} as well as a Map', () => {
+    const result = applyWeekOverrides([], [], [{ day: 'monday', activity: 'gym' }]);
+    expect(deriveDailyActivity('monday', result.trainingDays, result.otherActivitySchedule)).toBe('gym');
   });
 });

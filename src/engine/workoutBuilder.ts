@@ -52,6 +52,8 @@ import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRe
 import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDetailsRepo.js';
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../repositories/outsideBlueprintExercisesRepo.js';
+import { WeekActivityOverridesRepo } from '../repositories/weekActivityOverridesRepo.js';
+import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import type { ExerciseTargetRole } from './exerciseSelector.js';
 
 /** One prior session's actual logged sets for a specific exercise —
@@ -1510,6 +1512,20 @@ export function weekdayOfDate(dateIso: string): Weekday {
   return WEEKDAYS[mondayFirstIndex]!;
 }
 
+/** Current-Week Reconciliation Fix §4/§11: the Monday-anchored week-start
+ * date containing `dateIso` — the exact same value
+ * `assembleWeeklyPlanInput` returns as `WeeklyPlanInput.weekStart` (this
+ * function replaces that computation's former inline duplicate) and
+ * therefore the correct key for "this week"'s activity overrides.
+ * Deliberately independent of the user's configured `week_start_day`,
+ * which only affects weekly EXPOSURE aggregation (see
+ * TrainingProfile.week_start_day's own doc comment) — the generated
+ * weekly plan itself, and now current-week overrides on top of it, are
+ * always Monday-anchored. */
+export function programmingWeekStart(dateIso: string): string {
+  return addDays(dateIso, -WEEKDAYS.indexOf(weekdayOfDate(dateIso)));
+}
+
 interface TargetTouch {
   date: string;
   exercise_id: BlueprintId;
@@ -1717,17 +1733,35 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     );
   }
 
+  const weekStart = programmingWeekStart(date);
+
+  // Current-Week Reconciliation Fix §4/§5/§11: the user's own real
+  // Gym/Badminton/Both/Unselected activity for EACH day of THIS
+  // specific week — the recurring TrainingProfile default
+  // (training_days/other_activity_schedule) with any current-week
+  // override layered on top, via the same pure applyWeekOverrides
+  // function the write endpoint and TrainingProfileRepo.setDailyActivity
+  // both use. This is the ONLY place buildWeeklyProgrammingPlan's/
+  // buildWorkout's eligible-gym-days input is computed — neither of
+  // those functions themselves changed at all; they still just consume
+  // whatever `available_training_days`/`recurring_badminton_days` they
+  // are handed, exactly as before this fix.
+  const weekOverrides = state.training_profile ? new WeekActivityOverridesRepo(db).get(state.training_profile.id, weekStart) : new Map();
+  const effective = applyWeekOverrides(state.training_profile?.training_days ?? [], state.training_profile?.other_activity_schedule ?? [], weekOverrides);
+
   // Remediation §9: the recurring badminton days this user's own
   // TrainingProfile already records (`other_activity_schedule` —
   // "reduced training/recovery capacity, not just ignore," per that
   // field's own doc comment) are the real input frequencyEngine's
-  // soft day-avoidance needs — never re-derived or guessed here.
-  const recurringBadmintonDays = (state.training_profile?.other_activity_schedule ?? [])
+  // soft day-avoidance needs — never re-derived or guessed here. Now
+  // reads the EFFECTIVE (override-applied) schedule above, so a
+  // current-week-only badminton change is honored here too.
+  const recurringBadmintonDays = effective.otherActivitySchedule
     .filter((a) => a.activity_type === 'badminton')
     .map((a) => a.day);
 
   return {
-    weekStart: addDays(date, -WEEKDAYS.indexOf(weekday)),
+    weekStart,
     today: date,
     todayWeekday: weekday,
     todayBudgetMinutes: budgetMinutes,
@@ -1737,7 +1771,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     // every day, and never an invented number.
     defaultSessionMinutes: state.training_profile?.default_session_duration_minutes ?? budgetMinutes,
     available_equipment: state.training_profile?.available_equipment ?? [],
-    available_training_days: state.training_profile?.training_days ?? [],
+    available_training_days: effective.trainingDays,
     targets,
     recurring_badminton_days: recurringBadmintonDays,
   };

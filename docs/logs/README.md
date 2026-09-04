@@ -53,3 +53,4 @@ story of how the app got to its current state.
 - [2026-09-01-45-production-deployment-prep.md](2026-09-01-45-production-deployment-prep.md)
 - [2026-09-04-46-blueprint-picker-and-daily-activity.md](2026-09-04-46-blueprint-picker-and-daily-activity.md)
 - [2026-09-04-47-post-deployment-completion-prep.md](2026-09-04-47-post-deployment-completion-prep.md)
+- [2026-09-04-48-current-week-activity-overrides.md](2026-09-04-48-current-week-activity-overrides.md)

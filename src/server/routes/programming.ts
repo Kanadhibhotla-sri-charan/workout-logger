@@ -17,20 +17,22 @@ import {
   assembleAndBuildWorkout,
   assembleWeeklyPlanInput,
   buildWeeklyProgrammingPlan,
+  programmingWeekStart,
   type TargetBuildContext,
   type WeeklyPlanTargetAllocation,
 } from '../../engine/workoutBuilder.js';
 import { exercisesTrainingTarget } from '../../engine/exerciseSelector.js';
 import { filterEquipmentFeasible } from '../../engine/constraintEngine.js';
 import { addDays } from '../../engine/dateMath.js';
-import { WEEKDAYS, type BlueprintId, type Weekday } from '../../contracts/types.js';
-import { deriveDailyActivity } from '../../lib/dailyActivity.js';
+import { DAILY_ACTIVITIES, WEEKDAYS, type BlueprintId, type DailyActivity, type RecurringActivity, type TrainingProfile, type Weekday } from '../../contracts/types.js';
+import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import { GoalsRepo } from '../../repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../../repositories/outsideBlueprintExercisesRepo.js';
+import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 
 export const programmingRouter = Router();
@@ -118,14 +120,34 @@ function defaultBudgetMinutes(database: Database.Database): number {
   return profile?.default_session_duration_minutes ?? 60;
 }
 
-// GET /api/programming/week — the complete real weekly plan (spec §47/§48).
-// One call renders the whole week; never seven separate programming
-// requests (spec §49).
-programmingRouter.get('/week', (req, res) => {
-  const database = db(req);
-  const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
-  const budgetMinutes = defaultBudgetMinutes(database);
+/** Current-Week Reconciliation Fix §4/§5: the real Gym/Badminton/Both/
+ * Unselected activity for every day of `weekStart`'s week — the
+ * recurring TrainingProfile default with that week's own overrides (if
+ * any) layered on top, via the exact same pure `applyWeekOverrides`
+ * `assembleWeeklyPlanInput` already used to decide THIS week's real
+ * eligible gym days. Reusing it here (rather than reading `input`'s own
+ * `available_training_days`/`recurring_badminton_days`, which only
+ * carry Weekday[] membership, not the full RecurringActivity shape
+ * `nonGymDayType` needs for its generic non-badminton fallback) is a
+ * second, cheap, harmless read against the same unchanged DB state
+ * within one request — never a second inference mechanism, matching
+ * this file's existing "goalInput" pattern in /today below. */
+function effectiveWeekActivity(
+  database: Database.Database,
+  profile: TrainingProfile | undefined,
+  weekStart: string
+): { trainingDays: Weekday[]; otherActivitySchedule: RecurringActivity[] } {
+  if (!profile) return { trainingDays: [], otherActivitySchedule: [] };
+  const overrides = new WeekActivityOverridesRepo(database).get(profile.id, weekStart);
+  return applyWeekOverrides(profile.training_days, profile.other_activity_schedule, overrides);
+}
 
+/** GET /api/programming/week's full response body — extracted so the new
+ * PUT .../week/days/:day/activity route (Current-Week Reconciliation Fix
+ * §11) can return the identical "updated day/week state" after writing
+ * an override, in one round trip, without duplicating this shaping
+ * logic. */
+function buildWeekResponse(database: Database.Database, date: string, budgetMinutes: number) {
   const input = assembleWeeklyPlanInput(database, date, budgetMinutes);
   const plan = buildWeeklyProgrammingPlan(input);
 
@@ -136,7 +158,7 @@ programmingRouter.get('/week', (req, res) => {
 
   const user = new UsersRepo(database).getOrCreateDefault();
   const profile = new TrainingProfileRepo(database).get(user.id);
-  const otherActivitySchedule = profile?.other_activity_schedule ?? [];
+  const effective = effectiveWeekActivity(database, profile, plan.weekStart);
 
   const sessionsByDate = new Map(plan.sessions.map((s) => [s.date, s]));
   const days = WEEKDAYS.map((weekday, i) => {
@@ -147,8 +169,10 @@ programmingRouter.get('/week', (req, res) => {
     // already depends on — `type` never changes meaning here. This is
     // what lets the UI show "Both" for a day that already has both a
     // real gym session (`type: 'gym'`) AND a recurring badminton entry,
-    // which `type` alone cannot represent.
-    const activity = deriveDailyActivity(weekday, profile?.training_days ?? [], otherActivitySchedule);
+    // which `type` alone cannot represent. Both are now derived from
+    // the EFFECTIVE (current-week-override-applied) schedule, so a
+    // week-scoped change is reflected here immediately.
+    const activity = deriveDailyActivity(weekday, effective.trainingDays, effective.otherActivitySchedule);
     const gymSession = sessionsByDate.get(dayDate);
     if (gymSession) {
       return {
@@ -168,7 +192,7 @@ programmingRouter.get('/week', (req, res) => {
     return {
       date: dayDate,
       weekday,
-      type: nonGymDayType(weekday, otherActivitySchedule),
+      type: nonGymDayType(weekday, effective.otherActivitySchedule),
       activity,
       status: 'rest' as const,
       sessionPurpose: null,
@@ -180,13 +204,56 @@ programmingRouter.get('/week', (req, res) => {
     };
   });
 
-  res.json({
+  return {
     weekStart: plan.weekStart,
     weekEnd: addDays(plan.weekStart, 6),
     days,
     targetAllocations: plan.targetAllocations.map((a) => enrichAllocation(a, targetGoalMap, labels)),
     activeGoals: plan.sessions[0]?.activeGoals ?? [],
-  });
+  };
+}
+
+// GET /api/programming/week — the complete real weekly plan (spec §47/§48).
+// One call renders the whole week; never seven separate programming
+// requests (spec §49).
+programmingRouter.get('/week', (req, res) => {
+  const database = db(req);
+  const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
+  const budgetMinutes = defaultBudgetMinutes(database);
+  res.json(buildWeekResponse(database, date, budgetMinutes));
+});
+
+// PUT /api/programming/week/days/:day/activity — Current-Week
+// Reconciliation Fix §11: change ONE day's activity for the CURRENT week
+// only. Never touches the recurring TrainingProfile (see
+// WeekActivityOverridesRepo's own doc comment) — "reconciliation" is
+// automatic because /week and /today always recompute live from
+// (profile + this week's overrides) on every read (see
+// effectiveWeekActivity/assembleWeeklyPlanInput), so the response below
+// already reflects it in one round trip.
+programmingRouter.put('/week/days/:day/activity', (req, res) => {
+  const database = db(req);
+  const day = req.params.day;
+  if (!WEEKDAYS.includes(day as Weekday)) {
+    return res.status(400).json({ error: `day must be one of ${WEEKDAYS.join('|')}` });
+  }
+  const { activity } = req.body ?? {};
+  if (!DAILY_ACTIVITIES.includes(activity)) {
+    return res.status(400).json({ error: `activity must be one of ${DAILY_ACTIVITIES.join('|')}` });
+  }
+
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const profile = new TrainingProfileRepo(database).get(user.id);
+  if (!profile) {
+    return res.status(404).json({ error: 'No training profile exists for this user yet — create one first (PUT /api/training-profile)' });
+  }
+
+  const date = todayForUser(database);
+  const weekStart = programmingWeekStart(date);
+  new WeekActivityOverridesRepo(database).setOverride(profile.id, weekStart, day as Weekday, activity as DailyActivity);
+
+  const budgetMinutes = defaultBudgetMinutes(database);
+  res.json(buildWeekResponse(database, date, budgetMinutes));
 });
 
 // GET /api/programming/today — today's own real slice of the SAME weekly
@@ -212,16 +279,21 @@ programmingRouter.get('/today', (req, res) => {
   // `other_activity_schedule` (via the shared `nonGymDayType` helper)
   // supplies the real configured non-gym activity otherwise. Never a
   // second, Today-only activity configuration, and never a hard-coded
-  // "Saturday = badminton".
+  // "Saturday = badminton". Current-Week Reconciliation Fix §5: now
+  // reads the EFFECTIVE (this-week-override-applied) schedule — the
+  // exact same one assembleAndBuildWorkout itself just used internally
+  // to decide whether `date` is a real gym day — so Today can never
+  // disagree with a current-week-only change either.
   const profileForType = new TrainingProfileRepo(database).get(new UsersRepo(database).getOrCreateDefault().id);
-  const isGymDay = profileForType?.training_days.includes(result.weekday) ?? false;
-  const sessionType = isGymDay ? 'gym' : nonGymDayType(result.weekday, profileForType?.other_activity_schedule ?? []);
+  const effectiveForType = effectiveWeekActivity(database, profileForType, programmingWeekStart(date));
+  const isGymDay = effectiveForType.trainingDays.includes(result.weekday);
+  const sessionType = isGymDay ? 'gym' : nonGymDayType(result.weekday, effectiveForType.otherActivitySchedule);
   // Additive alongside sessionType, for the same reason as /week's
   // `activity` field — lets a "Both" day surface its badminton component
   // even though sessionType/exercises are gym-only (spec §8: a Both day's
   // gym programming already accounts for badminton internally; this only
   // makes that visible).
-  const activity = deriveDailyActivity(result.weekday, profileForType?.training_days ?? [], profileForType?.other_activity_schedule ?? []);
+  const activity = deriveDailyActivity(result.weekday, effectiveForType.trainingDays, effectiveForType.otherActivitySchedule);
 
   // Real active_goals only carries goal_id/priority/trend (the engine
   // has no reason to track goal_type at that layer) — resolved here
