@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
-# Deployment Phase §37: daily backup of the production SQLite database.
-# Uses SQLite's own online backup mechanism (the `.backup` command, via
-# the sqlite3 CLI) rather than copying the live file directly, so a
-# WAL-mode database mid-write is still backed up consistently.
+# Deployment Phase §37 / Post-Deployment Completion §6-7: daily backup
+# of the production SQLite database. Uses SQLite's own online backup
+# mechanism (the `.backup` command, via the sqlite3 CLI) rather than
+# copying the live file directly, so a WAL-mode database mid-write is
+# still backed up consistently.
+#
+# DB_PATH/BACKUP_DIR are overridden via the systemd unit's Environment=
+# lines (see ops/systemd/workout-logger-backup.service) to match
+# wherever this is actually deployed — the defaults below match the
+# real live deployment (Post-Deployment Completion spec §2: app under
+# /home/ubuntu/workout-logger, SQLite under its data/ subdirectory, run
+# as the `ubuntu` user — simpler than the original /opt +
+# dedicated-service-account plan in docs/PRODUCTION_DEPLOYMENT.md,
+# which is what was actually followed when this was deployed by hand).
 #
 # Exit codes: 0 on success, non-zero on any failure (so the invoking
 # systemd service is correctly reported as failed).
 
 set -euo pipefail
 
-DB_PATH="${DB_PATH:-/var/lib/workout-logger/workout-logger.sqlite}"
-BACKUP_DIR="${BACKUP_DIR:-/var/lib/workout-logger/backups}"
+DB_PATH="${DB_PATH:-/home/ubuntu/workout-logger/data/workout-logger.sqlite}"
+BACKUP_DIR="${BACKUP_DIR:-/home/ubuntu/workout-logger-backups}"
 RETENTION_DAYS=7
 
 if [ ! -f "$DB_PATH" ]; then

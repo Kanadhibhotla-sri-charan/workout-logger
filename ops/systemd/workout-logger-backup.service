@@ -1,11 +1,16 @@
+# Post-Deployment Completion spec §6-7: matches the real live
+# deployment (ubuntu user, app under /home/ubuntu/workout-logger) — see
+# ops/scripts/backup-workout-logger.sh's header comment for why this
+# differs from docs/PRODUCTION_DEPLOYMENT.md's original /opt +
+# dedicated-service-account plan.
 [Unit]
 Description=Workout Programmer SQLite backup
 After=network.target
 
 [Service]
 Type=oneshot
-User=workout
-Group=workout
-Environment=DB_PATH=/var/lib/workout-logger/workout-logger.sqlite
-Environment=BACKUP_DIR=/var/lib/workout-logger/backups
+User=ubuntu
+Group=ubuntu
+Environment=DB_PATH=/home/ubuntu/workout-logger/data/workout-logger.sqlite
+Environment=BACKUP_DIR=/home/ubuntu/workout-logger-backups
 ExecStart=/usr/local/bin/backup-workout-logger.sh

@@ -1,3 +1,16 @@
+> **Note — actual deployment diverged from this plan.** The application
+> was deployed by hand against a simpler layout than the one below: it
+> runs as the ordinary `ubuntu` user (no dedicated `workout` service
+> account), the app lives at `/home/ubuntu/workout-logger`, and SQLite
+> lives under that same directory's `data/` subdirectory (never
+> `/var/lib/workout-logger`). The architecture (Node/Express/SQLite/
+> systemd/Nginx, no Docker, no Postgres) and every "MUST NOT" in this
+> document still hold — only the specific paths/user below differ from
+> what is actually running. See `docs/POST_DEPLOYMENT_COMPLETION_SPEC.md`
+> and `docs/POST_DEPLOYMENT_COMPLETION_REPORT.md` for the real
+> deployment's current, accurate operational reference. The backup
+> script/unit under `ops/` have been updated to match the real paths.
+
 # Production Deployment Runbook — Oracle Cloud Always Free VM
 
 This is the exact, ordered runbook for deploying `workout-logger` to an
