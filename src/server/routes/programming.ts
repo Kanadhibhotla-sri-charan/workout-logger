@@ -14,7 +14,6 @@ import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import {
-  assembleAndBuildWorkout,
   assembleWeeklyPlanInput,
   buildWeeklyProgrammingPlan,
   programmingWeekStart,
@@ -33,6 +32,8 @@ import { UsersRepo } from '../../repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../../repositories/outsideBlueprintExercisesRepo.js';
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
+import type { PersistedWeekProgram } from '../../repositories/weeklyProgramRepo.js';
+import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } from '../../engine/weekProgramReconciliation.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 
 export const programmingRouter = Router();
@@ -114,6 +115,30 @@ function enrichPlannedWork<T extends { exercise_id: BlueprintId; target_type: Ta
   return { ...work, exercise_name: resolveExerciseName(work.exercise_id), target_name: resolveTargetName(work.target_type, work.target_id), ...goalInfo };
 }
 
+/** Final Current-Week Reconciliation Fix §17: /today's `exercises` field
+ * has always used `target_sets`/`target_reps_min`/`target_reps_max`/
+ * `target_rir_min`/`target_rir_max` (workoutBuilder.ts's
+ * `PlannedExercise` field names), while /week's `plannedWork` uses
+ * `sets`/`reps_min`/`reps_max`/`rir_min`/`rir_max`
+ * (`PlannedWorkItem`'s) — both describe the identical prescription, a
+ * pre-existing naming difference between two independently-built
+ * response shapes. Now that /today reads the SAME persisted
+ * `plannedWork` /week uses (spec §17), this translates only the field
+ * names for /today's response, preserving the exact contract
+ * `public/logger.html` already depends on (`g.target_sets`,
+ * `g.target_reps_min`, `g.target_reps_max`) — /week's own shape is
+ * never touched. */
+function toTodayExerciseShape(item: ReturnType<typeof enrichPlannedWork>) {
+  const { sets, reps_min, reps_max, rir_min, rir_max, ...rest } = item as unknown as {
+    sets: number;
+    reps_min: number;
+    reps_max: number;
+    rir_min: number;
+    rir_max: number;
+  };
+  return { ...rest, target_sets: sets, target_reps_min: reps_min, target_reps_max: reps_max, target_rir_min: rir_min, target_rir_max: rir_max };
+}
+
 function defaultBudgetMinutes(database: Database.Database): number {
   const user = new UsersRepo(database).getOrCreateDefault();
   const profile = new TrainingProfileRepo(database).get(user.id);
@@ -142,51 +167,91 @@ function effectiveWeekActivity(
   return applyWeekOverrides(profile.training_days, profile.other_activity_schedule, overrides);
 }
 
-/** GET /api/programming/week's full response body — extracted so the new
- * PUT .../week/days/:day/activity route (Current-Week Reconciliation Fix
- * §11) can return the identical "updated day/week state" after writing
- * an override, in one round trip, without duplicating this shaping
- * logic. */
-function buildWeekResponse(database: Database.Database, date: string, budgetMinutes: number) {
-  const input = assembleWeeklyPlanInput(database, date, budgetMinutes);
+/** Final Current-Week Reconciliation Fix §4/§20: runs the UNMODIFIED
+ * planner exactly once and shapes every one of the week's 7 days into
+ * the input `weekProgramReconciliation.ts` needs to persist/diff them —
+ * this is the ONLY function in this file that calls the planner. Every
+ * other read path (a `/week` or `/today` call against an
+ * already-persisted week) never reaches this function at all (spec
+ * §18: a plain GET must not blindly regenerate). */
+function computeFreshWeek(database: Database.Database, weekStart: string, budgetMinutes: number): { days: FreshDayInput[]; aggregates: { activeGoals: unknown; targetAllocations: unknown } } {
+  const input = assembleWeeklyPlanInput(database, weekStart, budgetMinutes);
   const plan = buildWeeklyProgrammingPlan(input);
 
   const targetGoalMap = new Map<string, { goal_id: string; is_specialization: boolean }>(
     input.targets.map((t: TargetBuildContext) => [targetKey(t), { goal_id: t.goal_id, is_specialization: t.is_specialization }])
   );
   const labels = goalLabels(database);
-
-  const user = new UsersRepo(database).getOrCreateDefault();
-  const profile = new TrainingProfileRepo(database).get(user.id);
-  const effective = effectiveWeekActivity(database, profile, plan.weekStart);
-
   const sessionsByDate = new Map(plan.sessions.map((s) => [s.date, s]));
-  const days = WEEKDAYS.map((weekday, i) => {
+
+  const days: FreshDayInput[] = WEEKDAYS.map((weekday, i) => {
     const dayDate = addDays(plan.weekStart, i);
-    // Blueprint Picker/Daily Activity spec §6-§8: the real four-state
-    // activity (gym/badminton/both/unselected), additive alongside the
-    // existing `type` field (gym/badminton/rest/other) that other code
-    // already depends on — `type` never changes meaning here. This is
-    // what lets the UI show "Both" for a day that already has both a
-    // real gym session (`type: 'gym'`) AND a recurring badminton entry,
-    // which `type` alone cannot represent. Both are now derived from
-    // the EFFECTIVE (current-week-override-applied) schedule, so a
-    // week-scoped change is reflected here immediately.
-    const activity = deriveDailyActivity(weekday, effective.trainingDays, effective.otherActivitySchedule);
     const gymSession = sessionsByDate.get(dayDate);
-    if (gymSession) {
+    if (!gymSession) {
+      return { dayIndex: i, date: dayDate, hasGymComponent: false, sessionPurpose: null, snapshot: { plannedWork: [] } };
+    }
+    const plannedWork = gymSession.plannedWork.map((w) => enrichPlannedWork(w, targetGoalMap, labels));
+    return {
+      dayIndex: i,
+      date: dayDate,
+      hasGymComponent: true,
+      sessionPurpose: gymSession.sessionPurpose,
+      snapshot: {
+        sessionPurpose: gymSession.sessionPurpose,
+        availableMinutes: gymSession.availableMinutes,
+        estimatedMinutes: gymSession.estimatedMinutes,
+        plannedWork,
+        skipped: gymSession.skipped,
+        badmintonContext: gymSession.badmintonContext,
+        resourceAllocation: gymSession.resourceAllocation,
+      },
+    };
+  });
+
+  return {
+    days,
+    aggregates: {
+      activeGoals: plan.sessions[0]?.activeGoals ?? [],
+      targetAllocations: plan.targetAllocations.map((a) => enrichAllocation(a, targetGoalMap, labels)),
+    },
+  };
+}
+
+/** Builds every one of the week's 7 day objects PURELY from the
+ * persisted program — gym/both days from their persisted snapshot, all
+ * days' `type`/`activity`/`status` derived live (cheap — no planner
+ * call, and these must always reflect the CURRENT profile/override/
+ * logged-session state, never a frozen-at-generation-time value). This
+ * is the read path a plain `GET /week` or `GET /today` actually uses. */
+function renderWeekDays(database: Database.Database, weekStart: string, program: PersistedWeekProgram, profile: TrainingProfile | undefined) {
+  const effective = effectiveWeekActivity(database, profile, weekStart);
+  return WEEKDAYS.map((weekday, i) => {
+    const dayDate = addDays(weekStart, i);
+    const activity = deriveDailyActivity(weekday, effective.trainingDays, effective.otherActivitySchedule);
+    const persisted = program.sessions.find((s) => s.day_index === i);
+    if (persisted) {
+      const snap = persisted.snapshot as {
+        sessionPurpose: unknown;
+        availableMinutes: number;
+        estimatedMinutes: number;
+        plannedWork: ReturnType<typeof enrichPlannedWork>[];
+        skipped: unknown;
+        badmintonContext: unknown;
+        resourceAllocation: unknown;
+      };
       return {
         date: dayDate,
         weekday,
         type: 'gym' as const,
         activity,
         status: realSessionStatus(database, dayDate),
-        sessionPurpose: gymSession.sessionPurpose,
-        availableMinutes: gymSession.availableMinutes,
-        estimatedMinutes: gymSession.estimatedMinutes,
-        plannedWork: gymSession.plannedWork.map((w) => enrichPlannedWork(w, targetGoalMap, labels)),
-        skipped: gymSession.skipped,
-        badmintonContext: gymSession.badmintonContext,
+        sessionPurpose: snap.sessionPurpose,
+        availableMinutes: snap.availableMinutes,
+        estimatedMinutes: snap.estimatedMinutes,
+        plannedWork: snap.plannedWork,
+        skipped: snap.skipped,
+        badmintonContext: snap.badmintonContext,
+        resourceAllocation: snap.resourceAllocation,
       };
     }
     return {
@@ -201,36 +266,49 @@ function buildWeekResponse(database: Database.Database, date: string, budgetMinu
       plannedWork: [] as ReturnType<typeof enrichPlannedWork>[],
       skipped: [],
       badmintonContext: null,
+      resourceAllocation: [],
     };
   });
+}
 
+function buildWeekResponse(database: Database.Database, weekStart: string, program: PersistedWeekProgram, profile: TrainingProfile | undefined) {
   return {
-    weekStart: plan.weekStart,
-    weekEnd: addDays(plan.weekStart, 6),
-    days,
-    targetAllocations: plan.targetAllocations.map((a) => enrichAllocation(a, targetGoalMap, labels)),
-    activeGoals: plan.sessions[0]?.activeGoals ?? [],
+    weekStart,
+    weekEnd: addDays(weekStart, 6),
+    days: renderWeekDays(database, weekStart, program, profile),
+    targetAllocations: program.target_allocations ?? [],
+    activeGoals: program.active_goals ?? [],
   };
 }
 
 // GET /api/programming/week — the complete real weekly plan (spec §47/§48).
 // One call renders the whole week; never seven separate programming
-// requests (spec §49).
+// requests (spec §49). Final Current-Week Reconciliation Fix §18: reads
+// the PERSISTED plan — only ever calls the planner (via
+// ensureWeekProgramGenerated -> computeFreshWeek) the first time this
+// specific week has ever been requested; every later call is a pure
+// read, so repeated GETs never regenerate/change anything by themselves.
 programmingRouter.get('/week', (req, res) => {
   const database = db(req);
   const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
   const budgetMinutes = defaultBudgetMinutes(database);
-  res.json(buildWeekResponse(database, date, budgetMinutes));
+  const weekStart = programmingWeekStart(date);
+
+  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes));
+
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const profile = new TrainingProfileRepo(database).get(user.id);
+  res.json(buildWeekResponse(database, weekStart, program, profile));
 });
 
 // PUT /api/programming/week/days/:day/activity — Current-Week
-// Reconciliation Fix §11: change ONE day's activity for the CURRENT week
-// only. Never touches the recurring TrainingProfile (see
-// WeekActivityOverridesRepo's own doc comment) — "reconciliation" is
-// automatic because /week and /today always recompute live from
-// (profile + this week's overrides) on every read (see
-// effectiveWeekActivity/assembleWeeklyPlanInput), so the response below
-// already reflects it in one round trip.
+// Reconciliation Fix §11/§19: change ONE day's activity for the CURRENT
+// week only. Never touches the recurring TrainingProfile (see
+// WeekActivityOverridesRepo's own doc comment). Unlike a plain GET, this
+// ALWAYS recomputes via the planner (it has to, to know what changed)
+// and then reconciles — writing only the days that actually need to
+// change (spec §6/§20), never blindly replacing the whole persisted
+// week.
 programmingRouter.put('/week/days/:day/activity', (req, res) => {
   const database = db(req);
   const day = req.params.day;
@@ -253,79 +331,63 @@ programmingRouter.put('/week/days/:day/activity', (req, res) => {
   new WeekActivityOverridesRepo(database).setOverride(profile.id, weekStart, day as Weekday, activity as DailyActivity);
 
   const budgetMinutes = defaultBudgetMinutes(database);
-  res.json(buildWeekResponse(database, date, budgetMinutes));
+  const { days, aggregates } = computeFreshWeek(database, weekStart, budgetMinutes);
+  const program = reconcileWeekProgram(database, weekStart, days, aggregates);
+
+  res.json(buildWeekResponse(database, weekStart, program, profile));
 });
 
-// GET /api/programming/today — today's own real slice of the SAME weekly
-// plan (spec §47/§58) — via assembleAndBuildWorkout, the EXISTING
-// single-day production path (never a second builder). Deliberately a
-// separate code path from /week's buildWeeklyProgrammingPlan call, so
-// the two genuinely prove agreement rather than trivially matching a
-// single shared in-memory object sliced twice.
+// GET /api/programming/today — today's own real slice of the SAME
+// PERSISTED weekly plan /week reads (spec §17/§47/§58): built from the
+// identical `buildWeekResponse`/`renderWeekDays` this file's /week route
+// uses, sliced to `date`'s own day — never a second, independently
+// reconstructed computation, so the two can never disagree (spec §17's
+// explicit "must not independently reconstruct a contradictory
+// version"). Like /week, this only ever calls the planner
+// (ensureWeekProgramGenerated -> computeFreshWeek) the first time this
+// week has been requested; a normal read is a pure, cheap lookup.
 programmingRouter.get('/today', (req, res) => {
   const database = db(req);
   const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
   const budgetMinutes = defaultBudgetMinutes(database);
+  const weekStart = programmingWeekStart(date);
 
-  const result = assembleAndBuildWorkout(database, date, budgetMinutes);
+  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes));
+
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const profile = new TrainingProfileRepo(database).get(user.id);
+  const week = buildWeekResponse(database, weekStart, program, profile);
+  const today = week.days.find((d) => d.date === date)!;
+
   const status = realSessionStatus(database, date);
   const loggedSessions = new WorkoutSessionsRepo(database).listSessionsByDate(date);
-
-  // Final Surgical Fix Pass §2/§3: gym > activity > rest, using the exact
-  // same canonical sources /week already uses — `training_days` decides
-  // whether this weekday is a real gym day at all (identical to the
-  // condition that puts a session into buildWeeklyProgrammingPlan's own
-  // `sessions[]`, so this can never disagree with /week), and
-  // `other_activity_schedule` (via the shared `nonGymDayType` helper)
-  // supplies the real configured non-gym activity otherwise. Never a
-  // second, Today-only activity configuration, and never a hard-coded
-  // "Saturday = badminton". Current-Week Reconciliation Fix §5: now
-  // reads the EFFECTIVE (this-week-override-applied) schedule — the
-  // exact same one assembleAndBuildWorkout itself just used internally
-  // to decide whether `date` is a real gym day — so Today can never
-  // disagree with a current-week-only change either.
-  const profileForType = new TrainingProfileRepo(database).get(new UsersRepo(database).getOrCreateDefault().id);
-  const effectiveForType = effectiveWeekActivity(database, profileForType, programmingWeekStart(date));
-  const isGymDay = effectiveForType.trainingDays.includes(result.weekday);
-  const sessionType = isGymDay ? 'gym' : nonGymDayType(result.weekday, effectiveForType.otherActivitySchedule);
-  // Additive alongside sessionType, for the same reason as /week's
-  // `activity` field — lets a "Both" day surface its badminton component
-  // even though sessionType/exercises are gym-only (spec §8: a Both day's
-  // gym programming already accounts for badminton internally; this only
-  // makes that visible).
-  const activity = deriveDailyActivity(result.weekday, effectiveForType.trainingDays, effectiveForType.otherActivitySchedule);
 
   // Real active_goals only carries goal_id/priority/trend (the engine
   // has no reason to track goal_type at that layer) — resolved here
   // straight from the real Goal row so a caller (e.g. "Start workout")
   // can build a real, correctly-typed GoalContext without guessing.
   const goalsRepo = new GoalsRepo(database);
-  const activeGoals = result.active_goals.map((g) => ({ ...g, goal_type: goalsRepo.get(g.goal_id)?.goal_type ?? 'aesthetic' }));
-
-  // Same real per-target goal mapping /week uses, for the identical
-  // "Goal 1 — Mid Chest" style per-exercise labeling (§65) — a second,
-  // harmless read (assembleWeeklyPlanInput is pure/deterministic against
-  // the same unchanged DB state within this one request), never a
-  // second inference mechanism.
-  const goalInput = assembleWeeklyPlanInput(database, date, budgetMinutes);
-  const targetGoalMap: TargetGoalMap = new Map(
-    goalInput.targets.map((t: TargetBuildContext) => [targetKey(t), { goal_id: t.goal_id, is_specialization: t.is_specialization }])
-  );
-  const labels = goalLabels(database);
+  const activeGoals = (week.activeGoals as Array<{ goal_id: string; priority: number; trend: unknown }>).map((g) => ({
+    ...g,
+    goal_type: goalsRepo.get(g.goal_id)?.goal_type ?? 'aesthetic',
+  }));
 
   res.json({
-    date: result.date,
-    weekday: result.weekday,
-    sessionPurpose: result.session_purpose,
-    sessionType,
-    activity,
+    date: today.date,
+    weekday: today.weekday,
+    sessionPurpose: today.sessionPurpose,
+    sessionType: today.type,
+    activity: today.activity,
     status: loggedSessions.length > 0 ? status : 'planned',
-    exercises: result.exercises.map((e) => enrichPlannedWork(e, targetGoalMap, labels)),
-    estimatedMinutes: result.estimated_minutes,
-    skippedTargets: result.skipped_targets,
+    exercises: today.plannedWork.map(toTodayExerciseShape),
+    estimatedMinutes: today.estimatedMinutes,
+    skippedTargets: today.skipped,
     activeGoals,
-    resourceAllocation: result.resource_allocation,
-    constraints: result.constraints,
+    resourceAllocation: today.resourceAllocation,
+    // Remediation §16's "equipment/time constraints" — trivial inputs,
+    // never derived from exercise selection, so no planner call is
+    // needed to reconstruct this.
+    constraints: { available_equipment: profile?.available_equipment ?? [], budget_minutes: budgetMinutes },
     loggedSessions,
   });
 });

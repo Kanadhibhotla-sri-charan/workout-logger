@@ -181,6 +181,17 @@ CREATE TABLE IF NOT EXISTS outside_blueprint_exercises (
   approved_at TEXT
 );
 
+-- Final Current-Week Reconciliation Fix §5: also doubles as the
+-- persisted store for "this calendar week's actual generated plan" —
+-- one row per (week), found by `start_date` = that week's Monday-
+-- anchored start (src/engine/workoutBuilder.ts's programmingWeekStart).
+-- `active_goals_json`/`target_allocations_json` cache that week's own
+-- week-level summary fields (see WeeklyProgrammingPlan) so a plain read
+-- never needs to re-run the planner — see
+-- src/repositories/weeklyProgramRepo.ts and
+-- src/engine/weekProgramReconciliation.ts. Never used for this purpose
+-- before this fix; the original `draft/active/completed/archived`
+-- Program concept (src/repositories/programsRepo.ts) is unaffected.
 CREATE TABLE IF NOT EXISTS programs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -191,7 +202,9 @@ CREATE TABLE IF NOT EXISTS programs (
   -- Blueprint commit in effect when this Program was created (see
   -- BlueprintAdapter.getManifest()). Set once, never overwritten.
   blueprint_commit TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  active_goals_json TEXT,
+  target_allocations_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS program_goals (
@@ -200,6 +213,16 @@ CREATE TABLE IF NOT EXISTS program_goals (
   PRIMARY KEY (program_id, goal_id)
 );
 
+-- Final Current-Week Reconciliation Fix §5/§6: one row per real gym day
+-- (day_index 0=Monday..6=Sunday) of a persisted week program —
+-- `snapshot_json` holds that day's fully-enriched plan (sessionPurpose,
+-- availableMinutes/estimatedMinutes, plannedWork, skipped,
+-- badmintonContext, resourceAllocation — the exact shape
+-- /api/programming/week already returns per day), so reconciliation can
+-- compare/preserve it without needing program_session_exercises' flat
+-- columns (which cannot hold that rich, nested decision/reasoning
+-- object). A badminton-only or unselected/rest day has NO row here —
+-- there is no gym prescription to persist for it.
 CREATE TABLE IF NOT EXISTS program_sessions (
   id TEXT PRIMARY KEY,
   program_id TEXT NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
@@ -207,7 +230,8 @@ CREATE TABLE IF NOT EXISTS program_sessions (
   name TEXT NOT NULL,
   planned_session_type TEXT NOT NULL,
   notes TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  snapshot_json TEXT
 );
 
 -- exercise_id is a Blueprint exercise id. No foreign key: Blueprint is an
