@@ -47,6 +47,7 @@ import { computeProgression, type ProgressionResult } from './progressionEngine.
 import { applyRecoveryConstraint, type RecentBadmintonSignal, type RecoveryConstraintResult } from './recoveryEngine.js';
 import { allocateResource, type ResourceAllocationEntry } from './resourceAllocation.js';
 import { classifyAestheticTrend, decideVolume, type AestheticProgressTrend, type VolumeDecision } from './volumeEngine.js';
+import { developmentPackageLevelFor, getDevelopmentReference, type DevelopmentReference } from './developmentReferenceEngine.js';
 import { buildTrainingState } from './trainingState.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDetailsRepo.js';
@@ -543,10 +544,21 @@ interface TargetRanking {
  * this target's own data (see buildWorkout's `recoveryByKey` map) — a
  * pure per-target function, so precomputing it ahead of the per-target
  * loop changes nothing about what it returns. */
-function rankTarget(target: TargetBuildContext, startingPointMin: number, recovery: RecoveryConstraintResult): TargetRanking {
+/** Programming Redesign (Step 12) §3-§5: `developmentReference` is this
+ * target's own Efficient-package weekly direct-set reference (only ever
+ * consulted for a non-specialization/non-goal target — a specialization
+ * target already short-circuits to needDeficit=0 below, exactly as
+ * before) — replacing the universal `startingPointMin` (Blueprint's
+ * global weekly_volume.starting_point_sets[0], the same 8 for every
+ * muscle) with this specific muscle's own Blueprint-authored reference.
+ * Falls back to `startingPointMin` when no package reference exists for
+ * this target (e.g. a functional_goal, which Blueprint's development
+ * packages don't cover). */
+function rankTarget(target: TargetBuildContext, startingPointMin: number, recovery: RecoveryConstraintResult, developmentReference: DevelopmentReference | null): TargetRanking {
   const recoveryNeed = recovery.priority_adjustment === 'avoid' ? 2 : recovery.priority_adjustment === 'reduce' ? 1 : 0;
   if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0, recoveryNeed };
-  const needDeficit = Math.max(0, startingPointMin - target.weekly_exposure_units);
+  const threshold = developmentReference?.weekly_direct_set_reference ?? startingPointMin;
+  const needDeficit = Math.max(0, threshold - target.weekly_exposure_units);
   return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit, recoveryNeed };
 }
 
@@ -696,12 +708,25 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     ])
   );
 
+  // Programming Redesign (Step 12) §3-§5: one DevelopmentReference per
+  // target, computed once — Complete level for a specialization
+  // (active-goal) target, Efficient for every other target — reused by
+  // both rankTarget/classification below AND decideVolume further down,
+  // so the two can never read a different reference for the same
+  // target within one run.
+  const developmentReferenceByKey = new Map<string, DevelopmentReference>(
+    input.targets.map((target) => [
+      targetKey(target),
+      getDevelopmentReference(target.target_type, target.target_id, developmentPackageLevelFor(target.is_specialization)),
+    ])
+  );
+
   // Fixed processing order — Goal 1's own targets, then Goal 2's, then
   // every normal_development target, then every maintenance target,
   // using this week's real BASELINE exposure (never re-sorted mid-run:
   // §7's dynamic exposure update changes how MUCH work a later target
   // gets, never WHEN it's considered — a stable, non-cascading design).
-  const rankedTargets = input.targets.map((t) => rankTarget(t, starting_point_sets[0], recoveryByKey.get(targetKey(t))!)).sort(compareRankings);
+  const rankedTargets = input.targets.map((t) => rankTarget(t, starting_point_sets[0], recoveryByKey.get(targetKey(t))!, developmentReferenceByKey.get(targetKey(t)) ?? null)).sort(compareRankings);
   const targetRankIndex = new Map<string, number>(rankedTargets.map((r, i) => [targetKey(r.target), i]));
   // Real per-target exercise count never gets anywhere near this many
   // (bounded by the target's own real candidate pool — Blueprint
@@ -724,9 +749,17 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // placed — never the static snapshot alone. Specialization targets
     // are exempt (they always get their own dedicated direct work,
     // exactly as rankTarget's own needDeficit=0 already establishes).
+    const developmentReference = developmentReferenceByKey.get(tKey) ?? null;
+    // Programming Redesign (Step 12) §3-§5: the SAME per-target
+    // reference rankTarget already used for this target above (its own
+    // Efficient package weekly reference, falling back to Blueprint's
+    // universal starting_point_sets[0] only when no package exists) —
+    // never a second, independently-derived threshold that could drift
+    // from the one that already decided this target's rank.
+    const developmentThreshold = developmentReference?.weekly_direct_set_reference ?? starting_point_sets[0];
     const plannedSoFar = plannedExposureByTarget.get(tKey) ?? 0;
     const effectiveExposureUnits = target.weekly_exposure_units + plannedSoFar;
-    const liveNeedDeficit = target.is_specialization ? 0 : Math.max(0, starting_point_sets[0] - effectiveExposureUnits);
+    const liveNeedDeficit = target.is_specialization ? 0 : Math.max(0, developmentThreshold - effectiveExposureUnits);
     const classification: TargetClassification = target.is_specialization ? 'specialization' : liveNeedDeficit > 0 ? 'normal_development' : 'maintenance';
 
     classificationByTarget.set(tKey, classification);
@@ -807,6 +840,12 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // the correct, honest outcome here for a stagnant target, not a
       // gap to paper over.
       introspection_confirmed_no_other_explanation: false,
+      // Programming Redesign (Step 12) §3-§5: Complete package for a
+      // specialization (active-goal) target, Efficient otherwise — the
+      // same reference already used above for this target's own
+      // classification, so decideVolume's starting-point/ceiling and
+      // rankTarget's/classification's threshold can never disagree.
+      development_reference: developmentReference,
     });
     log.push(`${target.target_type} "${target.target_id}": ${volumeDecision.reasoning}`);
 
@@ -825,7 +864,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         target_type: target.target_type,
         target_id: target.target_id,
         classification,
-        reason: `Already adequately exposed via compound work (${effectiveExposureUnits.toFixed(2)} real+planned exposure_units this week, at/above Blueprint's own ${starting_point_sets[0]}-set starting threshold) — no redundant direct work added merely because direct sets = 0 (spec §7/§8).`,
+        reason: `Already adequately exposed via compound work (${effectiveExposureUnits.toFixed(2)} real+planned exposure_units this week, at/above this target's own ${developmentThreshold}-set ${developmentReference?.weekly_direct_set_reference != null ? `Blueprint ${developmentReference.level} package` : 'Blueprint universal starting'} threshold) — no redundant direct work added merely because direct sets = 0 (spec §7/§8).`,
         decision: makeSkipDecision({ volume_decision: volumeDecision }),
       });
       continue;

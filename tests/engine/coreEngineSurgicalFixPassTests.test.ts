@@ -201,13 +201,16 @@ describe('Tests 5-8 — Fix C: 0/1/multiple exercises governed by real need and 
   });
 
   it('Test 6: ZERO exercises — real compound/baseline exposure already at Blueprint\'s own starting threshold means no redundant direct work is added', () => {
-    // front-delt's own as-of-weekStart real exposure already sits at
-    // Blueprint's own starting_point_sets[0] (8) — this represents real
+    // Programming Redesign (Step 12) §3-§5: front-delt's own real
+    // Blueprint Efficient package reference (shoulders-efficient: 2
+    // sessions/week x (3+2+2) sets = 14/week), not the old universal
+    // starting_point_sets[0] (8) — front-delt's own as-of-weekStart real
+    // exposure already sits at that reference, representing real
     // logged/planned exposure from elsewhere in the week, not a value
     // this pipeline invents. current_weekly_primary_sets stays 0 (no
     // direct sets of its own), which is exactly the condition the
     // "already adequately exposed" gate reads.
-    const target = normalDevTarget('front-delt', { current_weekly_primary_sets: 0, weekly_exposure_units: 8 });
+    const target = normalDevTarget('front-delt', { current_weekly_primary_sets: 0, weekly_exposure_units: 14 });
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [target] }));
 
     // Zero exercises anywhere in the real week for this target.
@@ -290,15 +293,17 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
     // to flat-barbell-bench-press only (equipment excludes cable-fly's
     // 'cable'), with enough real desired weekly volume that its own
     // real 0.33/set secondary contribution to front-delt genuinely
-    // crosses Blueprint's own starting_point_sets[0]=8 threshold: 25
-    // sets * 0.33 = 8.25 >= 8.
+    // crosses front-delt's own real Blueprint Efficient package
+    // reference (Programming Redesign Step 12 §3-§5: shoulders-
+    // efficient, 14/week — not the old universal starting_point_sets[0]
+    // of 8): 50 sets * 0.33 = 16.5 >= 14.
     const midPec = normalDevTarget('mid-pec', {
       is_specialization: true,
       goal_id: 'goal_1',
       goal_priority: 1,
       tier: 'primary',
-      current_weekly_primary_sets: 25,
-      weekly_exposure_units: 25,
+      current_weekly_primary_sets: 50,
+      weekly_exposure_units: 50,
     });
     const frontDelt = normalDevTarget('front-delt', { current_weekly_primary_sets: 0, weekly_exposure_units: 0 });
     const plan = buildWeeklyProgrammingPlan(
@@ -311,9 +316,9 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
     expect(plan.sessions.every((s) => s.plannedWork.every((w) => w.target_id !== 'front-delt'))).toBe(true);
     const skip = plan.sessions.flatMap((s) => s.skipped).find((sk) => sk.target_id === 'front-delt');
     expect(skip).toBeDefined();
-    // The reasoning cites the real computed exposure figure (25 sets *
-    // 0.33/set = 8.25), never an invented "1.32 sets" style conversion.
-    expect(skip!.reason).toContain('8.25');
+    // The reasoning cites the real computed exposure figure (50 sets *
+    // 0.33/set = 16.5), never an invented "1.32 sets" style conversion.
+    expect(skip!.reason).toContain('16.5');
   });
 });
 

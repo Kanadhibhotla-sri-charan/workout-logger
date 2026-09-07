@@ -80,6 +80,11 @@ function logBenchPressSession(date: string) {
 function logHeavyQuadsSession(date: string) {
   const sessionsRepo = new WorkoutSessionsRepo(db);
   const session = sessionsRepo.createSession({ date, session_type: 'gym', status: 'completed' });
+  // Programming Redesign (Step 12) §3-§5: quads' own real Blueprint
+  // Efficient package reference is 16 sets/week (2 sessions/week x
+  // (3+3+2) sets) — not the old universal starting_point_sets[0] of 8
+  // — so this fixture logs 18 real sets, comfortably above that
+  // muscle-specific threshold, to genuinely read as 'maintenance'.
   sessionsRepo.addExercisePerformance(session.session_id, {
     exercise_id: 'back-squat',
     order: 1,
@@ -93,6 +98,16 @@ function logHeavyQuadsSession(date: string) {
       { set_number: 6, weight: 85, reps: 8, completed: true },
       { set_number: 7, weight: 85, reps: 8, completed: true },
       { set_number: 8, weight: 85, reps: 6, completed: true },
+      { set_number: 9, weight: 85, reps: 6, completed: true },
+      { set_number: 10, weight: 85, reps: 6, completed: true },
+      { set_number: 11, weight: 85, reps: 6, completed: true },
+      { set_number: 12, weight: 85, reps: 6, completed: true },
+      { set_number: 13, weight: 85, reps: 6, completed: true },
+      { set_number: 14, weight: 85, reps: 6, completed: true },
+      { set_number: 15, weight: 85, reps: 6, completed: true },
+      { set_number: 16, weight: 85, reps: 6, completed: true },
+      { set_number: 17, weight: 85, reps: 6, completed: true },
+      { set_number: 18, weight: 85, reps: 6, completed: true },
     ],
   });
 }

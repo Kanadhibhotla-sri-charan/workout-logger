@@ -30,6 +30,7 @@ import type { BlueprintId } from '../contracts/types.js';
 import type { TargetType } from './goalResolver.js';
 import { PROGRESSION_INCREMENTS } from './config.js';
 import { daysBetween } from './dateMath.js';
+import type { DevelopmentReference } from './developmentReferenceEngine.js';
 
 export type AestheticProgressTrend = 'improving' | 'stagnant' | 'declining' | 'insufficient_data';
 
@@ -83,6 +84,19 @@ export interface VolumeDecisionInput {
    * stagnation alone without this being explicitly asserted true
    * (§11, §25: "do not automatically increase volume"). */
   introspection_confirmed_no_other_explanation?: boolean;
+  /** Programming Redesign (Step 12) §3-§5: this target's own Blueprint
+   * development-package weekly direct-set reference (Complete for an
+   * active-goal/specialization target, Efficient otherwise — see
+   * developmentReferenceEngine.ts). When present with a non-null
+   * `weekly_direct_set_reference`, this REPLACES the universal
+   * global-principles bands below as both the initial build-up target
+   * and the ceiling on further increases — a muscle-specific reference
+   * point, never a rigid quota (§1 rules #7-#8: still just informs the
+   * decision, never dictates it). Null/absent falls back to the
+   * pre-existing universal bands unchanged (e.g. every functional_goal,
+   * which has no Blueprint development package at all).
+   */
+  development_reference?: DevelopmentReference | null;
 }
 
 export interface VolumeDecision {
@@ -90,7 +104,7 @@ export interface VolumeDecision {
   target_id: BlueprintId;
   action: VolumeAction;
   recommended_weekly_primary_sets: number;
-  blueprint_reference_range: { min: number; max: number; label: 'starting_point' | 'practical_range' | 'higher_recovery_dependent' };
+  blueprint_reference_range: { min: number; max: number; label: 'starting_point' | 'practical_range' | 'higher_recovery_dependent' | 'blueprint_package_reference' };
   /** Populated only when action === 'introspect_needed' — the exact
    * §11 (stagnation) or §12 (decline/recovery) checklist item names,
    * for a caller/UI to walk and then set
@@ -124,7 +138,19 @@ const DECLINE_CHECKLIST = [
   'repeated performance decline',
 ];
 
-function referenceRangeFor(currentSets: number): VolumeDecision['blueprint_reference_range'] {
+/** Programming Redesign (Step 12) §3-§5: when `developmentReference`
+ * carries a real, target-specific weekly_direct_set_reference, THAT
+ * number (this exact muscle's own Blueprint package data) is the
+ * reference range — replacing the universal starting_point/
+ * practical_range/higher_recovery_dependent bands, which are the same
+ * three numbers for every muscle regardless of which one it is. Falls
+ * back to those universal bands unchanged when no package reference
+ * exists for this target (e.g. a functional_goal). */
+function referenceRangeFor(currentSets: number, developmentReference?: DevelopmentReference | null): VolumeDecision['blueprint_reference_range'] {
+  if (developmentReference?.weekly_direct_set_reference != null) {
+    const r = developmentReference.weekly_direct_set_reference;
+    return { min: r, max: r, label: 'blueprint_package_reference' };
+  }
   const { starting_point_sets, practical_range_sets, higher_recovery_dependent_sets } = BlueprintAdapter.getGlobalPrinciples().weekly_volume;
   if (currentSets < practical_range_sets[0]) {
     return { min: starting_point_sets[0], max: starting_point_sets[1], label: 'starting_point' };
@@ -146,23 +172,33 @@ function referenceRangeFor(currentSets: number): VolumeDecision['blueprint_refer
  * needs data this module doesn't have.
  */
 export function decideVolume(input: VolumeDecisionInput): VolumeDecision {
-  const referenceRange = referenceRangeFor(input.current_weekly_primary_sets);
+  const referenceRange = referenceRangeFor(input.current_weekly_primary_sets, input.development_reference);
   const { starting_point_sets } = BlueprintAdapter.getGlobalPrinciples().weekly_volume;
 
   // §9: starting volume. No existing direct work on this target yet —
   // build up gradually to the conservative low end, never jump to the
-  // upper range, regardless of goal priority (§2.2).
+  // upper range, regardless of goal priority (§2.2). Programming
+  // Redesign (Step 12) §3: when this target has its own Blueprint
+  // package reference, the starting point is never higher than that
+  // muscle's own reference either — never Blueprint's universal number
+  // for a muscle whose own package recommends starting lower.
   if (input.current_weekly_primary_sets === 0) {
+    const packageRef = input.development_reference?.weekly_direct_set_reference;
+    const startingSets = packageRef != null ? Math.min(starting_point_sets[0], packageRef) : starting_point_sets[0];
     return {
       target_type: input.target_type,
       target_id: input.target_id,
       action: 'increase',
-      recommended_weekly_primary_sets: starting_point_sets[0],
+      recommended_weekly_primary_sets: startingSets,
       blueprint_reference_range: referenceRange,
       introspection_checklist: null,
       reasoning:
-        `No existing direct weekly volume for this target — starting at Blueprint's conservative starting point ` +
-        `(${starting_point_sets[0]} sets/week), never jumping to the upper range regardless of goal priority (spec §9).`,
+        packageRef != null
+          ? `No existing direct weekly volume for this target — starting at ${startingSets} sets/week (the lower of Blueprint's ` +
+            `conservative universal starting point and this target's own ${input.development_reference!.level} package reference of ` +
+            `${packageRef} sets/week), never jumping to the upper range regardless of goal priority (spec §9).`
+          : `No existing direct weekly volume for this target — starting at Blueprint's conservative starting point ` +
+            `(${starting_point_sets[0]} sets/week), never jumping to the upper range regardless of goal priority (spec §9).`,
     };
   }
 

@@ -131,20 +131,27 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
     }
     // 2 sessions x 4 sets x 0.33 secondary = 2.64 exposure_units for
     // triceps/front-delt — real, substantial compound exposure, well
-    // above zero but still likely below Blueprint's own conservative
-    // starting_point_sets threshold, so classification (not a hard
-    // skip) is what actually reflects this — verified structurally:
-    const result = assembleAndBuildWorkout(db, THURSDAY, 240);
-    const tricepsPlan = result.exercises.find((e) => e.target_id === 'triceps');
+    // above zero. Programming Redesign (Step 12) §3-§5: triceps' own
+    // real Blueprint Efficient package reference (14/week) is now the
+    // threshold that decides classification, not the old flat universal
+    // 8 — with real+planned exposure well below that reference, triceps
+    // now genuinely needs (reduced, exposure-aware) direct work, so it
+    // may land as programmed exercise work on WHICHEVER real gym day of
+    // the week is actually compatible with it (a Push/Upper day), never
+    // necessarily today's (Thursday's Legs day) own slice — so this
+    // checks the whole real week, not one single-day slice, for
+    // wherever triceps' decision actually landed.
+    const foundOnAnyDay = [MONDAY, TUESDAY, THURSDAY, FRIDAY].map((date) => assembleAndBuildWorkout(db, date, 90));
+    const tricepsPlan = foundOnAnyDay.flatMap((r) => r.exercises).find((e) => e.target_id === 'triceps');
     if (tricepsPlan) {
-      // If triceps still gets direct work, its own decision object must
-      // show the real accumulated secondary exposure it was weighed
-      // against — never a target that "looks like" it has zero
-      // exposure when 2.64 units of real compound work already exist.
+      // If triceps gets direct work, its own decision object must show
+      // the real accumulated secondary exposure it was weighed against
+      // — never a target that "looks like" it has zero exposure when
+      // 2.64 units of real compound work already exist.
       expect(tricepsPlan.decision.weekly_exposure.secondary_sets).toBeGreaterThan(0);
       expect(tricepsPlan.decision.weekly_exposure.exposure_units).toBeGreaterThan(0);
     }
-    const tricepsSkip = result.skipped_targets.find((s) => s.target_id === 'triceps');
+    const tricepsSkip = foundOnAnyDay.flatMap((r) => r.skipped_targets).find((s) => s.target_id === 'triceps');
     if (tricepsSkip) {
       expect(tricepsSkip.decision.weekly_exposure.secondary_sets).toBeGreaterThan(0);
     }
@@ -256,14 +263,17 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
     setupProfile(FULL_EQUIPMENT, ['monday', 'tuesday', 'thursday', 'friday']);
     const sessionsRepo = new WorkoutSessionsRepo(db);
     const session = sessionsRepo.createSession({ date: TUESDAY, session_type: 'gym', status: 'completed' });
-    // Blueprint's own starting_point_sets minimum is real (verified
-    // elsewhere as 8) — 10 direct sets this week is comfortably above
-    // it, so quads should read as adequately covered, not under-trained.
+    // Programming Redesign (Step 12) §3-§5: quads' own Blueprint
+    // Efficient package reference (verified elsewhere as 16 sets/week —
+    // 2 sessions/week x (3+3+2) sets), not the old universal 8, is now
+    // the real threshold — 20 direct sets this week is comfortably
+    // above it, so quads should read as adequately covered, not
+    // under-trained.
     sessionsRepo.addExercisePerformance(session.session_id, {
       exercise_id: 'back-squat',
       order: 1,
       role: 'primary',
-      sets: Array.from({ length: 10 }, (_, i) => ({ set_number: i + 1, weight: 80, reps: 8, completed: true })),
+      sets: Array.from({ length: 20 }, (_, i) => ({ set_number: i + 1, weight: 80, reps: 8, completed: true })),
     });
 
     const result = assembleAndBuildWorkout(db, THURSDAY, 240);
