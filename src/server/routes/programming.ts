@@ -139,7 +139,7 @@ function toTodayExerciseShape(item: ReturnType<typeof enrichPlannedWork>) {
   return { ...rest, target_sets: sets, target_reps_min: reps_min, target_reps_max: reps_max, target_rir_min: rir_min, target_rir_max: rir_max };
 }
 
-function defaultBudgetMinutes(database: Database.Database): number {
+export function defaultBudgetMinutes(database: Database.Database): number {
   const user = new UsersRepo(database).getOrCreateDefault();
   const profile = new TrainingProfileRepo(database).get(user.id);
   return profile?.default_session_duration_minutes ?? 60;
@@ -174,7 +174,7 @@ function effectiveWeekActivity(
  * other read path (a `/week` or `/today` call against an
  * already-persisted week) never reaches this function at all (spec
  * §18: a plain GET must not blindly regenerate). */
-function computeFreshWeek(database: Database.Database, weekStart: string, budgetMinutes: number): { days: FreshDayInput[]; aggregates: { activeGoals: unknown; targetAllocations: unknown } } {
+export function computeFreshWeek(database: Database.Database, weekStart: string, budgetMinutes: number): { days: FreshDayInput[]; aggregates: { activeGoals: unknown; targetAllocations: unknown } } {
   const input = assembleWeeklyPlanInput(database, weekStart, budgetMinutes);
   const plan = buildWeeklyProgrammingPlan(input);
 
@@ -332,7 +332,7 @@ programmingRouter.put('/week/days/:day/activity', (req, res) => {
 
   const budgetMinutes = defaultBudgetMinutes(database);
   const { days, aggregates } = computeFreshWeek(database, weekStart, budgetMinutes);
-  const program = reconcileWeekProgram(database, weekStart, days, aggregates);
+  const program = reconcileWeekProgram(database, weekStart, days, aggregates, { kind: 'activity_override', dayIndex: WEEKDAYS.indexOf(day as Weekday) });
 
   res.json(buildWeekResponse(database, weekStart, program, profile));
 });
