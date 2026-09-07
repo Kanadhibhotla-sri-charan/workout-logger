@@ -299,3 +299,49 @@ CREATE INDEX IF NOT EXISTS idx_goal_events_goal ON goal_events(goal_id);
 CREATE INDEX IF NOT EXISTS idx_aesthetic_assessments_goal ON aesthetic_assessments(goal_id);
 CREATE INDEX IF NOT EXISTS idx_measurements_goal ON measurements(goal_id);
 CREATE INDEX IF NOT EXISTS idx_measurements_date ON measurements(date);
+
+-- Programming Redesign (Step 12) §10-§11: longitudinal goal-phase state
+-- — deliberately separate from workout_sessions.program_phase (spec
+-- rule #28: "Goal-phase state must remain separate from
+-- workout_sessions.program_phase"), which is per-session metadata, not
+-- a goal's own multi-week lifecycle. One goal can accumulate many
+-- historical phases over time; only ever one is non-'completed' at a
+-- time (enforced by application logic in goalPhaseRepo.ts, not a DB
+-- constraint, matching this schema's existing style elsewhere).
+CREATE TABLE IF NOT EXISTS goal_phases (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+  start_date TEXT NOT NULL,
+  review_date TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'review_due', 'review', 'completed')),
+  -- The Complete/Efficient development-package level this phase is
+  -- being run against (developmentReferenceEngine.ts) — 'complete' for
+  -- every real goal phase today (a phase only exists for an ACTIVE
+  -- goal), carried explicitly rather than re-derived, since a future
+  -- phase could reasonably run at a different level.
+  package_level TEXT CHECK (package_level IN ('complete', 'efficient')),
+  priority_snapshot INTEGER,
+  emphasis TEXT,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+-- Programming Redesign (Step 12) §12-§13: persisted evidence + system
+-- recommendation + user decision for one goal-phase review — "must
+-- allow a later user/developer to understand what evidence informed
+-- the decision" (spec §13). user_decision is NULL until the user
+-- actually decides (§12: "the engine recommends, the user decides").
+CREATE TABLE IF NOT EXISTS goal_phase_reviews (
+  id TEXT PRIMARY KEY,
+  goal_phase_id TEXT NOT NULL REFERENCES goal_phases(id) ON DELETE CASCADE,
+  review_date TEXT NOT NULL,
+  system_recommendation TEXT NOT NULL CHECK (system_recommendation IN ('continue', 'adjust', 'graduate')),
+  user_decision TEXT CHECK (user_decision IN ('continue', 'adjust', 'graduate')),
+  evidence_json TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_goal_phases_goal ON goal_phases(goal_id);
+CREATE INDEX IF NOT EXISTS idx_goal_phase_reviews_phase ON goal_phase_reviews(goal_phase_id);
