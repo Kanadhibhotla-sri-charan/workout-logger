@@ -15,7 +15,7 @@
 
 import type Database from 'better-sqlite3';
 import { GoalsRepo } from '../repositories/goalsRepo.js';
-import type { Goal, Measurement } from '../contracts/types.js';
+import type { Goal, Measurement, TrainingProfile } from '../contracts/types.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { MeasurementsRepo } from '../repositories/measurementsRepo.js';
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
@@ -24,14 +24,16 @@ import { UsersRepo } from '../repositories/usersRepo.js';
 import { GoalPhaseRepo, type GoalPhase } from '../repositories/goalPhaseRepo.js';
 import { GoalPhaseReviewsRepo, type GoalPhaseReview, type ReviewRecommendation } from '../repositories/goalPhaseReviewsRepo.js';
 import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDetailsRepo.js';
+import { WeekActivityOverridesRepo } from '../repositories/weekActivityOverridesRepo.js';
+import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import { buildPriorityMap } from './goalResolver.js';
-import { classifyAestheticTrend, type AestheticProgressTrend } from './volumeEngine.js';
+import { type AestheticProgressTrend } from './volumeEngine.js';
 import { getDevelopmentReference } from './developmentReferenceEngine.js';
 import { applyRecoveryConstraint } from './recoveryEngine.js';
 import { aggregateExposure } from './exposureEngine.js';
 import { roleFor } from './exerciseSelector.js';
-import { gatherTargetTouches, gatherRecentBadmintonSignal } from './workoutBuilder.js';
-import { daysBetween } from './dateMath.js';
+import { gatherTargetTouches, gatherRecentBadmintonSignal, weekdayOfDate, programmingWeekStart } from './workoutBuilder.js';
+import { daysBetween, addDays } from './dateMath.js';
 
 export type { ReviewRecommendation } from '../repositories/goalPhaseReviewsRepo.js';
 
@@ -71,19 +73,31 @@ export interface GoalReviewEvidence {
    * prescription. Compared here against `actual_weekly_exposure` (this
    * phase's real average weekly rate) only to help EXPLAIN a stagnant
    * trend — reaching or exceeding it is never itself evidence of
-   * success, and falling short of it is never itself a graduation
-   * blocker beyond what the trend/adherence evidence already says. */
+   * success, and falling short of it never independently drives a
+   * recommendation beyond what the trend evidence already says. */
   development_reference_weekly: number | null;
-  /** Real gym days with a completed WorkoutSession, divided by real
-   * configured training days, within the phase window — null if the
-   * phase window hasn't started yet or the profile has no training
-   * days configured. */
+  /** Final Step 12 Fix Pass §P0-3/§P0-4: how closely real completed-gym
+   * days matched real training OPPORTUNITIES within the phase window —
+   * exact calendar-date enumeration (see enumerateTrainingOpportunityDates),
+   * honoring any real current-week override, never an approximate
+   * phaseDays/7 * trainingDaysCount estimate. This answers "how closely
+   * did actual behavior follow the configured plan," never "did the
+   * goal succeed" — reviewGoalPhase only ever surfaces it as CONTEXT in
+   * `reason`, never as an independent pass/fail gate on the
+   * recommendation. Null if there were no real training opportunities
+   * in the window (e.g. no training days configured). */
   adherence_ratio: number | null;
   recovery_flagged: boolean;
 }
 
 export interface GoalPhaseReviewResult {
-  recommendation: ReviewRecommendation;
+  /** Final Step 12 Fix Pass §P0-2: the ENGINE never recommends
+   * 'graduate' — this app's goal model has no authoritative physical
+   * completion endpoint to verify against, so improving evidence alone
+   * can never be strong enough to assert a goal is DONE. 'graduate'
+   * stays a fully valid REVIEW DECISION (see ReviewRecommendation/
+   * applyReviewDecision) — only ever chosen by the user themselves. */
+  recommendation: Exclude<ReviewRecommendation, 'graduate'>;
   evidence: GoalReviewEvidence;
   reason: string;
 }
@@ -134,37 +148,111 @@ function classifyMeasurementTrend(measurements: readonly Measurement[]): Aesthet
   return 'stagnant';
 }
 
-/** Remediation (Step 12 Fix) §4: whether this phase fell short of the
- * user's OWN configured training plan — not an invented percentage
- * cutoff. Any real shortfall (adherence_ratio < 1) is a legitimate,
- * non-arbitrary signal; there is no principled basis in this app for
- * treating some smaller shortfall as still "good enough". Null (no
- * adherence window yet, or no training days configured) is never
- * treated as a shortfall. */
-function hasAdherenceShortfall(evidence: GoalReviewEvidence): boolean {
-  return evidence.adherence_ratio != null && evidence.adherence_ratio < 1;
+/** Final Step 12 Fix Pass §P0-1: a REAL trend — comparing an appropriate
+ * earlier assessment against the latest one — never a single rating
+ * classified in isolation (an isolated "4/5 = improving" reading
+ * conflates "how do things look right now" with "did this change").
+ * Phase-aware priority, most-specific first:
+ *   1. Two or more assessments recorded inside the phase window
+ *      (>= phase.start_date, <= asOfDate): compare the earliest-in-phase
+ *      against the latest-in-phase.
+ *   2. Exactly one assessment inside the phase, with at least one
+ *      earlier assessment recorded before the phase started: compare
+ *      that most recent PRIOR assessment against the in-phase one.
+ *   3. Fewer than two comparable assessments exist at all (0 or 1
+ *      total): insufficient data — a single rating is never a trend.
+ * Reuses the same staleness guard classifyAestheticTrend (still used
+ * as-is for the real weekly-programming pipeline's own, different
+ * "how does the user feel right now" question — see workoutBuilder.ts)
+ * already established: a latest usable assessment older than twice the
+ * goal's own review cadence is too stale to treat as current evidence. */
+function classifyAestheticTrendForReview(
+  allAssessments: readonly { rating: 1 | 2 | 3 | 4 | 5; date: string }[],
+  phase: GoalPhase,
+  asOfDate: string,
+  reviewCadenceDays: number
+): AestheticProgressTrend {
+  const usable = [...allAssessments].filter((a) => a.date <= asOfDate).sort((a, b) => a.date.localeCompare(b.date));
+  if (usable.length === 0) return 'insufficient_data';
+
+  const current = usable[usable.length - 1]!;
+  if (daysBetween(current.date, asOfDate) > reviewCadenceDays * 2) return 'insufficient_data';
+
+  const inPhase = usable.filter((a) => a.date >= phase.start_date);
+  if (inPhase.length >= 2) {
+    return classifyValueTrend(inPhase[0]!.rating, inPhase[inPhase.length - 1]!.rating);
+  }
+  if (inPhase.length === 1) {
+    const beforePhase = usable.filter((a) => a.date < phase.start_date);
+    const baseline = beforePhase[beforePhase.length - 1];
+    if (baseline) return classifyValueTrend(baseline.rating, inPhase[0]!.rating);
+  }
+  return 'insufficient_data';
+}
+
+/** Final Step 12 Fix Pass §P0-4: exact calendar-date enumeration of this
+ * phase's real training opportunities, from `startDate` to `endDate`
+ * inclusive (a caller has already capped `endDate` at
+ * min(asOfDate, phase.review_date) — never future dates, never beyond
+ * the phase itself). For each real date this reuses the SAME per-week
+ * override resolution (WeekActivityOverridesRepo + applyWeekOverrides)
+ * the real weekly-programming pipeline already uses
+ * (workoutBuilder.ts's assembleWeeklyPlanInput) — never a second,
+ * approximate attendance model — so a day the user intentionally moved
+ * OFF gym for a given week (an explicit current-week override) is
+ * conservatively excluded from "real opportunity" here exactly as it
+ * is in the real weekly plan, never counted as a missed one. */
+function enumerateTrainingOpportunityDates(db: Database.Database, profile: TrainingProfile | undefined, startDate: string, endDate: string): string[] {
+  if (!profile || startDate > endDate) return [];
+  const overridesRepo = new WeekActivityOverridesRepo(db);
+  const effectiveTrainingDaysByWeek = new Map<string, ReadonlyArray<TrainingProfile['training_days'][number]>>();
+  const opportunityDates: string[] = [];
+
+  for (let date = startDate; date <= endDate; date = addDays(date, 1)) {
+    const weekStart = programmingWeekStart(date);
+    let effectiveTrainingDays = effectiveTrainingDaysByWeek.get(weekStart);
+    if (!effectiveTrainingDays) {
+      const overrides = overridesRepo.get(profile.id, weekStart);
+      effectiveTrainingDays = applyWeekOverrides(profile.training_days, profile.other_activity_schedule, overrides).trainingDays;
+      effectiveTrainingDaysByWeek.set(weekStart, effectiveTrainingDays);
+    }
+    if (effectiveTrainingDays.includes(weekdayOfDate(date))) opportunityDates.push(date);
+  }
+  return opportunityDates;
 }
 
 /**
- * Programming Redesign (Step 12) §12/Remediation §4: never equates
- * volume-reference completion with success (spec rule #27) — trend
- * evidence (aesthetic/measurement/performance), recovery, and adherence
- * drive the recommendation; `actual_weekly_exposure`/
- * `development_reference_weekly` only ever disambiguate WHY a stagnant
- * trend might be happening, never substitute for the trend itself.
- * 'continue' is always the default outcome for weak/insufficient/single-
- * dimensional evidence; 'adjust' is only recommended with a specific,
- * cited reason; 'graduate' is deliberately conservative — the app has no
- * stored concept of a goal's actual physical endpoint, so it is never
- * granted from a fixed phase count or a single improving signal alone.
- * It requires REAL, CORROBORATED evidence achievable within a single
- * phase (an improving aesthetic trend plus an improving measurement or
- * performance trend), with no adherence shortfall and no flagged
- * recovery — and even then this is only ever a recommendation: "the
- * engine recommends, the user decides" (applyReviewDecision never
- * applies it on its own).
+ * Programming Redesign (Step 12) §12/Final Fix Pass §P0-2/§P0-3: never
+ * equates volume-reference completion with success (spec rule #27) —
+ * trend evidence (aesthetic/measurement/performance) and recovery are
+ * what DRIVE the recommendation; `actual_weekly_exposure`/
+ * `development_reference_weekly`/`adherence_ratio` are CONTEXT that only
+ * ever disambiguates WHY a stagnant trend might be happening (surfaced
+ * in `reason`), never an independent decision trigger and never a
+ * stand-in for the trend itself. 'continue' is always the default
+ * outcome for weak/insufficient/single-dimensional evidence; 'adjust' is
+ * only recommended with a specific, cited reason.
+ *
+ * The engine NEVER recommends 'graduate' (§P0-2 — see
+ * GoalPhaseReviewResult's own type, which excludes it entirely): this
+ * app's goal model has no authoritative physical completion endpoint,
+ * so even the best evidence this module can gather — real, sustained,
+ * multi-signal improvement — is never treated as proof a goal is DONE.
+ * Graduation stays a fully valid outcome (ReviewRecommendation still
+ * includes it, applyReviewDecision still handles it), reachable only by
+ * an explicit user decision — "the engine recommends, the user decides."
+ *
+ * §P0-3: adherence answers "how closely did actual behavior follow the
+ * configured plan," never "did the goal succeed" — it is never used
+ * here as an automatic pass/fail gate (no `adherence_ratio < 1` branch),
+ * only ever quoted as real, contextual information alongside a
+ * recommendation the TREND/exposure evidence already justifies on its
+ * own.
  */
 export function reviewGoalPhase(evidence: GoalReviewEvidence): GoalPhaseReviewResult {
+  const adherenceContext =
+    evidence.adherence_ratio != null ? ` (adherence this phase: ${Math.round(evidence.adherence_ratio * 100)}% of real training opportunities)` : '';
+
   if (evidence.recovery_flagged) {
     return {
       recommendation: 'adjust',
@@ -177,52 +265,37 @@ export function reviewGoalPhase(evidence: GoalReviewEvidence): GoalPhaseReviewRe
     return {
       recommendation: 'adjust',
       evidence,
-      reason: 'Declining assessment or measurement trend this phase — continuing unchanged is not justified; diagnose and adjust.',
+      reason: `Declining assessment or measurement trend this phase — continuing unchanged is not justified; diagnose and adjust${adherenceContext}.`,
     };
   }
 
   if (evidence.aesthetic_trend === 'improving') {
-    const corroborated = evidence.measurement_trend === 'improving' || evidence.performance_trend === 'improving';
-    if (corroborated && !hasAdherenceShortfall(evidence)) {
-      return {
-        recommendation: 'graduate',
-        evidence,
-        reason: 'Real, corroborated improvement this phase (an improving aesthetic trend together with an improving measurement or performance trend) with full adherence to the configured plan — this goal shows genuine evidence of having reached its target; recommend graduating it from active specialization (final decision is the user\'s).',
-      };
-    }
     return {
       recommendation: 'continue',
       evidence,
-      reason: 'Improving — phase progression does not automatically mean escalation or graduation; continue the current phase unchanged.',
+      reason: `Improving — real progress this phase; continue the current phase unchanged${adherenceContext}. The engine does not recommend graduating a goal on its own — this app has no stored physical completion endpoint to verify against, so graduation is only ever an explicit user decision.`,
     };
   }
 
   if (evidence.aesthetic_trend === 'stagnant') {
-    if (hasAdherenceShortfall(evidence)) {
-      return {
-        recommendation: 'adjust',
-        evidence,
-        reason: `Stagnant progress with a real shortfall against the configured training plan (${Math.round((evidence.adherence_ratio ?? 0) * 100)}% of configured training days) this phase — the likely explanation is adherence, not volume; address that before any volume change.`,
-      };
-    }
     if (evidence.development_reference_weekly != null && evidence.actual_weekly_exposure >= evidence.development_reference_weekly) {
       return {
         recommendation: 'adjust',
         evidence,
-        reason: 'Stagnant progress despite adequate real exposure and adherence this phase — more of the same is unlikely to help; adjust exercise selection/approach rather than simply continuing.',
+        reason: `Stagnant progress despite adequate real exposure this phase — more of the same is unlikely to help; adjust exercise selection/approach rather than simply continuing${adherenceContext}.`,
       };
     }
     return {
       recommendation: 'continue',
       evidence,
-      reason: 'Stagnant, but with insufficient exposure or adherence evidence yet to justify a specific adjustment — continue and gather another phase of real evidence before acting on a single reading.',
+      reason: `Stagnant, but with insufficient exposure evidence yet to justify a specific adjustment — continue and gather another phase of real evidence before acting on a single reading${adherenceContext}.`,
     };
   }
 
   return {
     recommendation: 'continue',
     evidence,
-    reason: 'Insufficient evidence this phase to justify any change — continuing unchanged is the safe, non-escalating default.',
+    reason: `Insufficient evidence this phase to justify any change — continuing unchanged is the safe, non-escalating default${adherenceContext}.`,
   };
 }
 
@@ -237,12 +310,7 @@ function representativeTarget(goal: Goal): { target_type: 'physique_target' | 'f
  * historically can pass an earlier date. */
 export function gatherReviewEvidence(db: Database.Database, goal: Goal, phase: GoalPhase, asOfDate: string): GoalReviewEvidence {
   const assessments = new AestheticAssessmentsRepo(db).listForGoal(goal.id);
-  const mostRecentAssessment = assessments[assessments.length - 1];
-  const aesthetic_trend = classifyAestheticTrend(
-    mostRecentAssessment ? { rating: mostRecentAssessment.rating, date: mostRecentAssessment.date } : null,
-    asOfDate,
-    goal.review_cadence_days
-  );
+  const aesthetic_trend = classifyAestheticTrendForReview(assessments, phase, asOfDate, goal.review_cadence_days);
 
   const phaseMeasurements = new MeasurementsRepo(db)
     .listForGoal(goal.id)
@@ -315,12 +383,17 @@ export function gatherReviewEvidence(db: Database.Database, goal: Goal, phase: G
 
   const development_reference_weekly = target ? getDevelopmentReference(target.target_type, target.target_id, 'complete').weekly_direct_set_reference : null;
 
+  // Final Step 12 Fix Pass §P0-4: exact calendar-date enumeration, never
+  // an approximate phaseDays/7 * trainingDaysCount estimate — the
+  // adherence window never extends past the phase's own boundary
+  // (review_date) even if asOfDate is later, and never into the future.
   const user = new UsersRepo(db).getOrCreateDefault();
   const profile = new TrainingProfileRepo(db).get(user.id);
-  const trainingDaysCount = profile?.training_days.length ?? 0;
-  const configuredTrainingDaysInWindow = trainingDaysCount > 0 ? Math.round((phaseDays / 7) * trainingDaysCount) : 0;
-  const completedGymDaysInWindow = new Set(recentSessions.filter((s) => s.session_type === 'gym').map((s) => s.date)).size;
-  const adherence_ratio = configuredTrainingDaysInWindow > 0 ? Math.min(1, completedGymDaysInWindow / configuredTrainingDaysInWindow) : null;
+  const adherenceEndDate = asOfDate < phase.review_date ? asOfDate : phase.review_date;
+  const opportunityDates = enumerateTrainingOpportunityDates(db, profile, phase.start_date, adherenceEndDate);
+  const completedGymDates = new Set(recentSessions.filter((s) => s.session_type === 'gym').map((s) => s.date));
+  const attendedOpportunities = opportunityDates.filter((d) => completedGymDates.has(d)).length;
+  const adherence_ratio = opportunityDates.length > 0 ? Math.min(1, attendedOpportunities / opportunityDates.length) : null;
 
   // Remediation (Step 12 Fix) §5: reuse the SAME real "last trained"/
   // "recent badminton" computations the actual weekly-programming

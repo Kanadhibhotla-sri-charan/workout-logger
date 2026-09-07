@@ -1,14 +1,17 @@
-// Step 12 Remediation §4 (P0): the review methodology must never use an
-// invented threshold. Three specific numbers named in the remediation
-// spec as illegitimate have been removed entirely: the 60% adherence
-// cutoff, the 2% measurement/performance trend-change band, and the "N
-// consecutive improving phases" graduation rule (the
-// consecutive_improving_phases field no longer exists on
-// GoalReviewEvidence at all — TypeScript itself enforces that nothing in
-// this file can reference it). Graduation is now evidence-based and
-// conservative: real, corroborated improvement within a SINGLE phase,
-// withheld the moment there's any real shortfall against the user's own
-// configured plan — never a fixed phase count.
+// Final Step 12 Fix Pass §P0-2/§P0-3: the review methodology must never
+// let the ENGINE recommend graduation, and must never treat adherence as
+// a universal pass/fail gate. This app's goal model has no authoritative
+// physical completion endpoint, so even the strongest possible evidence
+// (multi-signal, sustained improvement, perfect adherence) is never
+// enough for the engine itself to assert a goal is DONE — 'graduate'
+// stays a fully valid REVIEW DECISION, reachable only by an explicit
+// user choice (see GoalPhaseReviewResult's own type, which excludes
+// 'graduate' from what reviewGoalPhase can return, and
+// applyReviewDecision, which still handles a user's explicit 'graduate'
+// decision exactly as before — see tests/engine/goalPhaseEngine.test.ts's
+// "applyReviewDecision 'graduate'" and "user decision OVERRIDES the
+// system recommendation" tests for that end-to-end coverage, not
+// duplicated here).
 
 import { describe, expect, it } from 'vitest';
 import { reviewGoalPhase, type GoalReviewEvidence } from '../../src/engine/goalPhaseEngine.js';
@@ -28,64 +31,56 @@ function evidence(overrides: Partial<GoalReviewEvidence> = {}): GoalReviewEviden
   };
 }
 
-describe('Test A — no invented percentage trend threshold', () => {
-  it('a tiny but real measurement increase is classified improving, not stagnant (the old 2% band would have called this stagnant)', () => {
-    // classifyValueTrend is not exported — proven indirectly: a
-    // measurement_trend of 'improving' plus an aesthetic 'improving'
-    // trend with full adherence must be enough to graduate, which only
-    // happens if a small real increase is genuinely classified
-    // 'improving' upstream in gatherReviewEvidence rather than
-    // 'stagnant' under a percentage band. This test documents the
-    // contract at the reviewGoalPhase boundary: any evidence value of
-    // 'improving' — however the caller arrived at it — is treated as
-    // real improvement, never re-questioned by a second threshold here.
-    const result = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', measurement_trend: 'improving', adherence_ratio: 1 }));
-    expect(result.recommendation).toBe('graduate');
-  });
-});
-
-describe('Test B — adherence is judged against the real configured plan, never a hardcoded percentage cutoff', () => {
-  it('90% adherence (previously treated as "good enough" under an invented 60% threshold) is a real, actionable shortfall', () => {
-    const result = reviewGoalPhase(evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 0.9 }));
-    expect(result.recommendation).toBe('adjust');
-    expect(result.reason.toLowerCase()).toContain('adherence');
-  });
-
-  it('full adherence (ratio === 1) is never itself treated as a shortfall', () => {
+describe('Test A — the engine never recommends graduate, no matter how strong the evidence', () => {
+  it('real, corroborated, multi-signal improvement with perfect adherence still returns continue, never graduate', () => {
     const result = reviewGoalPhase(
-      evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 1, actual_weekly_exposure: 5, development_reference_weekly: 20 })
+      evidence({ aesthetic_trend: 'improving', measurement_trend: 'improving', performance_trend: 'improving', adherence_ratio: 1 })
     );
-    expect(result.reason.toLowerCase()).not.toContain('shortfall against the configured training plan');
+    expect(result.recommendation).toBe('continue');
+    expect(result.recommendation).not.toBe('graduate');
   });
-});
 
-describe('Test C — graduation requires corroborated evidence achievable within a SINGLE phase, never a fixed phase count', () => {
-  it('a bare improving aesthetic trend alone never graduates, no matter how many phases have passed (there is no phase-count field to satisfy)', () => {
+  it('a bare improving aesthetic trend alone never graduates either', () => {
     const result = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', adherence_ratio: 1 }));
     expect(result.recommendation).toBe('continue');
   });
 
-  it('an improving aesthetic trend corroborated by an improving performance trend graduates within a single phase', () => {
-    const result = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', performance_trend: 'improving', adherence_ratio: 1 }));
-    expect(result.recommendation).toBe('graduate');
+  it("TypeScript itself enforces this: reviewGoalPhase's own return type excludes 'graduate'", () => {
+    const result = reviewGoalPhase(evidence({ aesthetic_trend: 'improving' }));
+    // If reviewGoalPhase could ever return 'graduate', assigning its
+    // recommendation to this narrower local type would be a compile-time
+    // error (GoalPhaseReviewResult.recommendation is
+    // Exclude<ReviewRecommendation, 'graduate'>).
+    const recommendation: 'continue' | 'adjust' = result.recommendation;
+    expect(['continue', 'adjust']).toContain(recommendation);
   });
 });
 
-describe('Test D — graduation is withheld whenever there is any real adherence shortfall, even with corroborated improvement', () => {
-  it('never falsely graduates from otherwise-strong evidence undermined by a real shortfall', () => {
-    const result = reviewGoalPhase(
-      evidence({ aesthetic_trend: 'improving', measurement_trend: 'improving', performance_trend: 'improving', adherence_ratio: 0.95 })
-    );
-    expect(result.recommendation).not.toBe('graduate');
+describe('Test B — adherence is contextual evidence, never a universal pass/fail gate', () => {
+  it('90% adherence with improving evidence still recommends continue — a real shortfall never overrides real improvement', () => {
+    const result = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', adherence_ratio: 0.9 }));
     expect(result.recommendation).toBe('continue');
   });
+
+  it('a real adherence shortfall alone (stagnant trend, no exposure evidence) never automatically triggers adjust', () => {
+    const result = reviewGoalPhase(evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 0.3 }));
+    expect(result.recommendation).toBe('continue');
+    expect(result.reason.toLowerCase()).toContain('adherence'); // still real, contextual information
+  });
+
+  it('100% adherence with stagnant evidence is never itself treated as success', () => {
+    const result = reviewGoalPhase(evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 1 }));
+    expect(result.recommendation).toBe('continue');
+    expect(result.reason.toLowerCase()).not.toContain('success');
+  });
 });
 
-describe('Test E — graduation is never granted merely from hitting or exceeding a volume reference number', () => {
+describe('Test C — graduation is never granted merely from hitting or exceeding a volume reference number', () => {
   it('exposure far above the development reference, alone, never implies graduation', () => {
     const result = reviewGoalPhase(
       evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 1, actual_weekly_exposure: 100, development_reference_weekly: 20 })
     );
     expect(result.recommendation).not.toBe('graduate');
+    expect(result.recommendation).toBe('adjust'); // a real diagnostic signal (exposure), never a success/completion claim
   });
 });

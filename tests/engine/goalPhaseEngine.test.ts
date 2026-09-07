@@ -43,11 +43,14 @@ describe('reviewGoalPhase — required scenarios (spec section 16.J)', () => {
     expect(result.reason.length).toBeGreaterThan(0);
   });
 
-  it('stagnant assessment with LOW actual exposure -> adjust, citing adherence/exposure (not volume completion)', () => {
+  it('stagnant assessment with LOW actual exposure (below the reference) -> continue, adherence surfaced only as context (Final Fix Pass §P0-3)', () => {
     const result = reviewGoalPhase(
       evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 0.3, actual_weekly_exposure: 4, development_reference_weekly: 20 })
     );
-    expect(result.recommendation).toBe('adjust');
+    // Low exposure/adherence alone is not yet enough real evidence to
+    // justify a specific adjustment — continue and gather more evidence,
+    // never an automatic "adherence < 1 means adjust" rule.
+    expect(result.recommendation).toBe('continue');
     expect(result.reason.toLowerCase()).toContain('adherence');
   });
 
@@ -66,10 +69,10 @@ describe('reviewGoalPhase — required scenarios (spec section 16.J)', () => {
     expect(result.reason.toLowerCase()).toContain('recovery');
   });
 
-  it('poor adherence alone (stagnant trend) -> adjust, citing adherence specifically', () => {
+  it('poor adherence alone (stagnant trend, no exposure evidence) -> continue, never an automatic adherence-driven adjustment (Final Fix Pass §P0-3)', () => {
     const result = reviewGoalPhase(evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 0.2 }));
-    expect(result.recommendation).toBe('adjust');
-    expect(result.reason.toLowerCase()).toContain('adherence');
+    expect(result.recommendation).toBe('continue');
+    expect(result.reason.toLowerCase()).toContain('adherence'); // still surfaced as real context
   });
 
   it('declining trend -> adjust, never an automatic reduction decided here (the engine only recommends)', () => {
@@ -82,12 +85,13 @@ describe('reviewGoalPhase — required scenarios (spec section 16.J)', () => {
     expect(result.recommendation).toBe('continue');
   });
 
-  it('real corroborated improvement with full adherence -> graduate; a bare improving aesthetic trend alone -> continue (Remediation §4)', () => {
+  it('the engine never recommends graduate, even from real corroborated improvement with full adherence (Final Fix Pass §P0-2)', () => {
     const aestheticAlone = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', adherence_ratio: 1 }));
     expect(aestheticAlone.recommendation).toBe('continue');
 
     const corroborated = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', measurement_trend: 'improving', adherence_ratio: 1 }));
-    expect(corroborated.recommendation).toBe('graduate');
+    expect(corroborated.recommendation).toBe('continue');
+    expect(corroborated.recommendation).not.toBe('graduate');
   });
 
   it('volume-reference completion alone never implies success — stagnant + exposure far above reference is still adjust, never continue/graduate merely because the number was hit', () => {
@@ -209,11 +213,22 @@ describe('runGoalPhaseReview / applyReviewDecision — lifecycle + persistence (
   });
 });
 
-describe('Aesthetic assessment feeds directly into a real review\'s evidence', () => {
-  it('an "improving" assessment produces aesthetic_trend: improving in the persisted review evidence', () => {
+describe('Aesthetic assessment evidence is a real phase-aware trend, not a single rating (Final Fix Pass §P0-1)', () => {
+  it('a single assessment overall (no comparable baseline) is insufficient data, never classified as a trend', () => {
     const db = openDb(':memory:');
     const goalId = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1, review_cadence_days: 28 }).id;
     new AestheticAssessmentsRepo(db).record({ goal_id: goalId, date: '2026-09-01', rating: 5 });
+    const phaseId = new GoalPhaseRepo(db).create({ goal_id: goalId, start_date: '2026-08-01', review_date: '2026-09-12', package_level: 'complete' }).id;
+
+    const review = runGoalPhaseReview(db, phaseId, '2026-09-12');
+    expect((review.evidence as GoalReviewEvidence).aesthetic_trend).toBe('insufficient_data');
+  });
+
+  it('two comparable assessments inside the phase produce a real improving trend (earliest vs latest, never the latest alone)', () => {
+    const db = openDb(':memory:');
+    const goalId = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1, review_cadence_days: 28 }).id;
+    new AestheticAssessmentsRepo(db).record({ goal_id: goalId, date: '2026-08-05', rating: 2 });
+    new AestheticAssessmentsRepo(db).record({ goal_id: goalId, date: '2026-09-01', rating: 3 });
     const phaseId = new GoalPhaseRepo(db).create({ goal_id: goalId, start_date: '2026-08-01', review_date: '2026-09-12', package_level: 'complete' }).id;
 
     const review = runGoalPhaseReview(db, phaseId, '2026-09-12');
