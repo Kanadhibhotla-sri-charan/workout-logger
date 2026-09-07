@@ -2,7 +2,10 @@ import type Database from 'better-sqlite3';
 import { BlueprintAdapter, type BlueprintAestheticOutcome, type BlueprintFunctionalGoal } from '../blueprint/adapter.js';
 import type { Goal, GoalType } from '../contracts/types.js';
 import { MAX_ACTIVE_AESTHETIC_GOALS, REVIEW_CADENCE_DEFAULT_DAYS } from '../engine/config.js';
+import { addDays } from '../engine/dateMath.js';
+import { todayForUser } from '../lib/userTimezone.js';
 import { GoalEventsRepo } from './goalEventsRepo.js';
+import { GoalPhaseRepo } from './goalPhaseRepo.js';
 import { newId, nowIso } from './ids.js';
 
 export class UnknownBlueprintGoalReferenceError extends Error {
@@ -66,6 +69,25 @@ export interface CreateGoalInput {
 export class GoalsRepo {
   constructor(private db: Database.Database) {}
 
+  /** Remediation (Step 12 Fix) §5: connects the goal lifecycle to the
+   * goal-phase lifecycle — an active goal should have an appropriate
+   * active phase, so becoming active (creation or reactivation) starts
+   * one if it doesn't already have one. Complete package level: an
+   * active goal is by definition a training priority. A no-op if the
+   * goal already has a non-completed phase (never opens a second
+   * concurrent one). */
+  private ensureActivePhase(goal: Goal): void {
+    const phaseRepo = new GoalPhaseRepo(this.db);
+    if (phaseRepo.getActiveForGoal(goal.id)) return;
+    const startDate = todayForUser(this.db);
+    phaseRepo.create({
+      goal_id: goal.id,
+      start_date: startDate,
+      review_date: addDays(startDate, goal.review_cadence_days),
+      package_level: 'complete',
+    });
+  }
+
   /** Creates a local Goal instance. `input.blueprint_ref` is validated
    * against BlueprintAdapter before anything is written — an invalid
    * reference fails cleanly and nothing is persisted. If the goal is
@@ -109,6 +131,7 @@ export class GoalsRepo {
     eventsRepo.record({ goal_id: goal.id, event_type: 'created', detail: { blueprint_ref: goal.blueprint_ref, priority: goal.priority } });
     if (goal.active) {
       eventsRepo.record({ goal_id: goal.id, event_type: 'activated' });
+      this.ensureActivePhase(goal);
     }
 
     return goal;
@@ -139,18 +162,28 @@ export class GoalsRepo {
    * when the user changes focus." Frees a slot under the active-aesthetic-
    * goal cap. Records a 'deactivated' event; the goal row itself and its
    * full history are kept, never deleted, so it can be reactivated later
-   * with its evidence intact (§18). */
+   * with its evidence intact (§18). Remediation (Step 12 Fix) §5: also
+   * completes this goal's own active phase, if it has one — a
+   * deactivated goal must never be left with a falsely-active phase.
+   * Already-completed (historical) phases are untouched. */
   deactivate(id: string, notes?: string | null): Goal | undefined {
     const goal = this.get(id);
     if (!goal || !goal.active) return goal;
 
     this.db.prepare('UPDATE goals SET active = 0 WHERE id = ?').run(id);
     new GoalEventsRepo(this.db).record({ goal_id: id, event_type: 'deactivated', notes: notes ?? null });
+
+    const phaseRepo = new GoalPhaseRepo(this.db);
+    const activePhase = phaseRepo.getActiveForGoal(id);
+    if (activePhase) phaseRepo.complete(activePhase.id);
+
     return this.get(id);
   }
 
   /** Reactivates a previously deactivated goal — still subject to the
-   * active-aesthetic-goal cap. */
+   * active-aesthetic-goal cap. Remediation (Step 12 Fix) §5: also starts
+   * a fresh active phase (this goal's prior phase was already completed
+   * by deactivate() above, so there is nothing to resume). */
   reactivate(id: string): Goal | undefined {
     const goal = this.get(id);
     if (!goal || goal.active) return goal;
@@ -164,6 +197,7 @@ export class GoalsRepo {
 
     this.db.prepare('UPDATE goals SET active = 1 WHERE id = ?').run(id);
     new GoalEventsRepo(this.db).record({ goal_id: id, event_type: 'activated', notes: 'reactivated' });
+    this.ensureActivePhase({ ...goal, active: true });
     return this.get(id);
   }
 

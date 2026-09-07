@@ -16,7 +16,14 @@ let goalId: string;
 
 beforeEach(() => {
   db = openDb(':memory:');
-  goalId = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 }).id;
+  // Remediation (Step 12 Fix) §5: an ACTIVE goal now gets its own
+  // auto-created phase (GoalsRepo.create -> ensureActivePhase), which
+  // these tests would otherwise collide with — they exercise
+  // GoalPhaseRepo's own state machine directly via hand-built phases.
+  // Creating the goal inactive keeps this file's scope exactly what it
+  // was: the repo's own primitives, independent of goal-lifecycle wiring
+  // (which is covered separately in tests/goalPhaseLifecycleLinkage.test.ts).
+  goalId = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1, active: false }).id;
 });
 
 describe('GoalPhaseRepo — creation and active state', () => {

@@ -25,10 +25,11 @@ function evidence(overrides: Partial<GoalReviewEvidence> = {}): GoalReviewEviden
     measurement_trend: 'insufficient_data',
     performance_trend: 'insufficient_data',
     actual_weekly_exposure: 0,
+    phase_total_primary_sets: 0,
+    phase_weeks_elapsed: 1,
     development_reference_weekly: null,
     adherence_ratio: null,
     recovery_flagged: false,
-    consecutive_improving_phases: 0,
     ...overrides,
   };
 }
@@ -50,9 +51,9 @@ describe('reviewGoalPhase — required scenarios (spec section 16.J)', () => {
     expect(result.reason.toLowerCase()).toContain('adherence');
   });
 
-  it('stagnant assessment with ADEQUATE exposure (and good adherence) -> adjust, citing approach/exercise-selection, not adherence', () => {
+  it('stagnant assessment with ADEQUATE exposure (and full adherence) -> adjust, citing approach/exercise-selection, not adherence', () => {
     const result = reviewGoalPhase(
-      evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 0.9, actual_weekly_exposure: 22, development_reference_weekly: 20 })
+      evidence({ aesthetic_trend: 'stagnant', adherence_ratio: 1, actual_weekly_exposure: 22, development_reference_weekly: 20 })
     );
     expect(result.recommendation).toBe('adjust');
     expect(result.reason.toLowerCase()).toContain('exercise selection');
@@ -81,12 +82,12 @@ describe('reviewGoalPhase — required scenarios (spec section 16.J)', () => {
     expect(result.recommendation).toBe('continue');
   });
 
-  it('sustained multi-phase improvement with good adherence -> graduate (never from a single phase alone)', () => {
-    const singlePhase = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', adherence_ratio: 0.9, consecutive_improving_phases: 0 }));
-    expect(singlePhase.recommendation).toBe('continue');
+  it('real corroborated improvement with full adherence -> graduate; a bare improving aesthetic trend alone -> continue (Remediation §4)', () => {
+    const aestheticAlone = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', adherence_ratio: 1 }));
+    expect(aestheticAlone.recommendation).toBe('continue');
 
-    const multiPhase = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', adherence_ratio: 0.9, consecutive_improving_phases: 1 }));
-    expect(multiPhase.recommendation).toBe('graduate');
+    const corroborated = reviewGoalPhase(evidence({ aesthetic_trend: 'improving', measurement_trend: 'improving', adherence_ratio: 1 }));
+    expect(corroborated.recommendation).toBe('graduate');
   });
 
   it('volume-reference completion alone never implies success — stagnant + exposure far above reference is still adjust, never continue/graduate merely because the number was hit', () => {
@@ -183,7 +184,7 @@ describe('runGoalPhaseReview / applyReviewDecision — lifecycle + persistence (
       goal_phase_id: phaseId,
       review_date: '2026-09-12',
       system_recommendation: 'graduate',
-      evidence: evidence({ aesthetic_trend: 'improving', consecutive_improving_phases: 2, adherence_ratio: 0.9 }),
+      evidence: evidence({ aesthetic_trend: 'improving', measurement_trend: 'improving', adherence_ratio: 1 }),
       reason: 'Sustained improvement — recommend graduating.',
     });
 

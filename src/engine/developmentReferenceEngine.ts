@@ -36,9 +36,18 @@ export interface DevelopmentReference {
   package_id: string | null;
   /** sum(exercise.sets) x frequency.sessions_per_week for this target's
    * muscle_group package at `level` — null when no package exists for
-   * this target (see module doc comment). A reference point for
-   * programming decisions, never a quota to hit and never copied
-   * directly into a generated workout (spec §1 rules #7-#8). */
+   * this target (see module doc comment).
+   *
+   * Remediation (Step 12 Fix) §8: this is a WEEKLY OBJECTIVE — e.g. a
+   * Complete-package value of 26 means "aim for roughly 26 real direct
+   * sets across this target's real training days over the week," never
+   * "today's session must deliver 26 sets," never a single day's literal
+   * prescription, and never a quota whose mere completion implies
+   * anything about real progress. A caller distributes real work toward
+   * this weekly figure across whichever real days a target is actually
+   * trained on (see workoutBuilder.ts's weekly-first allocation) — it is
+   * never copied directly into one generated workout (spec §1 rules
+   * #7-#8). */
   weekly_direct_set_reference: number | null;
   coverage: { muscle_group_id: string; exercise_count: number } | null;
 }

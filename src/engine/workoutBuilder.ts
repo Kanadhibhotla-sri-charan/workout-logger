@@ -1565,7 +1565,7 @@ export function programmingWeekStart(dateIso: string): string {
   return addDays(dateIso, -WEEKDAYS.indexOf(weekdayOfDate(dateIso)));
 }
 
-interface TargetTouch {
+export interface TargetTouch {
   date: string;
   exercise_id: BlueprintId;
   sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
@@ -1588,8 +1588,13 @@ interface TargetTouch {
  * (`workout history -> history aggregation -> muscle exposure +
  * exercise history -> programming context -> exercise selection`),
  * not a placeholder.
+ *
+ * Exported so goalPhaseEngine.ts's review evidence can reuse this exact
+ * "real last trained" computation (Step 12 Remediation §5) instead of a
+ * second, simplified one built from a session's own free-text `role`
+ * field.
  */
-function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSessions: readonly { session_id: string; date: string }[]): Map<string, TargetTouch[]> {
+export function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSessions: readonly { session_id: string; date: string }[]): Map<string, TargetTouch[]> {
   const byTarget = new Map<string, TargetTouch[]>();
   for (const session of recentSessions) {
     for (const performance of sessionsRepo.getExercisePerformances(session.session_id)) {
@@ -1606,6 +1611,23 @@ function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSessions: 
     list.sort((a, b) => b.date.localeCompare(a.date));
   }
   return byTarget;
+}
+
+/** The real most-recent logged badminton session's intensity/fatigue, if
+ * any is within the given session window — the same real signal
+ * recovery decisions elsewhere already use. Exported so
+ * goalPhaseEngine.ts's review evidence can reuse this exact computation
+ * (Step 12 Remediation §5) instead of a hardcoded `null`. */
+export function gatherRecentBadmintonSignal(
+  badmintonRepo: BadmintonSessionDetailsRepo,
+  recentSessions: readonly { session_id: string; date: string; session_type: string }[]
+): RecentBadmintonSignal | null {
+  const recentBadmintonSessions = recentSessions.filter((s) => s.session_type === 'badminton').sort((a, b) => b.date.localeCompare(a.date));
+  const mostRecentBadminton = recentBadmintonSessions[0];
+  const badmintonDetails = mostRecentBadminton ? badmintonRepo.get(mostRecentBadminton.session_id) : undefined;
+  return badmintonDetails && badmintonDetails.intensity
+    ? { intensity: badmintonDetails.intensity as BadmintonIntensity, post_session_fatigue: badmintonDetails.post_session_fatigue }
+    : null;
 }
 
 /** The one real, shared impure data-gathering step (like
@@ -1636,13 +1658,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
   const rollingByTarget = new Map(state.rolling_exposure.map((e) => [`${e.target_type}:${e.target_id}`, e]));
   const touchesByTarget = gatherTargetTouches(sessionsRepo, state.recent_sessions);
 
-  const recentBadmintonSessions = state.recent_sessions.filter((s) => s.session_type === 'badminton').sort((a, b) => b.date.localeCompare(a.date));
-  const mostRecentBadminton = recentBadmintonSessions[0];
-  const badmintonDetails = mostRecentBadminton ? badmintonRepo.get(mostRecentBadminton.session_id) : undefined;
-  const recentBadmintonSignal: RecentBadmintonSignal | null =
-    badmintonDetails && badmintonDetails.intensity
-      ? { intensity: badmintonDetails.intensity as BadmintonIntensity, post_session_fatigue: badmintonDetails.post_session_fatigue }
-      : null;
+  const recentBadmintonSignal = gatherRecentBadmintonSignal(badmintonRepo, state.recent_sessions);
 
   /** Builds one TargetBuildContext from real exposure/history data —
    * shared by both the goal-linked loop below and the remediation

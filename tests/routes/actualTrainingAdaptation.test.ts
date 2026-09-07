@@ -235,6 +235,85 @@ describe('Phase 7 — remaining-week adaptation from real completed training (sp
   });
 });
 
+describe('Step 12 Remediation §7 (P1): strengthened remaining-week adaptation regression scenarios', () => {
+  it('Scenario 1 — completing a session exactly as planned triggers no unnecessary reallocation of a later, unlocked day', async () => {
+    setupProfile(['monday', 'tuesday', 'thursday', 'friday']);
+    const before = await getWeek();
+    const gymDays = before.days.filter((d: any) => d.type === 'gym').sort((a: any, b: any) => a.date.localeCompare(b.date));
+    // Find whichever real gym day this real week actually planned quads
+    // work for, and treat any LATER gym day as the one to check for
+    // unnecessary reallocation — never assume a specific hardcoded day.
+    const quadsDayIndex = gymDays.findIndex((d: any) => d.plannedWork.some((w: any) => w.target_id === 'quads'));
+    expect(quadsDayIndex).toBeGreaterThanOrEqual(0);
+    const laterDay = gymDays[quadsDayIndex + 1];
+    expect(laterDay).toBeDefined();
+
+    const quadsDay = gymDays[quadsDayIndex];
+    const plannedQuadsSets = quadsDay.plannedWork.filter((w: any) => w.target_id === 'quads').reduce((s: number, w: any) => s + w.sets, 0);
+    expect(plannedQuadsSets).toBeGreaterThan(0);
+    const laterDayBefore = before.days.find((d: any) => d.date === laterDay.date);
+
+    // Real actual training that matches the real plan exactly — the
+    // golden/quiet path: no shortfall, no excess.
+    await logCompletedQuadsSession(quadsDay.date, plannedQuadsSets);
+
+    const after = await getWeek();
+    const laterDayAfter = after.days.find((d: any) => d.date === laterDay.date);
+    expect(laterDayAfter.plannedWork).toEqual(laterDayBefore.plannedWork);
+  });
+
+  it('Scenario 4 — real unplanned work for one target never reduces a different, unrelated target\'s later-day programming', async () => {
+    setupProfile(['monday', 'tuesday', 'thursday', 'friday']);
+    const before = await getWeek();
+    const mondayDate = before.days.find((d: any) => d.weekday === 'monday').date;
+    const thursdayBefore = before.days.find((d: any) => d.weekday === 'thursday');
+    const thursdayQuadsBefore = thursdayBefore.plannedWork.filter((w: any) => w.target_id === 'quads').reduce((s: number, w: any) => s + w.sets, 0);
+
+    // Real, substantial unplanned work for triceps (no real primary or
+    // secondary relationship to quads at all) — added via the same
+    // real "Add Unplanned Exercise" path (POST .../exercises on an
+    // in-progress session).
+    const created = await request(app).post('/api/workouts').send({ date: mondayDate, session_type: 'gym', status: 'in_progress' }).expect(201);
+    await request(app)
+      .post(`/api/workouts/${created.body.session_id}/exercises`)
+      .send({
+        exercise_id: 'cable-pushdown',
+        order: 1,
+        role: 'primary',
+        sets: Array.from({ length: 20 }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 10, completed: true })),
+      })
+      .expect(201);
+    await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
+
+    const after = await getWeek();
+    const thursdayAfter = after.days.find((d: any) => d.weekday === 'thursday');
+    const thursdayQuadsAfter = thursdayAfter.plannedWork.filter((w: any) => w.target_id === 'quads').reduce((s: number, w: any) => s + w.sets, 0);
+    expect(thursdayQuadsAfter).toBe(thursdayQuadsBefore);
+  });
+
+  it('Scenario 7 — a real shortfall followed by a real excess within the same week never escalates a later day beyond the real development reference', async () => {
+    setupProfile(['monday', 'tuesday', 'thursday', 'friday']);
+    const before = await getWeek();
+    const mondayDate = before.days.find((d: any) => d.weekday === 'monday').date;
+    const tuesdayDate = before.days.find((d: any) => d.weekday === 'tuesday').date;
+    const quadsRef = getDevelopmentReference('physique_target', 'quads', 'efficient').weekly_direct_set_reference!;
+
+    await logCompletedQuadsSession(mondayDate, 1); // real shortfall vs plan
+    await logCompletedQuadsSession(tuesdayDate, quadsRef + 10); // real excess, already exceeds the reference alone
+
+    const after = await getWeek();
+    const remainingQuadsTotal = after.days
+      .filter((d: any) => d.date !== mondayDate && d.date !== tuesdayDate)
+      .reduce((sum: number, d: any) => sum + d.plannedWork.filter((w: any) => w.target_id === 'quads').reduce((s: number, w: any) => s + w.sets, 0), 0);
+
+    // No invented "make-up" escalation for the pattern, and no debt
+    // carried within the week either — once real exposure already
+    // exceeds the reference, remaining real allocation is bounded at 0,
+    // never inflated by the shortfall that preceded the excess.
+    expect(remainingQuadsTotal).toBe(0);
+  });
+});
+
 describe('Phase 7 — regression protection during actual-training adaptation (spec section 17)', () => {
   it('an unrelated day\'s persisted identity/prescription survives real-training-triggered reconciliation exactly like an activity-override one', async () => {
     setupProfile(['monday', 'tuesday', 'thursday', 'friday']);

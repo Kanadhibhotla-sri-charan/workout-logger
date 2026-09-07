@@ -18,7 +18,14 @@ let goalId: string;
 beforeEach(() => {
   db = openDb(':memory:');
   app = createApp(db);
-  goalId = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 }).id;
+  // Remediation (Step 12 Fix) §5: an ACTIVE goal now gets its own
+  // auto-created phase (GoalsRepo.create -> ensureActivePhase). This
+  // file's "Goal phase routes"/"review routes" tests deliberately manage
+  // phases explicitly through the routes themselves, so the goal is
+  // created inactive here to avoid colliding with that auto-created
+  // phase — the auto-creation hook itself is covered separately in
+  // tests/goalPhaseLifecycleLinkage.test.ts.
+  goalId = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1, active: false }).id;
 });
 
 describe('Aesthetic assessment routes (previously unrouted)', () => {
