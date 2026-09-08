@@ -104,7 +104,11 @@ export interface VolumeDecision {
   target_id: BlueprintId;
   action: VolumeAction;
   recommended_weekly_primary_sets: number;
-  blueprint_reference_range: { min: number; max: number; label: 'starting_point' | 'practical_range' | 'higher_recovery_dependent' | 'blueprint_package_reference' };
+  blueprint_reference_range: {
+    min: number;
+    max: number;
+    label: 'starting_point' | 'practical_range' | 'higher_recovery_dependent' | 'blueprint_package_reference' | 'missing_physique_package';
+  };
   /** Populated only when action === 'introspect_needed' — the exact
    * §11 (stagnation) or §12 (decline/recovery) checklist item names,
    * for a caller/UI to walk and then set
@@ -144,21 +148,38 @@ const DECLINE_CHECKLIST = [
  * reference range — replacing the universal starting_point/
  * practical_range/higher_recovery_dependent bands, which are the same
  * three numbers for every muscle regardless of which one it is. Falls
- * back to those universal bands unchanged when no package reference
- * exists for this target (e.g. a functional_goal). */
+ * back to those universal bands unchanged when no target-resolution
+ * context exists at all, or for a functional_goal (which has no
+ * Blueprint development package BY DESIGN — see
+ * developmentReferenceEngine.ts).
+ *
+ * Recovery+Fallback Fix §2: a physique_target is different — Blueprint
+ * simply not having grouped it into a muscle_group yet is a genuinely
+ * MISSING package, not a legitimate "no package expected" case like a
+ * functional_goal. The universal bands are still the only numbers this
+ * module has to offer here (no redesign of the volume system), but they
+ * are never silently labeled as if they were this target's own
+ * development reference — the distinct 'missing_physique_package' label
+ * makes that explicit for any caller/route/test that inspects it. */
 function referenceRangeFor(currentSets: number, developmentReference?: DevelopmentReference | null): VolumeDecision['blueprint_reference_range'] {
   if (developmentReference?.weekly_direct_set_reference != null) {
     const r = developmentReference.weekly_direct_set_reference;
     return { min: r, max: r, label: 'blueprint_package_reference' };
   }
+
   const { starting_point_sets, practical_range_sets, higher_recovery_dependent_sets } = BlueprintAdapter.getGlobalPrinciples().weekly_volume;
+  const isMissingPhysiquePackage = developmentReference?.target_type === 'physique_target';
   if (currentSets < practical_range_sets[0]) {
-    return { min: starting_point_sets[0], max: starting_point_sets[1], label: 'starting_point' };
+    return { min: starting_point_sets[0], max: starting_point_sets[1], label: isMissingPhysiquePackage ? 'missing_physique_package' : 'starting_point' };
   }
   if (currentSets <= practical_range_sets[1]) {
-    return { min: practical_range_sets[0], max: practical_range_sets[1], label: 'practical_range' };
+    return { min: practical_range_sets[0], max: practical_range_sets[1], label: isMissingPhysiquePackage ? 'missing_physique_package' : 'practical_range' };
   }
-  return { min: higher_recovery_dependent_sets[0], max: higher_recovery_dependent_sets[1], label: 'higher_recovery_dependent' };
+  return {
+    min: higher_recovery_dependent_sets[0],
+    max: higher_recovery_dependent_sets[1],
+    label: isMissingPhysiquePackage ? 'missing_physique_package' : 'higher_recovery_dependent',
+  };
 }
 
 /**

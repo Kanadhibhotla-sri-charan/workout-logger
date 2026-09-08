@@ -29,6 +29,7 @@ function evidence(overrides: Partial<GoalReviewEvidence> = {}): GoalReviewEviden
     phase_weeks_elapsed: 1,
     development_reference_weekly: null,
     adherence_ratio: null,
+    rolling_exposure_units: 0,
     recovery_flagged: false,
     ...overrides,
   };

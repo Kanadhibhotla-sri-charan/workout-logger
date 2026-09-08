@@ -30,7 +30,7 @@ import { buildPriorityMap } from './goalResolver.js';
 import { type AestheticProgressTrend } from './volumeEngine.js';
 import { getDevelopmentReference } from './developmentReferenceEngine.js';
 import { applyRecoveryConstraint } from './recoveryEngine.js';
-import { aggregateExposure } from './exposureEngine.js';
+import { aggregateExposure, aggregateRollingExposure, aggregateWeeklyExposure } from './exposureEngine.js';
 import { roleFor } from './exerciseSelector.js';
 import { gatherTargetTouches, gatherRecentBadmintonSignal, weekdayOfDate, programmingWeekStart } from './workoutBuilder.js';
 import { daysBetween, addDays } from './dateMath.js';
@@ -87,6 +87,13 @@ export interface GoalReviewEvidence {
    * recommendation. Null if there were no real training opportunities
    * in the window (e.g. no training days configured). */
   adherence_ratio: number | null;
+  /** Recovery+Fallback Fix §1: real, target-specific exposure over the
+   * 14 real calendar days ending at `asOfDate` — intentionally NOT the
+   * same measurement as `actual_weekly_exposure` above (that is the
+   * PHASE-WIDE average, which can span many weeks). This is what is
+   * actually passed to applyRecoveryConstraint as rolling evidence —
+   * never the phase average standing in for it. */
+  rolling_exposure_units: number;
   recovery_flagged: boolean;
 }
 
@@ -408,16 +415,50 @@ export function gatherReviewEvidence(db: Database.Database, goal: Goal, phase: G
   // stimulus). `other_activity_today: []` matches this app's one real
   // implementation of that input everywhere it's used (workoutBuilder.ts
   // passes the same empty list) — not a simplification unique to review.
+  //
+  // Recovery+Fallback Fix §1: `weekly_exposure_units`/`rolling_exposure_units`
+  // must be REAL recent exposure — the current (7-day) week and a real
+  // 14-real-calendar-day window ending at asOfDate, respectively — never
+  // the phase-wide average (`actual_weekly_exposure`, which can span many
+  // weeks and was previously passed for BOTH, telling recovery "the
+  // phase average IS this week AND IS the last 14 days"). The rolling
+  // window can reach earlier than phase.start_date (a phase started 5
+  // days ago still has a real, meaningful 14-day rolling window), so
+  // this reuses a fresh, unscoped-by-phase session fetch — never
+  // `recentSessions`, which is deliberately bounded to the phase. Both
+  // aggregations are the SAME canonical exposure functions
+  // workoutBuilder.ts's own real weekly-programming recovery calls
+  // already use (aggregateWeeklyExposure/aggregateRollingExposure) —
+  // never a second, hand-rolled exposure calculation — and both only
+  // ever see real completed sessions with `date <= asOfDate` (no future
+  // data) via the same `calculateExerciseExposure`/`isDateInRange`
+  // machinery, so they are automatically target-specific and
+  // actual-vs-planned correct with no extra code here.
   let recovery_flagged = false;
+  let rolling_exposure_units = 0;
   if (target) {
     const touchesByTarget = gatherTargetTouches(sessionsRepo, recentSessions);
     const mostRecentTouch = touchesByTarget.get(`${target.target_type}:${target.target_id}`)?.[0];
     const recentBadminton = gatherRecentBadmintonSignal(new BadmintonSessionDetailsRepo(db), recentSessions);
+
+    const recentCompletedSessions = sessionsRepo
+      .listSessions()
+      .filter((s) => s.date <= asOfDate && s.status === 'completed')
+      .map((s) => ({ date: s.date, exercises: sessionsRepo.getExercisePerformances(s.session_id).map((e) => ({ exercise_id: e.exercise_id, sets: e.sets })) }));
+    const weekStartDay = profile?.week_start_day ?? 'monday';
+    const weeklyWindowExposure = aggregateWeeklyExposure(recentCompletedSessions, asOfDate, weekStartDay).find(
+      (e) => e.target_type === target.target_type && e.target_id === target.target_id
+    );
+    const rollingWindowExposure = aggregateRollingExposure(recentCompletedSessions, asOfDate, 14).find(
+      (e) => e.target_type === target.target_type && e.target_id === target.target_id
+    );
+    rolling_exposure_units = rollingWindowExposure?.exposure_units ?? 0;
+
     const recovery = applyRecoveryConstraint({
       target_type: target.target_type,
       target_id: target.target_id,
-      weekly_exposure_units: actual_weekly_exposure,
-      rolling_exposure_units: actual_weekly_exposure,
+      weekly_exposure_units: weeklyWindowExposure?.exposure_units ?? 0,
+      rolling_exposure_units,
       rolling_window_days: 14,
       days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, asOfDate) : null,
       recent_badminton: recentBadminton,
@@ -435,6 +476,7 @@ export function gatherReviewEvidence(db: Database.Database, goal: Goal, phase: G
     phase_weeks_elapsed,
     development_reference_weekly,
     adherence_ratio,
+    rolling_exposure_units,
     recovery_flagged,
   };
 }
