@@ -183,13 +183,20 @@ describe('Strict Bug-Fix §11-15/§31 "Multiple exercises": 0/1/multiple exercis
     expect(quadsExercises[0]!.target_sets).toBe(3);
   });
 
-  it('multiple exercises — deterministically, from the target\'s own real Blueprint development package — when one exercise cannot reasonably cover the real weekly requirement', () => {
+  it('multiple exercises — deterministically, from the target\'s own real Blueprint exercise data — when one exercise cannot reasonably cover the real weekly requirement', () => {
     // current_weekly_primary_sets=0 -> decideVolume starts at Blueprint's
     // own starting_point_sets[0] (8); one eligible session this week ->
-    // setsToday=8, which exceeds any single quads package exercise's own
-    // per-session sets figure (back-squat/leg-press=3, leg-extension=2)
-    // — genuinely requiring all 3 of the package's real exercises to
-    // cover the full 8 sets without inventing a split.
+    // setsToday=8, which exceeds any single quads candidate's own
+    // per-session sets figure — genuinely requiring multiple real
+    // candidates to cover the full 8 sets without inventing a split.
+    // Blueprint Candidate Fix: candidate discovery/ranking is NOT
+    // limited to quads-efficient's own package-listed exercises (a
+    // universal package-membership gate was exactly the bug this fix
+    // closes) — bulgarian-split-squat-knee-dominant is a real quads
+    // candidate with a real Blueprint prescription (from quads-complete,
+    // which lists it even though quads-efficient does not; see
+    // lookupExercisePrescriptionAnyLevel), so it legitimately outranks
+    // leg-press here rather than being invisible to selection.
     const result = buildWorkout({
       date: '2026-09-03',
       weekday: 'thursday',
@@ -201,12 +208,12 @@ describe('Strict Bug-Fix §11-15/§31 "Multiple exercises": 0/1/multiple exercis
     const quadsExercises = result.exercises.filter((e) => e.target_id === 'quads');
     expect(quadsExercises.length).toBe(3);
     // Deterministic distribution: every exercise's own sets figure
-    // comes straight from Blueprint's own development package (never a
+    // comes straight from real Blueprint exercise data (never a
     // random split), and the total exactly equals the real weekly
     // requirement — no volume silently dropped just because it spans
     // more than one exercise.
     const bySets = Object.fromEntries(quadsExercises.map((e) => [e.exercise_id, e.target_sets]));
-    expect(bySets).toEqual({ 'back-squat': 3, 'leg-extension': 2, 'leg-press': 3 });
+    expect(bySets).toEqual({ 'back-squat': 3, 'bulgarian-split-squat-knee-dominant': 3, 'leg-extension': 2 });
     expect(quadsExercises.reduce((sum, e) => sum + e.target_sets, 0)).toBe(8);
     // Every exercise still carries its own real Blueprint reps/RIR —
     // multi-exercise construction never loses per-exercise prescription

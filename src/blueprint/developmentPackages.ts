@@ -77,3 +77,31 @@ export function lookupExercisePrescription(
   if (!pkg) return null;
   return pkg.exercises.find((e) => e.exercise_id === exerciseId) ?? null;
 }
+
+/** The two development-package levels Blueprint authors today — see
+ * this module's own header comment. Iterated by
+ * lookupExercisePrescriptionAnyLevel; never used to pick which level
+ * governs a target's own volume reference (that stays
+ * developmentReferenceEngine.ts's sole responsibility). */
+const ALL_DEVELOPMENT_PACKAGE_LEVELS = ['efficient', 'complete'] as const;
+
+/** Blueprint Candidate Fix: a real exercise can be genuinely absent
+ * from one package level yet present, with a real Blueprint-authored
+ * prescription, in the OTHER level for the same muscle_group (e.g.
+ * "Shoulders — Complete" adds rear-delt-row, which "Shoulders —
+ * Efficient" leaves out) — that is still an explicitly valid Blueprint
+ * prescription source for the exercise itself, never a fabricated
+ * value. This is used ONLY to resolve one exercise's own sets/reps/RIR
+ * template; it must never be read as "this target's development
+ * reference is now Complete" — that remains governed entirely by
+ * developmentReferenceEngine.ts's goal/non-goal Complete/Efficient
+ * rule, untouched here. Returns null only when the exercise is truly
+ * absent from every level's package for this muscle_group — a genuine
+ * data-quality gap, never invented. */
+export function lookupExercisePrescriptionAnyLevel(physiqueTargetId: string, exerciseId: string): BlueprintDevelopmentPackageExercise | null {
+  for (const level of ALL_DEVELOPMENT_PACKAGE_LEVELS) {
+    const prescription = lookupExercisePrescription(physiqueTargetId, exerciseId, level);
+    if (prescription) return prescription;
+  }
+  return null;
+}

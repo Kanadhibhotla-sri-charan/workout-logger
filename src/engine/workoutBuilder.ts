@@ -33,7 +33,7 @@
 
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
-import { lookupExercisePrescription, parseRange } from '../blueprint/developmentPackages.js';
+import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
@@ -975,30 +975,23 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       continue;
     }
 
-    // Narrow to candidates that actually have a usable rep/RIR
-    // prescription for this target BEFORE ranking — either Blueprint's
-    // own development-package data, or (for an outside-Blueprint
-    // candidate) the range the human supplied and this repo already
-    // validated at proposal time — otherwise the top-ranked candidate
-    // could be one with no prescription data, forcing an avoidable
-    // skip when a still-legitimate, still-feasible alternative
-    // candidate does have one (spec §5: substitute when the preferred
-    // pick doesn't work out; §25: never invent a substitute
-    // prescription instead).
-    if (target.target_type === 'physique_target') {
-      const withPrescription = candidateExerciseIds.filter((id) => outsideCandidatesById.has(id) || lookupExercisePrescription(target.target_id, id) !== null);
-      if (withPrescription.length === 0) {
-        weekLevelSkips.push({
-          target_type: target.target_type,
-          target_id: target.target_id,
-          classification,
-          reason: 'None of the equipment-feasible candidates have a Blueprint development-package rep/RIR prescription (or an approved outside-Blueprint one) for this target — exposing this gap rather than inventing one (spec §25).',
-          decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
-        });
-          continue;
-      }
-      candidateExerciseIds = withPrescription;
-    } else {
+    // Blueprint Candidate Fix: a physique-target candidate is NEVER
+    // pre-filtered by package-listed prescription before ranking.
+    // Efficient/Complete development packages are development-VOLUME
+    // reference data (see developmentReferenceEngine.ts) — never an
+    // exercise menu or an eligibility/prescription-existence gate. A
+    // real Blueprint exercise that simply isn't listed in either
+    // package for this muscle_group (e.g. Blueprint's own
+    // "rear-delt-fly"/"rear-delt-row" curation choices) must remain a
+    // real candidate for Gate 1-6 ranking; only the ACTUAL selected
+    // winner's own prescription is resolved (see attemptSelection
+    // below), and only a genuine absence of any real prescription for
+    // EVERY remaining real candidate is ever treated as a data gap
+    // (spec §5: substitute when the preferred pick doesn't work out —
+    // implemented as a real per-attempt retry in the day-construction
+    // loop below, never as a pre-ranking exclusion; §25: never invent a
+    // substitute prescription instead).
+    if (target.target_type !== 'physique_target') {
       // A functional_goal target has no Blueprint development-package
       // prescription source at all — an approved outside-Blueprint
       // exercise (with its own reps_range/rir_range) is the only real
@@ -1030,6 +1023,25 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     let remainingWeeklySets = badmintonLowerBodyReduce ? Math.max(1, desiredWeekly - 1) : desiredWeekly;
     let globalExerciseIndex = 0;
 
+    // Blueprint Candidate Fix: which of THIS target's real candidates
+    // could actually receive a placement — a resolvable Blueprint
+    // prescription at any package level, or an approved outside-
+    // Blueprint exercise with its own reps/RIR. Ranking itself still
+    // sees the FULL candidate pool (including unprescribable
+    // candidates, so a package-absent-but-otherwise-valid exercise can
+    // still win a ranking slot and go through the real per-attempt
+    // retry below) — this set is used ONLY by isLastUsableExercise
+    // below, to tell "another real candidate remains to take the rest
+    // of this week's volume" apart from "the pool merely still contains
+    // IDs that will keep failing the retry," so a genuinely sole usable
+    // candidate still absorbs the whole remaining weekly requirement
+    // rather than being wrongly capped at its own per-session figure.
+    const prescribableExerciseIds = new Set(
+      candidateExerciseIds.filter(
+        (id) => outsideCandidatesById.has(id) || (target.target_type === 'physique_target' && lookupExercisePrescriptionAnyLevel(target.target_id, id) !== null)
+      )
+    );
+
     /** One real Gate-1-6 selection attempt, restricted to `pool`, plus
      * this exercise's own real prescription and (when usable history
      * exists) real progression — everything needed BEFORE this
@@ -1056,7 +1068,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // no Blueprint data to size a multi-exercise/multi-day split
       // against it.
       const outsidePrescription = outsideSelection ? { reps: outsideSelection.reps_range, rir: outsideSelection.rir_range, sets: null as number | null } : null;
-      const blueprintPrescription = !outsideSelection && target.target_type === 'physique_target' ? lookupExercisePrescription(target.target_id, selection.exercise_id) : null;
+      const blueprintPrescription = !outsideSelection && target.target_type === 'physique_target' ? lookupExercisePrescriptionAnyLevel(target.target_id, selection.exercise_id) : null;
       const prescription = outsidePrescription ?? (blueprintPrescription ? { reps: blueprintPrescription.reps, rir: blueprintPrescription.rir, sets: blueprintPrescription.sets } : null);
       if (!prescription) return { selection, prescription: null as null };
 
@@ -1235,20 +1247,30 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         while (remainingWeeklySets > 0 && pool.length > 0) {
           const attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
           if (!attempt.prescription) {
-            if (globalExerciseIndex === 0 && placedTodayIds.length === 0) {
+            // Blueprint Candidate Fix: this specific candidate has no
+            // resolvable Blueprint prescription (checked at any package
+            // level, or an outside-Blueprint one) — remove ONLY this
+            // one and retry with the next-best real candidate still in
+            // the pool (spec §5's "substitute when the preferred pick
+            // doesn't work out"), rather than giving up on the whole
+            // target. A genuine data gap is reported only once the
+            // ENTIRE real pool is exhausted with nothing ever placed
+            // for this target this week.
+            pool = pool.filter((id) => id !== attempt.selection.exercise_id);
+            if (pool.length === 0 && globalExerciseIndex === 0 && placedTodayIds.length === 0) {
               weekLevelSkips.push({
                 target_type: target.target_type,
                 target_id: target.target_id,
                 classification,
-                reason: `No Blueprint development-package rep/RIR prescription is available for "${attempt.selection.exercise_id}" against this target — exposing this gap rather than inventing a rep range (spec §25).`,
+                reason: `No equipment-feasible candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) — exposing this genuine data gap rather than inventing one (spec §25). Last attempted: "${attempt.selection.exercise_id}".`,
                 decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }, purposeThisDay),
               });
             }
-            break;
+            continue;
           }
           pool = pool.filter((id) => id !== attempt.selection.exercise_id);
           placedTodayIds.push(attempt.selection.exercise_id);
-          const isLastUsableExercise = pool.length === 0;
+          const isLastUsableExercise = !pool.some((id) => prescribableExerciseIds.has(id));
           // Surgical Fix Pass §7-10: charge the week's remaining need by
           // the DELIVERED amount, never the pre-reduction natural cap —
           // an undelivered set was never actually placed, so it must
@@ -1268,8 +1290,18 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         // at that exercise's own Blueprint-authored per-session `sets`
         // figure (or the whole remaining amount if smaller, or if no
         // Blueprint sets figure exists) — never dividing the weekly
-        // total evenly across sessions.
-        const attempt = attemptSelection(dayCandidatePool, [], plannedTodayIds);
+        // total evenly across sessions. Blueprint Candidate Fix: the
+        // same real "remove this one, retry the next-best real
+        // candidate" substitution as the last-day loop above — a
+        // top-ranked candidate with no resolvable prescription must
+        // never silently leave this day empty when a lower-ranked, but
+        // still real and prescribable, candidate remains in the pool.
+        let dayPool = dayCandidatePool;
+        let attempt = attemptSelection(dayPool, [], plannedTodayIds);
+        while (!attempt.prescription && dayPool.length > 1) {
+          dayPool = dayPool.filter((id) => id !== attempt.selection.exercise_id);
+          attempt = attemptSelection(dayPool, [], plannedTodayIds);
+        }
         if (attempt.prescription) {
           // Same requested-vs-delivered accounting as the last-day
           // branch above: only the delivered amount is charged against
