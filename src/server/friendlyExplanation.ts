@@ -26,11 +26,23 @@ function pluralSets(n: number): string {
 }
 
 /** The user's own goal phrasing — "your <goal> goal" — derived from the
- * real Goal's own Blueprint reference id (never a raw internal target
- * id, never "Goal 1"-style positional labels, which aren't a goal
- * NAME). Null when this work isn't tied to a real user Goal at all. */
-function goalPhrase(goalBlueprintRef: string | null): string | null {
-  return goalBlueprintRef ? humanizeSlug(goalBlueprintRef) : null;
+ * real Goal's own name reference (never a raw internal target id, never
+ * "Goal 1"-style positional labels, which aren't a goal NAME). Null when
+ * this work isn't tied to a real user Goal at all.
+ *
+ * Final Copy/Explanation Fixes §7: the caller (programming.ts's
+ * resolveGoalNameRef) already substitutes the real Blueprint
+ * functionalGoal name (e.g. "Rotator Cuff") when one exists, since
+ * Blueprint's functionalGoals do carry a genuine clean title — verified
+ * against src/blueprint/snapshot/programming.json. Aesthetic outcomes
+ * have no equivalent (their only name-like field, display_name, is a
+ * first-person problem statement like "Arms look thin from the side",
+ * not a title), so their raw blueprint_ref slug still arrives here and
+ * humanizeSlug remains the correct, spec-sanctioned fallback for it.
+ * humanizeSlug is idempotent on an already-clean title (no hyphens to
+ * replace), so this one call handles both cases correctly. */
+function goalPhrase(goalNameRef: string | null): string | null {
+  return goalNameRef ? humanizeSlug(goalNameRef) : null;
 }
 
 interface FriendlyPlannedInput {
@@ -51,8 +63,8 @@ interface FriendlyPlannedInput {
  * answering exactly the four questions spec §4 asks for: why added,
  * what muscle it trains, how that relates to the user's active goal,
  * and how much this target has already been trained this week. */
-export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalBlueprintRef: string | null): string {
-  const goal = goalPhrase(goalBlueprintRef);
+export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalNameRef: string | null): string {
+  const goal = goalPhrase(goalNameRef);
   const isSecondary = work.role === 'secondary';
   const sentences: string[] = [];
 
@@ -70,6 +82,17 @@ export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalBl
     sentences.push(`${work.exercise_name} develops your ${work.target_name}, which is not currently an active goal but still needs regular development to keep your overall physique balanced.`);
   }
 
+  // Final Copy/Explanation Fixes §6: decision.weekly_exposure.primary_sets
+  // is genuinely ACTUAL training exposure, never a planned/prescribed
+  // count — traced to src/engine/trainingState.ts's buildTrainingState,
+  // which builds it from workoutSessionsRepo.getExercisePerformances
+  // (real logged sets) for every real session this week, and
+  // src/engine/exposureEngine.ts's calculateExerciseExposure, which
+  // explicitly excludes any set not marked completed (rule D — see
+  // tests/engine/exposureEngine.test.ts's "excludes uncompleted sets
+  // entirely"). A merely-planned, not-yet-performed session contributes
+  // nothing here. "You had ... so far this week" is therefore accurate
+  // as written — it never overstates unperformed/planned work as done.
   const priorSets = work.decision.weekly_exposure.primary_sets;
   sentences.push(
     priorSets > 0

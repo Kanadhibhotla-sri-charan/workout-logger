@@ -24,6 +24,14 @@
     let generated = null; // GET /api/programming/today?date=session.date result (gym sessions only)
     let skippedExerciseIds = new Set(); // locally tracked — no persisted "skipped" concept at the exercise level
     let substitutions = new Map(); // generated exercise_id -> {id, name} chosen substitute
+    // Final Copy/Explanation Fixes §1: a persisted, id-keyed exercise
+    // name lookup (Blueprint + approved outside-Blueprint) — the
+    // reliable identity-resolution mechanism a PERFORMED exercise's
+    // name must go through, since it must resolve correctly even when
+    // it's a substitute the transient `substitutions` Map above no
+    // longer knows about (page reload, reopened session, app restart).
+    // Never depends on `generated`/`substitutions` as the only source.
+    let exerciseNamesById = new Map();
     let dirty = false; // unsaved set values entered but not yet saved (spec §62)
     let startedAt = Date.now();
     let elapsedTimer = null;
@@ -50,10 +58,30 @@
         session = await api(`/api/workouts/${sessionId}`);
         if (session.session_type === 'gym') {
           generated = await api(`/api/programming/today?date=${session.date}`).catch(() => null);
+          await loadExerciseNames();
         }
         render();
       } catch (err) {
         showError(root, "We couldn't load this workout.", load);
+      }
+    }
+
+    // Final Copy/Explanation Fixes §1: fetched once per page load, from
+    // the same two real, persisted exercise catalogs the app already
+    // exposes (Blueprint's own library + approved outside-Blueprint
+    // proposals) — never from the current session's transient
+    // substitution state. A fetch failure leaves the map empty; name
+    // resolution then falls back to the generated program's own name,
+    // or the raw id as a last resort (unchanged from before this fix).
+    async function loadExerciseNames() {
+      try {
+        const [blueprintExercises, outsideExercises] = await Promise.all([
+          api('/api/blueprint/exercises'),
+          api('/api/outside-blueprint-exercises').catch(() => []),
+        ]);
+        exerciseNamesById = new Map([...blueprintExercises, ...outsideExercises].map((e) => [e.id, e.name]));
+      } catch (err) {
+        exerciseNamesById = new Map();
       }
     }
 
@@ -194,8 +222,15 @@
       return card;
     }
 
+    // Final Copy/Explanation Fixes §1: the PERFORMED exercise's own
+    // persisted id is resolved through the real exercise catalogs
+    // first — this is correct whether or not it matches anything in
+    // `generated` (i.e. whether or not a substitution happened), and
+    // survives a reload with no transient substitution state. Falling
+    // back to `generatedMatch.exercise_name` only covers the (now rare)
+    // case where the name lookup itself hasn't loaded yet.
     function exerciseDisplayName(perf, generatedMatch) {
-      return generatedMatch ? generatedMatch.exercise_name : perf.exercise_id;
+      return exerciseNamesById.get(perf.exercise_id) ?? generatedMatch?.exercise_name ?? perf.exercise_id;
     }
 
     function buildPreloadedExerciseCard(g) {

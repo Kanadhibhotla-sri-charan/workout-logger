@@ -23,7 +23,7 @@ import {
 import { exercisesTrainingTarget } from '../../engine/exerciseSelector.js';
 import { filterEquipmentFeasible } from '../../engine/constraintEngine.js';
 import { addDays } from '../../engine/dateMath.js';
-import { DAILY_ACTIVITIES, WEEKDAYS, type BlueprintId, type DailyActivity, type RecurringActivity, type TrainingProfile, type Weekday } from '../../contracts/types.js';
+import { DAILY_ACTIVITIES, WEEKDAYS, type BlueprintId, type DailyActivity, type Goal, type RecurringActivity, type TrainingProfile, type Weekday } from '../../contracts/types.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import { GoalsRepo } from '../../repositories/goalsRepo.js';
@@ -57,20 +57,40 @@ function targetKey(t: { target_type: TargetType; target_id: BlueprintId }): stri
   return `${t.target_type}:${t.target_id}`;
 }
 
+/** Final Copy/Explanation Fixes §7: the best available human-readable
+ * name for a Goal's underlying Blueprint reference. A functional goal
+ * (e.g. "rotator-cuff") has a genuine clean title in Blueprint's own
+ * data — BlueprintFunctionalGoal.name, e.g. "Rotator Cuff" — verified
+ * directly against src/blueprint/snapshot/programming.json, so prefer
+ * it. An aesthetic outcome has no equivalent: its only name-like field,
+ * display_name, is a first-person problem statement (e.g. "Arms look
+ * thin from the side"), not a goal title, so the raw blueprint_ref is
+ * passed through unchanged and humanized downstream by
+ * friendlyExplanation.ts's humanizeSlug — exactly the fallback spec §7
+ * itself says is acceptable when no better representation exists. */
+export function resolveGoalNameRef(goal: Pick<Goal, 'goal_type' | 'blueprint_ref'>): string {
+  if (goal.goal_type === 'functional') {
+    const functionalGoal = BlueprintAdapter.getFunctionalGoal(goal.blueprint_ref);
+    if (functionalGoal) return functionalGoal.name;
+  }
+  return goal.blueprint_ref;
+}
+
 /** Every active goal (aesthetic or functional), sorted by the user's own
  * real `priority` field ascending — "Goal 1" is simply position 1 in
  * that real, user-controlled ranking (spec §16/§19/§20's "Goal 1/Goal
  * 2 must be visibly distinct"), never a value this route invents.
- * `blueprintRefs` is each Goal's own real `blueprint_ref` (e.g.
- * "chest-front-width") — the Workout Programmer UI Fix's human-
- * readable-explanation layer humanizes this into "your chest front
- * width goal" rather than exposing the positional "Goal 1" label or
- * the raw target id as the user-facing goal name (spec §5). */
-function goalLabels(database: Database.Database): { labels: Map<string, string>; blueprintRefs: Map<string, string> } {
+ * `nameRefs` is each Goal's best available name reference (see
+ * resolveGoalNameRef) — the Workout Programmer UI Fix's human-
+ * readable-explanation layer turns this into "your chest front width
+ * goal" / "your Rotator Cuff goal" rather than exposing the positional
+ * "Goal 1" label or a raw target id as the user-facing goal name
+ * (spec §5, §7). */
+function goalLabels(database: Database.Database): { labels: Map<string, string>; nameRefs: Map<string, string> } {
   const goals = new GoalsRepo(database).list({ active: true }).sort((a, b) => a.priority - b.priority);
   return {
     labels: new Map(goals.map((g, i) => [g.id, `Goal ${i + 1}`])),
-    blueprintRefs: new Map(goals.map((g) => [g.id, g.blueprint_ref])),
+    nameRefs: new Map(goals.map((g) => [g.id, resolveGoalNameRef(g)])),
   };
 }
 
@@ -131,17 +151,17 @@ function enrichPlannedWork<
     progression_decision: { recommendation: string } | null;
     decision: { weekly_exposure: { primary_sets: number } };
   }
->(work: T, targetGoalMap?: TargetGoalMap, labels?: Map<string, string>, blueprintRefs?: Map<string, string>) {
+>(work: T, targetGoalMap?: TargetGoalMap, labels?: Map<string, string>, nameRefs?: Map<string, string>) {
   const goalInfo = targetGoalMap && labels ? resolveGoalLabelAndId(targetKey(work), work.classification, targetGoalMap, labels) : { goal_id: null, goal_label: null };
   const exercise_name = resolveExerciseName(work.exercise_id);
   const target_name = resolveTargetName(work.target_type, work.target_id);
-  const goalBlueprintRef = goalInfo.goal_id ? (blueprintRefs?.get(goalInfo.goal_id) ?? null) : null;
+  const goalNameRef = goalInfo.goal_id ? (nameRefs?.get(goalInfo.goal_id) ?? null) : null;
   return {
     ...work,
     exercise_name,
     target_name,
     ...goalInfo,
-    friendly_reasoning: buildFriendlyPlannedReasoning({ ...work, exercise_name, target_name }, goalBlueprintRef),
+    friendly_reasoning: buildFriendlyPlannedReasoning({ ...work, exercise_name, target_name }, goalNameRef),
   };
 }
 
@@ -222,7 +242,7 @@ export function computeFreshWeek(database: Database.Database, weekStart: string,
   const targetGoalMap = new Map<string, { goal_id: string; is_specialization: boolean }>(
     input.targets.map((t: TargetBuildContext) => [targetKey(t), { goal_id: t.goal_id, is_specialization: t.is_specialization }])
   );
-  const { labels, blueprintRefs } = goalLabels(database);
+  const { labels, nameRefs } = goalLabels(database);
   const sessionsByDate = new Map(plan.sessions.map((s) => [s.date, s]));
 
   const days: FreshDayInput[] = WEEKDAYS.map((weekday, i) => {
@@ -231,7 +251,7 @@ export function computeFreshWeek(database: Database.Database, weekStart: string,
     if (!gymSession) {
       return { dayIndex: i, date: dayDate, hasGymComponent: false, sessionPurpose: null, snapshot: { plannedWork: [] } };
     }
-    const plannedWork = gymSession.plannedWork.map((w) => enrichPlannedWork(w, targetGoalMap, labels, blueprintRefs));
+    const plannedWork = gymSession.plannedWork.map((w) => enrichPlannedWork(w, targetGoalMap, labels, nameRefs));
     const skipped = gymSession.skipped.map((s) => enrichSkip(s, targetGoalMap, labels));
     return {
       dayIndex: i,

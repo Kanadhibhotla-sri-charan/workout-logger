@@ -15,6 +15,7 @@ import { GoalsRepo } from '../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../src/repositories/usersRepo.js';
 import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning, humanizeSlug } from '../src/server/friendlyExplanation.js';
+import { resolveGoalNameRef } from '../src/server/routes/programming.js';
 
 const JARGON_TERMS = [
   'physique_target',
@@ -44,6 +45,49 @@ describe('humanizeSlug', () => {
   it('turns a kebab-case Blueprint id into plain words', () => {
     expect(humanizeSlug('chest-front-width')).toBe('chest front width');
     expect(humanizeSlug('arm-side-thickness')).toBe('arm side thickness');
+  });
+});
+
+describe('resolveGoalNameRef — Final Copy/Explanation Fixes §7: best available human-readable goal name', () => {
+  it('uses the real Blueprint functionalGoal title when one exists, not a humanized slug', () => {
+    // Verified directly against src/blueprint/snapshot/programming.json:
+    // functionalGoals do carry a genuine clean title ("Rotator Cuff"),
+    // unlike aesthetic outcomes, so it must be preferred here.
+    expect(resolveGoalNameRef({ goal_type: 'functional', blueprint_ref: 'rotator-cuff' })).toBe('Rotator Cuff');
+    expect(resolveGoalNameRef({ goal_type: 'functional', blueprint_ref: 'scapular-stability' })).toBe('Scapular Stability');
+  });
+
+  it('falls back to the raw blueprint_ref (humanized downstream) for an aesthetic outcome, which has no title field', () => {
+    // aestheticOutcomes' only name-like field, display_name, is a
+    // first-person problem statement ("Arms look thin from the side"),
+    // not a goal title — spec §7 explicitly allows the slug-humanization
+    // fallback when no better representation exists.
+    expect(resolveGoalNameRef({ goal_type: 'aesthetic', blueprint_ref: 'arm-side-thickness' })).toBe('arm-side-thickness');
+  });
+
+  it('falls back to the raw blueprint_ref for a functional goal id Blueprint does not recognize', () => {
+    expect(resolveGoalNameRef({ goal_type: 'functional', blueprint_ref: 'not-a-real-functional-goal' })).toBe('not-a-real-functional-goal');
+  });
+
+  it('end-to-end: a functional-goal-linked friendly_reasoning reads "your Rotator Cuff goal", never "your rotator cuff goal"', () => {
+    const text = buildFriendlyPlannedReasoning(
+      {
+        target_name: 'Rotator Cuff',
+        exercise_name: 'Band Pull-Apart',
+        role: 'primary',
+        classification: 'specialization',
+        sets: 3,
+        reps_min: 12,
+        reps_max: 20,
+        rir_min: 1,
+        rir_max: 3,
+        progression_decision: null,
+        decision: { weekly_exposure: { primary_sets: 0 } },
+      },
+      resolveGoalNameRef({ goal_type: 'functional', blueprint_ref: 'rotator-cuff' })
+    );
+    expect(text).toContain('Added for your Rotator Cuff goal.');
+    expect(text).not.toContain('rotator cuff goal'); // never the lowercase humanized-slug form when a real title exists
   });
 });
 

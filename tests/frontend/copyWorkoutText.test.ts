@@ -41,7 +41,17 @@ function extractFunction(source: string, name: string): string {
   return source.slice(startMatch.index, i);
 }
 
-let buildCopyText: (session: any, generated: any) => string;
+let rawBuildCopyText: (initialNames: Array<[string, string]>) => (session: any, generated: any) => string;
+
+/** Calls the real buildCopyText with a given PERSISTED exercise-name
+ * catalog (Blueprint + approved outside-Blueprint, as loadExerciseNames
+ * populates it in the real page) — the reliable identity-resolution
+ * mechanism §1 requires. `namesById` defaults to empty, matching a
+ * fetch that hasn't completed / returned nothing, so tests that don't
+ * care about name resolution can omit it. */
+function buildCopyText(session: any, generated: any, namesById: Array<[string, string]> = []): string {
+  return rawBuildCopyText(namesById)(session, generated);
+}
 
 beforeAll(() => {
   const appJs = readFile('app.js');
@@ -52,13 +62,17 @@ beforeAll(() => {
   const buildCopyTextSrc = extractFunction(loggerHtml, 'buildCopyText');
 
   // eslint-disable-next-line no-new-func
-  const factory = new Function(`
+  const factory = new Function(
+    'initialNames',
+    `
+    let exerciseNamesById = new Map(initialNames);
     ${formatDateSrc}
     ${exerciseDisplayNameSrc}
     ${buildCopyTextSrc}
     return buildCopyText;
-  `);
-  buildCopyText = factory();
+  `
+  );
+  rawBuildCopyText = factory as any;
 });
 
 function perf(exerciseId: string, sets: Array<{ weight: number | null; reps: number | null; completed: boolean }>) {
@@ -99,13 +113,51 @@ describe('logger.html buildCopyText — real executable formatter, not just mark
   it('uses the PERFORMED exercise variation, not the originally prescribed one, when they differ (spec: copy what was actually performed)', () => {
     // The program prescribed cable-pushdown; the logged performance is
     // for a genuinely different exercise id — exactly the "Cable
-    // Pushdown -> Rope" substitution scenario the spec describes,
-    // modeled here as the exercise the user actually performed.
+    // Pushdown -> Rope" substitution scenario the spec describes. The
+    // persisted name catalog (not `generated`) resolves it.
     const session = { date: '2026-09-08', notes: null, exercises: [perf('cable-pushdown-rope', [{ weight: 25, reps: 12, completed: true }])] };
     const generated = { exercises: [{ exercise_id: 'cable-pushdown', exercise_name: 'Cable Pushdown' }, { exercise_id: 'cable-pushdown-rope', exercise_name: 'Cable Pushdown (Rope)' }] };
-    const text = buildCopyText(session, generated);
+    const text = buildCopyText(session, generated, [
+      ['cable-pushdown', 'Cable Pushdown'],
+      ['cable-pushdown-rope', 'Cable Pushdown (Rope)'],
+    ]);
     expect(text).toContain('Cable Pushdown (Rope)');
     expect(text).not.toMatch(/Cable Pushdown \(\d+ set/); // the plain prescribed name never stands in for the performed one
+  });
+
+  describe('Final Copy/Explanation Fixes §1/§2: real persisted-substitution regression (no transient substitution state)', () => {
+    // Final Fixes §2's exact required scenario: `generated.exercises`
+    // contains ONLY the originally-prescribed exercise (the program
+    // itself is never mutated to include the substitute); the
+    // performed session was logged under the substitute's own real
+    // exercise id; there is no substitutions Map at all (buildCopyText
+    // never receives one, matching a fresh page load/reload where the
+    // in-memory Map from the original session is long gone). The ONLY
+    // way this resolves correctly is through the persisted exercise
+    // catalog (`namesById`, simulating the real /api/blueprint/exercises
+    // + /api/outside-blueprint-exercises fetch) — never generated,
+    // never a substitution map, never the raw id.
+    const generatedPrescribedOnly = { exercises: [{ exercise_id: 'cable-pushdown', exercise_name: 'Cable Pushdown' }] };
+    const persistedNames: Array<[string, string]> = [
+      ['cable-pushdown', 'Cable Pushdown'],
+      ['cable-pushdown-rope', 'Cable Pushdown (Rope)'],
+    ];
+
+    it('resolves the human-readable performed (substituted) name from the persisted catalog alone', () => {
+      const session = { date: '2026-09-08', notes: null, exercises: [perf('cable-pushdown-rope', [{ weight: 25, reps: 12, completed: true }])] };
+      const text = buildCopyText(session, generatedPrescribedOnly, persistedNames);
+      expect(text).toContain('Cable Pushdown (Rope)');
+      expect(text).not.toContain('cable-pushdown-rope'); // never the raw id
+      // The plain prescribed name is not what got copied — this is the
+      // performed variation, not the original prescription.
+      expect(text).not.toMatch(/Cable Pushdown — \d+ set/);
+    });
+
+    it('still resolves correctly with generated entirely absent — the exact "reopened after reload/app restart" case', () => {
+      const session = { date: '2026-09-08', notes: null, exercises: [perf('cable-pushdown-rope', [{ weight: 25, reps: 12, completed: true }])] };
+      const text = buildCopyText(session, null, persistedNames);
+      expect(text).toContain('Cable Pushdown (Rope)');
+    });
   });
 
   it('includes an incomplete/skipped set faithfully, never fabricating a completed one', () => {
