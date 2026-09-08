@@ -304,6 +304,18 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transf
 .planned-vs-actual { display: flex; gap: var(--space-4); margin-top: var(--space-2); font-size: 0.85rem; }
 .planned-vs-actual .pva-label { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; display: block; }
 
+/* Small, visually subordinate personal note for a single session —
+   never as prominent as the exercise list itself. */
+.session-note-section { margin-top: var(--space-4); }
+.session-note-section h2 { color: var(--text-muted); }
+.session-note-section textarea {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
 /* ---------- Program week grid ---------- */
 
 .week-grid {

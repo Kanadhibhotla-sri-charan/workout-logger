@@ -11,13 +11,20 @@
 // from the previous gate carries forward) rather than ever returning
 // zero candidates because of its own preference.
 //
-// Gate 1 (feasibility — equipment/time/schedule/Blueprint-or-approved-
-// outside-Blueprint validity) is NOT re-implemented here: it already
-// happens upstream (constraintEngine.filterEquipmentFeasible,
-// constraintEngine.fitToTimeBudget, constraintEngine
+// Gate 1 (feasibility — time/schedule/Blueprint-or-approved-outside-
+// Blueprint validity) is NOT re-implemented here: it already happens
+// upstream (constraintEngine.fitToTimeBudget, constraintEngine
 // .isBodyFocusAllowedOnDay, exerciseUniverse's resolution) and every id
-// in candidate_exercise_ids is assumed already feasible by the time it
+// in candidate_exercise_ids is assumed already valid by the time it
 // reaches this module. Gates 2-6 below are this module's actual job.
+//
+// Equipment Filter Fix: equipment availability is deliberately NOT part
+// of Gate 1 (or any gate here) — program generation never eliminates a
+// candidate for equipment reasons; the user substitutes manually when a
+// specific piece of equipment isn't actually available that session.
+// constraintEngine.filterEquipmentFeasible/isExerciseEquipmentFeasible
+// still exist and are used by GET /api/programming/substitutes, an
+// unrelated equipment-aware substitution feature, never by generation.
 
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { resolveSecondaryTarget } from '../blueprint/secondaryTargetMapping.js';

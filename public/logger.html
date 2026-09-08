@@ -67,6 +67,10 @@
       } else {
         root.appendChild(buildExerciseSection());
         if (session.status !== 'completed') root.appendChild(buildAddExerciseSection());
+        // Badminton already has its own per-session notes field within
+        // its own details form — this general session note is added
+        // only for gym sessions to avoid a confusing duplicate field.
+        root.appendChild(buildSessionNoteSection());
       }
 
       if (session.status !== 'completed') root.appendChild(buildFinishBar());
@@ -216,7 +220,7 @@
 
       const explain = el('details', { class: 'exercise-explanation' });
       explain.appendChild(el('summary', { text: 'Why this exercise' }));
-      explain.appendChild(el('p', { text: g.reasoning, style: 'margin:0.4rem 0 0' }));
+      explain.appendChild(el('p', { text: g.friendly_reasoning || g.reasoning, style: 'margin:0.4rem 0 0' }));
       card.appendChild(explain);
 
       const state = { sets: buildInitialSets(g.target_sets) };
@@ -389,6 +393,43 @@
       return section;
     }
 
+    // ---------- Session note ----------
+    // A small, optional, personal note for this specific session (e.g.
+    // "used rope for pushdowns today") — separate from the generated
+    // program's own explanations. Persisted on workout_sessions.notes
+    // (already existed for this exact purpose), never affecting
+    // programming decisions or workout history.
+
+    function buildSessionNoteSection() {
+      const section = el('section', { class: 'session-note-section' });
+      section.appendChild(el('h2', { text: 'Session note', style: 'font-size:1rem;margin-bottom:0.35rem' }));
+      const textarea = el('textarea', {
+        id: 'session-note-input',
+        rows: '2',
+        placeholder: 'e.g. Rope for pushdowns, EZ bar for curls...',
+        style: 'width:100%;resize:vertical;font:inherit',
+      });
+      textarea.value = session.notes || '';
+      section.appendChild(textarea);
+
+      const actions = el('div', { class: 'btn-row', style: 'margin-top:0.4rem' });
+      const statusEl = el('div');
+      const saveBtn = createButton({ label: 'Save note', variant: 'secondary', onClick: async () => {
+        const value = textarea.value.trim() || null;
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}`, {
+            method: 'PATCH',
+            body: { notes: value },
+          }), value ? 'Note saved.' : 'Note cleared.');
+          session.notes = value;
+        } catch (err) { /* value stays in the textarea, unsaved (spec §61) */ }
+      }});
+      actions.appendChild(saveBtn);
+      section.appendChild(actions);
+      section.appendChild(statusEl);
+      return section;
+    }
+
     // ---------- Badminton ----------
 
     function buildBadmintonSection() {
@@ -457,10 +498,49 @@
       return bar;
     }
 
+    // Pure formatter: (session, generated) -> plain text, built from the
+    // exact same fields buildLoggedExerciseCard renders (performed sets,
+    // the same exerciseDisplayName resolution — never a separately
+    // invented name), so the copied text and the visible table can
+    // never drift apart. No DOM access, kept separate from the
+    // Clipboard API call itself so it's testable without a browser (see
+    // tests/frontend/copyWorkoutText.test.ts).
+    function buildCopyText(session, generated) {
+      const lines = [`Workout — ${formatDate(session.date, { weekday: 'long' })}`, ''];
+      for (const perf of session.exercises) {
+        const generatedMatch = generated ? generated.exercises.find((g) => g.exercise_id === perf.exercise_id) : null;
+        const name = exerciseDisplayName(perf, generatedMatch);
+        const setsText = perf.sets.map((s) => `${s.weight ?? '—'}×${s.reps ?? '—'}${s.completed ? '' : ' (skipped)'}`).join(', ');
+        lines.push(`${name} — ${perf.sets.length} set(s): ${setsText}`);
+      }
+      if (session.notes) {
+        lines.push('', `Session note: ${session.notes}`);
+      }
+      return lines.join('\n');
+    }
+
     function buildCompletedFooter() {
       const bar = el('div', { class: 'logger-finish-bar' });
       bar.appendChild(el('p', { text: 'Workout completed', style: 'font-weight:700;margin:0 0 0.5rem' }));
       const row = el('div', { class: 'btn-row' });
+      // Copy is for the performed-exercise table (gym sessions) — a
+      // badminton day has no such table to copy.
+      if (session.session_type !== 'badminton') {
+        const copyStatus = el('span', { class: 'faint', style: 'align-self:center' });
+        const copyBtn = createButton({ label: 'Copy', variant: 'secondary', onClick: async () => {
+          const text = buildCopyText(session, generated);
+          try {
+            if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('Clipboard API unavailable');
+            await navigator.clipboard.writeText(text);
+            copyStatus.textContent = 'Copied to clipboard';
+          } catch (err) {
+            copyStatus.textContent = "Couldn't copy automatically — please select and copy the text manually.";
+          }
+          setTimeout(() => { copyStatus.textContent = ''; }, 3000);
+        }});
+        row.appendChild(copyBtn);
+        row.appendChild(copyStatus);
+      }
       row.appendChild(el('a', { class: 'btn', href: '/history.html', text: 'View History' }));
       row.appendChild(el('a', { class: 'btn btn-secondary', href: '/today.html', text: 'Back to Today' }));
       row.appendChild(createButton({ label: 'Edit workout', variant: 'ghost', onClick: async () => {

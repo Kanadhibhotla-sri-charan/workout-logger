@@ -85,6 +85,8 @@ describe('Blueprint Candidate Fix — real Blueprint snapshot data preconditions
   });
 });
 
+const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'band', 'harness', 'plate'];
+
 describe('Requirement D — rear-delt regression coverage', () => {
   it('rear-delt-row remains a real, selectable candidate even though it is absent from shoulders-efficient', () => {
     const result = buildWorkout({
@@ -95,29 +97,35 @@ describe('Requirement D — rear-delt regression coverage', () => {
       date: '2026-09-01',
       weekday: 'tuesday',
       budget_minutes: 60,
-      // dumbbell+bench isolates rear-delt-row as the ONLY equipment-
-      // feasible rear-delt Blueprint exercise (cable-rear-delt-builder
-      // needs cable; face-pull needs cable+band; machine-reverse-fly
-      // needs machine; rear-delt-fly needs dumbbell+machine) — so a
-      // pre-fix pool that excluded package-absent candidates before
-      // ranking would leave nothing at all to select here.
-      available_equipment: ['dumbbell', 'bench'],
+      // Equipment Filter Fix: equipment is never a candidate-
+      // elimination rule during generation, so full equipment is used
+      // here deliberately — every real rear-delt Blueprint exercise
+      // (cable-rear-delt-builder, face-pull, machine-reverse-fly,
+      // rear-delt-fly, rear-delt-row) is a real, equally-feasible
+      // candidate. current_exercise_id is the real, still-supported
+      // mechanism (Gate 5 — progression continuity) used here to pin
+      // down which of several equally-valid candidates wins, so this
+      // test deterministically exercises rear-delt-row specifically.
+      available_equipment: FULL_EQUIPMENT,
       available_training_days: ['monday', 'tuesday'],
-      targets: [normalDevTarget({ target_id: 'rear-delt' })],
+      targets: [normalDevTarget({ target_id: 'rear-delt', current_exercise_id: 'rear-delt-row' })],
     });
 
-    expect(result.exercises.length).toBe(1);
-    const planned = result.exercises[0]!;
-    expect(planned.target_id).toBe('rear-delt');
-    expect(planned.exercise_id).toBe('rear-delt-row');
-    expect(planned.target_sets).toBeGreaterThan(0);
+    // With full equipment, rear-delt's real weekly volume may be
+    // delivered across more than one real exercise now that equipment
+    // no longer narrows the candidate pool — Gate 5 still guarantees
+    // rear-delt-row wins the FIRST placement (the one current_exercise_id
+    // actually governs).
+    const planned = result.exercises.find((e) => e.target_id === 'rear-delt' && e.exercise_id === 'rear-delt-row');
+    expect(planned).toBeDefined();
+    expect(planned!.target_sets).toBeGreaterThan(0);
     // Its real prescription is sourced from shoulders-COMPLETE (the
     // only level that lists rear-delt-row) — proving the widened
     // any-level lookup, not a fabricated rep/RIR range, supplied it.
-    expect(planned.target_reps_min).toBe(8);
-    expect(planned.target_reps_max).toBe(15);
-    expect(planned.target_rir_min).toBe(1);
-    expect(planned.target_rir_max).toBe(3);
+    expect(planned!.target_reps_min).toBe(8);
+    expect(planned!.target_reps_max).toBe(15);
+    expect(planned!.target_rir_min).toBe(1);
+    expect(planned!.target_rir_max).toBe(3);
     expect(result.skipped_targets.find((s) => s.target_id === 'rear-delt')).toBeUndefined();
   });
 });
@@ -132,16 +140,14 @@ describe('Requirement E — generic (non-rear-delt) package-gating regression te
       date: '2026-09-02',
       weekday: 'wednesday',
       budget_minutes: 60,
-      // dumbbell+barbell: back-squat (needs rack too) and every
-      // machine-only quads exercise are infeasible; sumo-squat/sumo-
-      // deadlift are feasible but have NO prescription at any package
-      // level, so the real per-attempt retry must pass over them and
-      // land on bulgarian-split-squat-knee-dominant — the only
-      // feasible candidate with a real (quads-complete-sourced)
-      // prescription.
-      available_equipment: ['dumbbell', 'barbell'],
+      // Equipment Filter Fix: full equipment — every real quads
+      // Blueprint exercise is a candidate regardless of what the user
+      // happens to have; current_exercise_id (Gate 5 — progression
+      // continuity, unrelated to equipment) is what pins the winner
+      // down deterministically for this test.
+      available_equipment: FULL_EQUIPMENT,
       available_training_days: ['monday', 'tuesday', 'wednesday'],
-      targets: [normalDevTarget({ target_id: 'quads' })],
+      targets: [normalDevTarget({ target_id: 'quads', current_exercise_id: 'bulgarian-split-squat-knee-dominant' })],
     });
 
     const planned = result.exercises.find((e) => e.target_id === 'quads');
@@ -155,29 +161,43 @@ describe('Requirement E — generic (non-rear-delt) package-gating regression te
 });
 
 describe('Requirement F — negative test: genuine prescription gap', () => {
-  it('rear-delt-fly (absent from every shoulders package level) is surfaced as a real data-quality gap — never fabricated, never blamed on mere package absence', () => {
+  it('a target with no development-package coverage at all (neck-thickness) is surfaced as a real data-quality gap — never fabricated, never blamed on mere package absence', () => {
+    // Equipment Filter Fix: neck-thickness (unlike rear-delt) is used
+    // here instead of rear-delt-fly specifically, because equipment can
+    // no longer isolate a single candidate — with the full candidate
+    // pool always in play, a genuine per-exercise gap (like
+    // rear-delt-fly's) would just be substituted away by the real
+    // per-attempt retry onto a real alternative that DOES have a
+    // prescription (e.g. face-pull), which is the CORRECT behavior,
+    // not a gap. neck-thickness instead has real Blueprint exercises
+    // (neck-extension, neck-flexion) but NO development package exists
+    // for its muscle group at ANY level — confirmed below — so every
+    // real candidate genuinely lacks a resolvable prescription
+    // regardless of which one ranking prefers, guaranteeing this
+    // exercises the true "entire real pool exhausted" gap path.
+    expect(lookupExercisePrescriptionAnyLevel('neck-thickness', 'neck-extension')).toBeNull();
+    expect(lookupExercisePrescriptionAnyLevel('neck-thickness', 'neck-flexion')).toBeNull();
+    expect(BlueprintAdapter.getExercise('neck-extension')).toBeDefined();
+    expect(BlueprintAdapter.getExercise('neck-flexion')).toBeDefined();
+
     const result = buildWorkout({
-      // Same real pull-day placement as Requirement D's test above.
-      date: '2026-09-01',
-      weekday: 'tuesday',
+      date: '2026-08-31',
+      weekday: 'monday',
       budget_minutes: 60,
-      // dumbbell+machine isolates rear-delt-fly as the ONLY equipment-
-      // feasible rear-delt candidate (rear-delt-row needs bench;
-      // cable-rear-delt-builder/face-pull need cable).
-      available_equipment: ['dumbbell', 'machine'],
-      available_training_days: ['monday', 'tuesday'],
-      targets: [normalDevTarget({ target_id: 'rear-delt' })],
+      available_equipment: FULL_EQUIPMENT,
+      available_training_days: ['monday'],
+      targets: [normalDevTarget({ target_id: 'neck-thickness' })],
     });
 
-    // No exercise is fabricated for rear-delt — there is genuinely no
-    // valid Blueprint prescription anywhere for this candidate.
-    expect(result.exercises.find((e) => e.target_id === 'rear-delt')).toBeUndefined();
+    // No exercise is fabricated for neck-thickness — there is
+    // genuinely no valid Blueprint prescription anywhere for either of
+    // its real candidates.
+    expect(result.exercises.find((e) => e.target_id === 'neck-thickness')).toBeUndefined();
 
-    const skip = result.skipped_targets.find((s) => s.target_id === 'rear-delt');
+    const skip = result.skipped_targets.find((s) => s.target_id === 'neck-thickness');
     expect(skip).toBeDefined();
     // The real reason is a genuine prescription/data gap...
     expect(skip!.reason).toContain('resolvable Blueprint prescription');
-    expect(skip!.reason).toContain('rear-delt-fly');
     // ...never a claim that absence from the package makes the
     // exercise itself invalid (the exact incorrect rule this fix
     // removes — spec rule #3).

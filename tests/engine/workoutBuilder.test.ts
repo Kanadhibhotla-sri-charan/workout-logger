@@ -98,13 +98,19 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       date: '2026-08-20',
       sets: [{ weight: 60, reps: 3, completed: true, rir: 0 }],
     };
+    // Equipment Filter Fix: current_exercise_id is set on BOTH builds
+    // (not just the declining one) so Gate 5's progression-continuity
+    // pick lands on the same exercise either way — isolating the
+    // reduce-vs-no-reduce comparison to the progression decision itself,
+    // rather than to which exercise the full (equipment-unfiltered)
+    // candidate pool happens to rank first.
     const withoutDecline = buildWorkout({
       date: '2026-08-31',
       weekday: 'monday',
       budget_minutes: 60,
       available_equipment: CHEST_EQUIPMENT,
       available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
-      targets: [baseTarget({ current_weekly_primary_sets: 12 })],
+      targets: [baseTarget({ current_weekly_primary_sets: 12, current_exercise_id: 'flat-barbell-bench-press' })],
     });
     const withDecline = buildWorkout({
       date: '2026-08-31',
@@ -157,18 +163,20 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     }
   });
 
-  it('skips a target with no equipment-feasible exercise, with a clear reason', () => {
+  it('Equipment Filter Fix: a target is never skipped merely because no equipment is available — a real Blueprint exercise still gets selected', () => {
     const result = buildWorkout({
       date: '2026-08-31',
       weekday: 'monday',
       budget_minutes: 60,
-      available_equipment: [], // nothing available
+      available_equipment: [], // nothing available — must never eliminate candidates during generation
       available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
       targets: [baseTarget()],
     });
-    expect(result.exercises).toEqual([]);
-    expect(result.skipped_targets[0]!.target_id).toBe('mid-pec');
-    expect(result.skipped_targets[0]!.reason.length).toBeGreaterThan(10);
+    expect(result.skipped_targets.find((s) => s.target_id === 'mid-pec')).toBeUndefined();
+    expect(result.exercises.length).toBe(1);
+    const planned = result.exercises[0]!;
+    expect(planned.target_id).toBe('mid-pec');
+    expect(BlueprintAdapter.getExercise(planned.exercise_id)).toBeDefined();
   });
 
   it('skips (avoids) a target already trained today, per recoveryEngine', () => {
@@ -269,13 +277,13 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     expect(result.skipped_targets.find((s) => s.target_id === functionalGoal.id)).toBeUndefined();
   });
 
-  it("remediation §10: an outside-Blueprint candidate requiring unavailable equipment never becomes selectable", () => {
+  it('Equipment Filter Fix: an approved outside-Blueprint candidate remains selectable even when its own equipment is unavailable', () => {
     const functionalGoal = BlueprintAdapter.getFunctionalGoals()[0]!;
     const result = buildWorkout({
       date: '2026-08-31',
       weekday: 'monday',
       budget_minutes: 60,
-      available_equipment: ['bodyweight'],
+      available_equipment: ['bodyweight'], // does not include 'kettlebell'
       available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
       targets: [
         baseTarget({
@@ -288,18 +296,19 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
         }),
       ],
     });
-    expect(result.exercises.find((e) => e.target_id === functionalGoal.id)).toBeUndefined();
-    expect(result.skipped_targets.find((s) => s.target_id === functionalGoal.id)).toBeDefined();
+    const plan = result.exercises.find((e) => e.target_id === functionalGoal.id);
+    expect(plan).toBeDefined();
+    expect(plan!.exercise_id).toBe('outside-ex-1');
+    expect(result.skipped_targets.find((s) => s.target_id === functionalGoal.id)).toBeUndefined();
   });
 
-  it('required test 3: substitutes a feasible Blueprint exercise when the preferred/current one is unavailable', () => {
-    // Only 'cable' equipment is available. flat-barbell-bench-press
-    // (barbell/bench/rack) is infeasible; cable-fly (mid-pec primary,
-    // 'cable' only) is both feasible and has real Blueprint
-    // development-package prescription data — cable-chest-press is
-    // feasible too but has no package prescription, so it must not be
-    // the one selected (proves the substitution lands on a genuinely
-    // usable alternative, not just any feasible one).
+  it('Equipment Filter Fix: the current exercise is kept (never substituted) when only its equipment is unavailable', () => {
+    // Only 'cable' equipment is available — flat-barbell-bench-press
+    // needs barbell/bench/rack, none of which are listed. Equipment
+    // availability must never drive candidate selection during program
+    // generation (the user substitutes manually if a specific session's
+    // equipment genuinely isn't there); Gate 5's progression-continuity
+    // pick keeps the current exercise regardless.
     const result = buildWorkout({
       date: '2026-08-31',
       weekday: 'monday',
@@ -311,9 +320,8 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
 
     expect(result.exercises.length).toBe(1);
     const planned = result.exercises[0]!;
-    expect(planned.exercise_id).not.toBe('flat-barbell-bench-press');
-    expect(['cable-fly']).toContain(planned.exercise_id);
-    expect(planned.reasoning).toContain('replaces');
+    expect(planned.exercise_id).toBe('flat-barbell-bench-press');
+    expect(planned.decision.selection?.substituted_from).toBeNull();
   });
 
   it('required test 11: a heavy recent badminton session changes the pipeline\'s recovery-driven reasoning for a stagnant target', () => {
@@ -420,20 +428,23 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     });
 
     it('a substitution is recorded when selection replaces the target\'s current exercise', () => {
-      // Only 'cable' equipment is available: flat-barbell-bench-press
-      // (the "current" exercise) becomes infeasible, forcing a real
-      // substitution to cable-fly.
+      // 'back-squat' is a real Blueprint exercise, but not one that
+      // trains mid-pec at all — it can never win Gate 5's progression-
+      // continuity check (which only ever keeps `current_exercise_id`
+      // when it's genuinely still in this target's own candidate pool),
+      // so a real substitution is guaranteed regardless of equipment
+      // (Equipment Filter Fix: equipment is no longer what forces this).
       const result = buildWorkout({
         date: '2026-08-31',
         weekday: 'monday',
         budget_minutes: 60,
-        available_equipment: ['cable'],
+        available_equipment: CHEST_EQUIPMENT,
         available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
-        targets: [baseTarget({ current_exercise_id: 'flat-barbell-bench-press', recent_exercise_ids: ['flat-barbell-bench-press'] })],
+        targets: [baseTarget({ current_exercise_id: 'back-squat' })],
       });
       const planned = result.exercises[0]!;
-      expect(planned.exercise_id).not.toBe('flat-barbell-bench-press');
-      expect(planned.decision.selection?.substituted_from).toBe('flat-barbell-bench-press');
+      expect(planned.exercise_id).not.toBe('back-squat');
+      expect(planned.decision.selection?.substituted_from).toBe('back-squat');
     });
 
     it('no substitution is recorded when selection keeps the target\'s current exercise (continuity, not a substitution)', () => {
@@ -636,12 +647,13 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
         date: '2026-09-03', // Thursday — the legs day in this rotation (see quadsInput above)
         weekday: 'thursday',
         budget_minutes: 60,
-        // Restricted to back-squat's own equipment only (Strict Bug-Fix
-        // Fix C: quads' Blueprint package also lists leg-press/leg-
-        // extension, both needing 'machine' — excluding it keeps this
-        // test isolated to the volume/badminton interaction it's
-        // actually about, rather than entangling it with multi-exercise
-        // construction, which has its own dedicated coverage).
+        // Equipment Filter Fix: available_equipment no longer narrows
+        // candidates at all, so quads' full real candidate pool (not
+        // just back-squat) competes here — the assertion below sums
+        // across every quads exercise placed rather than assuming a
+        // single one, since this test's real intent (badminton never
+        // inflates/deflates weekly volume beyond the legitimate 1-set
+        // trim) is independent of how many exercises deliver it.
         available_equipment: ['barbell', 'rack'],
         available_training_days: ['tuesday', 'wednesday', 'thursday'],
         targets: [
@@ -653,11 +665,11 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
           }),
         ],
       });
-      const plan = result.exercises.find((e) => e.target_id === 'quads');
+      const quadsExercises = result.exercises.filter((e) => e.target_id === 'quads');
       // Weekly volume held at the pre-existing 6 (minus the single
       // session-level trim, since exactly one eligible session remains
       // this week) — never pushed up OR down by badminton itself.
-      expect(plan?.target_sets).toBe(5);
+      expect(quadsExercises.reduce((sum, e) => sum + e.target_sets, 0)).toBe(5);
     });
   });
 });

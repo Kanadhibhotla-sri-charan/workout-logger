@@ -35,6 +35,8 @@ import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverri
 import type { PersistedWeekProgram } from '../../repositories/weeklyProgramRepo.js';
 import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } from '../../engine/weekProgramReconciliation.js';
 import { todayForUser } from '../../lib/userTimezone.js';
+import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning } from '../friendlyExplanation.js';
+import type { SkippedTarget } from '../../engine/workoutBuilder.js';
 
 export const programmingRouter = Router();
 
@@ -58,10 +60,18 @@ function targetKey(t: { target_type: TargetType; target_id: BlueprintId }): stri
 /** Every active goal (aesthetic or functional), sorted by the user's own
  * real `priority` field ascending — "Goal 1" is simply position 1 in
  * that real, user-controlled ranking (spec §16/§19/§20's "Goal 1/Goal
- * 2 must be visibly distinct"), never a value this route invents. */
-function goalLabels(database: Database.Database): Map<string, string> {
+ * 2 must be visibly distinct"), never a value this route invents.
+ * `blueprintRefs` is each Goal's own real `blueprint_ref` (e.g.
+ * "chest-front-width") — the Workout Programmer UI Fix's human-
+ * readable-explanation layer humanizes this into "your chest front
+ * width goal" rather than exposing the positional "Goal 1" label or
+ * the raw target id as the user-facing goal name (spec §5). */
+function goalLabels(database: Database.Database): { labels: Map<string, string>; blueprintRefs: Map<string, string> } {
   const goals = new GoalsRepo(database).list({ active: true }).sort((a, b) => a.priority - b.priority);
-  return new Map(goals.map((g, i) => [g.id, `Goal ${i + 1}`]));
+  return {
+    labels: new Map(goals.map((g, i) => [g.id, `Goal ${i + 1}`])),
+    blueprintRefs: new Map(goals.map((g) => [g.id, g.blueprint_ref])),
+  };
 }
 
 /** Real per-real-gym-day status, from actually-logged WorkoutSessions —
@@ -106,13 +116,44 @@ function enrichAllocation(allocation: WeeklyPlanTargetAllocation, targetGoalMap:
   return { ...allocation, target_name: resolveTargetName(allocation.target_type, allocation.target_id), goal_id, goal_label };
 }
 
-function enrichPlannedWork<T extends { exercise_id: BlueprintId; target_type: TargetType; target_id: BlueprintId; classification: 'specialization' | 'normal_development' | 'maintenance' }>(
-  work: T,
-  targetGoalMap?: TargetGoalMap,
-  labels?: Map<string, string>
-) {
+function enrichPlannedWork<
+  T extends {
+    exercise_id: BlueprintId;
+    target_type: TargetType;
+    target_id: BlueprintId;
+    classification: 'specialization' | 'normal_development' | 'maintenance';
+    role: string;
+    sets: number;
+    reps_min: number;
+    reps_max: number;
+    rir_min: number;
+    rir_max: number;
+    progression_decision: { recommendation: string } | null;
+    decision: { weekly_exposure: { primary_sets: number } };
+  }
+>(work: T, targetGoalMap?: TargetGoalMap, labels?: Map<string, string>, blueprintRefs?: Map<string, string>) {
   const goalInfo = targetGoalMap && labels ? resolveGoalLabelAndId(targetKey(work), work.classification, targetGoalMap, labels) : { goal_id: null, goal_label: null };
-  return { ...work, exercise_name: resolveExerciseName(work.exercise_id), target_name: resolveTargetName(work.target_type, work.target_id), ...goalInfo };
+  const exercise_name = resolveExerciseName(work.exercise_id);
+  const target_name = resolveTargetName(work.target_type, work.target_id);
+  const goalBlueprintRef = goalInfo.goal_id ? (blueprintRefs?.get(goalInfo.goal_id) ?? null) : null;
+  return {
+    ...work,
+    exercise_name,
+    target_name,
+    ...goalInfo,
+    friendly_reasoning: buildFriendlyPlannedReasoning({ ...work, exercise_name, target_name }, goalBlueprintRef),
+  };
+}
+
+function enrichSkip(skip: SkippedTarget, targetGoalMap?: TargetGoalMap, labels?: Map<string, string>) {
+  const goalInfo = targetGoalMap && labels ? resolveGoalLabelAndId(targetKey(skip), skip.classification, targetGoalMap, labels) : { goal_id: null, goal_label: null };
+  const target_name = resolveTargetName(skip.target_type, skip.target_id);
+  return {
+    ...skip,
+    target_name,
+    ...goalInfo,
+    friendly_reason: buildFriendlySkipReasoning({ ...skip, target_name }),
+  };
 }
 
 /** Final Current-Week Reconciliation Fix §17: /today's `exercises` field
@@ -181,7 +222,7 @@ export function computeFreshWeek(database: Database.Database, weekStart: string,
   const targetGoalMap = new Map<string, { goal_id: string; is_specialization: boolean }>(
     input.targets.map((t: TargetBuildContext) => [targetKey(t), { goal_id: t.goal_id, is_specialization: t.is_specialization }])
   );
-  const labels = goalLabels(database);
+  const { labels, blueprintRefs } = goalLabels(database);
   const sessionsByDate = new Map(plan.sessions.map((s) => [s.date, s]));
 
   const days: FreshDayInput[] = WEEKDAYS.map((weekday, i) => {
@@ -190,7 +231,8 @@ export function computeFreshWeek(database: Database.Database, weekStart: string,
     if (!gymSession) {
       return { dayIndex: i, date: dayDate, hasGymComponent: false, sessionPurpose: null, snapshot: { plannedWork: [] } };
     }
-    const plannedWork = gymSession.plannedWork.map((w) => enrichPlannedWork(w, targetGoalMap, labels));
+    const plannedWork = gymSession.plannedWork.map((w) => enrichPlannedWork(w, targetGoalMap, labels, blueprintRefs));
+    const skipped = gymSession.skipped.map((s) => enrichSkip(s, targetGoalMap, labels));
     return {
       dayIndex: i,
       date: dayDate,
@@ -201,7 +243,7 @@ export function computeFreshWeek(database: Database.Database, weekStart: string,
         availableMinutes: gymSession.availableMinutes,
         estimatedMinutes: gymSession.estimatedMinutes,
         plannedWork,
-        skipped: gymSession.skipped,
+        skipped,
         badmintonContext: gymSession.badmintonContext,
         resourceAllocation: gymSession.resourceAllocation,
       },

@@ -37,7 +37,7 @@ import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/dev
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
-import { fitToTimeBudget, filterEquipmentFeasible, isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
+import { fitToTimeBudget, isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
 import { exercisesTrainingTarget, selectExercise, type ExerciseSelectionResult } from './exerciseSelector.js';
@@ -439,7 +439,7 @@ export interface WeeklyPlanSession {
   badmintonContext: RecentBadmintonSignal | null;
   /** Targets considered for (or already routed toward) this specific
    * date that ended up with no work here — either genuinely skipped
-   * for the whole week (recovery/equipment/prescription — see
+   * for the whole week (recovery/prescription/no-real-candidate — see
    * WeeklyProgrammingPlan.decisions for the real reason) or dropped
    * specifically from this date's own session by time-fitting. */
   skipped: SkippedTarget[];
@@ -947,20 +947,21 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       continue;
     }
 
+    // Equipment Filter Fix: equipment availability is NEVER a candidate-
+    // elimination rule during program generation — the full Blueprint
+    // exercise library for this target is the candidate universe, exactly
+    // as for the "outside-Blueprint" pool merged in below. A user whose
+    // equipment happens to be unavailable for a given session substitutes
+    // manually (the real per-target candidate list, equipment-gated, is
+    // still served separately by GET /api/programming/substitutes for
+    // exactly that purpose — constraintEngine.filterEquipmentFeasible is
+    // untouched and still used there). Removing this from generation means
+    // a good real Blueprint exercise is never discarded here merely
+    // because the user's usual equipment list doesn't happen to list it.
     let candidateExerciseIds = exercisesTrainingTarget(target.target_type, target.target_id);
-    candidateExerciseIds = filterEquipmentFeasible(
-      candidateExerciseIds.map((id) => BlueprintAdapter.getExercise(id)!),
-      input.available_equipment
-    ).map((e) => e.id);
 
-    // Remediation §10: an approved outside-Blueprint exercise is a
-    // real fallback candidate, merged in alongside Blueprint's own —
-    // equipment-gated exactly like a Blueprint exercise (its own
-    // `equipment` field satisfies the same Pick<BlueprintExercise,
-    // 'equipment'> shape filterEquipmentFeasible already checks).
-    const feasibleOutside = filterEquipmentFeasible(target.outside_blueprint_exercises, input.available_equipment);
-    const outsideCandidatesById = new Map(feasibleOutside.map((e) => [e.id, e]));
-    for (const outside of feasibleOutside) {
+    const outsideCandidatesById = new Map(target.outside_blueprint_exercises.map((e) => [e.id, e]));
+    for (const outside of target.outside_blueprint_exercises) {
       if (!candidateExerciseIds.includes(outside.id)) candidateExerciseIds.push(outside.id);
     }
 
@@ -969,7 +970,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         target_type: target.target_type,
         target_id: target.target_id,
         classification,
-        reason: 'No equipment-feasible Blueprint or approved outside-Blueprint exercise trains this target.',
+        reason: 'No Blueprint or approved outside-Blueprint exercise trains this target.',
         decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
       });
       continue;
@@ -1262,7 +1263,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
                 target_type: target.target_type,
                 target_id: target.target_id,
                 classification,
-                reason: `No equipment-feasible candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) — exposing this genuine data gap rather than inventing one (spec §25). Last attempted: "${attempt.selection.exercise_id}".`,
+                reason: `No candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) — exposing this genuine data gap rather than inventing one (spec §25). Last attempted: "${attempt.selection.exercise_id}".`,
                 decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }, purposeThisDay),
               });
             }
@@ -1408,10 +1409,10 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       plannedWork: sessionWork,
       estimatedMinutes: sessionMinutes,
       badmintonContext: input.targets.find((t) => t.recent_badminton !== null)?.recent_badminton ?? null,
-      // Week-level skips (recovery/equipment/prescription/no-eligible-
-      // day/already-adequately-exposed — none of them day-specific,
-      // since equipment and Blueprint data are uniform across the real
-      // week) are surfaced on EVERY session, matching how the pre-
+      // Week-level skips (recovery/prescription/no-eligible-day/already-
+      // adequately-exposed — none of them day-specific, since Blueprint
+      // data is uniform across the real week) are surfaced on EVERY
+      // session, matching how the pre-
       // weekly-plan architecture recomputed and surfaced them fresh on
       // every single-day call; this date's own time-fitting drops are
       // the only genuinely day-specific skips.

@@ -34,14 +34,6 @@ import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.
 import { BadmintonSessionDetailsRepo } from '../../src/repositories/badmintonSessionDetailsRepo.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
-// triceps-efficient's real Blueprint package (src/blueprint/snapshot/
-// programming.json): close-grip-bench-press needs barbell + smith
-// machine only; cable-pushdown needs cable; overhead-triceps-extension
-// needs barbell + ez-bar + dumbbell. Restricting available_equipment to
-// just barbell + smith machine leaves close-grip-bench-press as the
-// ONLY real candidate for the "triceps" target — a deterministic,
-// single-candidate scenario for the requested-vs-delivered tests below.
-const SINGLE_TRICEPS_CANDIDATE_EQUIPMENT = ['barbell', 'smith machine'];
 
 function normalDevTarget(targetId: string, overrides: Partial<TargetBuildContext> = {}): TargetBuildContext {
   return {
@@ -97,12 +89,26 @@ describe('Tests 1-3 — Fix A (final sessions authoritative) + Fix B (delivered,
   ];
 
   function buildReducedPlan() {
+    // Equipment Filter Fix: equipment is never an elimination rule
+    // during generation, so restricting available_equipment can no
+    // longer isolate close-grip-bench-press as the sole candidate —
+    // current_exercise_id (Gate 5 — progression continuity) is what
+    // keeps it, the exercise with the real declining history, as the
+    // winner here. A tight time budget (matching Test 4's own verified
+    // math: estimateMinutes(2 sets) = 6.5) is what keeps the real
+    // remaining 1 set from being picked up by a genuine substitute
+    // exercise this session — construction still wants to add one, but
+    // it doesn't survive time-fitting, leaving a real, honest unmet
+    // set (exactly the Fix A/Fix B scenario this test group is about),
+    // rather than the full triceps candidate pool silently delivering
+    // all 3 sets via a second exercise regardless of session length.
     const target = normalDevTarget('triceps', {
       current_weekly_primary_sets: 3, // 'maintain' path (nonzero) — desiredWeekly = 3, fully controlled
       weekly_exposure_units: 3,
+      current_exercise_id: 'close-grip-bench-press',
       exercise_history: { 'close-grip-bench-press': decliningHistory },
     });
-    return buildWeeklyProgrammingPlan(weeklyInput({ available_equipment: SINGLE_TRICEPS_CANDIDATE_EQUIPMENT, targets: [target] }));
+    return buildWeeklyProgrammingPlan(weeklyInput({ todayBudgetMinutes: 7, defaultSessionMinutes: 7, targets: [target] }));
   }
 
   it('Test 1: targetAllocations is rebuilt from the FINAL fitted sessions — requiredDirectSets(3) > deliveredDirectSets(2), with no contradiction against the real session', () => {
@@ -289,14 +295,18 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
   });
 
   it('later, lower-priority front-delt programming genuinely accounts for mid-pec\'s real planned bench exposure — the real computed number, never a fabricated direct-set equivalence', () => {
-    // mid-pec (specialization, priority 1, processed first) restricted
-    // to flat-barbell-bench-press only (equipment excludes cable-fly's
-    // 'cable'), with enough real desired weekly volume that its own
-    // real 0.33/set secondary contribution to front-delt genuinely
-    // crosses front-delt's own real Blueprint Efficient package
-    // reference (Programming Redesign Step 12 §3-§5: shoulders-
-    // efficient, 14/week — not the old universal starting_point_sets[0]
-    // of 8): 50 sets * 0.33 = 16.5 >= 14.
+    // mid-pec (specialization, priority 1, processed first), with
+    // enough real desired weekly volume (50 sets) that its own real
+    // secondary contribution to front-delt genuinely crosses front-
+    // delt's own real Blueprint Efficient package reference
+    // (Programming Redesign Step 12 §3-§5: shoulders-efficient,
+    // 14/week — not the old universal starting_point_sets[0] of 8).
+    // Equipment Filter Fix: equipment can no longer isolate mid-pec to
+    // a single exercise, so the expected front-delt exposure figure is
+    // recomputed here from whichever real mid-pec exercises actually
+    // got placed (never a hardcoded number tied to one specific
+    // exercise) — this still proves the same thing: the reasoning
+    // cites the real computed exposure figure, never a fabricated one.
     const midPec = normalDevTarget('mid-pec', {
       is_specialization: true,
       goal_id: 'goal_1',
@@ -306,9 +316,7 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
       weekly_exposure_units: 50,
     });
     const frontDelt = normalDevTarget('front-delt', { current_weekly_primary_sets: 0, weekly_exposure_units: 0 });
-    const plan = buildWeeklyProgrammingPlan(
-      weeklyInput({ available_equipment: ['barbell', 'bench', 'rack'], targets: [midPec, frontDelt] })
-    );
+    const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [midPec, frontDelt] }));
 
     // front-delt received no direct work of its own this week — the
     // real propagated exposure (never a static zero) already satisfied
@@ -316,9 +324,20 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
     expect(plan.sessions.every((s) => s.plannedWork.every((w) => w.target_id !== 'front-delt'))).toBe(true);
     const skip = plan.sessions.flatMap((s) => s.skipped).find((sk) => sk.target_id === 'front-delt');
     expect(skip).toBeDefined();
-    // The reasoning cites the real computed exposure figure (50 sets *
-    // 0.33/set = 16.5), never an invented "1.32 sets" style conversion.
-    expect(skip!.reason).toContain('16.5');
+
+    const midPecWork = plan.sessions.flatMap((s) => s.plannedWork).filter((w) => w.target_id === 'mid-pec');
+    expect(midPecWork.length).toBeGreaterThan(0);
+    const expectedFrontDeltExposure = midPecWork.reduce((sum, w) => {
+      const { contributions } = calculateExerciseExposure(
+        w.exercise_id,
+        Array.from({ length: w.sets }, () => ({ completed: true }))
+      );
+      return sum + (contributions.find((c) => c.target_id === 'front-delt')?.exposure_units ?? 0);
+    }, 0);
+    // The reasoning cites the real computed exposure figure — recomputed
+    // independently here from the real placed exercises — never an
+    // invented "1.32 sets" style conversion.
+    expect(skip!.reason).toContain(expectedFrontDeltExposure.toFixed(2));
   });
 });
 

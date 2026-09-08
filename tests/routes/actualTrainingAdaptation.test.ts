@@ -435,7 +435,7 @@ describe('Phase 7 — package references never override real constraints (spec s
     expect(quadsDelivered).toBeLessThanOrEqual(quadsRef);
   });
 
-  it('equipment constraints still exclude infeasible candidates regardless of the package reference', async () => {
+  it('Equipment Filter Fix: minimal available equipment never excludes real candidates from program generation', async () => {
     const user = new UsersRepo(db).getOrCreateDefault();
     new TrainingProfileRepo(db).upsert(user.id, {
       timezone: 'Asia/Kolkata',
@@ -444,14 +444,20 @@ describe('Phase 7 — package references never override real constraints (spec s
       default_session_duration_minutes: 90,
       minimum_session_duration_minutes: 30,
       maximum_session_duration_minutes: 120,
-      available_equipment: ['dumbbell'], // deliberately minimal
+      available_equipment: ['dumbbell'], // deliberately minimal — must never gate candidate selection
       other_activity_schedule: [],
     });
     const week = await getWeek();
     const monday = week.days.find((d: any) => d.weekday === 'monday');
-    for (const w of monday.plannedWork) {
+    // Real programming still happens, and real candidates requiring
+    // equipment well beyond the minimal available list are still
+    // legitimately selectable — equipment availability is reference
+    // information for the user, never a program-generation gate.
+    expect(monday.plannedWork.length).toBeGreaterThan(0);
+    const needsMoreThanDumbbell = monday.plannedWork.some((w: any) => {
       const ex = BlueprintAdapter.getExercise(w.exercise_id);
-      if (ex) expect(ex.equipment.some((e: string) => e === 'dumbbell' || e === 'bodyweight')).toBe(true);
-    }
+      return ex ? ex.equipment.some((e: string) => e !== 'dumbbell') : false;
+    });
+    expect(needsMoreThanDumbbell).toBe(true);
   });
 });

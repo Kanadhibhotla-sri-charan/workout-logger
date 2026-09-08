@@ -130,8 +130,8 @@
           panel.appendChild(el('h3', { text: 'Unmet / dropped work' }));
           for (const s of day.skipped) {
             const card = createCard([
-              el('div', { class: 'card-title', text: s.target_id }),
-              el('div', { class: 'card-subtitle', text: s.reason }),
+              el('div', { class: 'card-title', text: s.target_name || s.target_id }),
+              el('div', { class: 'card-subtitle', text: s.friendly_reason || s.reason }),
             ]);
             panel.appendChild(card);
           }
@@ -211,7 +211,7 @@
       const explain = el('details', { class: 'exercise-explanation' });
       explain.appendChild(el('summary', { text: 'Why included' }));
       explain.appendChild(el('p', { text: describeWork(item), style: 'margin:0.4rem 0' }));
-      explain.appendChild(el('p', { class: 'faint', text: item.reasoning, style: 'margin:0' }));
+      explain.appendChild(el('p', { class: 'faint', text: item.friendly_reasoning || item.reasoning, style: 'margin:0' }));
       card.appendChild(explain);
 
       return card;

@@ -104,7 +104,7 @@
 
       const explain = el('details', { class: 'exercise-explanation' });
       explain.appendChild(el('summary', { text: 'Why this exercise' }));
-      explain.appendChild(el('p', { text: item.reasoning, style: 'margin:0.4rem 0 0' }));
+      explain.appendChild(el('p', { text: item.friendly_reasoning || item.reasoning, style: 'margin:0.4rem 0 0' }));
       card.appendChild(explain);
       return card;
     }
