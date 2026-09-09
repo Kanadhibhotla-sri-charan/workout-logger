@@ -120,11 +120,12 @@ export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalNa
   return sentences.join(' ');
 }
 
-/** Consolidated Fix §9/§10/§11: the discriminated skip category
+/** One-Pass Dev Spec v2 §18/§19 (superseding Consolidated Fix §9/§10/
+ * §11's slightly different naming): the discriminated skip category
  * `workoutBuilder.ts`'s `SkippedTarget.reason_code` already assigns at
  * the exact site that decided it. Mirrors that type exactly so this
  * function can switch on it directly. */
-type SkipReasonCode = 'recovery' | 'no_eligible_day' | 'adequately_exposed' | 'no_volume_recommended' | 'no_candidates' | 'no_resolvable_prescription';
+type SkipReasonCode = 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity';
 
 interface FriendlySkipInput {
   target_type: TargetType;
@@ -161,19 +162,19 @@ function joinNaturally(items: readonly string[]): string {
 /** Builds the plain-language explanation for a target that received no
  * work this session. Switches exclusively on the structured
  * `reason_code` `workoutBuilder.ts` already assigned at the exact site
- * that decided this skip (Consolidated Fix §9/§10) — never by string-
- * matching `reason`, so an unhandled/future code is a compile error
- * here, not a silent fall-through to a generic "not prescribable"
- * bucket. `no_candidates`/`no_resolvable_prescription` are surfaced as a
- * genuine Blueprint data-integrity gap (spec §11), explicitly distinct
- * from the four ordinary "valid but not selected today" categories —
- * never described as the target/exercise itself being invalid. */
+ * that decided this skip (One-Pass Dev Spec v2 §18/§19) — never by
+ * string-matching `reason`, so an unhandled/future code is a compile
+ * error here, not a silent fall-through to a generic "not prescribable"
+ * bucket. `blueprint_data_integrity` is surfaced as a genuine Blueprint
+ * data-integrity gap (spec §11/§18/§23), explicitly distinct from the
+ * ordinary "valid but not selected today" categories — never described
+ * as the target/exercise itself being invalid. */
 export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
   switch (skip.reason_code) {
     case 'recovery': {
-      // Spec §10: only mention the date when the engine actually knows
-      // it — days_since === 0 reads better as "earlier today" than a
-      // duplicated date string.
+      // Spec §11/§22: only mention the date when the engine actually
+      // knows it — days_since === 0 reads better as "earlier today" than
+      // a duplicated date string.
       const { date, days_since } = skip.decision.last_trained;
       if (date && days_since === 0) {
         return `${skip.target_name} was already trained earlier today, so there isn't enough recovery for another direct session.`;
@@ -183,10 +184,14 @@ export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
       }
       return `${skip.target_name} needs more recovery time before its next real session, so no work was added today.`;
     }
-    case 'no_eligible_day': {
-      return `${skip.target_name} isn't scheduled on any of your training days this week.`;
+    case 'not_current_exposure': {
+      // Spec §22's "Not today's exposure" wording: distinguishes a
+      // genuinely valid target that simply isn't due this exposure cycle
+      // from an invalid one — it remains available for a future session,
+      // never a permanent exclusion.
+      return `${skip.target_name} is not part of this week's exposure cycle — no training day this week fits it. It will be considered at the next appropriate target-training session.`;
     }
-    case 'adequately_exposed': {
+    case 'adequately_covered': {
       const covering = coveringExerciseNames(skip.decision.recent_exercise_ids);
       return covering.length > 0
         ? `${skip.target_name} is already covered today by ${joinNaturally(covering)}, so another direct exercise isn't needed in this session.`
@@ -195,13 +200,47 @@ export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
     case 'no_volume_recommended': {
       return `${skip.target_name} doesn't have a weekly training target yet.`;
     }
-    case 'no_candidates':
-    case 'no_resolvable_prescription': {
-      // Spec §9/§11: a genuine Blueprint data gap — never framed as
-      // "not prescribable"/"invalid," which would misleadingly imply
-      // this target/exercise itself is wrong rather than the underlying
-      // data being incomplete.
-      return `${skip.target_name} is missing the Blueprint data needed to safely prescribe it right now — this is a data gap to fix, not a normal training decision.`;
+    case 'blueprint_data_integrity': {
+      // Spec §9/§11/§18/§22/§23: a genuine Blueprint data gap — never
+      // framed as "not prescribable"/"invalid," which would misleadingly
+      // imply this target/exercise itself is wrong rather than the
+      // underlying data being incomplete.
+      return `The Blueprint data for ${skip.target_name} is incomplete, so the programmer cannot safely use it until that data is fixed — this is a data gap to fix, not a normal training decision.`;
     }
   }
+}
+
+/** One-Pass Dev Spec v2 §18/§22/§31.13: the plain-language explanation
+ * for one valid candidate exercise that was NOT selected for today's
+ * session, built entirely from the same structured facts every placed
+ * exercise's `decision.selection` already carries (`rejected_candidates`
+ * + `decisive_gate` from `exerciseSelector.selectExercise` — see
+ * workoutBuilder.ts). This is deliberately never surfaced through
+ * `SkippedTarget`/`skipped_targets` — a rejected candidate is not a
+ * skipped target (the target itself was successfully programmed, just
+ * with a different exercise), so conflating the two would violate §23's
+ * "not selected" vs "invalid" distinction. Callers/UI may use this for
+ * any exercise id present in a placed exercise's own
+ * `decision.selection.rejected_candidates`. `decisive_gate` selects
+ * between the "redundant today" framing (Gate 3 — the rejected candidate
+ * was already claimed for a different target this session) and the
+ * general "better variation" framing (every other gate) per spec §18's
+ * `redundant_today`/`better_variation_selected` categories — both real,
+ * distinct facts already produced by the selector, never invented here. */
+export function buildFriendlyRejectedCandidateReasoning(input: {
+  rejected_exercise_name: string;
+  selected_exercise_name: string;
+  decisive_gate: 'gate2_goal_relevance' | 'gate3_programming_need' | 'gate4_historical_context' | 'gate5_progression_continuity' | 'gate6_tie_break';
+}): string {
+  if (input.decisive_gate === 'gate3_programming_need') {
+    return (
+      `${input.rejected_exercise_name} is a valid exercise for this target, but ${input.selected_exercise_name} was chosen instead ` +
+      `because ${input.rejected_exercise_name} is already doing work for a different target in this same session — ` +
+      `${input.rejected_exercise_name} remains available for another session.`
+    );
+  }
+  return (
+    `A different valid variation (${input.selected_exercise_name}) was selected because it provides the better fit for today's ` +
+    `programming objective. ${input.rejected_exercise_name} is still a valid exercise and remains available for another session.`
+  );
 }

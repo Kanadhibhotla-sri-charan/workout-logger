@@ -27,6 +27,8 @@ import {
   type WeeklyPlanInput,
 } from '../../src/engine/workoutBuilder.js';
 import { calculateExerciseExposure } from '../../src/engine/exposureEngine.js';
+import { BlueprintAdapter } from '../../src/blueprint/adapter.js';
+import { lookupExercisePrescriptionAnyLevel } from '../../src/blueprint/developmentPackages.js';
 import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
@@ -230,7 +232,8 @@ describe('Tests 5-8 — Fix C: 0/1/multiple exercises governed by real need and 
     // Zero exercises anywhere in the real week for this target.
     expect(plan.sessions.every((s) => s.plannedWork.every((w) => w.target_id !== 'front-delt'))).toBe(true);
     const skip = plan.sessions.flatMap((s) => s.skipped).find((sk) => sk.target_id === 'front-delt');
-    expect(skip?.reason).toContain('adequately exposed');
+    expect(skip?.reason_code).toBe('adequately_covered');
+    expect(skip?.reason).toContain('adequately covered');
     // Never required at all (desiredWeekly was never even computed past
     // the skip), so no fabricated zero-required entry either.
     expect(plan.targetAllocations.find((a) => a.target_id === 'front-delt')).toBeUndefined();
@@ -248,14 +251,35 @@ describe('Tests 5-8 — Fix C: 0/1/multiple exercises governed by real need and 
     expect(allocation.unmetDirectSets).toBe(0);
   });
 
-  it('Test 8b: real exercise count EXCEEDS the Blueprint package\'s own exercise count (3) when real need and real (Blueprint + approved outside-Blueprint) candidates genuinely justify it', () => {
-    // Two approved outside-Blueprint candidates supplement triceps-
-    // efficient's 3 real Blueprint members (7 sets total). Gate 3 (goal
-    // relevance -> primary role) keeps preferring the 3 real primary-
-    // role Blueprint candidates over the secondary-role outside ones
-    // for as long as any Blueprint candidate remains (Blueprint-first
-    // selection is unchanged) — the outside candidates are only ever
-    // reached once all 3 Blueprint candidates are already placed.
+  it('Test 8b (One-Pass Dev Spec v2 §1.1/§7/§25/§26): multiple real exercises ARE used (no hardcoded single-exercise ceiling), but this one real exposure never absorbs more than its own natural per-exposure amount, even when real weekly need and real outside candidates could otherwise inflate it', () => {
+    // Triceps-efficient's real Blueprint package composes 3 exercises
+    // totalling 7 sets per exposure (cable-pushdown 2, close-grip-bench-
+    // press 3, overhead-triceps-extension 2) — this target's real
+    // `direct_sets_per_exposure` reference (the exact winning exercises
+    // Gate 1-6 selects may differ from the package's own 3 members,
+    // since package membership is not a selection gate — see
+    // blueprintCandidateGating.test.ts — but the natural per-exposure
+    // SETS total is still this package-derived figure, 7). With only
+    // Monday available this week, Monday is this target's ONLY (and
+    // therefore last) real exposure this week.
+    // current_weekly_primary_sets=9 (>7) means the weekly-level
+    // objective (desiredWeekly=9, 'maintain') genuinely exceeds what one
+    // real exposure can naturally deliver.
+    //
+    // Before the One-Pass Dev Spec v2 fix, the target's last (here: only)
+    // eligible day absorbed the ENTIRE remaining weekly total via as many
+    // additional exercises as needed — reaching all 9 sets in this one
+    // session using several real Blueprint exercises (7) plus an
+    // outside-Blueprint one for the extra 2. That is exactly the "cram
+    // multiple exposures' worth into one session" anti-pattern the spec
+    // forbids: 9 sets in one exposure is closer to two real triceps
+    // sessions' worth than one. The correct behavior is to deliver
+    // exactly one real exposure's natural amount (7, using multiple real
+    // Blueprint exercises — proving multiple exercises are still used,
+    // never an arbitrary "always 1" ceiling either) and leave the
+    // genuine remaining 2 sets honestly unmet for a future real
+    // exposure, rather than reaching for the approved outside candidates
+    // merely to inflate this one session.
     const target = normalDevTarget('triceps', {
       current_weekly_primary_sets: 9,
       weekly_exposure_units: 9,
@@ -268,18 +292,31 @@ describe('Tests 5-8 — Fix C: 0/1/multiple exercises governed by real need and 
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
     const tricepsWork = monday.plannedWork.filter((w) => w.target_id === 'triceps');
 
-    // Blueprint's own triceps-efficient package has exactly 3 exercises
-    // — real exercise count here must exceed that, proving package
-    // length is no longer the ceiling.
-    expect(tricepsWork.length).toBeGreaterThan(3);
-    expect(tricepsWork.reduce((sum, w) => sum + w.sets, 0)).toBe(9);
+    // Multiple real Blueprint exercises are used — never an artificial
+    // single-exercise ceiling — and every one of them is a genuine,
+    // independently resolvable Blueprint candidate (package membership
+    // is not a selection gate, so Gate 6 may pick a real triceps
+    // variation outside the package's own 3-member roster; what matters
+    // here is that it is real Blueprint data, never invented).
+    expect(tricepsWork.length).toBeGreaterThan(1);
+    for (const w of tricepsWork) {
+      expect(BlueprintAdapter.getExercise(w.exercise_id)).toBeDefined();
+      const prescription = lookupExercisePrescriptionAnyLevel('triceps', w.exercise_id);
+      expect(prescription).not.toBeNull();
+      expect(w.sets).toBeLessThanOrEqual(prescription!.sets);
+    }
+    // This one real exposure delivers exactly its own natural
+    // per-exposure amount (7 — triceps-efficient's own sum(exercise
+    // sets)) — never the full remaining weekly total (9) — and the
+    // approved outside candidates are correctly never reached, since
+    // they exist only to cover work Blueprint's own package doesn't, not
+    // to inflate a single session beyond its natural composition.
+    expect(tricepsWork.reduce((sum, w) => sum + w.sets, 0)).toBe(7);
+    expect(monday.plannedWork.some((w) => w.exercise_id.startsWith('outside-triceps'))).toBe(false);
+    // The genuine remainder is left honestly unmet — no debt, no cram.
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'triceps')!;
-    expect(allocation.deliveredDirectSets).toBe(9);
-    expect(allocation.unmetDirectSets).toBe(0);
-    // At least one real Blueprint candidate was used before any outside
-    // one — Blueprint-first selection, unchanged.
-    const blueprintIds = new Set(['cable-pushdown', 'close-grip-bench-press', 'overhead-triceps-extension']);
-    expect(tricepsWork.some((w) => blueprintIds.has(w.exercise_id))).toBe(true);
+    expect(allocation.deliveredDirectSets).toBe(7);
+    expect(allocation.unmetDirectSets).toBe(2);
   });
 });
 

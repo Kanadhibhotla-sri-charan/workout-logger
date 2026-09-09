@@ -218,9 +218,9 @@ describe('Consolidated Fix §16 Test 7 — a genuine Blueprint data gap is class
     // entry, and functional_goal never resolves a Blueprint package
     // prescription), so this correctly lands on the genuine-data-gap
     // code, never a candidate-count-zero one.
-    expect(skip!.reason_code).toBe('no_resolvable_prescription');
+    expect(skip!.reason_code).toBe('blueprint_data_integrity');
     // Distinct from every ordinary "valid but not selected today" code.
-    expect(['recovery', 'no_eligible_day', 'adequately_exposed', 'no_volume_recommended']).not.toContain(skip!.reason_code);
+    expect(['recovery', 'not_current_exposure', 'adequately_covered', 'no_volume_recommended']).not.toContain(skip!.reason_code);
   });
 });
 

@@ -169,9 +169,13 @@ export interface BuildWorkoutInput {
   available_training_days: readonly Weekday[];
   targets: readonly TargetBuildContext[];
   /** Days the user's TrainingProfile marks as a recurring badminton
-   * commitment (remediation §9's "session distribution... day-moving"
-   * — see frequencyEngine.allocateFrequency's own soft-avoidance
-   * doc). Optional; defaults to none. */
+   * commitment (remediation §9's "session distribution... day-moving").
+   * Optional; defaults to none. One-Pass Dev Spec v2 §1.2/§9: the
+   * calendar-week session-spreading mechanism this used to reference
+   * (frequencyEngine.allocateFrequency) was confirmed dead — zero
+   * production callers anywhere in the repo — and has been removed;
+   * this module's own eligible-day/exposure-cycle logic below is the
+   * sole real mechanism. */
   recurring_badminton_days?: readonly Weekday[];
   /** Surgical Fix Pass §4/§5: the real session length every OTHER day
    * of this same week (besides `date`) gets when this call's own real
@@ -324,18 +328,36 @@ export interface SkippedTarget {
    * independent daily discovery when it's actually the same week-level
    * fact recurring on every session. */
   scope: 'week' | 'session';
-  /** Consolidated Fix §9/§10/§11: the structured, discriminated category
-   * this skip actually belongs to — set explicitly at the exact site
-   * that decided it, never inferred later by string-matching `reason`.
-   * `friendlyExplanation.ts` switches on this (never on substrings of
-   * `reason`) so an unhandled/future code is a compile-time error, not
-   * something that can silently fall through to a generic "not
-   * prescribable" bucket. `no_candidates`/`no_resolvable_prescription`
-   * are genuine Blueprint data-integrity gaps (spec §11) — a
-   * structurally different category from an ordinary "valid but not
-   * selected today" programming decision (recovery/no_eligible_day/
-   * adequately_exposed/no_volume_recommended). */
-  reason_code: 'recovery' | 'no_eligible_day' | 'adequately_exposed' | 'no_volume_recommended' | 'no_candidates' | 'no_resolvable_prescription';
+  /** One-Pass Dev Spec v2 §18/§19 (superseding Consolidated Fix §9/§10/
+   * §11's slightly different naming): the structured, discriminated
+   * category this skip actually belongs to — set explicitly at the
+   * exact site that decided it, never inferred later by string-matching
+   * `reason`. `friendlyExplanation.ts` switches on this (never on
+   * substrings of `reason`) so an unhandled/future code is a
+   * compile-time error, not something that can silently fall through to
+   * a generic "not prescribable" bucket.
+   *
+   *   - `recovery`: valid target; today's direct work is prevented by
+   *     recovery state (spec §18 `recovery`).
+   *   - `not_current_exposure`: valid target; no gym day this week is
+   *     compatible with it, so it isn't part of this week's exposure
+   *     cycle (spec §18 `not_current_exposure`).
+   *   - `adequately_covered`: valid target; today's actual/planned work
+   *     already provides sufficient relevant coverage (spec §18
+   *     `adequately_covered`).
+   *   - `no_volume_recommended`: valid target; no weekly direct-volume
+   *     objective is currently recommended for it (a real, distinct
+   *     volumeEngine outcome — not one of spec §18's six named examples,
+   *     which the spec explicitly allows: "only use categories that
+   *     correspond to real engine facts").
+   *   - `blueprint_data_integrity`: a genuine malformed/missing
+   *     authoritative Blueprint record (spec §18's data-integrity
+   *     category) — structurally different from the four ordinary
+   *     "valid but not selected today" categories above. It must never
+   *     mean "not in the current package" or "lost a ranking gate" (spec
+   *     §18) — both of those are already handled upstream as ordinary
+   *     candidate narrowing, never a skip. */
+  reason_code: 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity';
   reason: string;
   /** As much of the same machine-readable explanation as had actually
    * been computed before this target was skipped — e.g. a target
@@ -901,10 +923,10 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       weekLevelSkips.push({
         target_type: target.target_type,
         scope: 'week' as const,
-        reason_code: 'adequately_exposed',
+        reason_code: 'adequately_covered',
         target_id: target.target_id,
         classification,
-        reason: `Already adequately exposed via compound work (${effectiveExposureUnits.toFixed(2)} real+planned exposure_units this week, at/above this target's own ${developmentThreshold}-set ${developmentReference?.weekly_direct_set_reference != null ? `Blueprint ${developmentReference.level} package` : 'Blueprint universal starting'} threshold) — no redundant direct work added merely because direct sets = 0 (spec §7/§8).`,
+        reason: `Already adequately covered via compound work (${effectiveExposureUnits.toFixed(2)} real+planned exposure_units this week, at/above this target's own ${developmentThreshold}-set ${developmentReference?.weekly_direct_set_reference != null ? `Blueprint ${developmentReference.level} package` : 'Blueprint universal starting'} threshold) — no redundant direct work added merely because direct sets = 0 (One-Pass Dev Spec v2 §18 adequately_covered).`,
         decision: makeSkipDecision({ volume_decision: volumeDecision }),
       });
       continue;
@@ -982,10 +1004,10 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       weekLevelSkips.push({
         target_type: target.target_type,
         scope: 'week' as const,
-        reason_code: 'no_eligible_day',
+        reason_code: 'not_current_exposure',
         target_id: target.target_id,
         classification,
-        reason: `No gym day this week is compatible with this target: ${weeklyAllocation.reasoning}`,
+        reason: `Not part of this week's exposure cycle — no gym day this week is compatible with this target: ${weeklyAllocation.reasoning}`,
         decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
       });
       continue;
@@ -1013,10 +1035,10 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       weekLevelSkips.push({
         target_type: target.target_type,
         scope: 'week' as const,
-        reason_code: 'no_candidates',
+        reason_code: 'blueprint_data_integrity',
         target_id: target.target_id,
         classification,
-        reason: 'No Blueprint or approved outside-Blueprint exercise trains this target.',
+        reason: 'Genuine Blueprint data gap: no Blueprint or approved outside-Blueprint exercise trains this target at all — a content/authoring gap in Blueprint itself, not a normal programming decision (One-Pass Dev Spec v2 §18 blueprint_data_integrity).',
         decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
       });
       continue;
@@ -1240,6 +1262,20 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       globalExerciseIndex++;
     };
 
+    // One-Pass Dev Spec v2 §1.3/§6: this target's own per-exposure
+    // reference (sum of its Blueprint package's own exercise sets, never
+    // multiplied by frequency) — null for a target with no package
+    // reference (functional_goal, or a physique target Blueprint hasn't
+    // grouped yet). Only the target's LAST real eligible day this week
+    // is ever bounded by it (see that branch below) — every OTHER
+    // eligible day already gets exactly one exercise regardless
+    // (unchanged from before this spec), so only the last day's
+    // multi-exercise absorption could ever cram more than one real
+    // exposure's worth of volume into a single session.
+    const sessionCap = developmentReference?.direct_sets_per_exposure ?? null;
+    let lastAttemptedExerciseId: BlueprintId | null = null;
+    let everAttemptedARealCandidate = false;
+
     for (let dayIdx = 0; dayIdx < eligibleDaysThisWeek.length && remainingWeeklySets > 0; dayIdx++) {
       const day = eligibleDaysThisWeek[dayIdx]!;
       const date = dateForWeekday.get(day)!;
@@ -1257,35 +1293,41 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       const plannedTodayIds = plannedExerciseIdsByDate.get(date) ?? [];
 
       if (isLastDay) {
-        // Consolidated Fix §2/§3: the target's LAST real session this
-        // week — 0/1/multiple exercise construction (Fix C) still
-        // absorbs as much of the real remaining need as legitimately
-        // fits, but EVERY placed exercise stays capped at its own
-        // authored per-session `sets` figure — never uncapped merely
-        // because it's the last usable candidate. A prior version of
-        // this loop deliberately bypassed the cap for "the sole
-        // remaining usable candidate" so no weekly volume was "wasted";
-        // that is exactly the invariant the consolidated fix spec
-        // forbids (generated_sets <= authored_per_session_sets, always,
-        // §3/§15.B). Volume this session's real candidates cannot
-        // absorb without violating their own authored caps is left
-        // genuinely unmet (surfaced via unmetDirectSets below) rather
-        // than crammed into one exercise — exactly what spec §3 asks
-        // for ("if the remaining reference cannot be delivered without
-        // violating authored exercise caps ... do not cram it into one
-        // exercise").
+        // Consolidated Fix §2/§3 (retained) + One-Pass Dev Spec v2 §1.1/
+        // §7/§25/§26 (new): the target's LAST real session this week —
+        // 0/1/multiple exercise construction (Fix C) still absorbs
+        // real remaining need, but now bounded at TWO independent
+        // ceilings: (a) every placed exercise still stays capped at its
+        // own authored per-session `sets` figure (Consolidated Fix
+        // §3/§15.B, unchanged), and (b) — new — the day's own total
+        // delivery is also capped at `sessionCap` when a per-exposure
+        // reference exists, so this last real exposure this week can
+        // never absorb MORE than one exposure's natural worth merely
+        // because it happens to be the only (or last) real chance this
+        // week. A prior architecture let the last day absorb the ENTIRE
+        // remaining weekly reference via as many additional exercises as
+        // needed regardless of (b) — exactly the "cram multiple
+        // exposures into one session" anti-pattern §7.3's worked example
+        // forbids (a frequency of 2 with only 1 real compatible day this
+        // week must deliver exactly ONE exposure this week, never two
+        // crammed together). Volume this session's real per-exposure
+        // budget cannot absorb is left genuinely unmet (surfaced via
+        // unmetDirectSets below) rather than crammed in — exactly what
+        // spec §3/§25 ask for.
         let pool = [...dayCandidatePool];
         const placedTodayIds: BlueprintId[] = [];
-        // Surgical Fix Pass §12-16: Blueprint's own package exercise
-        // count is NOT the ceiling here — the loop continues purely on
-        // real remaining need and real candidate availability (stop
-        // conditions: required work satisfied, no suitable candidate
-        // remains, or session resources exhausted — spec §14 steps
-        // 9/10/13). `pool` already shrinks by one real candidate per
-        // iteration, so this is bounded by the real number of feasible/
-        // prescribed candidates for this target, never an invented cap.
-        while (remainingWeeklySets > 0 && pool.length > 0) {
+        let sessionRemaining = sessionCap === null ? remainingWeeklySets : Math.min(remainingWeeklySets, sessionCap);
+        // Surgical Fix Pass §12-16 (retained): Blueprint's own package
+        // exercise count is NOT the ceiling here — the loop continues
+        // purely on real remaining need, real candidate availability,
+        // and (new) this session's own natural per-exposure budget.
+        // `pool` already shrinks by one real candidate per iteration, so
+        // this is bounded by the real number of feasible/prescribed
+        // candidates for this target, never an invented cap.
+        while (remainingWeeklySets > 0 && sessionRemaining > 0 && pool.length > 0) {
           const attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
+          everAttemptedARealCandidate = true;
+          lastAttemptedExerciseId = attempt.selection.exercise_id;
           if (!attempt.prescription) {
             // Blueprint Candidate Fix: this specific candidate has no
             // resolvable Blueprint prescription (checked at any package
@@ -1293,42 +1335,30 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
             // one and retry with the next-best real candidate still in
             // the pool (spec §5's "substitute when the preferred pick
             // doesn't work out"), rather than giving up on the whole
-            // target. A genuine data gap is reported only once the
-            // ENTIRE real pool is exhausted with nothing ever placed
-            // for this target this week.
+            // target. A genuine data gap is reported only once, after
+            // every real eligible day this week has been tried with
+            // nothing ever placed for this target (see after the outer
+            // day loop below).
             pool = pool.filter((id) => id !== attempt.selection.exercise_id);
-            if (pool.length === 0 && globalExerciseIndex === 0 && placedTodayIds.length === 0) {
-              weekLevelSkips.push({
-                target_type: target.target_type,
-                scope: 'week' as const,
-                reason_code: 'no_resolvable_prescription',
-                target_id: target.target_id,
-                classification,
-                reason: `No candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) — exposing this genuine data gap rather than inventing one (spec §25). Last attempted: "${attempt.selection.exercise_id}".`,
-                decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }, purposeThisDay),
-              });
-            }
             continue;
           }
           pool = pool.filter((id) => id !== attempt.selection.exercise_id);
           placedTodayIds.push(attempt.selection.exercise_id);
-          // Surgical Fix Pass §7-10 / Consolidated Fix §3: charge the
-          // week's remaining need by the DELIVERED amount, never the
-          // pre-reduction natural cap — an undelivered set was never
-          // actually placed, so it must stay available for a later
-          // session to genuinely deliver (never silently written off).
-          // `requested` is kept only for this exercise's own reasoning
-          // text (§9's "Requested: 3, Delivered: 2, Reason: ..."). This
-          // exercise's own authored per-session cap (attempt.prescription
-          // .sets) is ALWAYS the ceiling here — never bypassed, even when
-          // it's the sole remaining usable candidate for this target's
-          // last session this week (Consolidated Fix §3/§15.B: an
-          // authored exercise prescription cannot be inflated to satisfy
-          // a target-volume number).
-          const requested = attempt.prescription.sets === null ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
+          // Surgical Fix Pass §7-10 / Consolidated Fix §3: charge both
+          // the week's remaining need AND today's own per-exposure
+          // budget by the DELIVERED amount, never the pre-reduction
+          // natural cap — an undelivered set was never actually placed,
+          // so it must stay available for a later session to genuinely
+          // deliver (never silently written off). This exercise's own
+          // authored per-session cap (attempt.prescription.sets) is
+          // ALWAYS a ceiling here too — never bypassed, even when it's
+          // the sole remaining usable candidate for this target's last
+          // session this week (Consolidated Fix §3/§15.B).
+          const requested = attempt.prescription.sets === null ? sessionRemaining : Math.min(sessionRemaining, attempt.prescription.sets);
           const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
           const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
           remainingWeeklySets -= delivered;
+          sessionRemaining -= delivered;
           finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, delivered, requested);
           if (attempt.prescription.sets === null) break;
         }
@@ -1345,9 +1375,12 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         // still real and prescribable, candidate remains in the pool.
         let dayPool = dayCandidatePool;
         let attempt = attemptSelection(dayPool, [], plannedTodayIds);
+        everAttemptedARealCandidate = true;
+        lastAttemptedExerciseId = attempt.selection.exercise_id;
         while (!attempt.prescription && dayPool.length > 1) {
           dayPool = dayPool.filter((id) => id !== attempt.selection.exercise_id);
           attempt = attemptSelection(dayPool, [], plannedTodayIds);
+          lastAttemptedExerciseId = attempt.selection.exercise_id;
         }
         if (attempt.prescription) {
           // Same requested-vs-delivered accounting as the last-day
@@ -1364,6 +1397,23 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       }
     }
 
+    // One-Pass Dev Spec v2 §18/§19: a genuine Blueprint data-integrity
+    // gap is reported once, for the whole target, only after every real
+    // eligible day this week has actually been tried and NOTHING was
+    // ever placed — never mid-week (a later day may still succeed) and
+    // never confused with an ordinary "valid but not selected today"
+    // skip.
+    if (globalExerciseIndex === 0 && everAttemptedARealCandidate) {
+      weekLevelSkips.push({
+        target_type: target.target_type,
+        scope: 'week' as const,
+        reason_code: 'blueprint_data_integrity',
+        target_id: target.target_id,
+        classification,
+        reason: `Genuine Blueprint data gap: no candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) across every real eligible day this week — exposing this data gap rather than inventing one (One-Pass Dev Spec v2 §18 blueprint_data_integrity). Last attempted: "${lastAttemptedExerciseId}".`,
+        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
+      });
+    }
   }
 
   // Consolidated Fix §7/§15.C: session time availability has ZERO effect
@@ -1437,12 +1487,48 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     });
   }
 
+  assertNoContradictoryProgramState(sessions);
+
   return {
     weekStart: input.weekStart,
     sessions,
     targetAllocations: rebuildTargetAllocationsFromFinalSessions(sessions, requiredDirectSetsByTarget, classificationByTarget),
     decisions: log,
   };
+}
+
+/**
+ * One-Pass Dev Spec v2 §20: "A target/exercise cannot be generated
+ * successfully today and simultaneously unprescribable today... before
+ * returning a session, reconcile/validate programmed exercises vs
+ * excluded/skipped exercises/targets and ensure there is no semantic
+ * contradiction." By construction, the per-target loop above always
+ * `continue`s immediately after pushing a week-level skip for a target
+ * (never falling through to construction afterward), and the
+ * `blueprint_data_integrity` skip is only ever pushed when
+ * `globalExerciseIndex === 0` (nothing was ever placed for that target
+ * this whole week) — so this should never actually find a contradiction.
+ * It is a real, executable safety net rather than only a passing test:
+ * a target_id appearing in both a session's `plannedWork` and `skipped`
+ * is a genuine programming-engine bug, and this fails loudly (matching
+ * this codebase's existing "fail loudly on a data/logic surprise"
+ * convention — see NoFeasibleExerciseError, parseRange) rather than
+ * silently returning contradictory state to a caller/UI.
+ */
+function assertNoContradictoryProgramState(sessions: readonly WeeklyPlanSession[]): void {
+  for (const session of sessions) {
+    const plannedTargetKeys = new Set(session.plannedWork.map((w) => targetKey(w)));
+    for (const skip of session.skipped) {
+      const key = targetKey(skip);
+      if (plannedTargetKeys.has(key)) {
+        throw new Error(
+          `Contradictory program state (One-Pass Dev Spec v2 §20): ${skip.target_type} "${skip.target_id}" is both ` +
+            `programmed and marked skipped (reason_code: ${skip.reason_code}) on ${session.date}. This indicates a real ` +
+            `programming-engine defect, not a normal outcome.`
+        );
+      }
+    }
+  }
 }
 
 /**

@@ -14,7 +14,7 @@ import { createApp } from '../src/server/app.js';
 import { GoalsRepo } from '../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../src/repositories/usersRepo.js';
-import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning, humanizeSlug } from '../src/server/friendlyExplanation.js';
+import { buildFriendlyPlannedReasoning, buildFriendlyRejectedCandidateReasoning, buildFriendlySkipReasoning, humanizeSlug } from '../src/server/friendlyExplanation.js';
 import { resolveGoalNameRef } from '../src/server/routes/programming.js';
 
 const JARGON_TERMS = [
@@ -165,7 +165,7 @@ describe('buildFriendlyPlannedReasoning', () => {
   });
 });
 
-describe('buildFriendlySkipReasoning — Consolidated Fix §9/§10/§11: switches exclusively on the structured reason_code, never on substrings of reason', () => {
+describe('buildFriendlySkipReasoning — One-Pass Dev Spec v2 §18/§19: switches exclusively on the structured reason_code, never on substrings of reason', () => {
   function baseSkip(overrides: Partial<Parameters<typeof buildFriendlySkipReasoning>[0]> = {}) {
     return {
       target_type: 'physique_target' as const,
@@ -199,39 +199,66 @@ describe('buildFriendlySkipReasoning — Consolidated Fix §9/§10/§11: switche
     expect(text).toContain('2026-09-07');
   });
 
-  it('a genuinely unscheduled target reads as a scheduling reason', () => {
-    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'no_eligible_day' }));
-    expect(text).toContain("isn't scheduled on any of your training days");
+  it('a target not part of this week\'s exposure cycle reads as a scheduling/exposure reason, distinguishing valid-but-not-due from invalid (spec §22/§23)', () => {
+    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'not_current_exposure' }));
+    expect(text).toContain('exposure cycle');
+    expect(text).toContain('next appropriate target-training session');
   });
 
-  it('an "already adequately exposed" skip names the REAL covering exercise(s), not a generic "compound work" placeholder (spec §10)', () => {
+  it('an "adequately covered" skip names the REAL covering exercise(s), not a generic "compound work" placeholder (spec §10/§22)', () => {
     const text = buildFriendlySkipReasoning(
-      baseSkip({ reason_code: 'adequately_exposed', decision: { ...baseSkip().decision, recent_exercise_ids: ['back-squat', 'leg-extension'] } })
+      baseSkip({ reason_code: 'adequately_covered', decision: { ...baseSkip().decision, recent_exercise_ids: ['back-squat', 'leg-extension'] } })
     );
     expect(text).toContain('Back Squat');
     expect(text).toContain('Leg Extension');
     assertNoJargon(text);
   });
 
-  it('an "already adequately exposed" skip falls back to a plain sufficiency reason when no real covering exercise id resolves', () => {
-    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'adequately_exposed' }));
+  it('an "adequately covered" skip falls back to a plain sufficiency reason when no real covering exercise id resolves', () => {
+    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'adequately_covered' }));
     expect(text).toContain('already getting enough real training this week');
     assertNoJargon(text);
   });
 
-  it('a genuine Blueprint data gap (no_candidates / no_resolvable_prescription) is framed as a data issue, never as "not prescribable"/invalid (spec §9/§11)', () => {
-    for (const reason_code of ['no_candidates', 'no_resolvable_prescription'] as const) {
-      const text = buildFriendlySkipReasoning(baseSkip({ reason_code }));
-      expect(text).toContain('data gap');
-      expect(text.toLowerCase()).not.toContain('not prescribable');
-      expect(text.toLowerCase()).not.toContain('confidently prescribable');
-      assertNoJargon(text);
-    }
+  it('a genuine Blueprint data gap (blueprint_data_integrity) is framed as a data issue, never as "not prescribable"/invalid (spec §9/§11/§18/§22/§23)', () => {
+    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'blueprint_data_integrity' }));
+    expect(text).toContain('data gap');
+    expect(text.toLowerCase()).not.toContain('not prescribable');
+    expect(text.toLowerCase()).not.toContain('confidently prescribable');
+    expect(text.toLowerCase()).not.toContain('invalid');
+    assertNoJargon(text);
   });
 
   it('never contains internal implementation terminology', () => {
     const text = buildFriendlySkipReasoning(baseSkip());
     assertNoJargon(text);
+  });
+});
+
+describe('buildFriendlyRejectedCandidateReasoning — One-Pass Dev Spec v2 §18/§22/§31.13: valid-but-not-selected-today explanations', () => {
+  it('a candidate rejected for a better-fit variation (any non-redundancy gate) is explained as "better variation selected," remaining valid for a future session', () => {
+    const text = buildFriendlyRejectedCandidateReasoning({
+      rejected_exercise_name: 'Close-Grip Bench Press',
+      selected_exercise_name: 'Cable Pushdown',
+      decisive_gate: 'gate5_progression_continuity',
+    });
+    expect(text).toContain('Close-Grip Bench Press');
+    expect(text).toContain('Cable Pushdown');
+    expect(text).toContain('better fit');
+    expect(text.toLowerCase()).toContain('remains available');
+    expect(text.toLowerCase()).not.toContain('no valid prescription');
+    expect(text.toLowerCase()).not.toContain('not prescribable');
+  });
+
+  it('a candidate rejected because it is already covering a different target today (Gate 3) is explained as redundant today, not invalid', () => {
+    const text = buildFriendlyRejectedCandidateReasoning({
+      rejected_exercise_name: 'Incline Dumbbell Press',
+      selected_exercise_name: 'Cable Fly',
+      decisive_gate: 'gate3_programming_need',
+    });
+    expect(text).toContain('Incline Dumbbell Press');
+    expect(text).toContain('already doing work for a different target');
+    expect(text.toLowerCase()).toContain('remains available');
   });
 });
 

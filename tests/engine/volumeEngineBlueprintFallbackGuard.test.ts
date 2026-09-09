@@ -32,6 +32,8 @@ describe('Test A — a missing physique package never silently uses global weekl
       level: 'efficient',
       package_id: null,
       weekly_direct_set_reference: null,
+      direct_sets_per_exposure: null,
+      sessions_per_week_reference: null,
       coverage: null,
     };
     const result = decideVolume({ ...BASE, target_id: 'an-ungrouped-physique-target', development_reference: missingPackage });
@@ -51,6 +53,8 @@ describe('Test A — a missing physique package never silently uses global weekl
       level: 'efficient',
       package_id: null,
       weekly_direct_set_reference: null,
+      direct_sets_per_exposure: null,
+      sessions_per_week_reference: null,
       coverage: null,
     };
     // current_weekly_primary_sets deliberately inside the practical_range
@@ -87,6 +91,8 @@ describe('Test C — functional-goal behavior is unaffected by the physique-pack
       level: 'efficient',
       package_id: null,
       weekly_direct_set_reference: null,
+      direct_sets_per_exposure: null,
+      sessions_per_week_reference: null,
       coverage: null,
     };
     const result = decideVolume({ ...BASE, target_type: 'functional_goal', target_id: 'some-functional-goal', development_reference: functionalReference });
