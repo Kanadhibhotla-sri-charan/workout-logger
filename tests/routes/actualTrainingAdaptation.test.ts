@@ -23,6 +23,7 @@ import { WeeklyProgramRepo } from '../../src/repositories/weeklyProgramRepo.js';
 import { programmingWeekStart } from '../../src/engine/workoutBuilder.js';
 import { todayForUser } from '../../src/lib/userTimezone.js';
 import { getDevelopmentReference } from '../../src/engine/developmentReferenceEngine.js';
+import { lookupExercisePrescriptionAnyLevel } from '../../src/blueprint/developmentPackages.js';
 import { BlueprintAdapter } from '../../src/blueprint/adapter.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
@@ -413,13 +414,13 @@ describe('Phase 8 — machine-readable deviation reasons (spec section 9, 16.K)'
 });
 
 describe('Phase 7 — package references never override real constraints (spec section 16.F)', () => {
-  it('a real, tiny time budget still caps delivered quads work regardless of the Efficient package reference', async () => {
+  it('Consolidated Fix §3/§15.B: each delivered quads exercise still caps at its own authored per-session sets, regardless of the Efficient package reference or a scarce nominal time budget', async () => {
     const user = new UsersRepo(db).getOrCreateDefault();
     new TrainingProfileRepo(db).upsert(user.id, {
       timezone: 'Asia/Kolkata',
       week_start_day: 'monday',
       training_days: ['monday'] as any,
-      default_session_duration_minutes: 15, // genuinely tight
+      default_session_duration_minutes: 15, // genuinely tight nominal budget — must have zero effect (spec §7)
       minimum_session_duration_minutes: 10,
       maximum_session_duration_minutes: 20,
       available_equipment: FULL_EQUIPMENT,
@@ -428,10 +429,15 @@ describe('Phase 7 — package references never override real constraints (spec s
     const week = await getWeek();
     const monday = week.days.find((d: any) => d.weekday === 'monday');
     const quadsRef = getDevelopmentReference('physique_target', 'quads', 'efficient').weekly_direct_set_reference!;
-    const quadsDelivered = monday.plannedWork.filter((w: any) => w.target_id === 'quads').reduce((s: number, w: any) => s + w.sets, 0);
-    // Real time fitting still governs what's delivered — never the
-    // package reference itself, no matter how large it is.
-    expect(monday.estimatedMinutes).toBeLessThanOrEqual(20);
+    const quadsWork = monday.plannedWork.filter((w: any) => w.target_id === 'quads');
+    const quadsDelivered = quadsWork.reduce((s: number, w: any) => s + w.sets, 0);
+    // Real per-exercise authored caps still govern what's delivered —
+    // never the package reference itself, no matter how large it is —
+    // and the scarce nominal time budget above has zero effect (§7):
+    // estimatedMinutes may genuinely exceed it.
+    for (const w of quadsWork) {
+      expect(w.sets).toBeLessThanOrEqual(lookupExercisePrescriptionAnyLevel('quads', w.exercise_id)!.sets!);
+    }
     expect(quadsDelivered).toBeLessThanOrEqual(quadsRef);
   });
 

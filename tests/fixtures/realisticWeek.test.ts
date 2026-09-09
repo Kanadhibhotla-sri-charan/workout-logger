@@ -156,11 +156,13 @@ describe('fixture: a realistic week (Mon/Tue gym, Wed rest, Thu/Fri gym, Sat/Sun
     }
   });
 
-  it('generates a real, complete workout on every scheduled day across the full two-week span with no errors, never exceeding the time budget', () => {
+  it('generates a real, complete workout on every scheduled day across the full two-week span with no errors — the nominal time budget never removes anything (Consolidated Fix §7)', () => {
     for (const date of [MON1, TUE1, THU1, FRI1, MON2, TUE2]) {
       const result = assembleAndBuildWorkout(db, date, 60);
       expect(result.exercises.length).toBeGreaterThan(0);
-      expect(result.estimated_minutes).toBeLessThanOrEqual(60);
+      // estimated_minutes is informational only and may genuinely exceed
+      // the nominal budget — it is never a filter (spec §7).
+      expect(result.skipped_targets.some((s) => s.reason.includes('time-fitting'))).toBe(false);
       // Every generated exercise carries the full remediation §16
       // machine-readable decision object through this real end-to-end
       // path, not just in isolated unit tests.

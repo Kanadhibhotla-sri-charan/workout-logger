@@ -159,15 +159,14 @@ describe('Strict Bug-Fix §32: the required full-week fixture, through the real 
     logBadmintonSession(SUN1, 'medium');
   });
 
-  it('Monday — Push, a real limited time budget: the real production path still serves Goal 1 first and never exceeds the budget', () => {
-    const result = assembleAndBuildWorkout(db, MON2, 20); // a genuinely tight session
-    expect(result.estimated_minutes).toBeLessThanOrEqual(20);
+  it('Monday — Push, a scarce nominal time budget: the real production path still serves Goal 1, and the budget removes nothing (Consolidated Fix §7)', () => {
+    const result = assembleAndBuildWorkout(db, MON2, 20); // a genuinely tight nominal session
     expect(result.exercises.length).toBeGreaterThan(0);
-    // Goal 1 (mid-pec) is this specialization's own push day — under a
-    // scarce budget, its real work must survive (Strict Bug-Fix §3:
-    // programming priority preserved through time fitting), not be
-    // arbitrarily bumped by whatever else also wants Monday's slot.
+    // Goal 1 (mid-pec) is this specialization's own push day — its real
+    // work is always present regardless of the nominal budget, never
+    // bumped by whatever else also wants Monday's slot.
     expect(result.exercises.some((e) => e.target_id === 'mid-pec')).toBe(true);
+    expect(result.skipped_targets.some((s) => s.reason.includes('time-fitting'))).toBe(false);
   });
 
   it('Tuesday — Pull, normal time: Goal 2 (a genuinely different PPL day than Goal 1) gets its own real work', () => {
@@ -179,7 +178,6 @@ describe('Strict Bug-Fix §32: the required full-week fixture, through the real 
 
   it('Thursday — Legs: the real logged week-1 quads volume reads as maintenance (not normal_development, not re-prescribed as if untrained)', () => {
     const result = assembleAndBuildWorkout(db, THU2, 75);
-    expect(result.estimated_minutes).toBeLessThanOrEqual(75);
     const quadsWork = [...result.exercises, ...result.skipped_targets].filter((e) => e.target_id === 'quads');
     expect(quadsWork.length).toBeGreaterThan(0);
     expect(quadsWork.every((e) => e.classification === 'maintenance')).toBe(true);
@@ -187,7 +185,6 @@ describe('Strict Bug-Fix §32: the required full-week fixture, through the real 
 
   it('Friday — Upper, after a real logged high-intensity badminton weekend: the badminton context genuinely reaches this real day\'s plan', () => {
     const result = assembleAndBuildWorkout(db, FRI2, 75);
-    expect(result.estimated_minutes).toBeLessThanOrEqual(75);
     expect(result.exercises.length).toBeGreaterThan(0);
     const withBadmintonContext = result.exercises.filter((e) => e.decision.badminton_context !== null);
     expect(withBadmintonContext.length).toBeGreaterThan(0);

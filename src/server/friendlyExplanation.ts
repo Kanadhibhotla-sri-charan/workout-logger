@@ -12,6 +12,7 @@
 
 import type { TargetType } from '../engine/goalResolver.js';
 import type { BlueprintId } from '../contracts/types.js';
+import { BlueprintAdapter } from '../blueprint/adapter.js';
 
 /** "arm-side-thickness" -> "arm side thickness". The only generic,
  * always-available humanization of a Blueprint slug this app can do
@@ -119,40 +120,88 @@ export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalNa
   return sentences.join(' ');
 }
 
+/** Consolidated Fix §9/§10/§11: the discriminated skip category
+ * `workoutBuilder.ts`'s `SkippedTarget.reason_code` already assigns at
+ * the exact site that decided it. Mirrors that type exactly so this
+ * function can switch on it directly. */
+type SkipReasonCode = 'recovery' | 'no_eligible_day' | 'adequately_exposed' | 'no_volume_recommended' | 'no_candidates' | 'no_resolvable_prescription';
+
 interface FriendlySkipInput {
   target_type: TargetType;
   target_id: BlueprintId;
   target_name: string;
+  reason_code: SkipReasonCode;
   reason: string;
   decision: {
     recovery: { priority_adjustment: string };
     volume_decision: { action: string } | null;
     weekly_allocation: { eligible_days_this_week: readonly string[] } | null;
     selection: unknown;
+    last_trained: { date: string | null; days_since: number | null };
+    recent_exercise_ids: readonly BlueprintId[];
+    weekly_exposure: { exposure_units: number };
   };
 }
 
+/** Real exercise names for whichever of a target's `recent_exercise_ids`
+ * Blueprint actually recognizes — used to name the ACTUAL exercise(s)
+ * providing coverage (spec §10's "covered today by Back Squats and Leg
+ * Extensions" style), never a generic "compound work" placeholder. */
+function coveringExerciseNames(ids: readonly BlueprintId[]): string[] {
+  return ids.map((id) => BlueprintAdapter.getExercise(id)?.name).filter((name): name is string => name != null);
+}
+
+function joinNaturally(items: readonly string[]): string {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0]!;
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
 /** Builds the plain-language explanation for a target that received no
- * work this session. Picks the category primarily from real, already-
- * computed structured signals; where no dedicated structured field
- * distinguishes a case (e.g. "already adequately exposed" vs "no
- * resolvable prescription"), this matches on the same stable,
- * workoutBuilder.ts-own-generated `reason` substrings
- * weekProgramReconciliation.ts's classifyDeviationReason already relies
- * on for the identical reason (see its own doc comment) — never a
- * third-party or user-authored string. */
+ * work this session. Switches exclusively on the structured
+ * `reason_code` `workoutBuilder.ts` already assigned at the exact site
+ * that decided this skip (Consolidated Fix §9/§10) — never by string-
+ * matching `reason`, so an unhandled/future code is a compile error
+ * here, not a silent fall-through to a generic "not prescribable"
+ * bucket. `no_candidates`/`no_resolvable_prescription` are surfaced as a
+ * genuine Blueprint data-integrity gap (spec §11), explicitly distinct
+ * from the four ordinary "valid but not selected today" categories —
+ * never described as the target/exercise itself being invalid. */
 export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
-  if (skip.decision.recovery.priority_adjustment !== 'none') {
-    return `${skip.target_name} needs more recovery time before its next real session, so no work was added today.`;
+  switch (skip.reason_code) {
+    case 'recovery': {
+      // Spec §10: only mention the date when the engine actually knows
+      // it — days_since === 0 reads better as "earlier today" than a
+      // duplicated date string.
+      const { date, days_since } = skip.decision.last_trained;
+      if (date && days_since === 0) {
+        return `${skip.target_name} was already trained earlier today, so there isn't enough recovery for another direct session.`;
+      }
+      if (date) {
+        return `${skip.target_name} was trained directly on ${date}, so there isn't enough recovery for another direct session today.`;
+      }
+      return `${skip.target_name} needs more recovery time before its next real session, so no work was added today.`;
+    }
+    case 'no_eligible_day': {
+      return `${skip.target_name} isn't scheduled on any of your training days this week.`;
+    }
+    case 'adequately_exposed': {
+      const covering = coveringExerciseNames(skip.decision.recent_exercise_ids);
+      return covering.length > 0
+        ? `${skip.target_name} is already covered today by ${joinNaturally(covering)}, so another direct exercise isn't needed in this session.`
+        : `${skip.target_name} is already getting enough real training this week from other exercises, so no extra direct work was needed.`;
+    }
+    case 'no_volume_recommended': {
+      return `${skip.target_name} doesn't have a weekly training target yet.`;
+    }
+    case 'no_candidates':
+    case 'no_resolvable_prescription': {
+      // Spec §9/§11: a genuine Blueprint data gap — never framed as
+      // "not prescribable"/"invalid," which would misleadingly imply
+      // this target/exercise itself is wrong rather than the underlying
+      // data being incomplete.
+      return `${skip.target_name} is missing the Blueprint data needed to safely prescribe it right now — this is a data gap to fix, not a normal training decision.`;
+    }
   }
-  if (skip.decision.weekly_allocation && skip.decision.weekly_allocation.eligible_days_this_week.length === 0) {
-    return `${skip.target_name} isn't scheduled on any of your training days this week.`;
-  }
-  if (skip.reason.includes('adequately exposed')) {
-    return `${skip.target_name} is already getting enough real training this week from other exercises, so no extra direct work was needed.`;
-  }
-  if (skip.reason.includes('No weekly volume recommended')) {
-    return `${skip.target_name} doesn't have a weekly training target yet.`;
-  }
-  return `We don't have a confidently prescribable exercise for ${skip.target_name} right now, so it was left out rather than guessed at.`;
 }

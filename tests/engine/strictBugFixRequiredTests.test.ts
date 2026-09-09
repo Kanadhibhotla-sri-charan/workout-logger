@@ -40,20 +40,23 @@ function normalDevTarget(overrides: Partial<TargetBuildContext>): TargetBuildCon
   };
 }
 
-describe('Strict Bug-Fix §3.6: real programming need survives time fitting — never overridden by alphabetical/array-position ID', () => {
-  // Three real normal-development push-compatible targets (so they
-  // genuinely compete for the same Monday session) with deliberately
-  // different exposure deficits. "front-delt" — the LOWEST-need target
-  // — is also the alphabetically EARLIEST real Blueprint id of the
-  // three ("front-delt" < "mid-pec" < "triceps"); "triceps" — the
-  // HIGHEST-need target — sorts alphabetically LAST. This is the exact
-  // trap §3.6 describes: if a later stage ever fell back to ID
-  // ordering, front-delt (not triceps) would win the scarce budget.
+describe('Consolidated Fix §7/§15.C: real programming need is never overridden by a session time budget — a scarce budget removes nothing at all (supersedes the former Strict Bug-Fix §3.6 time-fitting test)', () => {
+  // Two real normal-development push-compatible targets with
+  // deliberately different exposure deficits, plus front-delt, which
+  // (independent of time or need — verified identical under both a
+  // scarce and a generous budget) has no candidate with a resolvable
+  // front-delt-specific Blueprint prescription in this fixture's real
+  // data and is therefore excluded via the genuine-data-gap path (spec
+  // §9/§25), never via time. Under the OLD time-fitting mechanism, a
+  // scarce budget would let only ONE of {triceps, mid-pec} survive
+  // (whichever ranked/fit first); Consolidated Fix §7 means session time
+  // now has zero effect on generation, so a scarce nominal budget must
+  // never cause either of them to lose its own real work.
   function threeTargets() {
     return [
       normalDevTarget({ target_id: 'triceps', weekly_exposure_units: 0 }), // needDeficit=8 — highest need
       normalDevTarget({ target_id: 'mid-pec', weekly_exposure_units: 3 }), // needDeficit=5 — middle
-      normalDevTarget({ target_id: 'front-delt', weekly_exposure_units: 6 }), // needDeficit=2 — lowest need, earliest id
+      normalDevTarget({ target_id: 'front-delt', weekly_exposure_units: 6 }), // no resolvable prescription in this fixture — a genuine data gap, unrelated to time
     ];
   }
 
@@ -68,24 +71,19 @@ describe('Strict Bug-Fix §3.6: real programming need survives time fitting — 
     });
   }
 
-  it('under a scarce budget, the highest-need target survives and the lowest-need target is sacrificed first', () => {
+  it('under a scarce nominal budget, both real prescribable targets still receive their own work — neither is dropped for time', () => {
     const result = buildAt(10);
     const targetIds = result.exercises.map((e) => e.target_id);
     expect(targetIds).toContain('triceps');
-    expect(targetIds).not.toContain('mid-pec');
-    expect(targetIds).not.toContain('front-delt');
+    expect(targetIds).toContain('mid-pec');
+    expect(result.skipped_targets.some((s) => s.reason.includes('time-fitting'))).toBe(false);
   });
 
-  it('the lowest-need target is NOT rescued by its alphabetically-earlier id even under a much more generous budget', () => {
-    // Generous enough for triceps (highest need) and mid-pec (middle)
-    // both, but front-delt (lowest need) — despite sorting first
-    // alphabetically among the three real ids — must still be the one
-    // left out, proving need (not ID) drives the outcome.
+  it('the same two targets are still both present under a more generous budget too — the nominal budget never changes what gets included', () => {
     const result = buildAt(25);
     const targetIds = result.exercises.map((e) => e.target_id);
     expect(targetIds).toContain('triceps');
     expect(targetIds).toContain('mid-pec');
-    expect(targetIds).not.toContain('front-delt');
   });
 });
 
@@ -245,23 +243,23 @@ describe('Strict Bug-Fix §11-15/§31 "Multiple exercises": 0/1/multiple exercis
     expect(exercises.length).toBe(1);
   });
 
-  it('multi-exercise construction still respects the time budget — a tight budget drops the lowest-priority of a target\'s own additional exercises rather than exceeding it', () => {
+  it('Consolidated Fix §7: multi-exercise construction ignores the time budget entirely — a tight nominal budget drops none of a target\'s own real additional exercises', () => {
     const result = buildWorkout({
       date: '2026-09-03',
       weekday: 'thursday',
-      budget_minutes: 10, // enough for back-squat's own 3 sets (~8.8 min), not for a second exercise too
+      budget_minutes: 10, // a scarce nominal budget — must have zero effect (spec §7)
       available_equipment: FULL_EQUIPMENT,
       available_training_days: ['tuesday', 'wednesday', 'thursday'],
       targets: [normalDevTarget({ target_id: 'quads', current_weekly_primary_sets: 0, weekly_exposure_units: 0 })],
     });
-    expect(result.estimated_minutes).toBeLessThanOrEqual(10);
     const quadsExercises = result.exercises.filter((e) => e.target_id === 'quads');
-    expect(quadsExercises.length).toBe(1);
-    expect(quadsExercises[0]!.exercise_id).toBe('back-squat');
-    // The rest of this target's own real weekly requirement is exposed
-    // as a real, explained skip — never silently dropped without a
-    // trace.
-    const droppedForQuads = result.skipped_targets.filter((s) => s.target_id === 'quads');
-    expect(droppedForQuads.length).toBeGreaterThan(0);
+    // Every real candidate construction decided on for this target is
+    // placed in full — multiple exercises, each capped at its own
+    // authored sets, never trimmed for time.
+    expect(quadsExercises.length).toBeGreaterThan(1);
+    expect(result.estimated_minutes).toBeGreaterThan(10);
+    // No time-fitting skip is ever created (spec §7/§9).
+    const timeFittingSkip = result.skipped_targets.find((s) => s.reason.includes('time-fitting'));
+    expect(timeFittingSkip).toBeUndefined();
   });
 });

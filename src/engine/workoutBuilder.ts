@@ -5,11 +5,18 @@
 // is pure — it takes already-gathered plain data (per-target context
 // assembled by the caller) and composes the already-real engines
 // (exposureEngine's numbers, volumeEngine, frequencyEngine,
-// recoveryEngine, exerciseSelector, constraintEngine.fitToTimeBudget) in
-// the spec's own step order. `assembleWorkoutBuildInput` is the one
-// impure function that reads the database (TrainingState,
-// AestheticAssessmentsRepo, BadmintonSessionDetailsRepo) to build that
-// per-target context.
+// recoveryEngine, exerciseSelector) in the spec's own step order.
+// `assembleWorkoutBuildInput` is the one impure function that reads the
+// database (TrainingState, AestheticAssessmentsRepo,
+// BadmintonSessionDetailsRepo) to build that per-target context.
+//
+// Consolidated Fix §7/§8: session time availability and equipment
+// availability have ZERO effect on generation here — constraintEngine's
+// fitToTimeBudget/filterEquipmentFeasible are real, tested utilities
+// still used elsewhere (the substitution endpoint, GET
+// /api/programming/substitutes), but this pipeline never calls either.
+// `estimated_minutes`/`availableMinutes` are carried on the output purely
+// as informational display data.
 //
 // What this pipeline does NOT do, and why, is as important as what it
 // does:
@@ -28,8 +35,9 @@
 //     outcome for a stagnant target, not a limitation to work around.
 //   - It never re-derives per-set duration from Blueprint data (none
 //     exists) — TIME_ESTIMATION (config.ts, [DEFAULT]) is the single,
-//     visible, documented estimate used to feed constraintEngine
-//     .fitToTimeBudget.
+//     visible, documented estimate surfaced as informational
+//     `estimated_minutes` only; it never filters or reduces generation
+//     (Consolidated Fix §7).
 
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
@@ -37,7 +45,7 @@ import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/dev
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
-import { fitToTimeBudget, isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
+import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
 import { exercisesTrainingTarget, selectExercise, type ExerciseSelectionResult } from './exerciseSelector.js';
@@ -45,7 +53,7 @@ import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
 import { computeProgression, type ProgressionResult } from './progressionEngine.js';
 import { applyRecoveryConstraint, type RecentBadmintonSignal, type RecoveryConstraintResult } from './recoveryEngine.js';
-import { allocateResource, type ResourceAllocationEntry } from './resourceAllocation.js';
+import type { ResourceAllocationEntry } from './resourceAllocation.js';
 import { classifyAestheticTrend, decideVolume, type AestheticProgressTrend, type VolumeDecision } from './volumeEngine.js';
 import { developmentPackageLevelFor, getDevelopmentReference, type DevelopmentReference } from './developmentReferenceEngine.js';
 import { buildTrainingState } from './trainingState.js';
@@ -306,6 +314,28 @@ export interface SkippedTarget {
   target_type: TargetType;
   target_id: BlueprintId;
   classification: TargetClassification;
+  /** Consolidated Fix §12: whether this is a whole-week fact ('week' —
+   * e.g. recovery, exposure coverage, weekly eligibility, prescription
+   * resolvability; computed once per target for the whole week and
+   * therefore identical across every session in it) or specific to one
+   * real session ('session'). Lets a caller tell "this target isn't
+   * getting worked this week, and here's why" apart from "this
+   * exercise specifically didn't fit today" — never presented as an
+   * independent daily discovery when it's actually the same week-level
+   * fact recurring on every session. */
+  scope: 'week' | 'session';
+  /** Consolidated Fix §9/§10/§11: the structured, discriminated category
+   * this skip actually belongs to — set explicitly at the exact site
+   * that decided it, never inferred later by string-matching `reason`.
+   * `friendlyExplanation.ts` switches on this (never on substrings of
+   * `reason`) so an unhandled/future code is a compile-time error, not
+   * something that can silently fall through to a generic "not
+   * prescribable" bucket. `no_candidates`/`no_resolvable_prescription`
+   * are genuine Blueprint data-integrity gaps (spec §11) — a
+   * structurally different category from an ordinary "valid but not
+   * selected today" programming decision (recovery/no_eligible_day/
+   * adequately_exposed/no_volume_recommended). */
+  reason_code: 'recovery' | 'no_eligible_day' | 'adequately_exposed' | 'no_volume_recommended' | 'no_candidates' | 'no_resolvable_prescription';
   reason: string;
   /** As much of the same machine-readable explanation as had actually
    * been computed before this target was skipped — e.g. a target
@@ -342,9 +372,9 @@ export interface WorkoutBuildResult {
    * not a user goal), with the same priority and aesthetic-progress
    * trend used throughout this build. */
   active_goals: Array<{ goal_id: string; priority: number; trend: AestheticProgressTrend }>;
-  /** Remediation §17/§16: the real allocateResource() output that
-   * decided today's goal-level time-budget split — see the "Remediation
-   * §17" block below for how it's produced. */
+  /** Consolidated Fix §7: always empty now that time no longer competes
+   * for or filters generation — kept only for API/type back-compat with
+   * existing callers of this field. */
   resource_allocation: readonly ResourceAllocationEntry[];
   /** Remediation §16's "equipment/time constraints" — the exact inputs
    * every equipment-feasibility check and the time-budget split above
@@ -437,11 +467,14 @@ export interface WeeklyPlanSession {
   plannedWork: PlannedWorkItem[];
   estimatedMinutes: number;
   badmintonContext: RecentBadmintonSignal | null;
-  /** Targets considered for (or already routed toward) this specific
-   * date that ended up with no work here — either genuinely skipped
-   * for the whole week (recovery/prescription/no-real-candidate — see
-   * WeeklyProgrammingPlan.decisions for the real reason) or dropped
-   * specifically from this date's own session by time-fitting. */
+  /** Targets skipped for the whole week (recovery/prescription/no-real-
+   * candidate/no-eligible-day/already-adequately-exposed — see
+   * WeeklyProgrammingPlan.decisions for the real reason), each carrying
+   * `scope: 'week'` (Consolidated Fix §12) since none of them are
+   * specific to this one date — surfaced on every session because each
+   * real day legitimately needs to know why a target isn't in it. Time
+   * and equipment no longer produce any day-specific skip at all (§7/
+   * §8), so no `scope: 'session'` entry exists here today. */
   skipped: SkippedTarget[];
   activeGoals: Array<{ goal_id: string; priority: number; trend: AestheticProgressTrend }>;
   resourceAllocation: readonly ResourceAllocationEntry[];
@@ -651,14 +684,17 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   const log: string[] = [];
   const weekLevelSkips: SkippedTarget[] = [];
   const candidates: Array<FittableItem & { goal_id: string; goal_priority: number; planned: Omit<PlannedWorkItem, 'estimated_minutes'>; date: string }> = [];
-  // `FittableItem.priority` (below) now carries the real, per-target
-  // compareRankings-derived rank (Strict Bug-Fix §3.5) so fitToTimeBudget
-  // sorts WITHIN a goal's own bucket correctly — that is a different
-  // number from the goal's own resourceAllocation-level priority (real
-  // goal rank 1/2/... or the flat NON_SPECIALIZATION_PRIORITY sentinel
-  // marking "below every real goal"), which decides ordering BETWEEN
-  // goal buckets (§17, unchanged). `goal_priority` keeps that second,
-  // distinct number available so the two concerns never collide again.
+  // `priority` (below, `FittableItem`'s field) carries the real,
+  // per-target compareRankings-derived rank (Strict Bug-Fix §3.5).
+  // Consolidated Fix §7: nothing sorts by it anymore now that
+  // fitToTimeBudget is no longer called — `candidates` already comes out
+  // in the correct final order for free, since `rankedTargets` (line
+  // ~750) and this per-target loop both iterate in that exact same
+  // compareRankings order, so pushing each target's exercises as they're
+  // constructed already yields priority order. `goal_priority` remains a
+  // distinct field (real goal rank 1/2/... or the flat
+  // NON_SPECIALIZATION_PRIORITY sentinel) so it's never confused with
+  // this per-target rank.
   const plannedExerciseIdsByDate = new Map<string, BlueprintId[]>();
   // §7: real primary/secondary exposure_units every already-processed
   // (higher-priority) target's own placed work has contributed to EVERY
@@ -800,6 +836,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (recovery.priority_adjustment === 'avoid') {
       weekLevelSkips.push({
         target_type: target.target_type,
+        scope: 'week' as const,
+        reason_code: 'recovery',
         target_id: target.target_id,
         classification,
         reason: `recovery: ${recovery.reasoning}`,
@@ -862,6 +900,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (!target.is_specialization && target.current_weekly_primary_sets === 0 && liveNeedDeficit <= 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
+        scope: 'week' as const,
+        reason_code: 'adequately_exposed',
         target_id: target.target_id,
         classification,
         reason: `Already adequately exposed via compound work (${effectiveExposureUnits.toFixed(2)} real+planned exposure_units this week, at/above this target's own ${developmentThreshold}-set ${developmentReference?.weekly_direct_set_reference != null ? `Blueprint ${developmentReference.level} package` : 'Blueprint universal starting'} threshold) — no redundant direct work added merely because direct sets = 0 (spec §7/§8).`,
@@ -873,6 +913,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (desiredWeekly <= 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
+        scope: 'week' as const,
+        reason_code: 'no_volume_recommended',
         target_id: target.target_id,
         classification,
         reason: 'No weekly volume recommended yet for this target.',
@@ -939,6 +981,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (eligibleDaysThisWeek.length === 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
+        scope: 'week' as const,
+        reason_code: 'no_eligible_day',
         target_id: target.target_id,
         classification,
         reason: `No gym day this week is compatible with this target: ${weeklyAllocation.reasoning}`,
@@ -968,6 +1012,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (candidateExerciseIds.length === 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
+        scope: 'week' as const,
+        reason_code: 'no_candidates',
         target_id: target.target_id,
         classification,
         reason: 'No Blueprint or approved outside-Blueprint exercise trains this target.',
@@ -1023,25 +1069,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // silently backfill it.
     let remainingWeeklySets = badmintonLowerBodyReduce ? Math.max(1, desiredWeekly - 1) : desiredWeekly;
     let globalExerciseIndex = 0;
-
-    // Blueprint Candidate Fix: which of THIS target's real candidates
-    // could actually receive a placement — a resolvable Blueprint
-    // prescription at any package level, or an approved outside-
-    // Blueprint exercise with its own reps/RIR. Ranking itself still
-    // sees the FULL candidate pool (including unprescribable
-    // candidates, so a package-absent-but-otherwise-valid exercise can
-    // still win a ranking slot and go through the real per-attempt
-    // retry below) — this set is used ONLY by isLastUsableExercise
-    // below, to tell "another real candidate remains to take the rest
-    // of this week's volume" apart from "the pool merely still contains
-    // IDs that will keep failing the retry," so a genuinely sole usable
-    // candidate still absorbs the whole remaining weekly requirement
-    // rather than being wrongly capped at its own per-session figure.
-    const prescribableExerciseIds = new Set(
-      candidateExerciseIds.filter(
-        (id) => outsideCandidatesById.has(id) || (target.target_type === 'physique_target' && lookupExercisePrescriptionAnyLevel(target.target_id, id) !== null)
-      )
-    );
 
     /** One real Gate-1-6 selection attempt, restricted to `pool`, plus
      * this exercise's own real prescription and (when usable history
@@ -1230,11 +1257,23 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       const plannedTodayIds = plannedExerciseIdsByDate.get(date) ?? [];
 
       if (isLastDay) {
-        // The target's LAST real session this week — full 0/1/multiple
-        // exercise construction (Fix C, unchanged) absorbs whatever
-        // genuinely remains, using Blueprint's own per-exercise `sets`
-        // figures to size each pick, so no real weekly volume is ever
-        // silently dropped just because the week ran out of days.
+        // Consolidated Fix §2/§3: the target's LAST real session this
+        // week — 0/1/multiple exercise construction (Fix C) still
+        // absorbs as much of the real remaining need as legitimately
+        // fits, but EVERY placed exercise stays capped at its own
+        // authored per-session `sets` figure — never uncapped merely
+        // because it's the last usable candidate. A prior version of
+        // this loop deliberately bypassed the cap for "the sole
+        // remaining usable candidate" so no weekly volume was "wasted";
+        // that is exactly the invariant the consolidated fix spec
+        // forbids (generated_sets <= authored_per_session_sets, always,
+        // §3/§15.B). Volume this session's real candidates cannot
+        // absorb without violating their own authored caps is left
+        // genuinely unmet (surfaced via unmetDirectSets below) rather
+        // than crammed into one exercise — exactly what spec §3 asks
+        // for ("if the remaining reference cannot be delivered without
+        // violating authored exercise caps ... do not cram it into one
+        // exercise").
         let pool = [...dayCandidatePool];
         const placedTodayIds: BlueprintId[] = [];
         // Surgical Fix Pass §12-16: Blueprint's own package exercise
@@ -1261,6 +1300,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
             if (pool.length === 0 && globalExerciseIndex === 0 && placedTodayIds.length === 0) {
               weekLevelSkips.push({
                 target_type: target.target_type,
+                scope: 'week' as const,
+                reason_code: 'no_resolvable_prescription',
                 target_id: target.target_id,
                 classification,
                 reason: `No candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) — exposing this genuine data gap rather than inventing one (spec §25). Last attempted: "${attempt.selection.exercise_id}".`,
@@ -1271,15 +1312,20 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           }
           pool = pool.filter((id) => id !== attempt.selection.exercise_id);
           placedTodayIds.push(attempt.selection.exercise_id);
-          const isLastUsableExercise = !pool.some((id) => prescribableExerciseIds.has(id));
-          // Surgical Fix Pass §7-10: charge the week's remaining need by
-          // the DELIVERED amount, never the pre-reduction natural cap —
-          // an undelivered set was never actually placed, so it must
-          // stay available for a later session to genuinely deliver
-          // (never silently written off). `requested` is kept only for
-          // this exercise's own reasoning text (§9's "Requested: 3,
-          // Delivered: 2, Reason: ...").
-          const requested = attempt.prescription.sets === null || isLastUsableExercise ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
+          // Surgical Fix Pass §7-10 / Consolidated Fix §3: charge the
+          // week's remaining need by the DELIVERED amount, never the
+          // pre-reduction natural cap — an undelivered set was never
+          // actually placed, so it must stay available for a later
+          // session to genuinely deliver (never silently written off).
+          // `requested` is kept only for this exercise's own reasoning
+          // text (§9's "Requested: 3, Delivered: 2, Reason: ..."). This
+          // exercise's own authored per-session cap (attempt.prescription
+          // .sets) is ALWAYS the ceiling here — never bypassed, even when
+          // it's the sole remaining usable candidate for this target's
+          // last session this week (Consolidated Fix §3/§15.B: an
+          // authored exercise prescription cannot be inflated to satisfy
+          // a target-volume number).
+          const requested = attempt.prescription.sets === null ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
           const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
           const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
           remainingWeeklySets -= delivered;
@@ -1320,18 +1366,19 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
 
   }
 
-  // Remediation §17 / Surgical Fix Pass §11: goals literally compete for
-  // EACH SESSION's own real time budget — allocateResource +
-  // fitToTimeBudget run once PER REAL SESSION (date) now, not once for
-  // the whole build, since every gym day this week has its own real
-  // candidates and its own real minutes (today's explicit override, or
-  // the profile's own default for every other day). Within each
-  // session, Level 1 splits that session's own budget across goal
-  // buckets in strict priority order; Level 2 (fitToTimeBudget) picks
-  // which of that goal's own candidates on THIS date actually fit,
-  // using each candidate's real compareRankings-derived rank
-  // (targetRankIndex) — so real programming need governs which
-  // candidates get dropped first, never array position or ID.
+  // Consolidated Fix §7/§15.C: session time availability has ZERO effect
+  // on normal program generation. A prior architecture ("Remediation §17
+  // / Surgical Fix Pass §11") had goals literally compete for each
+  // session's own estimated time budget via allocateResource +
+  // fitToTimeBudget, dropping whichever candidates didn't fit and
+  // recording a "dropped by time-fitting" skip — exactly the candidate
+  // elimination the consolidated fix spec forbids. Every candidate this
+  // pipeline already decided to place for a given date is now placed,
+  // full stop; `estimated_minutes`/`availableMinutes` remain on the
+  // response purely as informational display data (spec §7: "estimated
+  // time may remain informational in the UI, but it must not alter
+  // candidate eligibility/allocation/selection/count/generated program
+  // contents").
   const candidatesByDate = new Map<string, typeof candidates>();
   for (const c of candidates) {
     const list = candidatesByDate.get(c.date) ?? [];
@@ -1360,46 +1407,14 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     const availableMinutes = date === input.today ? input.todayBudgetMinutes : input.defaultSessionMinutes;
     const dayCandidates = candidatesByDate.get(date) ?? [];
 
-    const dayCandidatesByGoal = new Map<string, typeof candidates>();
-    for (const c of dayCandidates) {
-      const list = dayCandidatesByGoal.get(c.goal_id) ?? [];
-      list.push(c);
-      dayCandidatesByGoal.set(c.goal_id, list);
-    }
+    // Consolidated Fix §7: every real candidate already constructed for
+    // this date is placed unconditionally — no goal-vs-goal time
+    // competition, no time-based drop. `estimatedMinutes` below is
+    // computed straight from the full, unfiltered set for informational
+    // display only.
+    const sessionWork: PlannedWorkItem[] = dayCandidates.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes }));
+    const sessionMinutes = dayCandidates.reduce((sum, c) => sum + c.estimated_minutes, 0);
 
-    const allocation = allocateResource({
-      resource_name: 'session_minutes',
-      total_available: availableMinutes,
-      goals: [...dayCandidatesByGoal.entries()].map(([goalId, group]) => ({
-        goal_id: goalId,
-        priority: Math.min(...group.map((c) => c.goal_priority)),
-        desired_amount: group.reduce((sum, c) => sum + c.estimated_minutes, 0),
-        progress_status: goalTrend.get(goalId),
-      })),
-    });
-    if (allocation.allocations.length > 0) {
-      log.push(`${date}: Goal-level time allocation (spec §17): ${allocation.allocations.map((a) => a.reasoning).join(' ')}`);
-    }
-
-    const sessionWork: PlannedWorkItem[] = [];
-    const sessionSkipped: SkippedTarget[] = [];
-    let sessionMinutes = 0;
-    for (const entry of allocation.allocations) {
-      const group = dayCandidatesByGoal.get(entry.goal_id) ?? [];
-      const fitted = fitToTimeBudget(group, entry.allocated_amount);
-      log.push(`${date}: ${fitted.reasoning}`);
-      sessionMinutes += fitted.total_minutes;
-      sessionWork.push(...fitted.kept.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes })));
-      for (const dropped of fitted.dropped) {
-        sessionSkipped.push({
-          target_type: dropped.planned.target_type,
-          target_id: dropped.planned.target_id,
-          classification: dropped.planned.classification,
-          reason: `Dropped by time-fitting within its goal's allocated budget on ${date}: ${fitted.reasoning}`,
-          decision: dropped.planned.decision,
-        });
-      }
-    }
     sessions.push({
       date,
       weekday: day,
@@ -1409,16 +1424,16 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       plannedWork: sessionWork,
       estimatedMinutes: sessionMinutes,
       badmintonContext: input.targets.find((t) => t.recent_badminton !== null)?.recent_badminton ?? null,
-      // Week-level skips (recovery/prescription/no-eligible-day/already-
-      // adequately-exposed — none of them day-specific, since Blueprint
-      // data is uniform across the real week) are surfaced on EVERY
-      // session, matching how the pre-
-      // weekly-plan architecture recomputed and surfaced them fresh on
-      // every single-day call; this date's own time-fitting drops are
-      // the only genuinely day-specific skips.
-      skipped: [...weekLevelSkips, ...sessionSkipped],
+      // Consolidated Fix §12: every current skip is a whole-week fact
+      // (scope: 'week') computed once per target above — surfaced on
+      // every session because each real day legitimately needs to know
+      // "this target isn't getting worked this week, and here's why,"
+      // never because it was freshly, independently discovered today.
+      // Time/equipment no longer produce any day-specific ('session'
+      // scope) skip at all now that neither filters generation (§7/§8).
+      skipped: weekLevelSkips,
       activeGoals,
-      resourceAllocation: allocation.allocations,
+      resourceAllocation: [],
     });
   }
 
@@ -1792,10 +1807,9 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
   // targets gets resources first — so every one of them shares the
   // exact same flat, non-differentiating goal_priority number. That
   // number still needs to sort after every real user goal (so
-  // specialization is always protected first at the resourceAllocation
-  // goal-BUCKET level — see buildWorkout's allocateResource call, which
-  // only ever needs the bucket's own priority, not a per-target one),
-  // but WITHIN this bucket, real ordering comes entirely from
+  // specialization is always protected first — see tierOf()/
+  // compareRankings above, which read this exact flat sentinel), but
+  // WITHIN this bucket, real ordering comes entirely from
   // buildWorkout's own rankTarget()/compareRankings() — actual exposure
   // deficit for normal-development, actual days-since-trained for
   // maintenance, target_id only as the final tie-break once those are

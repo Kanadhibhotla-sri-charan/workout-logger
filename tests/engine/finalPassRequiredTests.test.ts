@@ -59,27 +59,26 @@ function setupProfile(equipment: string[], trainingDays: string[], otherActivity
 type TrainingProfile = Parameters<TrainingProfileRepo['upsert']>[1];
 
 describe('Final Programming-Engine Pass §25: required end-to-end tests', () => {
-  it('Test 1 — goal priority: Goal 1 receives priority over Goal 2 when resources are constrained', () => {
+  it('Test 1 — goal priority: Consolidated Fix §7 — a scarce session time budget no longer decides which goal is served; both Goal 1 and Goal 2 get their own real work', () => {
     setupProfile(FULL_EQUIPMENT, ['monday', 'tuesday', 'thursday', 'friday']);
     const goalsRepo = new GoalsRepo(db);
     // chest-front-width (mid-pec) and chest-upper-shelf (upper-pec) are
-    // both push/upper compatible, so they genuinely compete for the
-    // same Monday (push) session's time budget.
+    // both push/upper compatible, so under the old time-budget-
+    // competition model they'd have fought over the same Monday (push)
+    // session's minutes. Session time now has zero effect on generation
+    // (spec §7/§15.C) — a scarce nominal budget (7 minutes) must not
+    // eliminate either goal's own real work; each goal's own priority
+    // still governs ordinary programming decisions (selection, exposure,
+    // recovery), never a time-budget elimination.
     goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
     goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: 'chest-upper-shelf', priority: 2 });
 
-    // A scarce budget that can serve one goal's own push-day work but
-    // not both. mid-pec's real weekly requirement (Strict Bug-Fix Fix C:
-    // 0/1/multiple exercises, drawn from the real shared chest
-    // development package) now needs 2 exercises (cable-fly + flat-
-    // barbell-bench-press) to fully cover itself — 7 minutes is tight
-    // enough to fit only the first of those, with nothing left over for
-    // upper-pec's own (separate, lower-ranked — see chest-front-width's
-    // own supporting_targets) work, proving Goal 1's real need still
-    // wins the scarce budget entirely under the real multi-exercise path.
     const result = assembleAndBuildWorkout(db, MONDAY, 7);
     expect(result.exercises.find((e) => e.target_id === 'mid-pec')).toBeDefined();
-    expect(result.exercises.find((e) => e.target_id === 'upper-pec')).toBeUndefined();
+    expect(result.exercises.find((e) => e.target_id === 'upper-pec')).toBeDefined();
+    // The nominal 7-minute budget is echoed back purely as informational
+    // display data — it never filtered the above.
+    expect(result.estimated_minutes).toBeGreaterThan(7);
   });
 
   it('Test 2 — third goal: activating a third aesthetic specialization goal is rejected unless one is first deactivated', () => {
@@ -430,21 +429,23 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
     expect(result.exercises.find((e) => e.target_id === 'mid-pec')).toBeDefined();
   });
 
-  it('Test 16 — time constraint: the final workout fits the budget, with higher-priority specialization preserved before lower-priority/maintenance work', () => {
+  it('Test 16 — Consolidated Fix §7: a scarce nominal time budget has zero effect on the final workout — nothing is dropped, the specialization goal\'s own real work is included in full', () => {
     setupProfile(FULL_EQUIPMENT, ['monday', 'tuesday', 'thursday', 'friday']);
     const goalsRepo = new GoalsRepo(db);
     goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
 
-    const result = assembleAndBuildWorkout(db, MONDAY, 15); // scarce budget
-    expect(result.estimated_minutes).toBeLessThanOrEqual(15);
+    const result = assembleAndBuildWorkout(db, MONDAY, 15); // scarce nominal budget
+    expect(result.exercises.length).toBeGreaterThan(0);
+    // The specialization goal's own work is included regardless of the
+    // scarce budget — time never eliminates it.
     const midPec = result.exercises.find((e) => e.target_id === 'mid-pec');
-    if (result.exercises.length > 0) {
-      // If anything was kept at all under this scarce a budget, it must
-      // be the specialization goal's own work, never a lower-priority
-      // normal-development/maintenance target instead.
-      expect(midPec).toBeDefined();
-      expect(midPec!.classification).toBe('specialization');
-    }
+    expect(midPec).toBeDefined();
+    expect(midPec!.classification).toBe('specialization');
+    // estimated_minutes may genuinely exceed the nominal budget —
+    // informational only, never a filter (spec §7).
+    expect(result.estimated_minutes).toBeGreaterThan(15);
+    // No time-fitting skip is ever created.
+    expect(result.skipped_targets.some((s) => s.reason.includes('time-fitting'))).toBe(false);
   });
 
   it('Test 17 — equipment constraint: a feasible Blueprint alternative is selected when the preferred exercise is unavailable; outside-Blueprint only when required', () => {

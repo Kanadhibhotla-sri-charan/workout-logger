@@ -94,14 +94,14 @@ describe('Tests 1-3 — Fix A (final sessions authoritative) + Fix B (delivered,
     // longer isolate close-grip-bench-press as the sole candidate —
     // current_exercise_id (Gate 5 — progression continuity) is what
     // keeps it, the exercise with the real declining history, as the
-    // winner here. A tight time budget (matching Test 4's own verified
-    // math: estimateMinutes(2 sets) = 6.5) is what keeps the real
-    // remaining 1 set from being picked up by a genuine substitute
-    // exercise this session — construction still wants to add one, but
-    // it doesn't survive time-fitting, leaving a real, honest unmet
-    // set (exactly the Fix A/Fix B scenario this test group is about),
-    // rather than the full triceps candidate pool silently delivering
-    // all 3 sets via a second exercise regardless of session length.
+    // winner here. Consolidated Fix §7: session time no longer has any
+    // effect on generation, so the real remaining 1 set (after this
+    // exercise's own progression-driven reduction) is now genuinely
+    // picked up by a second real candidate from the same triceps pool
+    // (cable-pushdown/overhead-triceps-extension) rather than being left
+    // unmet by time-fitting — this test group's real subject, the
+    // requested-vs-delivered accounting on the FIRST (reduced) exercise,
+    // is unaffected by that.
     const target = normalDevTarget('triceps', {
       current_weekly_primary_sets: 3, // 'maintain' path (nonzero) — desiredWeekly = 3, fully controlled
       weekly_exposure_units: 3,
@@ -111,81 +111,89 @@ describe('Tests 1-3 — Fix A (final sessions authoritative) + Fix B (delivered,
     return buildWeeklyProgrammingPlan(weeklyInput({ todayBudgetMinutes: 7, defaultSessionMinutes: 7, targets: [target] }));
   }
 
-  it('Test 1: targetAllocations is rebuilt from the FINAL fitted sessions — requiredDirectSets(3) > deliveredDirectSets(2), with no contradiction against the real session', () => {
+  it('Test 1: targetAllocations is rebuilt from the FINAL sessions — the reduced first exercise plus a genuine second exercise fully deliver requiredDirectSets(3), with no contradiction against the real session', () => {
     const plan = buildReducedPlan();
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
     const tricepsWork = monday.plannedWork.filter((w) => w.target_id === 'triceps');
-    expect(tricepsWork).toHaveLength(1);
-    expect(tricepsWork[0]!.sets).toBe(2); // the real, final, post-fitting number
+    // Consolidated Fix §7: with no time-fitting to drop it, a real
+    // second candidate now picks up the 1 set the first exercise's own
+    // progression reduction left remaining.
+    expect(tricepsWork).toHaveLength(2);
+    expect(tricepsWork[0]!.sets).toBe(2); // the real, final, progression-reduced number
+    expect(tricepsWork[1]!.sets).toBe(1); // the real remaining need, capped at its own authored sets
 
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'triceps')!;
     expect(allocation.requiredDirectSets).toBe(3);
-    expect(allocation.deliveredDirectSets).toBe(2);
+    expect(allocation.deliveredDirectSets).toBe(3);
     // No contradiction: the allocation's own deliveredDirectSets equals
     // exactly what the real session actually contains — never a
     // separate, disagreeing "planned" total.
     expect(allocation.deliveredDirectSets).toBe(tricepsWork.reduce((sum, w) => sum + w.sets, 0));
   });
 
-  it('Test 2: undelivered sets are never consumed — the week\'s remaining need decreases by the delivered 2, not the requested 3', () => {
+  it('Test 2: undelivered sets are never consumed — the FIRST exercise\'s own remaining need decreases by the delivered 2, not the requested 3 (a second real exercise then covers the rest)', () => {
     const plan = buildReducedPlan();
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
-    const tricepsWork = monday.plannedWork.find((w) => w.target_id === 'triceps')!;
-    expect(tricepsWork.sets).toBe(2);
-    expect(tricepsWork.reasoning).toContain('requested 3, delivered 2');
+    const tricepsWork = monday.plannedWork.filter((w) => w.target_id === 'triceps');
+    expect(tricepsWork[0]!.sets).toBe(2);
+    expect(tricepsWork[0]!.reasoning).toContain('requested 3, delivered 2');
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'triceps')!;
-    // Required(3) - delivered(2) = exactly 1 real unmet set, never
-    // silently written off and never double-subtracted.
-    expect(allocation.unmetDirectSets).toBe(1);
+    // The 1 real set the first exercise's reduction left behind is
+    // never silently written off — Consolidated Fix §7 means it's
+    // picked up by a second real exercise instead of being dropped by
+    // time-fitting, so the week's real need ends up fully met.
+    expect(allocation.unmetDirectSets).toBe(0);
   });
 
-  it('Test 3: progression-driven reduction — 3 requested / 2 delivered, unmet=1, distinct requiredDirectSets/deliveredDirectSets/unmetDirectSets fields (never one field standing in for both)', () => {
+  it('Test 3: progression-driven reduction — 3 requested / 2 delivered on the first exercise, distinct requiredDirectSets/deliveredDirectSets/unmetDirectSets fields (never one field standing in for both)', () => {
     const plan = buildReducedPlan();
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
-    const tricepsWork = monday.plannedWork.find((w) => w.target_id === 'triceps')!;
-    expect(tricepsWork.progression_decision?.recommendation).toBe('reduce');
-    expect(tricepsWork.sets).toBe(2);
+    const tricepsWork = monday.plannedWork.filter((w) => w.target_id === 'triceps');
+    expect(tricepsWork[0]!.progression_decision?.recommendation).toBe('reduce');
+    expect(tricepsWork[0]!.sets).toBe(2);
 
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'triceps')!;
     expect(allocation.requiredDirectSets).toBe(3);
-    expect(allocation.deliveredDirectSets).toBe(2);
-    expect(allocation.unmetDirectSets).toBe(1);
+    expect(allocation.deliveredDirectSets).toBe(3);
+    expect(allocation.unmetDirectSets).toBe(0);
   });
 });
 
-describe('Test 4 — Fix B applies identically when TIME-FITTING (not progression) is what reduces delivery', () => {
-  it('a tight session time budget drops one whole candidate exercise — required stays what construction decided, delivered is exactly what survived fitting, the gap is explicit (never silently redistributed)', () => {
-    // Full equipment: triceps' real candidate pool is all 3 real
-    // Blueprint package exercises (cable-pushdown 2 sets, close-grip-
-    // bench-press 3 sets, overhead-triceps-extension 2 sets — see
-    // triceps-efficient in programming.json). desiredWeekly=5 (via
-    // 'maintain', current_weekly_primary_sets=5) is naturally satisfied
-    // by exactly 2 of them (cable-pushdown + close-grip-bench-press,
-    // Gate 6's alphabetical tie-break makes this deterministic), so
-    // CONSTRUCTION books 5 real sets across 2 real exercises before any
-    // time-fitting ever runs.
+describe('Consolidated Fix §7/§15.C: session time availability has ZERO effect on normal generation (supersedes the former Fix-B time-fitting test)', () => {
+  it('a tight session time budget drops nothing — every candidate construction decided on survives, delivered equals required, no time-fitting skip is ever created', () => {
+    // Full equipment, only one real gym day this week (see weeklyInput's
+    // own default `available_training_days: ['monday']`) — desiredWeekly
+    // =5 (via 'maintain', current_weekly_primary_sets=5) is delivered
+    // via real Gate-1-6 selection across as many real triceps candidates
+    // as it takes, each capped at its own authored per-session sets.
     const target = normalDevTarget('triceps', { current_weekly_primary_sets: 5, weekly_exposure_units: 5 });
-    // estimateMinutes(2 sets) = 6.5, estimateMinutes(3 sets) = 8.8 — a
-    // 7-minute budget fits the first (lower-priority-number, placed
-    // first) exercise alone, not both.
+    // A 7-minute budget would have dropped some of these candidates
+    // under the old time-fitting mechanism. Consolidated Fix §7: this
+    // budget must have zero effect — every real candidate construction
+    // decided on is placed in full.
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ todayBudgetMinutes: 7, defaultSessionMinutes: 7, targets: [target] }));
 
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
     const tricepsWork = monday.plannedWork.filter((w) => w.target_id === 'triceps');
-    // Exactly one of the two constructed exercises survived fitting.
-    expect(tricepsWork).toHaveLength(1);
+    // Every one of construction's own exercises survives — nothing
+    // dropped for time — and each stays within its own authored cap
+    // (2, 2, 1 — the last capped by remaining need, not its own higher
+    // authored ceiling).
+    expect(tricepsWork.length).toBeGreaterThanOrEqual(2);
     const deliveredSets = tricepsWork.reduce((sum, w) => sum + w.sets, 0);
-    expect(deliveredSets).toBeLessThan(5);
-    expect(deliveredSets).toBeGreaterThan(0);
+    expect(deliveredSets).toBe(5);
+    // The session's own estimated minutes may genuinely exceed the
+    // nominal budget — informational only, never a filter (§7).
+    expect(monday.estimatedMinutes).toBeGreaterThan(7);
 
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'triceps')!;
-    expect(allocation.requiredDirectSets).toBe(5); // untouched by fitting — what construction actually decided
-    expect(allocation.deliveredDirectSets).toBe(deliveredSets); // exactly what survived, never a disagreeing number
-    expect(allocation.unmetDirectSets).toBe(5 - deliveredSets); // the real gap, explicit and non-negative
+    expect(allocation.requiredDirectSets).toBe(5);
+    expect(allocation.deliveredDirectSets).toBe(5); // fully delivered — time never reduced it
+    expect(allocation.unmetDirectSets).toBe(0);
 
-    // The dropped exercise is surfaced, not silently discarded.
-    const droppedForTime = monday.skipped.find((s) => s.target_id === 'triceps' && s.reason.includes('time-fitting'));
-    expect(droppedForTime).toBeDefined();
+    // No time-fitting skip is ever created (spec §7/§9/§15.C).
+    const droppedForTime = monday.skipped.find((s) => s.reason.includes('time-fitting'));
+    expect(droppedForTime).toBeUndefined();
   });
 });
 
@@ -295,18 +303,27 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
   });
 
   it('later, lower-priority front-delt programming genuinely accounts for mid-pec\'s real planned bench exposure — the real computed number, never a fabricated direct-set equivalence', () => {
-    // mid-pec (specialization, priority 1, processed first), with
-    // enough real desired weekly volume (50 sets) that its own real
-    // secondary contribution to front-delt genuinely crosses front-
-    // delt's own real Blueprint Efficient package reference
-    // (Programming Redesign Step 12 §3-§5: shoulders-efficient,
-    // 14/week — not the old universal starting_point_sets[0] of 8).
-    // Equipment Filter Fix: equipment can no longer isolate mid-pec to
-    // a single exercise, so the expected front-delt exposure figure is
-    // recomputed here from whichever real mid-pec exercises actually
-    // got placed (never a hardcoded number tied to one specific
-    // exercise) — this still proves the same thing: the reasoning
-    // cites the real computed exposure figure, never a fabricated one.
+    // mid-pec (specialization, priority 1, processed first). Consolidated
+    // Fix §3/§15.B: a single session can no longer deliver an inflated
+    // 50 sets by cramming the overflow into one exercise once its real
+    // candidate pool is exhausted — desiredWeekly=50 now genuinely
+    // delivers only whatever its real distinct candidates' own authored
+    // per-session caps sum to (here: 2 real exercises), with the rest
+    // honestly unmet, never crammed. front-delt's own baseline
+    // weekly_exposure_units below represents real exposure it already
+    // has from elsewhere this week (e.g. other compound work already
+    // logged/planned) — completely legitimate per this app's own
+    // "compound secondary exposure counts even when direct sets = 0"
+    // rule — chosen so that ADDING mid-pec's real (now much smaller,
+    // correctly-capped) secondary contribution is what tips it over its
+    // own real Blueprint Efficient package reference (Programming
+    // Redesign Step 12 §3-§5: shoulders-efficient, 14/week — not the old
+    // universal starting_point_sets[0] of 8). The expected front-delt
+    // exposure figure is recomputed below from whichever real mid-pec
+    // exercises actually got placed (never a hardcoded number tied to
+    // one specific exercise) — this still proves the same thing: the
+    // reasoning cites the real computed exposure figure, never a
+    // fabricated one.
     const midPec = normalDevTarget('mid-pec', {
       is_specialization: true,
       goal_id: 'goal_1',
@@ -315,7 +332,7 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
       current_weekly_primary_sets: 50,
       weekly_exposure_units: 50,
     });
-    const frontDelt = normalDevTarget('front-delt', { current_weekly_primary_sets: 0, weekly_exposure_units: 0 });
+    const frontDelt = normalDevTarget('front-delt', { current_weekly_primary_sets: 0, weekly_exposure_units: 13.5 });
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [midPec, frontDelt] }));
 
     // front-delt received no direct work of its own this week — the
@@ -327,17 +344,20 @@ describe('Test 9 — real bench-press exposure math, and later programming genui
 
     const midPecWork = plan.sessions.flatMap((s) => s.plannedWork).filter((w) => w.target_id === 'mid-pec');
     expect(midPecWork.length).toBeGreaterThan(0);
-    const expectedFrontDeltExposure = midPecWork.reduce((sum, w) => {
+    const midPecContribution = midPecWork.reduce((sum, w) => {
       const { contributions } = calculateExerciseExposure(
         w.exercise_id,
         Array.from({ length: w.sets }, () => ({ completed: true }))
       );
       return sum + (contributions.find((c) => c.target_id === 'front-delt')?.exposure_units ?? 0);
     }, 0);
-    // The reasoning cites the real computed exposure figure — recomputed
+    // front-delt's real baseline (its own weekly_exposure_units, set
+    // above) plus mid-pec's real planned contribution — recomputed
     // independently here from the real placed exercises — never an
-    // invented "1.32 sets" style conversion.
-    expect(skip!.reason).toContain(expectedFrontDeltExposure.toFixed(2));
+    // invented "1.32 sets" style conversion. The reasoning cites this
+    // real total, not the mid-pec contribution alone.
+    const expectedTotalExposure = frontDelt.weekly_exposure_units + midPecContribution;
+    expect(skip!.reason).toContain(expectedTotalExposure.toFixed(2));
   });
 });
 

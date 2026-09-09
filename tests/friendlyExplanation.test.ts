@@ -165,38 +165,68 @@ describe('buildFriendlyPlannedReasoning', () => {
   });
 });
 
-describe('buildFriendlySkipReasoning', () => {
+describe('buildFriendlySkipReasoning — Consolidated Fix §9/§10/§11: switches exclusively on the structured reason_code, never on substrings of reason', () => {
   function baseSkip(overrides: Partial<Parameters<typeof buildFriendlySkipReasoning>[0]> = {}) {
     return {
       target_type: 'physique_target' as const,
       target_id: 'quads',
       target_name: 'Quads',
+      reason_code: 'no_volume_recommended' as const,
       reason: 'some internal reason text',
       decision: {
         recovery: { priority_adjustment: 'none' },
         volume_decision: { action: 'maintain' },
         weekly_allocation: { eligible_days_this_week: ['monday'] },
         selection: null,
+        last_trained: { date: null, days_since: null },
+        recent_exercise_ids: [],
+        weekly_exposure: { exposure_units: 0 },
       },
       ...overrides,
     };
   }
 
-  it('a recovery-flagged skip reads as a recovery reason, using the real target name', () => {
-    const text = buildFriendlySkipReasoning(baseSkip({ decision: { ...baseSkip().decision, recovery: { priority_adjustment: 'avoid' } } }));
+  it('a recovery skip reads as a recovery reason, using the real target name, with no fabricated date when none is known', () => {
+    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'recovery' }));
     expect(text).toContain('Quads');
     expect(text).toContain('recovery time');
   });
 
+  it('a recovery skip cites the REAL last-trained date when the engine actually knows it (spec §10)', () => {
+    const text = buildFriendlySkipReasoning(
+      baseSkip({ reason_code: 'recovery', decision: { ...baseSkip().decision, last_trained: { date: '2026-09-07', days_since: 1 } } })
+    );
+    expect(text).toContain('2026-09-07');
+  });
+
   it('a genuinely unscheduled target reads as a scheduling reason', () => {
-    const text = buildFriendlySkipReasoning(baseSkip({ decision: { ...baseSkip().decision, weekly_allocation: { eligible_days_this_week: [] } } }));
+    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'no_eligible_day' }));
     expect(text).toContain("isn't scheduled on any of your training days");
   });
 
-  it('an "already adequately exposed" skip reads as a positive sufficiency reason, not a gap', () => {
-    const text = buildFriendlySkipReasoning(baseSkip({ reason: 'Already adequately exposed via compound work (14.0 real+planned exposure_units this week...) (spec §7/§8).' }));
+  it('an "already adequately exposed" skip names the REAL covering exercise(s), not a generic "compound work" placeholder (spec §10)', () => {
+    const text = buildFriendlySkipReasoning(
+      baseSkip({ reason_code: 'adequately_exposed', decision: { ...baseSkip().decision, recent_exercise_ids: ['back-squat', 'leg-extension'] } })
+    );
+    expect(text).toContain('Back Squat');
+    expect(text).toContain('Leg Extension');
+    assertNoJargon(text);
+  });
+
+  it('an "already adequately exposed" skip falls back to a plain sufficiency reason when no real covering exercise id resolves', () => {
+    const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'adequately_exposed' }));
     expect(text).toContain('already getting enough real training this week');
     assertNoJargon(text);
+  });
+
+  it('a genuine Blueprint data gap (no_candidates / no_resolvable_prescription) is framed as a data issue, never as "not prescribable"/invalid (spec §9/§11)', () => {
+    for (const reason_code of ['no_candidates', 'no_resolvable_prescription'] as const) {
+      const text = buildFriendlySkipReasoning(baseSkip({ reason_code }));
+      expect(text).toContain('data gap');
+      expect(text.toLowerCase()).not.toContain('not prescribable');
+      expect(text.toLowerCase()).not.toContain('confidently prescribable');
+      assertNoJargon(text);
+    }
   });
 
   it('never contains internal implementation terminology', () => {
