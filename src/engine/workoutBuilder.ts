@@ -65,6 +65,14 @@ import { WeekActivityOverridesRepo } from '../repositories/weekActivityOverrides
 import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import type { ExerciseTargetRole } from './exerciseSelector.js';
 
+/** Post-v2 Corrective Fix v2 §3/§7: the rolling window (in real calendar
+ * days) the maximum-frequency gate counts actual exposures within — a
+ * genuine calendar-week span, matching what "N exposures per week"
+ * itself means, never aligned to a Monday-Sunday boundary (a trailing
+ * window ending on the real day being considered, exactly like every
+ * other real-date-driven computation in this module). */
+const FREQUENCY_REFERENCE_WINDOW_DAYS = 7;
+
 /** One prior session's actual logged sets for a specific exercise —
  * ground truth, never a planned/target value (ExercisePerformance's
  * Set[] vs. ProgramSessionExercise's target_* fields stay distinct
@@ -144,6 +152,20 @@ export interface TargetBuildContext {
    * under the identical condition days_since_target_last_trained is
    * null (no real touch found in the loaded history window). */
   last_trained_date: string | null;
+  /** Post-v2 Corrective Fix v2 §4/§6/§7: every distinct real calendar
+   * date (deduped, most-recent-first) within the loaded history window
+   * on which this target actually received a real DIRECT (primary-role)
+   * exposure — the raw material for the rolling-window frequency gate's
+   * `actual_exposure_count_in_reference_window` (frequency is NOT just
+   * minimum spacing: a target due again by spacing alone can still be
+   * genuinely NOT due if it already received its full frequency
+   * reference's worth of real exposures within the trailing window).
+   * Optional and defaulting to `last_trained_date` alone (or `[]`) when
+   * omitted, so existing callers/fixtures that only ever tracked a
+   * single most-recent date keep their exact prior behavior — real
+   * production data (`assembleWeeklyPlanInput`) always populates the
+   * full real list. */
+  recent_direct_exposure_dates?: readonly string[];
   recent_badminton: RecentBadmintonSignal | null;
   recent_exercise_ids: readonly BlueprintId[];
   current_exercise_id: BlueprintId | null;
@@ -227,11 +249,35 @@ export interface ExposureCycleDecision {
    * reference (`direct_sets_per_exposure`'s own
    * `sessions_per_week_reference`) when one exists, or Blueprint's
    * universal `typical_starting_range_per_week` midpoint otherwise.
-   * Never a hardcoded, target-specific number. */
+   * Never a hardcoded, target-specific number. This is a MINIMUM
+   * spacing heuristic only (Post-v2 Corrective Fix v2 §3) — satisfying
+   * it is necessary but not sufficient for `is_due_today`; see
+   * `frequency_reference_per_week`/`actual_exposure_count_in_reference_window`
+   * below for the separate maximum-frequency gate. */
   expected_exposure_interval_days: number;
+  /** Post-v2 Corrective Fix v2 §3/§6: this target's own real exposure
+   * frequency reference (exposures per week) — the SAME number
+   * `expected_exposure_interval_days` was derived from
+   * (`7 / frequency_reference_per_week`, floored), kept alongside it so
+   * a caller never has to re-derive it. */
+  frequency_reference_per_week: number;
+  /** Post-v2 Corrective Fix v2 §3/§4/§7: how many real direct exposures
+   * (actual logged history, plus any already-placed-earlier-this-run
+   * exposure — never a future/other target's own work) fall within the
+   * trailing `FREQUENCY_REFERENCE_WINDOW_DAYS`-day window ending just
+   * before this real day. Minimum spacing alone is NOT a sufficient
+   * frequency gate (spec §3's own worked example: a 2/week target
+   * trained Monday and Thursday must not also receive a third exposure
+   * on Sunday merely because 3 days have elapsed since Thursday) — this
+   * count, compared against `frequency_reference_per_week`, is the
+   * separate maximum-frequency gate that catches exactly that case. */
+  actual_exposure_count_in_reference_window: number;
   /** Whether this target is actually due for a real exposure on this
    * specific real day: `compatible_today` AND (never trained, or
-   * `days_since_last_exposure >= expected_exposure_interval_days`). */
+   * `days_since_last_exposure >= expected_exposure_interval_days`) AND
+   * `actual_exposure_count_in_reference_window < frequency_reference_per_week`
+   * — BOTH the minimum-spacing gate and the maximum-frequency gate must
+   * pass; neither alone is sufficient (Post-v2 Corrective Fix v2 §3). */
   is_due_today: boolean;
   reasoning: string;
 }
@@ -749,6 +795,19 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   // fact a later target's own allocation actually reads, not just a
   // static snapshot from before this plan started running.
   const plannedExposureByTarget = new Map<string, number>();
+  // Post-v2 Corrective Fix v2 §12/§13: several distinct target_ids can
+  // share the exact same Blueprint development package (e.g. chest's
+  // upper-pec/mid-pec/lower-pec all sharing "chest-efficient") — that
+  // package's own weekly_direct_set_reference is the combined objective
+  // for the WHOLE muscle group, never each sharing target's own
+  // independent full quota. Keyed by package_id, this accumulates real
+  // DELIVERED direct sets (never the naive per-target desired amount)
+  // from every target sharing a package this run, so whichever target is
+  // processed later (per the same fixed priority order everything else
+  // uses) sees how much of the shared budget genuinely remains — never
+  // duplicating the package aggregate as if it belonged to each target
+  // in full.
+  const plannedDirectSetsByPackage = new Map<string, number>();
   const goalTrend = new Map<string, AestheticProgressTrend>();
   // Surgical Fix Pass §4/§5: targetAllocations is NOT accumulated here
   // during construction — construction can request more than final
@@ -978,10 +1037,55 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       continue;
     }
 
-    // Surgical Fix Pass §6: the real requirement — captured once, here,
-    // independent of whatever construction/fitting later actually
-    // manages to deliver. Never touched again for this target.
-    requiredDirectSetsByTarget.set(tKey, desiredWeekly);
+    // Post-v2 Corrective Fix v2 §12/§13: this target's real, fair-share
+    // ceiling once whatever OTHER target(s) sharing the same Blueprint
+    // package have already claimed this run is subtracted — never the
+    // full package aggregate duplicated as if it belonged to this target
+    // alone (see plannedDirectSetsByPackage's own doc comment above).
+    // packageId is null for a target with no package reference, in which
+    // case there is nothing to share and the budget is unbounded.
+    //
+    // Scoped deliberately narrow: this cap only ever applies when
+    // `desiredWeekly` itself IS the package's own recommended starting
+    // figure (current_weekly_primary_sets === 0, decideVolume's zero-
+    // branch) — never when a target already has genuine, real MAINTAINED
+    // volume from actual training history (decideVolume's 'maintain'/
+    // 'introspect_needed' outcomes always return `current_weekly_primary_sets`
+    // itself, real user data this fix must never suppress just because it
+    // happens to exceed a package's own baseline reference — §11's "never
+    // an exact workout template," applied here). The genuine duplication
+    // risk this fix targets is specifically several simultaneously-
+    // untrained sibling targets each independently adopting the same
+    // package's own recommended starting point.
+    const isPackageDerivedRecommendation = target.current_weekly_primary_sets === 0 && volumeDecision.action === 'increase';
+    const packageId = developmentReference?.package_id ?? null;
+    const packageWeeklyReference = developmentReference?.weekly_direct_set_reference ?? null;
+    const alreadyClaimedForPackage = packageId ? (plannedDirectSetsByPackage.get(packageId) ?? 0) : 0;
+    const packageRemainingBudget =
+      packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation ? Math.max(0, packageWeeklyReference - alreadyClaimedForPackage) : Number.POSITIVE_INFINITY;
+
+    if (packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation && packageRemainingBudget <= 0) {
+      weekLevelSkips.push({
+        target_type: target.target_type,
+        scope: 'exposure' as const,
+        reason_code: 'adequately_covered',
+        target_id: target.target_id,
+        classification,
+        reason: `This target shares Blueprint's "${packageId}" development package with other target(s) in the same muscle group — that package's own ${packageWeeklyReference}-set weekly reference has already been fully claimed by higher-priority sibling target(s) this run, so no additional direct work is added on top of it (Post-v2 Corrective Fix v2 §12: a shared package aggregate is never duplicated as each target's own complete objective).`,
+        decision: makeSkipDecision({ volume_decision: volumeDecision }),
+      });
+      continue;
+    }
+
+    // Surgical Fix Pass §6 / Post-v2 Corrective Fix v2 §12: the real
+    // requirement — captured once, here, independent of whatever
+    // construction/fitting later actually manages to deliver. Already
+    // capped at whatever fair share of a shared package's budget genuinely
+    // remains for this target, so it is never confused with the naive,
+    // pre-sharing per-target reference. Never touched again for this
+    // target.
+    const fairShareWeekly = Math.min(desiredWeekly, packageRemainingBudget);
+    requiredDirectSetsByTarget.set(tKey, fairShareWeekly);
 
     // Strict Bug-Fix §4/§7/§22: the weekly plan must be durable within
     // this generation run — "when generating Friday for the same week,
@@ -1078,7 +1182,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // real reduction to the target's TOTAL weekly work, applied once up
     // front (before any day is planned) so a later day can never
     // silently backfill it.
-    let remainingWeeklySets = badmintonLowerBodyReduce ? Math.max(1, desiredWeekly - 1) : desiredWeekly;
+    let remainingWeeklySets = badmintonLowerBodyReduce ? Math.max(1, fairShareWeekly - 1) : fairShareWeekly;
     let globalExerciseIndex = 0;
 
     /** One real Gate-1-6 selection attempt, restricted to `pool`, plus
@@ -1287,6 +1391,17 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // this week, so a later real day correctly sees it; never reset
     // because a new calendar week began (§5.4/§8).
     let simulatedLastExposureDate: string | null = target.last_trained_date;
+    // Post-v2 Corrective Fix v2 §3/§4/§7: every real direct-exposure date
+    // known so far — real logged history (deduped with `last_trained_date`,
+    // in case that most-recent-touch happened to be a secondary-role
+    // touch not already in `recent_direct_exposure_dates`), plus any
+    // exposure THIS SAME run places on an earlier real day. This is the
+    // raw material for the separate maximum-frequency gate below; it is
+    // pure per-run planning state (§8) — never written back, never
+    // treated as real history itself.
+    const knownDirectExposureDates = new Set<string>(target.recent_direct_exposure_dates ?? []);
+    if (target.last_trained_date) knownDirectExposureDates.add(target.last_trained_date);
+    const exposureDatesThisRun: string[] = [...knownDirectExposureDates];
     let everCompatibleThisRun = false;
     let lastAttemptedExerciseId: BlueprintId | null = null;
     let everAttemptedARealCandidate = false;
@@ -1302,19 +1417,35 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       const purposeThisDay = isPhysique ? (sessionPurposes.get(day) ?? null) : null;
       const compatibleToday = !isPhysique || (purposeThisDay !== null && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purposeThisDay));
       const daysSinceLastExposure = simulatedLastExposureDate ? daysBetween(simulatedLastExposureDate, date) : null;
-      const isDueToday = daysSinceLastExposure === null || daysSinceLastExposure >= expectedExposureIntervalDays;
+      const spacingOk = daysSinceLastExposure === null || daysSinceLastExposure >= expectedExposureIntervalDays;
+      // Post-v2 Corrective Fix v2 §3/§4/§7: the SEPARATE maximum-frequency
+      // gate — minimum spacing alone is not sufficient (a 2/week target
+      // trained Monday+Thursday must not also get a 3rd exposure on
+      // Sunday merely because 3 days have elapsed since Thursday; Monday
+      // and Thursday are BOTH still within the trailing 7-day window
+      // ending Sunday, so this count already sits at the frequency
+      // reference and blocks a 3rd). Counts real logged history AND any
+      // exposure already placed earlier THIS SAME run — never a future
+      // day, never another target's own exposures.
+      const actualExposureCountInReferenceWindow = exposureDatesThisRun.filter((d) => daysBetween(d, date) < FREQUENCY_REFERENCE_WINDOW_DAYS).length;
+      const withinFrequencyReference = actualExposureCountInReferenceWindow < sessionsPerWeekForInterval;
+      const isDueToday = spacingOk && withinFrequencyReference;
       const exposureDecision: ExposureCycleDecision = {
         session_purpose_today: purposeThisDay,
         compatible_today: compatibleToday,
         last_exposure_date: simulatedLastExposureDate,
         days_since_last_exposure: daysSinceLastExposure,
         expected_exposure_interval_days: expectedExposureIntervalDays,
+        frequency_reference_per_week: sessionsPerWeekForInterval,
+        actual_exposure_count_in_reference_window: actualExposureCountInReferenceWindow,
         is_due_today: compatibleToday && isDueToday,
         reasoning: !compatibleToday
           ? `${target.target_type} "${target.target_id}": ${date} (${day}) is not a compatible training day for this target (session purpose: ${purposeThisDay ?? 'none'}).`
-          : !isDueToday
+          : !spacingOk
             ? `${target.target_type} "${target.target_id}": not yet due for another real exposure on ${date} — last real exposure ${simulatedLastExposureDate}, ${daysSinceLastExposure} day(s) ago (expected interval ~${expectedExposureIntervalDays} day(s)).`
-            : `${target.target_type} "${target.target_id}": due for a real exposure on ${date} — ${simulatedLastExposureDate ? `last real exposure ${simulatedLastExposureDate}, ${daysSinceLastExposure} day(s) ago` : 'never trained before'} (expected interval ~${expectedExposureIntervalDays} day(s)).`,
+            : !withinFrequencyReference
+              ? `${target.target_type} "${target.target_id}": minimum spacing alone would allow ${date}, but this target's own frequency reference (~${sessionsPerWeekForInterval}/week) is already satisfied by ${actualExposureCountInReferenceWindow} real/planned exposure(s) within the trailing ${FREQUENCY_REFERENCE_WINDOW_DAYS}-day window — minimum spacing is a floor, not the complete frequency gate (Post-v2 Corrective Fix v2 §3).`
+              : `${target.target_type} "${target.target_id}": due for a real exposure on ${date} — ${simulatedLastExposureDate ? `last real exposure ${simulatedLastExposureDate}, ${daysSinceLastExposure} day(s) ago` : 'never trained before'} (expected interval ~${expectedExposureIntervalDays} day(s); ${actualExposureCountInReferenceWindow}/${sessionsPerWeekForInterval} exposures so far in the trailing ${FREQUENCY_REFERENCE_WINDOW_DAYS}-day window).`,
       };
       lastComputedExposureDecision = exposureDecision;
       log.push(exposureDecision.reasoning);
@@ -1386,6 +1517,11 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
         remainingWeeklySets -= delivered;
         sessionRemaining -= delivered;
+        // Post-v2 Corrective Fix v2 §12: credit this target's real
+        // delivered sets toward its shared package's own running total —
+        // whichever sibling target this same run processes next reads
+        // this via `packageRemainingBudget`, above.
+        if (packageId) plannedDirectSetsByPackage.set(packageId, (plannedDirectSetsByPackage.get(packageId) ?? 0) + delivered);
         finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, delivered, exposureDecision, requested);
         placedAnyToday = true;
         if (attempt.prescription.sets === null) break;
@@ -1394,7 +1530,10 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // §5.4/§8: this real placement — not a calendar boundary — is what
       // advances this target's exposure state for any LATER real day
       // this same run considers.
-      if (placedAnyToday) simulatedLastExposureDate = date;
+      if (placedAnyToday) {
+        simulatedLastExposureDate = date;
+        exposureDatesThisRun.push(date);
+      }
     }
 
     // Post-v2 Corrective Fix §18/§21/§22: exactly one of two genuinely
@@ -1431,7 +1570,9 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           target_id: target.target_id,
           classification,
           reason: everCompatibleThisRun
-            ? `Not due for this exposure yet — last real exposure ${target.last_trained_date ?? 'unknown'}, expected interval ~${expectedExposureIntervalDays} day(s). It remains available for the next appropriate target-training session.`
+            ? lastComputedExposureDecision && lastComputedExposureDecision.actual_exposure_count_in_reference_window >= lastComputedExposureDecision.frequency_reference_per_week
+              ? `Not due for this exposure — this target's own frequency reference (~${lastComputedExposureDecision.frequency_reference_per_week}/week) is already satisfied by ${lastComputedExposureDecision.actual_exposure_count_in_reference_window} real/planned exposure(s) within the trailing ${FREQUENCY_REFERENCE_WINDOW_DAYS}-day window (Post-v2 Corrective Fix v2 §3: minimum spacing alone is not the complete frequency gate). It remains available for the next appropriate target-training session.`
+              : `Not due for this exposure yet — last real exposure ${target.last_trained_date ?? 'unknown'}, expected interval ~${expectedExposureIntervalDays} day(s). It remains available for the next appropriate target-training session.`
             : `No real training day considered this run is compatible with this target. It remains available for the next appropriate target-training session.`,
           decision: makeSkipDecision({ volume_decision: volumeDecision, exposure_decision: lastComputedExposureDecision }),
         });
@@ -1726,6 +1867,15 @@ export interface TargetTouch {
   date: string;
   exercise_id: BlueprintId;
   sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
+  /** Post-v2 Corrective Fix v2 §4/§7: whether this specific touch was a
+   * DIRECT (primary-role) exposure of the target, or merely compound
+   * overlap (secondary role) from an exercise trained for a different
+   * target. `last_trained_date`/`current_exercise_id` elsewhere in this
+   * module deliberately keep the pre-existing combined-role "most
+   * recently touched at all" semantics unchanged; this field exists so
+   * the rolling-window frequency gate can count only genuine direct
+   * exposures, never inflate its count with secondary overlap. */
+  role: 'primary' | 'secondary';
 }
 
 /**
@@ -1759,7 +1909,7 @@ export function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSes
       for (const c of contributions) {
         const key = `${c.target_type}:${c.target_id}`;
         const list = byTarget.get(key) ?? [];
-        list.push({ date: session.date, exercise_id: performance.exercise_id, sets: performance.sets });
+        list.push({ date: session.date, exercise_id: performance.exercise_id, sets: performance.sets, role: c.role });
         byTarget.set(key, list);
       }
     }
@@ -1846,6 +1996,12 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
       (exerciseHistory[touch.exercise_id] ??= []).push({ date: touch.date, sets: touch.sets });
     }
 
+    // Post-v2 Corrective Fix v2 §4/§7: every distinct real date this
+    // target was DIRECTLY (primary-role) exposed, most-recent-first —
+    // touches is already sorted most-recent-first, so the first
+    // occurrence of each date via Set preserves that order.
+    const recentDirectExposureDates = [...new Set(touches.filter((t) => t.role === 'primary').map((t) => t.date))];
+
     return {
       target_type: targetType,
       target_id: targetId,
@@ -1862,6 +2018,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
       review_cadence_days: reviewCadenceDays,
       days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, date) : null,
       last_trained_date: mostRecentTouch?.date ?? null,
+      recent_direct_exposure_dates: recentDirectExposureDates,
       recent_badminton: recentBadmintonSignal,
       recent_exercise_ids: [...new Set(touches.map((t) => t.exercise_id))],
       current_exercise_id: mostRecentTouch?.exercise_id ?? null,

@@ -174,11 +174,23 @@ describe('fixture: a realistic week (Mon/Tue gym, Wed rest, Thu/Fri gym, Sat/Sun
   });
 
   it('both ranked specialization goals stay protected and present across the week, alongside real normal-development coverage of the rest of the physique', () => {
-    // Monday (push) is goal 1's own day — mid-pec must be there.
-    const monday2 = assembleAndBuildWorkout(db, MON2, 90);
-    const mondaySpecialization = monday2.exercises.filter((e) => e.classification === 'specialization');
-    const mondayRest = monday2.exercises.filter((e) => e.classification !== 'specialization');
-    expect(mondaySpecialization.some((e) => e.target_id === 'mid-pec')).toBe(true);
+    // Post-v2 Corrective Fix v2 §3/§5: week 1 already logged FOUR real
+    // direct mid-pec exposures (Mon/Tue/Thu/Fri — double its own 2/week
+    // reference, deliberately so to also exercise secondary-exposure
+    // accumulation elsewhere in this fixture). The corrected frequency
+    // model — minimum spacing is NOT the sole gate — correctly spaces
+    // mid-pec's next real exposure into week 2 rather than making it due
+    // again the instant the calendar rolls over (spec §5's own "already
+    // received its appropriate exposures immediately before a boundary"
+    // rule): real invariant checked here is that goal 1 is never
+    // silently dropped for the week, not that it lands on Monday
+    // specifically, which the OLD calendar-week model — not this one —
+    // would have assumed.
+    const mondayRest = assembleAndBuildWorkout(db, MON2, 90).exercises.filter((e) => e.classification !== 'specialization');
+    const midPecSeenThisWeek = [MON2, '2026-09-01', '2026-09-03', '2026-09-04'].some((date) =>
+      assembleAndBuildWorkout(db, date, 90).exercises.some((e) => e.target_id === 'mid-pec' && e.classification === 'specialization')
+    );
+    expect(midPecSeenThisWeek).toBe(true);
     expect(mondayRest.length).toBeGreaterThan(0);
 
     // Tuesday (pull) is goal 2's own day — brachialis-arm-thickness must

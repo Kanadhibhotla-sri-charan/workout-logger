@@ -140,7 +140,21 @@ interface FriendlySkipInput {
      * facts (never a calendar-week eligibility list) used to build the
      * `not_current_exposure` explanation — only ever present when the
      * engine actually reached that decision. */
-    exposure_decision: { last_exposure_date: string | null; days_since_last_exposure: number | null; expected_exposure_interval_days: number } | null;
+    exposure_decision: {
+      last_exposure_date: string | null;
+      days_since_last_exposure: number | null;
+      expected_exposure_interval_days: number;
+      /** Post-v2 Corrective Fix v2 §3/§20: when present alongside
+       * `frequency_reference_per_week`, distinguishes "not yet due by
+       * spacing" from "already had its full frequency reference's worth
+       * of exposures within the trailing window" — a grounded fact worth
+       * surfacing distinctly (spec §20's own example: "actual exposure
+       * count in the relevant window"). Optional so a caller supplying
+       * only the older 3-field shape (tests, older callers) keeps
+       * working unchanged. */
+      actual_exposure_count_in_reference_window?: number;
+      frequency_reference_per_week?: number;
+    } | null;
     selection: unknown;
     last_trained: { date: string | null; days_since: number | null };
     recent_exercise_ids: readonly BlueprintId[];
@@ -198,6 +212,18 @@ export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
       // week — never a permanent exclusion, and never implying the
       // calendar week itself is what's being waited on.
       const exposure = skip.decision.exposure_decision;
+      // Post-v2 Corrective Fix v2 §3/§20: minimum spacing satisfied is
+      // not, by itself, proof of due-ness — when the actual reason is
+      // the separate maximum-frequency gate (already had its full
+      // reference's worth of exposures within the trailing window), say
+      // so distinctly rather than implying a plain spacing wait.
+      if (
+        exposure?.actual_exposure_count_in_reference_window !== undefined &&
+        exposure.frequency_reference_per_week !== undefined &&
+        exposure.actual_exposure_count_in_reference_window >= exposure.frequency_reference_per_week
+      ) {
+        return `${skip.target_name} isn't due for this exposure — it's already had ${exposure.actual_exposure_count_in_reference_window} real exposure(s) within its own frequency reference (~${exposure.frequency_reference_per_week}/week). It remains available for the next appropriate target-training session.`;
+      }
       if (exposure?.last_exposure_date) {
         return `${skip.target_name} isn't due for this exposure yet — it was trained directly on ${exposure.last_exposure_date}. It remains available for the next appropriate target-training session.`;
       }
