@@ -144,6 +144,15 @@ describe('§22.5 — repeated GET stability (no accidental regeneration)', () =>
       .sessions.map((s) => s.id)
       .sort();
 
+    // Captured before the repeated GETs below, so the later comparison is
+    // a genuine before/after check rather than a value compared with
+    // itself (the full JSON snapshots are byte-identical too — a
+    // deterministic read, proven here from the DB layer rather than the
+    // response).
+    const snapshotsAfterFirst = repo
+      .getByWeekStart(weekStart)!
+      .sessions.map((s) => s.snapshot);
+
     await request(app).get('/api/programming/week').expect(200);
     await request(app).get('/api/programming/week').expect(200);
 
@@ -156,12 +165,10 @@ describe('§22.5 — repeated GET stability (no accidental regeneration)', () =>
       .sort();
     expect(idsAfterRepeatedGets).toEqual(idsAfterFirst); // exact same identities, not merely the same count
 
-    // And the full JSON snapshots are byte-identical too (deterministic
-    // read, but proven here from the DB layer rather than the response).
-    const snapshotsAfterFirst = repo
+    const snapshotsAfterRepeatedGets = repo
       .getByWeekStart(weekStart)!
       .sessions.map((s) => s.snapshot);
-    expect(snapshotsAfterFirst).toEqual(snapshotsAfterFirst);
+    expect(snapshotsAfterRepeatedGets).toEqual(snapshotsAfterFirst);
   });
 
   it('GET /today never triggers its own separate regeneration once /week has already generated the week', async () => {
