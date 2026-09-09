@@ -10,9 +10,24 @@
 // tests/fixtures/strictBugFixFullWeek.test.ts.
 
 import { describe, expect, it } from 'vitest';
-import { buildWorkout, type TargetBuildContext } from '../../src/engine/workoutBuilder.js';
+import { buildWorkout, buildWeeklyProgrammingPlan, type TargetBuildContext, type WeeklyPlanInput } from '../../src/engine/workoutBuilder.js';
+import { lookupExercisePrescriptionAnyLevel } from '../../src/blueprint/developmentPackages.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
+
+function weeklyInput(overrides: Partial<WeeklyPlanInput> = {}): WeeklyPlanInput {
+  return {
+    weekStart: '2026-08-31',
+    today: '2026-08-31',
+    todayWeekday: 'monday',
+    todayBudgetMinutes: 300,
+    defaultSessionMinutes: 300,
+    available_equipment: FULL_EQUIPMENT,
+    available_training_days: ['monday'],
+    targets: [],
+    ...overrides,
+  };
+}
 
 function normalDevTarget(overrides: Partial<TargetBuildContext>): TargetBuildContext {
   return {
@@ -87,8 +102,18 @@ describe('Consolidated Fix §7/§15.C: real programming need is never overridden
   });
 });
 
-describe('Strict Bug-Fix §22: the weekly plan is durable within one generation run', () => {
-  it('generating Monday and Friday of the identical week, from identical stored state, computes the identical weekly_allocation for the same target', () => {
+describe('Post-v2 Corrective Fix §22/§29: the exposure-cycle decision is durable and consistent within one real week, regardless of which day within it is being generated', () => {
+  it('generating Monday and Friday of the identical week, from identical stored state, computes consistent real exposure-cycle facts for the same target', () => {
+    // mid-pec (Complete package, this fixture's own is_specialization
+    // target): sessions_per_week_reference=2 -> expected exposure
+    // interval floor(7/2)=3 days (a minimum real spacing, e.g. a
+    // Monday+Thursday cadence, never a rounded average). Never trained
+    // before (last_trained_date: null) -> due immediately on Monday (the
+    // first real day this run considers); Friday is 4 real days after
+    // Monday, which already clears the 3-day interval, so it becomes due
+    // again there too — two real exposures this week, driven entirely by
+    // actual dates, never a precomputed "eligible days this week" list or
+    // a sessions-per-week count.
     const target = normalDevTarget({
       target_type: 'physique_target',
       target_id: 'mid-pec',
@@ -109,46 +134,61 @@ describe('Strict Bug-Fix §22: the weekly plan is durable within one generation 
     const mondayResult = buildWorkout(input('monday', '2026-08-31'));
     const fridayResult = buildWorkout(input('friday', '2026-09-04'));
 
-    const mondayAllocation = mondayResult.exercises.find((e) => e.target_id === 'mid-pec')!.decision.weekly_allocation;
-    const fridayAllocation = fridayResult.exercises.find((e) => e.target_id === 'mid-pec')!.decision.weekly_allocation;
+    const mondayPlanned = mondayResult.exercises.find((e) => e.target_id === 'mid-pec');
+    const fridayPlanned = fridayResult.exercises.find((e) => e.target_id === 'mid-pec');
+    expect(mondayPlanned).toBeDefined();
+    expect(fridayPlanned).toBeDefined();
 
-    // NOT derived from "weekly target requirement / remaining number of
-    // days from today" — both calls see the exact same real weekly
-    // eligibility (push+upper — Monday and Friday both), so the SAME
-    // per-session set count falls out regardless of which day within
-    // the week is actually being generated. `session_purpose_today`
-    // correctly differs (push on Monday, upper on Friday — that part IS
-    // genuinely day-specific); everything about the durable weekly
-    // allocation itself does not.
-    expect(mondayAllocation?.eligible_days_this_week).toEqual(fridayAllocation?.eligible_days_this_week);
-    expect(mondayAllocation?.sessions_remaining_this_week).toEqual(fridayAllocation?.sessions_remaining_this_week);
-    expect(mondayAllocation?.eligible_days_this_week).toEqual(['monday', 'friday']);
-    expect(mondayAllocation?.sessions_remaining_this_week).toBe(2);
+    const mondayExposure = mondayPlanned!.decision.exposure_decision!;
+    const fridayExposure = fridayPlanned!.decision.exposure_decision!;
+
+    // Both independent calls agree on this target's own real expected
+    // interval — a fact of the target's Blueprint reference, never of
+    // which day is being asked about.
+    expect(mondayExposure.expected_exposure_interval_days).toBe(3);
+    expect(fridayExposure.expected_exposure_interval_days).toBe(3);
+
+    // Monday: the first real exposure this week — never trained before.
+    expect(mondayExposure.last_exposure_date).toBeNull();
+    expect(mondayExposure.is_due_today).toBe(true);
+
+    // Friday: correctly reconstructs Monday's own placement as its real
+    // last exposure (simulated forward WITHIN this independent run),
+    // never re-deriving from "weekly target requirement / remaining
+    // number of days" and never resetting because it's a different day.
+    expect(fridayExposure.last_exposure_date).toBe('2026-08-31');
+    expect(fridayExposure.days_since_last_exposure).toBe(4);
+    expect(fridayExposure.is_due_today).toBe(true);
   });
 });
 
-describe('Strict Bug-Fix §21/§7 Stage 7: a target compatible with more days than Blueprint\'s own frequency cap gets a deterministic subset, never every compatible day', () => {
-  it('a universal target (compatible with every PPL+Upper session purpose) is capped at the real frequency range upper bound, not all 4 gym days', () => {
+describe('Post-v2 Corrective Fix §5/§9: a target compatible with many days is gated by its own real due-ness interval, never a precomputed eligible-day-count cap', () => {
+  it('a universal target (compatible with every PPL+Upper session purpose) receives real exposures spaced by its own expected interval, never one on every compatible day', () => {
     // obliques (config.ts's UNIVERSAL_PHYSIQUE_TARGETS) is compatible
-    // with push, pull, legs, AND upper — a real scenario where more
-    // compatible days exist (4) than Blueprint's own frequency range
-    // upper bound allows (3, per globalPrinciples.frequency
-    // .typical_starting_range_per_week). A naive "every compatible day
-    // is eligible" implementation would let it train all 4 days/week,
-    // silently exceeding Blueprint's own guidance.
-    const result = buildWorkout({
-      date: '2026-08-31',
-      weekday: 'monday',
-      budget_minutes: 90,
-      available_equipment: FULL_EQUIPMENT,
-      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
-      targets: [normalDevTarget({ target_id: 'obliques', weekly_exposure_units: 0 })],
-    });
-    const allocation = result.exercises.find((e) => e.target_id === 'obliques')!.decision.weekly_allocation!;
-    expect(allocation.eligible_days_this_week.length).toBe(3);
-    // Deterministic: the first 3 gym days in real Monday-first order,
-    // not an arbitrary or random subset.
-    expect(allocation.eligible_days_this_week).toEqual(['monday', 'tuesday', 'thursday']);
+    // with push, pull, legs, AND upper — a real scenario where every
+    // one of the week's 4 gym days is compatible. Under the corrected
+    // model, real due-ness (not a "how many compatible days exist, up
+    // to a cap" count) decides which of those 4 days actually receive
+    // direct work.
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({
+        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        targets: [normalDevTarget({ target_id: 'obliques', weekly_exposure_units: 0 })],
+      })
+    );
+    const daysWithObliques = plan.sessions.filter((s) => s.plannedWork.some((w) => w.target_id === 'obliques'));
+    // Never all 4 compatible days — real due-ness genuinely spaces real
+    // exposures apart rather than filling every compatible day.
+    expect(daysWithObliques.length).toBeGreaterThan(0);
+    expect(daysWithObliques.length).toBeLessThan(4);
+    // Every exercise placed still respects its own authored cap — real
+    // due-based spacing never licenses inflating an exercise.
+    for (const session of daysWithObliques) {
+      for (const w of session.plannedWork.filter((w) => w.target_id === 'obliques')) {
+        const prescription = lookupExercisePrescriptionAnyLevel('obliques', w.exercise_id);
+        if (prescription) expect(w.sets).toBeLessThanOrEqual(prescription.sets);
+      }
+    }
   });
 });
 
@@ -222,15 +262,16 @@ describe('Strict Bug-Fix §11-15/§31 "Multiple exercises": 0/1/multiple exercis
     }
   });
 
-  it('a target with no Blueprint development package (an unmapped physique_target) never receives more than one exercise — no data exists to justify or size a split', () => {
-    // 'obliques' is grouped in the "core" muscle_group but its own
-    // package member roster is shared with rectus-abdominis; this test
-    // instead uses a target with a genuinely small requirement to
-    // confirm the single-exercise path is the honest default, not the
-    // exception — real coverage of the "no package -> always single
-    // exercise" branch lives in the functional_goal path, exercised by
+  it('a small real requirement for a real Blueprint-packaged target is still split honestly across exercises when a single exercise\'s own authored cap cannot hold it alone — never padded, never exceeding any exercise\'s real cap', () => {
+    // 'obliques' does have a real Blueprint package ('core-efficient');
+    // real coverage of the "no package -> always single exercise" branch
+    // lives in the functional_goal path, exercised by
     // finalPassRequiredTests.test.ts Tests 18-20 (functional goals never
-    // get a Blueprint package at all).
+    // get a Blueprint package at all). What this test actually protects:
+    // a genuinely small weekly requirement (4 sets) legitimately spans 2
+    // real exercises here because each individual exercise's own authored
+    // per-exposure cap (2 sets) is smaller than the requirement — this is
+    // honest multi-exercise construction, not exposure-cramming.
     const result = buildWorkout({
       date: '2026-08-31',
       weekday: 'monday',
@@ -240,7 +281,11 @@ describe('Strict Bug-Fix §11-15/§31 "Multiple exercises": 0/1/multiple exercis
       targets: [normalDevTarget({ target_id: 'obliques', current_weekly_primary_sets: 4, weekly_exposure_units: 4, most_recent_assessment: { rating: 4, date: '2026-08-25' } })],
     });
     const exercises = result.exercises.filter((e) => e.target_id === 'obliques');
-    expect(exercises.length).toBe(1);
+    expect(exercises.length).toBeGreaterThan(0);
+    expect(exercises.reduce((sum, e) => sum + e.target_sets, 0)).toBe(4);
+    for (const e of exercises) {
+      expect(e.target_sets).toBeGreaterThan(0);
+    }
   });
 
   it('Consolidated Fix §7: multi-exercise construction ignores the time budget entirely — a tight nominal budget drops none of a target\'s own real additional exercises', () => {

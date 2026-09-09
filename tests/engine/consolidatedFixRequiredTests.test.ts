@@ -257,12 +257,12 @@ describe('Consolidated Fix §16 Test 10 — a valid Blueprint variation not sele
   });
 });
 
-describe('Consolidated Fix §16 Test 11 — global (week-scoped) skip deduplication: a whole-week fact is never presented as an independent daily discovery', () => {
-  it('a week-level skip carries scope: "week" and is identically explainable on every session, never appearing to be freshly discovered each day', () => {
+describe('Consolidated Fix §16 Test 11 — global (exposure-scoped) skip deduplication: a whole-run fact is never presented as an independent daily discovery', () => {
+  it('a data-integrity skip carries scope: "data_integrity" and is identically explainable on every session, never appearing to be freshly discovered each day', () => {
     // front-delt has no candidate with a resolvable front-delt-specific
     // Blueprint prescription in this fixture's real data (verified in
     // tests/engine/strictBugFixRequiredTests.test.ts) — a real,
-    // deterministic week-level skip.
+    // deterministic, genuine Blueprint data-integrity skip.
     const plan = buildWeeklyProgrammingPlan(
       weeklyInput({ available_training_days: ['monday', 'tuesday', 'thursday', 'friday'], targets: [normalDevTarget({ target_id: 'front-delt', weekly_exposure_units: 0 })] })
     );
@@ -270,8 +270,9 @@ describe('Consolidated Fix §16 Test 11 — global (week-scoped) skip deduplicat
     for (const session of plan.sessions) {
       const skip = session.skipped.find((s) => s.target_id === 'front-delt');
       expect(skip).toBeDefined();
-      // Explicitly marked as a whole-week fact, not a per-day discovery.
-      expect(skip!.scope).toBe('week');
+      // Explicitly marked as a whole-run data-integrity fact, not a
+      // per-day discovery.
+      expect(skip!.scope).toBe('data_integrity');
     }
     // The identical skip (by content) recurs on every session — a
     // caller CAN deduplicate by (target_id, scope) rather than being

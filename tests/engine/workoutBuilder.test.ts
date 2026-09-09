@@ -41,19 +41,28 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       targets: [baseTarget()],
     });
 
-    expect(result.exercises.length).toBe(1);
-    const planned = result.exercises[0]!;
+    // A fresh (never-trained) specialization target's due exposure may
+    // legitimately span more than one real exercise when a single
+    // exercise's own authored per-exposure cap is smaller than the
+    // exposure's natural amount — check the real per-target invariants,
+    // never a fixed exercise count.
+    expect(result.exercises.length).toBeGreaterThan(0);
+    const midPecExercises = result.exercises.filter((e) => e.target_id === 'mid-pec');
+    expect(midPecExercises.length).toBeGreaterThan(0);
+    const planned = midPecExercises[0]!;
     expect(planned.target_id).toBe('mid-pec');
     expect(planned.target_sets).toBeGreaterThan(0);
     expect(planned.target_reps_min).toBeGreaterThan(0);
     expect(planned.target_reps_max).toBeGreaterThanOrEqual(planned.target_reps_min);
     expect(planned.estimated_minutes).toBeGreaterThan(0);
-    // The exercise must genuinely be Blueprint's own package data for mid-pec.
-    expect(BlueprintAdapter.getExercise(planned.exercise_id)).toBeDefined();
-    // No exercise_history was supplied — a first-time prescription has
-    // nothing to progress from yet.
-    expect(planned.progression_decision).toBeNull();
-    expect(planned.previous_performance).toBeNull();
+    // Every placed exercise must genuinely be Blueprint's own package data for mid-pec.
+    for (const e of midPecExercises) {
+      expect(BlueprintAdapter.getExercise(e.exercise_id)).toBeDefined();
+      // No exercise_history was supplied — a first-time prescription has
+      // nothing to progress from yet.
+      expect(e.progression_decision).toBeNull();
+      expect(e.previous_performance).toBeNull();
+    }
   });
 
   it('remediation §6: usable exercise history produces a real progression_decision and previous_performance, consumed by the builder', () => {
@@ -81,12 +90,15 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       ],
     });
 
-    expect(result.exercises.length).toBe(1);
-    const planned = result.exercises[0]!;
-    expect(planned.exercise_id).toBe('flat-barbell-bench-press');
-    expect(planned.progression_decision).not.toBeNull();
-    expect(planned.progression_decision!.exercise_id).toBe('flat-barbell-bench-press');
-    expect(planned.previous_performance).toEqual({ date: '2026-08-27', weight: 60, reps: 12 });
+    // A due exposure for a specialization target may legitimately span
+    // more than one real exercise — the current/continuing exercise must
+    // still be among them, carrying its own real progression facts.
+    expect(result.exercises.length).toBeGreaterThan(0);
+    const planned = result.exercises.find((e) => e.exercise_id === 'flat-barbell-bench-press');
+    expect(planned).toBeDefined();
+    expect(planned!.progression_decision).not.toBeNull();
+    expect(planned!.progression_decision!.exercise_id).toBe('flat-barbell-bench-press');
+    expect(planned!.previous_performance).toEqual({ date: '2026-08-27', weight: 60, reps: 12 });
   });
 
   it('remediation §6: a "reduce" progression decision actually reduces the session\'s set count, distinct from weekly volume', () => {
@@ -174,10 +186,11 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       targets: [baseTarget()],
     });
     expect(result.skipped_targets.find((s) => s.target_id === 'mid-pec')).toBeUndefined();
-    expect(result.exercises.length).toBe(1);
-    const planned = result.exercises[0]!;
-    expect(planned.target_id).toBe('mid-pec');
-    expect(BlueprintAdapter.getExercise(planned.exercise_id)).toBeDefined();
+    const midPecExercises = result.exercises.filter((e) => e.target_id === 'mid-pec');
+    expect(midPecExercises.length).toBeGreaterThan(0);
+    for (const e of midPecExercises) {
+      expect(BlueprintAdapter.getExercise(e.exercise_id)).toBeDefined();
+    }
   });
 
   it('skips (avoids) a target already trained today, per recoveryEngine', () => {
@@ -319,10 +332,10 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       targets: [baseTarget({ current_exercise_id: 'flat-barbell-bench-press' })],
     });
 
-    expect(result.exercises.length).toBe(1);
-    const planned = result.exercises[0]!;
-    expect(planned.exercise_id).toBe('flat-barbell-bench-press');
-    expect(planned.decision.selection?.substituted_from).toBeNull();
+    expect(result.exercises.length).toBeGreaterThan(0);
+    const planned = result.exercises.find((e) => e.exercise_id === 'flat-barbell-bench-press');
+    expect(planned).toBeDefined();
+    expect(planned!.decision.selection?.substituted_from).toBeNull();
   });
 
   it('required test 11: a heavy recent badminton session changes the pipeline\'s recovery-driven reasoning for a stagnant target', () => {
@@ -423,7 +436,8 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       expect(planned.decision.recovery.priority_adjustment).not.toBe('avoid');
       expect(planned.decision.volume_decision.action).toBeDefined();
       expect(planned.decision.session_purpose).toBe('push');
-      expect(planned.decision.weekly_allocation?.eligible_days_this_week).toContain('monday');
+      expect(planned.decision.exposure_decision?.compatible_today).toBe(true);
+      expect(planned.decision.exposure_decision?.is_due_today).toBe(true);
       expect(planned.decision.selection?.decisive_gate).toBeDefined();
       expect(Array.isArray(planned.decision.selection?.rejected_candidates)).toBe(true);
     });
@@ -462,7 +476,7 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       expect(planned.decision.selection?.substituted_from).toBeNull();
     });
 
-    it('a target skipped before weekly allocation carries recovery but null volume_decision/weekly_allocation/selection — never a fabricated decision', () => {
+    it('a target skipped before any exposure-cycle decision runs carries recovery but null volume_decision/exposure_decision/selection — never a fabricated decision', () => {
       const result = buildWorkout({
         date: '2026-08-31',
         weekday: 'monday',
@@ -474,7 +488,7 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       const skip = result.skipped_targets.find((s) => s.target_id === 'mid-pec')!;
       expect(skip.decision.recovery.priority_adjustment).toBe('avoid');
       expect(skip.decision.volume_decision).toBeNull();
-      expect(skip.decision.weekly_allocation).toBeNull();
+      expect(skip.decision.exposure_decision).toBeNull();
       expect(skip.decision.selection).toBeNull();
     });
 

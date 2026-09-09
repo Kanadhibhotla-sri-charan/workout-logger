@@ -63,7 +63,9 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     const planned = result.exercises[0]!;
     expect(BlueprintAdapter.getExercise(planned.exercise_id)).toBeDefined();
     expect(planned.target_sets).toBeGreaterThan(0);
-    expect(result.estimated_minutes).toBeLessThanOrEqual(60);
+    // A real due exposure is never shrunk to fit a nominal session-length
+    // budget — time has zero effect on what's programmed.
+    expect(result.skipped_targets.some((s) => s.reason.includes('time-fitting'))).toBe(false);
   });
 
   it('remediation §17/§25: deterministic at the real impure boundary too — identical DB state produces byte-identical output on repeat calls, never randomness', () => {

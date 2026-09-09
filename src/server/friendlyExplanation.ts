@@ -136,7 +136,11 @@ interface FriendlySkipInput {
   decision: {
     recovery: { priority_adjustment: string };
     volume_decision: { action: string } | null;
-    weekly_allocation: { eligible_days_this_week: readonly string[] } | null;
+    /** Post-v2 Corrective Fix §22/§43: the real, per-day exposure-cycle
+     * facts (never a calendar-week eligibility list) used to build the
+     * `not_current_exposure` explanation — only ever present when the
+     * engine actually reached that decision. */
+    exposure_decision: { last_exposure_date: string | null; days_since_last_exposure: number | null; expected_exposure_interval_days: number } | null;
     selection: unknown;
     last_trained: { date: string | null; days_since: number | null };
     recent_exercise_ids: readonly BlueprintId[];
@@ -185,11 +189,19 @@ export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
       return `${skip.target_name} needs more recovery time before its next real session, so no work was added today.`;
     }
     case 'not_current_exposure': {
-      // Spec §22's "Not today's exposure" wording: distinguishes a
-      // genuinely valid target that simply isn't due this exposure cycle
-      // from an invalid one — it remains available for a future session,
-      // never a permanent exclusion.
-      return `${skip.target_name} is not part of this week's exposure cycle — no training day this week fits it. It will be considered at the next appropriate target-training session.`;
+      // Post-v2 Corrective Fix §22: "isn't due for this exposure," never
+      // framed as "not this week" — distinguishes a genuinely valid
+      // target that simply hasn't reached its own expected exposure
+      // interval (or has no compatible training day at all) from an
+      // invalid one. It remains available for the next appropriate
+      // target-training session, which may fall in a later calendar
+      // week — never a permanent exclusion, and never implying the
+      // calendar week itself is what's being waited on.
+      const exposure = skip.decision.exposure_decision;
+      if (exposure?.last_exposure_date) {
+        return `${skip.target_name} isn't due for this exposure yet — it was trained directly on ${exposure.last_exposure_date}. It remains available for the next appropriate target-training session.`;
+      }
+      return `${skip.target_name} isn't due for this exposure — no training day fits it right now. It remains available for the next appropriate target-training session.`;
     }
     case 'adequately_covered': {
       const covering = coveringExerciseNames(skip.decision.recent_exercise_ids);

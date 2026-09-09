@@ -171,7 +171,8 @@ describe('Strict Bug-Fix §32: the required full-week fixture, through the real 
 
   it('Tuesday — Pull, normal time: Goal 2 (a genuinely different PPL day than Goal 1) gets its own real work', () => {
     const result = assembleAndBuildWorkout(db, TUE2, 75);
-    expect(result.estimated_minutes).toBeLessThanOrEqual(75);
+    // The nominal session length never shrinks a real due exposure.
+    expect(result.skipped_targets.some((s) => s.reason.includes('time-fitting'))).toBe(false);
     expect(result.exercises.some((e) => e.target_id === 'brachialis-arm-thickness')).toBe(true);
     expect(result.active_goals.length).toBe(2);
   });

@@ -112,10 +112,10 @@ describe('One-Pass Dev Spec v2 §31.7 — full equipment invariance: identical p
 });
 
 describe('One-Pass Dev Spec v2 §31.14 — not_current_exposure: a real engine-level scheduling gap, distinguished from invalid', () => {
-  it('a physique target whose session-purpose is never compatible with any available training day is skipped with reason_code not_current_exposure, scope week', () => {
+  it('a physique target whose session-purpose is never compatible with any available training day is skipped with reason_code not_current_exposure, scope exposure', () => {
     // 'legs' purpose is deterministically never assigned to Monday
     // (sessionPurpose.ts) — a leg-region target with ONLY Monday
-    // available therefore has zero compatible gym days this week.
+    // available therefore has zero compatible gym days this run.
     const target = normalDevTarget({ target_id: 'quads', current_weekly_primary_sets: 0, weekly_exposure_units: 0 });
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ available_training_days: ['monday'], targets: [target] }));
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
@@ -123,9 +123,9 @@ describe('One-Pass Dev Spec v2 §31.14 — not_current_exposure: a real engine-l
     const skip = monday.skipped.find((s) => s.target_id === 'quads');
     expect(skip).toBeDefined();
     expect(skip!.reason_code).toBe('not_current_exposure');
-    expect(skip!.scope).toBe('week');
+    expect(skip!.scope).toBe('exposure');
     // Distinct from a genuine Blueprint data-integrity problem — this
-    // target remains fully valid, just not schedulable this week.
+    // target remains fully valid, just not schedulable right now.
     expect(skip!.reason_code).not.toBe('blueprint_data_integrity');
   });
 });

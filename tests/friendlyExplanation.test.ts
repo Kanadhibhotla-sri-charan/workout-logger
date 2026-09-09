@@ -176,7 +176,7 @@ describe('buildFriendlySkipReasoning — One-Pass Dev Spec v2 §18/§19: switche
       decision: {
         recovery: { priority_adjustment: 'none' },
         volume_decision: { action: 'maintain' },
-        weekly_allocation: { eligible_days_this_week: ['monday'] },
+        exposure_decision: { last_exposure_date: null, days_since_last_exposure: null, expected_exposure_interval_days: 4 },
         selection: null,
         last_trained: { date: null, days_since: null },
         recent_exercise_ids: [],
@@ -199,10 +199,22 @@ describe('buildFriendlySkipReasoning — One-Pass Dev Spec v2 §18/§19: switche
     expect(text).toContain('2026-09-07');
   });
 
-  it('a target not part of this week\'s exposure cycle reads as a scheduling/exposure reason, distinguishing valid-but-not-due from invalid (spec §22/§23)', () => {
+  it('a target not due for this exposure reads as a scheduling/exposure reason, distinguishing valid-but-not-due from invalid, never framed as "not this week" (Post-v2 Corrective Fix §22)', () => {
     const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'not_current_exposure' }));
-    expect(text).toContain('exposure cycle');
+    expect(text).toContain("isn't due for this exposure");
     expect(text).toContain('next appropriate target-training session');
+    expect(text.toLowerCase()).not.toContain('this week');
+  });
+
+  it('a target not due for this exposure cites the REAL last exposure date when the engine knows it, never a fabricated one (Post-v2 Corrective Fix §22/§43)', () => {
+    const text = buildFriendlySkipReasoning(
+      baseSkip({
+        reason_code: 'not_current_exposure',
+        decision: { ...baseSkip().decision, exposure_decision: { last_exposure_date: '2026-09-05', days_since_last_exposure: 2, expected_exposure_interval_days: 4 } },
+      })
+    );
+    expect(text).toContain('2026-09-05');
+    expect(text).toContain("isn't due for this exposure");
   });
 
   it('an "adequately covered" skip names the REAL covering exercise(s), not a generic "compound work" placeholder (spec §10/§22)', () => {

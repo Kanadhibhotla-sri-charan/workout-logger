@@ -188,42 +188,51 @@ export interface BuildWorkoutInput {
 }
 
 /**
- * Final Programming-Engine Pass §8/§9: frequency (how many days/week a
- * target actually trains) is now an OUTPUT of contextual weekly
- * allocation, never spreadDays' even mathematical spreading. This
- * object records exactly how that output was reached for one target on
- * one real day: which of the week's real gym days (from today onward)
- * are actually compatible with this target's PPL+Upper session
- * purpose, and how many of them remain to spread the already-decided
- * weekly total (volumeEngine's own `desiredWeekly` — §13 says "retain
- * the existing methodology" for that decision, so this object never
- * re-derives or second-guesses it) across.
+ * Post-v2 Corrective Fix §5/§9/§29: whether this target is due for a
+ * real exposure on ONE SPECIFIC real day, decided from its own ACTUAL
+ * last-trained date and a Blueprint-derived expected exposure interval
+ * — never from a precomputed, calendar-week-capped list of "eligible
+ * days" (the prior `WeeklyAllocationDecision`/`eligible_days_this_week`/
+ * `sessions_remaining_this_week` model this replaces, which made the
+ * Monday-Sunday window the authoritative container for how many
+ * sessions a target could ever receive). This is computed FRESH for
+ * every real day a target is considered on — unlike its predecessor, it
+ * is never one value "applying on every day of this real week," because
+ * due-ness genuinely differs day to day as real (or, within a single
+ * generation run, already-placed-earlier-this-run) exposures accrue.
  *
- * §12's "compound exposure already allocated this week must reduce
- * what's prescribed, never stack blindly on top" is handled upstream
- * of this object entirely, by classification (rankTarget() reads the
- * real primary+secondary weekly_exposure_units, not a raw primary-set
- * count) — deliberately NOT by subtracting current_weekly_primary_sets
- * a second time here, which would double-count against
- * volumeEngine.decideVolume's own 'maintain' semantics (where
- * recommended_weekly_primary_sets already equals
- * current_weekly_primary_sets, making any further subtraction always
- * zero and silently starving every steady-state target).
+ * `last_exposure_date`/`days_since_last_exposure` reflect the target's
+ * real actual last-trained date, advanced only by a real placement THIS
+ * SAME planning run makes on an earlier real day — never reset because
+ * a new calendar week began (§5.4/§8).
  */
-export interface WeeklyAllocationDecision {
-  /** This target's PPL+Upper-compatible session purpose today, or null
-   * for a functional_goal (purpose-agnostic — see
+export interface ExposureCycleDecision {
+  /** This target's PPL+Upper-compatible session purpose on this real
+   * day, or null for a functional_goal (purpose-agnostic — see
    * sessionPurpose.isTargetCompatibleWithPurpose). */
   session_purpose_today: SessionPurpose | null;
-  /** The week's remaining real gym days (today included) whose session
-   * purpose this target is actually compatible with — the real
-   * eligibility set spreadDays never computed. */
-  eligible_days_this_week: readonly Weekday[];
-  /** eligible_days_this_week.length, clamped to Blueprint's own
-   * typical_starting_range_per_week upper bound (never more sessions
-   * than Blueprint itself suggests, even if more eligible days exist),
-   * floored at 1. The actual denominator setsToday is computed from. */
-  sessions_remaining_this_week: number;
+  /** Whether this real day's session purpose is compatible with this
+   * target at all — independent of due-ness. A physique target with
+   * `compatible_today: false` cannot receive direct work today
+   * regardless of how due it is. */
+  compatible_today: boolean;
+  /** The target's most recent known (real, or already-placed-this-run)
+   * direct exposure date as of this real day, or null if never trained. */
+  last_exposure_date: string | null;
+  /** Real calendar days between `last_exposure_date` and this real day,
+   * or null when `last_exposure_date` is null (never trained). */
+  days_since_last_exposure: number | null;
+  /** This target's own expected interval between real exposures, in
+   * days — derived from its Blueprint development-package frequency
+   * reference (`direct_sets_per_exposure`'s own
+   * `sessions_per_week_reference`) when one exists, or Blueprint's
+   * universal `typical_starting_range_per_week` midpoint otherwise.
+   * Never a hardcoded, target-specific number. */
+  expected_exposure_interval_days: number;
+  /** Whether this target is actually due for a real exposure on this
+   * specific real day: `compatible_today` AND (never trained, or
+   * `days_since_last_exposure >= expected_exposure_interval_days`). */
+  is_due_today: boolean;
   reasoning: string;
 }
 
@@ -264,12 +273,16 @@ export interface DecisionExplanation {
    * carried here per §22's explicit "session purpose" explainability
    * requirement rather than forcing a caller to a separate lookup. */
   session_purpose: SessionPurpose | null;
-  /** Null when a target was skipped before weekly allocation ran (e.g.
-   * an 'avoid' recovery signal, or no weekly volume recommended yet) —
-   * there is nothing genuine to report yet, and this stays null rather
-   * than a fabricated placeholder. */
-  weekly_allocation: WeeklyAllocationDecision | null;
-  /** Null under the identical conditions as `weekly_allocation` above,
+  /** Null when a target was skipped before the exposure-cycle decision
+   * ran for any real day (e.g. an 'avoid' recovery signal, no weekly
+   * volume recommended yet, or a genuine data-integrity gap discovered
+   * before any day was even considered) — there is nothing genuine to
+   * report yet, and this stays null rather than a fabricated
+   * placeholder. When populated on a PLACED exercise, this is the
+   * specific real day's own exposure decision (Post-v2 Corrective Fix
+   * §5/§9) — never a single value asserted to apply to the whole week. */
+  exposure_decision: ExposureCycleDecision | null;
+  /** Null under the identical conditions as `exposure_decision` above,
    * plus whenever no feasible/prescribed candidate existed to select
    * from at all. */
   selection: {
@@ -318,18 +331,24 @@ export interface SkippedTarget {
   target_type: TargetType;
   target_id: BlueprintId;
   classification: TargetClassification;
-  /** Consolidated Fix §12: whether this is a whole-week fact ('week' —
-   * e.g. recovery, exposure coverage, weekly eligibility, prescription
-   * resolvability; computed once per target for the whole week and
-   * therefore identical across every session in it) or specific to one
-   * real session ('session'). Lets a caller tell "this target isn't
-   * getting worked this week, and here's why" apart from "this
-   * exercise specifically didn't fit today" — never presented as an
-   * independent daily discovery when it's actually the same week-level
-   * fact recurring on every session. */
-  scope: 'week' | 'session';
-  /** One-Pass Dev Spec v2 §18/§19 (superseding Consolidated Fix §9/§10/
-   * §11's slightly different naming): the structured, discriminated
+  /** Post-v2 Corrective Fix §21: the scope vocabulary this decision
+   * actually belongs to — never a binary "week vs session" (which
+   * itself implied the calendar week was the meaningful container).
+   * `'exposure'`: an exposure-cycle-level fact, computed once per target
+   * per generation run and therefore identical across every session
+   * this run produces (recovery, not-yet-due, adequate coverage, no
+   * recommended volume) — lets a caller tell "this target isn't due
+   * right now, and here's why" apart from "this specific exercise
+   * didn't fit today," never presenting the same fact as an independent
+   * daily discovery. `'data_integrity'`: a genuine Blueprint data defect
+   * — structurally different from an ordinary programming decision, and
+   * never deduplicated alongside one. `'session'`: reserved for a
+   * genuinely day-specific decision; no current mechanism produces one
+   * (time/equipment do not filter generation), kept for when one
+   * legitimately exists. */
+  scope: 'exposure' | 'data_integrity' | 'session';
+  /** Post-v2 Corrective Fix §18/§22 (superseding One-Pass Dev Spec v2
+   * §18/§19's slightly different framing): the structured, discriminated
    * category this skip actually belongs to — set explicitly at the
    * exact site that decided it, never inferred later by string-matching
    * `reason`. `friendlyExplanation.ts` switches on this (never on
@@ -339,9 +358,13 @@ export interface SkippedTarget {
    *
    *   - `recovery`: valid target; today's direct work is prevented by
    *     recovery state (spec §18 `recovery`).
-   *   - `not_current_exposure`: valid target; no gym day this week is
-   *     compatible with it, so it isn't part of this week's exposure
-   *     cycle (spec §18 `not_current_exposure`).
+   *   - `not_current_exposure`: valid target; not due for a real
+   *     exposure right now — either no real day this run considered is
+   *     compatible with it at all, or it is compatible but hasn't
+   *     reached its own expected exposure interval since its last real
+   *     exposure yet (spec §22: "isn't due for this exposure," never
+   *     framed as "not this week"). It remains available for the next
+   *     appropriate target-training session.
    *   - `adequately_covered`: valid target; today's actual/planned work
    *     already provides sufficient relevant coverage (spec §18
    *     `adequately_covered`).
@@ -362,12 +385,12 @@ export interface SkippedTarget {
   /** As much of the same machine-readable explanation as had actually
    * been computed before this target was skipped — e.g. a target
    * skipped on an 'avoid' recovery signal carries `recovery` but null
-   * `volume_decision`/`weekly_allocation`/`selection`, since this
+   * `volume_decision`/`exposure_decision`/`selection`, since this
    * pipeline never fabricates a decision it didn't reach (spec §25's
    * rule applied to explainability itself, not just prescriptions). */
-  decision: Omit<DecisionExplanation, 'volume_decision' | 'weekly_allocation' | 'selection'> & {
+  decision: Omit<DecisionExplanation, 'volume_decision' | 'exposure_decision' | 'selection'> & {
     volume_decision: VolumeDecision | null;
-    weekly_allocation: WeeklyAllocationDecision | null;
+    exposure_decision: ExposureCycleDecision | null;
     selection: DecisionExplanation['selection'];
   };
 }
@@ -489,13 +512,14 @@ export interface WeeklyPlanSession {
   plannedWork: PlannedWorkItem[];
   estimatedMinutes: number;
   badmintonContext: RecentBadmintonSignal | null;
-  /** Targets skipped for the whole week (recovery/prescription/no-real-
-   * candidate/no-eligible-day/already-adequately-exposed — see
+  /** Targets skipped at exposure-cycle scope this generation run
+   * (recovery/prescription/not-yet-due/already-adequately-covered — see
    * WeeklyProgrammingPlan.decisions for the real reason), each carrying
-   * `scope: 'week'` (Consolidated Fix §12) since none of them are
-   * specific to this one date — surfaced on every session because each
-   * real day legitimately needs to know why a target isn't in it. Time
-   * and equipment no longer produce any day-specific skip at all (§7/
+   * `scope: 'exposure'` or `'data_integrity'` (Post-v2 Corrective Fix
+   * §21) since none of them are specific to this one date — surfaced on
+   * every session because each real day legitimately needs to know why
+   * a target isn't in it. Time and equipment no longer produce any
+   * day-specific skip at all (§7/
    * §8), so no `scope: 'session'` entry exists here today. */
   skipped: SkippedTarget[];
   activeGoals: Array<{ goal_id: string; priority: number; trend: AestheticProgressTrend }>;
@@ -748,7 +772,16 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
 
   const { starting_point_sets } = BlueprintAdapter.getGlobalPrinciples().weekly_volume;
   const { typical_starting_range_per_week } = BlueprintAdapter.getGlobalPrinciples().frequency;
-  const [, sessionsRangeMax] = typical_starting_range_per_week;
+  // Post-v2 Corrective Fix §9/§10: the fallback expected exposure
+  // frequency for a target with no Blueprint development-package
+  // reference of its own (a functional_goal, or a physique_target
+  // Blueprint hasn't grouped yet) — Blueprint's own universal frequency
+  // guidance, midpoint of its range, never a per-target hardcoded
+  // number. Used only to derive an expected exposure INTERVAL (see
+  // expectedExposureIntervalDays below); no longer used to cap a
+  // precomputed "eligible days this week" count, which no longer exists.
+  const [globalFrequencyRangeMin, globalFrequencyRangeMax] = typical_starting_range_per_week;
+  const globalFallbackSessionsPerWeek = (globalFrequencyRangeMin + globalFrequencyRangeMax) / 2;
 
   const recoveryByKey = new Map<string, RecoveryConstraintResult>(
     input.targets.map((target) => [
@@ -840,7 +873,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     };
     const lastTrained: DecisionExplanation['last_trained'] = { date: target.last_trained_date, days_since: target.days_since_target_last_trained };
     const makeSkipDecision = (
-      overrides: { volume_decision?: VolumeDecision | null; weekly_allocation?: WeeklyAllocationDecision | null; selection?: DecisionExplanation['selection'] } = {},
+      overrides: { volume_decision?: VolumeDecision | null; exposure_decision?: ExposureCycleDecision | null; selection?: DecisionExplanation['selection'] } = {},
       sessionPurposeOverride: SessionPurpose | null = sessionPurposes.get(input.todayWeekday) ?? null
     ): SkippedTarget['decision'] => ({
       classification,
@@ -851,14 +884,14 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       recovery,
       volume_decision: overrides.volume_decision ?? null,
       session_purpose: target.target_type === 'physique_target' ? sessionPurposeOverride : null,
-      weekly_allocation: overrides.weekly_allocation ?? null,
+      exposure_decision: overrides.exposure_decision ?? null,
       selection: overrides.selection ?? null,
     });
 
     if (recovery.priority_adjustment === 'avoid') {
       weekLevelSkips.push({
         target_type: target.target_type,
-        scope: 'week' as const,
+        scope: 'exposure' as const,
         reason_code: 'recovery',
         target_id: target.target_id,
         classification,
@@ -922,7 +955,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (!target.is_specialization && target.current_weekly_primary_sets === 0 && liveNeedDeficit <= 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
-        scope: 'week' as const,
+        scope: 'exposure' as const,
         reason_code: 'adequately_covered',
         target_id: target.target_id,
         classification,
@@ -935,7 +968,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (desiredWeekly <= 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
-        scope: 'week' as const,
+        scope: 'exposure' as const,
         reason_code: 'no_volume_recommended',
         target_id: target.target_id,
         classification,
@@ -968,50 +1001,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // it's actually compatible with (sessionPurpose.ts); a
     // functional_goal isn't purpose-gated, just gym-day-gated.
     const isPhysique = target.target_type === 'physique_target';
-    const compatibleDaysThisWeek = orderedGymDays.filter((d) => {
-      if (!isPhysique) return true;
-      const purpose = sessionPurposes.get(d);
-      return purpose !== undefined && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purpose);
-    });
-    const sessionsRemainingThisWeek = Math.max(1, Math.min(compatibleDaysThisWeek.length, sessionsRangeMax));
-    // Strict Bug-Fix §7 Stage 7 / §21: when more compatible days exist
-    // than Blueprint's own frequency range's upper bound allows, select
-    // a deterministic subset — the first sessionsRemainingThisWeek
-    // compatible days in real Monday-first week order (orderedGymDays
-    // is already that canonical order — see its own definition above) —
-    // rather than the target silently training on every compatible day
-    // regardless of the cap (a real correctness gap for a target
-    // compatible with more session purposes than Blueprint's own
-    // frequency cap, e.g. a universal target like obliques against a
-    // 4-gym-day week with a 3-session/week cap).
-    const eligibleDaysThisWeek = compatibleDaysThisWeek.slice(0, sessionsRemainingThisWeek);
-    const weeklyAllocation: WeeklyAllocationDecision = {
-      session_purpose_today: isPhysique ? (sessionPurposes.get(input.todayWeekday) ?? null) : null,
-      eligible_days_this_week: eligibleDaysThisWeek,
-      sessions_remaining_this_week: sessionsRemainingThisWeek,
-      reasoning:
-        eligibleDaysThisWeek.length === 0
-          ? `${target.target_type} "${target.target_id}": no gym day this week is compatible with this target.`
-          : `${target.target_type} "${target.target_id}": eligible on ${eligibleDaysThisWeek.join(', ')} (${sessionsRemainingThisWeek} session(s)/week, capped at Blueprint's own frequency range's upper bound of ${sessionsRangeMax}` +
-            (compatibleDaysThisWeek.length > eligibleDaysThisWeek.length
-              ? `; ${compatibleDaysThisWeek.length - eligibleDaysThisWeek.length} additional compatible day(s) not used this week under that cap`
-              : '') +
-            `); ${desiredWeekly} desired weekly sets distributed across them session-by-session in chronological order (Surgical Fix Pass §2/§6 — never desiredWeekly/sessionsRemaining division), this same weekly allocation applying on every day of this real week (spec §22).`,
-    };
-    log.push(weeklyAllocation.reasoning);
-
-    if (eligibleDaysThisWeek.length === 0) {
-      weekLevelSkips.push({
-        target_type: target.target_type,
-        scope: 'week' as const,
-        reason_code: 'not_current_exposure',
-        target_id: target.target_id,
-        classification,
-        reason: `Not part of this week's exposure cycle — no gym day this week is compatible with this target: ${weeklyAllocation.reasoning}`,
-        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
-      });
-      continue;
-    }
 
     // Equipment Filter Fix: equipment availability is NEVER a candidate-
     // elimination rule during program generation — the full Blueprint
@@ -1034,12 +1023,12 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     if (candidateExerciseIds.length === 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
-        scope: 'week' as const,
+        scope: 'data_integrity' as const,
         reason_code: 'blueprint_data_integrity',
         target_id: target.target_id,
         classification,
         reason: 'Genuine Blueprint data gap: no Blueprint or approved outside-Blueprint exercise trains this target at all — a content/authoring gap in Blueprint itself, not a normal programming decision (One-Pass Dev Spec v2 §18 blueprint_data_integrity).',
-        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
+        decision: makeSkipDecision({ volume_decision: volumeDecision }),
       });
       continue;
     }
@@ -1155,6 +1144,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       progressionDecision: ProgressionResult | null,
       previousPerformance: PlannedExercise['previous_performance'],
       sets: number,
+      exposureDecision: ExposureCycleDecision,
       requested: number = sets
     ) => {
       const reps = parseRange(prescription.reps);
@@ -1231,7 +1221,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           // presenting a reduced delivery as though it were the full
           // request.
           (requested !== sets ? ` — requested ${requested}, delivered ${sets} (reason: progression/recovery constraint)` : '') +
-          ` (${desiredWeekly} desired weekly, ${eligibleDaysThisWeek.length} session(s)/week: ${eligibleDaysThisWeek.join(', ')} — session-by-session, not divided evenly, per Surgical Fix Pass §2/§6). ` +
+          ` (${desiredWeekly} desired weekly reference; a real due exposure — expected every ~${exposureDecision.expected_exposure_interval_days} day(s), ` +
+          `${exposureDecision.last_exposure_date ? `previous exposure ${exposureDecision.last_exposure_date}` : 'no prior exposure known'} — Post-v2 Corrective Fix §5/§9, never desiredWeekly/eligible-days division). ` +
           `Reps ${reps.min}-${reps.max}, RIR ${rir.min}-${rir.max} per Blueprint's development package.` +
           (progressionDecision ? ` Progression: ${progressionDecision.recommendation} — ${progressionDecision.reasoning}` : ' First-time prescription — no prior performance of this exact exercise to progress from.') +
           (exerciseIndex === 0 && badmintonLowerBodyReduce ? ` Badminton (remediation §9): ${recovery.reasoning}` : ''),
@@ -1244,7 +1235,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           recovery,
           volume_decision: volumeDecision,
           session_purpose: purposeThisDay,
-          weekly_allocation: weeklyAllocation,
+          exposure_decision: exposureDecision,
           selection: selectionDecision,
         },
       };
@@ -1272,18 +1263,65 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // (unchanged from before this spec), so only the last day's
     // multi-exercise absorption could ever cram more than one real
     // exposure's worth of volume into a single session.
+    // Post-v2 Corrective Fix §5/§9/§29: this target's own expected
+    // exposure interval, in days — derived from its Blueprint
+    // development-package frequency reference when one exists, or
+    // Blueprint's universal typical_starting_range_per_week midpoint
+    // otherwise. This — never a precomputed, calendar-week-capped list
+    // of "eligible days" — is what decides whether the target is due
+    // for another real exposure on any given real day, so its ACTUAL
+    // cadence (checked against its own real last-trained date) places
+    // it, never "how many compatible days exist in this Monday-Sunday
+    // window."
     const sessionCap = developmentReference?.direct_sets_per_exposure ?? null;
+    const sessionsPerWeekForInterval = developmentReference?.sessions_per_week_reference ?? globalFallbackSessionsPerWeek;
+    // floor, not round: this is a MINIMUM real spacing, not an average —
+    // a 2x/week target trained Monday and again Thursday (a 3-day gap)
+    // is the textbook-correct real-world cadence for that frequency, and
+    // rounding up to 4 would incorrectly mark Thursday not yet due.
+    const expectedExposureIntervalDays = Math.max(1, Math.floor(7 / Math.max(sessionsPerWeekForInterval, 0.1)));
+
+    // The target's most recent known direct-exposure date, as of the
+    // start of this generation run — real history only. Advances ONLY
+    // when THIS SAME run places a real exposure on an earlier real day
+    // this week, so a later real day correctly sees it; never reset
+    // because a new calendar week began (§5.4/§8).
+    let simulatedLastExposureDate: string | null = target.last_trained_date;
+    let everCompatibleThisRun = false;
     let lastAttemptedExerciseId: BlueprintId | null = null;
     let everAttemptedARealCandidate = false;
+    // The most recently computed real exposure-cycle decision — kept so
+    // the end-of-run summary skip (when nothing was ever placed) can
+    // carry real, structured `last_exposure_date`/`days_since_last_exposure`
+    // facts (spec §43) rather than nothing at all.
+    let lastComputedExposureDecision: ExposureCycleDecision | null = null;
 
-    for (let dayIdx = 0; dayIdx < eligibleDaysThisWeek.length && remainingWeeklySets > 0; dayIdx++) {
-      const day = eligibleDaysThisWeek[dayIdx]!;
+    for (const day of orderedGymDays) {
+      if (remainingWeeklySets <= 0) break;
       const date = dateForWeekday.get(day)!;
-      const isLastDay = dayIdx === eligibleDaysThisWeek.length - 1;
       const purposeThisDay = isPhysique ? (sessionPurposes.get(day) ?? null) : null;
+      const compatibleToday = !isPhysique || (purposeThisDay !== null && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purposeThisDay));
+      const daysSinceLastExposure = simulatedLastExposureDate ? daysBetween(simulatedLastExposureDate, date) : null;
+      const isDueToday = daysSinceLastExposure === null || daysSinceLastExposure >= expectedExposureIntervalDays;
+      const exposureDecision: ExposureCycleDecision = {
+        session_purpose_today: purposeThisDay,
+        compatible_today: compatibleToday,
+        last_exposure_date: simulatedLastExposureDate,
+        days_since_last_exposure: daysSinceLastExposure,
+        expected_exposure_interval_days: expectedExposureIntervalDays,
+        is_due_today: compatibleToday && isDueToday,
+        reasoning: !compatibleToday
+          ? `${target.target_type} "${target.target_id}": ${date} (${day}) is not a compatible training day for this target (session purpose: ${purposeThisDay ?? 'none'}).`
+          : !isDueToday
+            ? `${target.target_type} "${target.target_id}": not yet due for another real exposure on ${date} — last real exposure ${simulatedLastExposureDate}, ${daysSinceLastExposure} day(s) ago (expected interval ~${expectedExposureIntervalDays} day(s)).`
+            : `${target.target_type} "${target.target_id}": due for a real exposure on ${date} — ${simulatedLastExposureDate ? `last real exposure ${simulatedLastExposureDate}, ${daysSinceLastExposure} day(s) ago` : 'never trained before'} (expected interval ~${expectedExposureIntervalDays} day(s)).`,
+      };
+      lastComputedExposureDecision = exposureDecision;
+      log.push(exposureDecision.reasoning);
+      if (compatibleToday) everCompatibleThisRun = true;
+      if (!exposureDecision.is_due_today) continue;
 
-      // §16's Monday rule, enforced per real day (not just the day the
-      // caller happens to be asking about) — assignSessionPurposes
+      // §16's Monday rule, enforced per real day — assignSessionPurposes
       // already keeps 'legs' off Monday, so this only ever fires for a
       // target whose compatible purposes somehow still included an
       // actually-forbidden slot.
@@ -1292,127 +1330,112 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
 
       const plannedTodayIds = plannedExerciseIdsByDate.get(date) ?? [];
 
-      if (isLastDay) {
-        // Consolidated Fix §2/§3 (retained) + One-Pass Dev Spec v2 §1.1/
-        // §7/§25/§26 (new): the target's LAST real session this week —
-        // 0/1/multiple exercise construction (Fix C) still absorbs
-        // real remaining need, but now bounded at TWO independent
-        // ceilings: (a) every placed exercise still stays capped at its
-        // own authored per-session `sets` figure (Consolidated Fix
-        // §3/§15.B, unchanged), and (b) — new — the day's own total
-        // delivery is also capped at `sessionCap` when a per-exposure
-        // reference exists, so this last real exposure this week can
-        // never absorb MORE than one exposure's natural worth merely
-        // because it happens to be the only (or last) real chance this
-        // week. A prior architecture let the last day absorb the ENTIRE
-        // remaining weekly reference via as many additional exercises as
-        // needed regardless of (b) — exactly the "cram multiple
-        // exposures into one session" anti-pattern §7.3's worked example
-        // forbids (a frequency of 2 with only 1 real compatible day this
-        // week must deliver exactly ONE exposure this week, never two
-        // crammed together). Volume this session's real per-exposure
-        // budget cannot absorb is left genuinely unmet (surfaced via
-        // unmetDirectSets below) rather than crammed in — exactly what
-        // spec §3/§25 ask for.
-        let pool = [...dayCandidatePool];
-        const placedTodayIds: BlueprintId[] = [];
-        let sessionRemaining = sessionCap === null ? remainingWeeklySets : Math.min(remainingWeeklySets, sessionCap);
-        // Surgical Fix Pass §12-16 (retained): Blueprint's own package
-        // exercise count is NOT the ceiling here — the loop continues
-        // purely on real remaining need, real candidate availability,
-        // and (new) this session's own natural per-exposure budget.
-        // `pool` already shrinks by one real candidate per iteration, so
-        // this is bounded by the real number of feasible/prescribed
-        // candidates for this target, never an invented cap.
-        while (remainingWeeklySets > 0 && sessionRemaining > 0 && pool.length > 0) {
-          const attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
-          everAttemptedARealCandidate = true;
-          lastAttemptedExerciseId = attempt.selection.exercise_id;
-          if (!attempt.prescription) {
-            // Blueprint Candidate Fix: this specific candidate has no
-            // resolvable Blueprint prescription (checked at any package
-            // level, or an outside-Blueprint one) — remove ONLY this
-            // one and retry with the next-best real candidate still in
-            // the pool (spec §5's "substitute when the preferred pick
-            // doesn't work out"), rather than giving up on the whole
-            // target. A genuine data gap is reported only once, after
-            // every real eligible day this week has been tried with
-            // nothing ever placed for this target (see after the outer
-            // day loop below).
-            pool = pool.filter((id) => id !== attempt.selection.exercise_id);
-            continue;
-          }
-          pool = pool.filter((id) => id !== attempt.selection.exercise_id);
-          placedTodayIds.push(attempt.selection.exercise_id);
-          // Surgical Fix Pass §7-10 / Consolidated Fix §3: charge both
-          // the week's remaining need AND today's own per-exposure
-          // budget by the DELIVERED amount, never the pre-reduction
-          // natural cap — an undelivered set was never actually placed,
-          // so it must stay available for a later session to genuinely
-          // deliver (never silently written off). This exercise's own
-          // authored per-session cap (attempt.prescription.sets) is
-          // ALWAYS a ceiling here too — never bypassed, even when it's
-          // the sole remaining usable candidate for this target's last
-          // session this week (Consolidated Fix §3/§15.B).
-          const requested = attempt.prescription.sets === null ? sessionRemaining : Math.min(sessionRemaining, attempt.prescription.sets);
-          const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
-          const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
-          remainingWeeklySets -= delivered;
-          sessionRemaining -= delivered;
-          finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, delivered, requested);
-          if (attempt.prescription.sets === null) break;
-        }
-      } else {
-        // Every OTHER eligible day gets exactly one exercise — capped
-        // at that exercise's own Blueprint-authored per-session `sets`
-        // figure (or the whole remaining amount if smaller, or if no
-        // Blueprint sets figure exists) — never dividing the weekly
-        // total evenly across sessions. Blueprint Candidate Fix: the
-        // same real "remove this one, retry the next-best real
-        // candidate" substitution as the last-day loop above — a
-        // top-ranked candidate with no resolvable prescription must
-        // never silently leave this day empty when a lower-ranked, but
-        // still real and prescribable, candidate remains in the pool.
-        let dayPool = dayCandidatePool;
-        let attempt = attemptSelection(dayPool, [], plannedTodayIds);
+      // Post-v2 Corrective Fix §9.2/§13: every DUE real exposure gets
+      // 0/1/multiple exercise construction, bounded at TWO independent
+      // ceilings: (a) every placed exercise stays capped at its own
+      // authored per-session `sets` figure (Consolidated Fix §3/§15.B,
+      // unchanged), and (b) the day's own total delivery is also capped
+      // at `sessionCap` (this target's natural per-exposure amount) when
+      // a per-exposure reference exists — so no single real exposure can
+      // ever absorb more than one exposure's natural worth, regardless
+      // of how many real due days occur this week. There is no more
+      // "only the last eligible day may use multiple exercises" special
+      // case: since due-ness now genuinely gates WHICH days receive any
+      // work at all, every day that clears the gate IS its own complete,
+      // independent exposure.
+      let pool = [...dayCandidatePool];
+      const placedTodayIds: BlueprintId[] = [];
+      let sessionRemaining = sessionCap === null ? remainingWeeklySets : Math.min(remainingWeeklySets, sessionCap);
+      let placedAnyToday = false;
+      // Surgical Fix Pass §12-16 (retained): Blueprint's own package
+      // exercise count is NOT the ceiling here — the loop continues
+      // purely on real remaining need, real candidate availability, and
+      // this exposure's own natural per-exposure budget. `pool` already
+      // shrinks by one real candidate per iteration, so this is bounded
+      // by the real number of feasible/prescribed candidates for this
+      // target, never an invented cap.
+      while (remainingWeeklySets > 0 && sessionRemaining > 0 && pool.length > 0) {
+        const attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
         everAttemptedARealCandidate = true;
         lastAttemptedExerciseId = attempt.selection.exercise_id;
-        while (!attempt.prescription && dayPool.length > 1) {
-          dayPool = dayPool.filter((id) => id !== attempt.selection.exercise_id);
-          attempt = attemptSelection(dayPool, [], plannedTodayIds);
-          lastAttemptedExerciseId = attempt.selection.exercise_id;
+        if (!attempt.prescription) {
+          // Blueprint Candidate Fix: this specific candidate has no
+          // resolvable Blueprint prescription (checked at any package
+          // level, or an outside-Blueprint one) — remove ONLY this one
+          // and retry with the next-best real candidate still in the
+          // pool (spec §5's "substitute when the preferred pick doesn't
+          // work out"), rather than giving up on the whole target. A
+          // genuine data gap is reported only once, after every real day
+          // this run has been tried with nothing ever placed for this
+          // target (see after the outer day loop below).
+          pool = pool.filter((id) => id !== attempt.selection.exercise_id);
+          continue;
         }
-        if (attempt.prescription) {
-          // Same requested-vs-delivered accounting as the last-day
-          // branch above: only the delivered amount is charged against
-          // the week's real remaining need (§7-10) — an undelivered set
-          // stays available for a later session, never silently
-          // consumed.
-          const requested = attempt.prescription.sets === null ? remainingWeeklySets : Math.min(remainingWeeklySets, attempt.prescription.sets);
-          const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
-          const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
-          remainingWeeklySets -= delivered;
-          finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, delivered, requested);
-        }
+        pool = pool.filter((id) => id !== attempt.selection.exercise_id);
+        placedTodayIds.push(attempt.selection.exercise_id);
+        // Surgical Fix Pass §7-10 / Consolidated Fix §3: charge both the
+        // week's remaining reference AND today's own per-exposure budget
+        // by the DELIVERED amount, never the pre-reduction natural cap —
+        // an undelivered set was never actually placed, so it must stay
+        // available for a later exposure to genuinely deliver (never
+        // silently written off). This exercise's own authored
+        // per-session cap (attempt.prescription.sets) is ALWAYS a
+        // ceiling here too — never bypassed (Consolidated Fix §3/§15.B).
+        const requested = attempt.prescription.sets === null ? sessionRemaining : Math.min(sessionRemaining, attempt.prescription.sets);
+        const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
+        const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
+        remainingWeeklySets -= delivered;
+        sessionRemaining -= delivered;
+        finalizePlacement(date, purposeThisDay, attempt.selection, attempt.prescription, attempt.progressionDecision ?? null, attempt.previousPerformance ?? null, delivered, exposureDecision, requested);
+        placedAnyToday = true;
+        if (attempt.prescription.sets === null) break;
       }
+
+      // §5.4/§8: this real placement — not a calendar boundary — is what
+      // advances this target's exposure state for any LATER real day
+      // this same run considers.
+      if (placedAnyToday) simulatedLastExposureDate = date;
     }
 
-    // One-Pass Dev Spec v2 §18/§19: a genuine Blueprint data-integrity
-    // gap is reported once, for the whole target, only after every real
-    // eligible day this week has actually been tried and NOTHING was
-    // ever placed — never mid-week (a later day may still succeed) and
-    // never confused with an ordinary "valid but not selected today"
-    // skip.
-    if (globalExerciseIndex === 0 && everAttemptedARealCandidate) {
-      weekLevelSkips.push({
-        target_type: target.target_type,
-        scope: 'week' as const,
-        reason_code: 'blueprint_data_integrity',
-        target_id: target.target_id,
-        classification,
-        reason: `Genuine Blueprint data gap: no candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) across every real eligible day this week — exposing this data gap rather than inventing one (One-Pass Dev Spec v2 §18 blueprint_data_integrity). Last attempted: "${lastAttemptedExerciseId}".`,
-        decision: makeSkipDecision({ volume_decision: volumeDecision, weekly_allocation: weeklyAllocation }),
-      });
+    // Post-v2 Corrective Fix §18/§21/§22: exactly one of two genuinely
+    // distinct outcomes when nothing was ever placed for this target
+    // this run — never confused with each other, and never reported
+    // mid-run (a later real day may still succeed).
+    if (globalExerciseIndex === 0) {
+      if (everAttemptedARealCandidate) {
+        // A real candidate was actually attempted at least once (this
+        // target WAS due on some real day) but nothing had a resolvable
+        // Blueprint prescription anywhere — a genuine data gap, distinct
+        // from an ordinary "not due yet" programming decision.
+        weekLevelSkips.push({
+          target_type: target.target_type,
+          scope: 'data_integrity' as const,
+          reason_code: 'blueprint_data_integrity',
+          target_id: target.target_id,
+          classification,
+          reason: `Genuine Blueprint data gap: no candidate for this target has a resolvable Blueprint prescription (development-package rep/RIR at any level, or an approved outside-Blueprint one) on any real day this target was due — exposing this data gap rather than inventing one (spec §18 blueprint_data_integrity). Last attempted: "${lastAttemptedExerciseId}".`,
+          decision: makeSkipDecision({ volume_decision: volumeDecision }),
+        });
+      } else {
+        // Post-v2 Corrective Fix §22: valid target, simply not due for
+        // this exposure — either no real day this run considered was
+        // compatible with it at all, or it is compatible but hasn't
+        // reached its own expected exposure interval yet. Never framed
+        // as "not this week" — it remains available for the next
+        // appropriate target-training session, which may fall in a
+        // later calendar week this same run doesn't cover.
+        weekLevelSkips.push({
+          target_type: target.target_type,
+          scope: 'exposure' as const,
+          reason_code: 'not_current_exposure',
+          target_id: target.target_id,
+          classification,
+          reason: everCompatibleThisRun
+            ? `Not due for this exposure yet — last real exposure ${target.last_trained_date ?? 'unknown'}, expected interval ~${expectedExposureIntervalDays} day(s). It remains available for the next appropriate target-training session.`
+            : `No real training day considered this run is compatible with this target. It remains available for the next appropriate target-training session.`,
+          decision: makeSkipDecision({ volume_decision: volumeDecision, exposure_decision: lastComputedExposureDecision }),
+        });
+      }
     }
   }
 
