@@ -234,9 +234,26 @@ function effectiveWeekActivity(
  * this is the ONLY function in this file that calls the planner. Every
  * other read path (a `/week` or `/today` call against an
  * already-persisted week) never reaches this function at all (spec
- * §18: a plain GET must not blindly regenerate). */
-export function computeFreshWeek(database: Database.Database, weekStart: string, budgetMinutes: number): { days: FreshDayInput[]; aggregates: { activeGoals: unknown; targetAllocations: unknown } } {
-  const input = assembleWeeklyPlanInput(database, weekStart, budgetMinutes);
+ * §18: a plain GET must not blindly regenerate).
+ *
+ * Same-Week History & Day-Specific Recovery Fix §3/§4: `weekStart`
+ * (always that week's own Monday) anchors WHICH CALENDAR WEEK is being
+ * generated; `historyAsOfDate` (defaults to `weekStart` only for a
+ * caller that hasn't been updated to pass the real one) is the SEPARATE
+ * real reference date the planner's own real training history is read
+ * through. Every canonical caller below now passes its own real current
+ * date here, so real Tue-Sun training already logged in THIS SAME
+ * programming week remains visible to later same-week
+ * generation/reconciliation — the planner no longer behaves as though
+ * it is still Monday morning once real training has happened later in
+ * the week. */
+export function computeFreshWeek(
+  database: Database.Database,
+  weekStart: string,
+  budgetMinutes: number,
+  historyAsOfDate: string = weekStart
+): { days: FreshDayInput[]; aggregates: { activeGoals: unknown; targetAllocations: unknown } } {
+  const input = assembleWeeklyPlanInput(database, weekStart, budgetMinutes, historyAsOfDate);
   const plan = buildWeeklyProgrammingPlan(input);
 
   const targetGoalMap = new Map<string, { goal_id: string; is_specialization: boolean }>(
@@ -356,7 +373,7 @@ programmingRouter.get('/week', (req, res) => {
   const budgetMinutes = defaultBudgetMinutes(database);
   const weekStart = programmingWeekStart(date);
 
-  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes));
+  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes, date));
 
   const user = new UsersRepo(database).getOrCreateDefault();
   const profile = new TrainingProfileRepo(database).get(user.id);
@@ -393,7 +410,7 @@ programmingRouter.put('/week/days/:day/activity', (req, res) => {
   new WeekActivityOverridesRepo(database).setOverride(profile.id, weekStart, day as Weekday, activity as DailyActivity);
 
   const budgetMinutes = defaultBudgetMinutes(database);
-  const { days, aggregates } = computeFreshWeek(database, weekStart, budgetMinutes);
+  const { days, aggregates } = computeFreshWeek(database, weekStart, budgetMinutes, date);
   const program = reconcileWeekProgram(database, weekStart, days, aggregates, { kind: 'activity_override', dayIndex: WEEKDAYS.indexOf(day as Weekday) });
 
   res.json(buildWeekResponse(database, weekStart, program, profile));
@@ -414,7 +431,7 @@ programmingRouter.get('/today', (req, res) => {
   const budgetMinutes = defaultBudgetMinutes(database);
   const weekStart = programmingWeekStart(date);
 
-  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes));
+  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes, date));
 
   const user = new UsersRepo(database).getOrCreateDefault();
   const profile = new TrainingProfileRepo(database).get(user.id);

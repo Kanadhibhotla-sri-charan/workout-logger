@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
-import { assembleAndBuildWorkout } from '../../src/engine/workoutBuilder.js';
+import { assembleAndBuildWorkout, assembleWeeklyProgrammingPlan } from '../../src/engine/workoutBuilder.js';
 import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
@@ -148,7 +148,7 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     expect(midPecPlan?.previous_performance).toEqual({ date: PRIOR_THURSDAY, weight: 60, reps: 8 });
   });
 
-  it('remediation §5: a target already trained today is skipped (avoid), proving days_since_target_last_trained is real', () => {
+  it('Same-Week History & Day-Specific Recovery Fix §6: a target already trained today gets no same-day repeat, proving days_since_target_last_trained is real — but this is a same-day exclusion, never a whole-week one', () => {
     setupProfileAndGoal(db, ['barbell', 'bench', 'rack', 'cable']);
 
     const sessionsRepo = new WorkoutSessionsRepo(db);
@@ -163,8 +163,15 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     const result = assembleAndBuildWorkout(db, MONDAY, 60);
     const midPecPlan = result.exercises.find((e) => e.target_id === 'mid-pec');
     expect(midPecPlan).toBeUndefined();
-    const skip = result.skipped_targets.find((s) => s.target_id === 'mid-pec');
-    expect(skip?.reason).toContain('recovery');
+
+    // The core requirement of this fix: Monday's own real same-day
+    // exclusion must never be promoted into removing mid-pec from the
+    // ENTIRE week — a later real, compatible, genuinely-due day (Friday,
+    // push/upper-compatible, correctly spaced from Monday) still gets it.
+    const week = assembleWeeklyProgrammingPlan(db, MONDAY, 60);
+    const friday = week.sessions.find((s) => s.date === '2026-09-04')!;
+    const fridayMidPec = friday.plannedWork.filter((w) => w.target_id === 'mid-pec');
+    expect(fridayMidPec.length).toBeGreaterThan(0);
   });
 
   it('remediation §7/§14: a real workout is a mix of specialization AND normal_development/maintenance work, with specialization protected when time is scarce', () => {

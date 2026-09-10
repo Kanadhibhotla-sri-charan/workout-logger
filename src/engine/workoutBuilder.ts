@@ -947,18 +947,27 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       selection: overrides.selection ?? null,
     });
 
-    if (recovery.priority_adjustment === 'avoid') {
-      weekLevelSkips.push({
-        target_type: target.target_type,
-        scope: 'exposure' as const,
-        reason_code: 'recovery',
-        target_id: target.target_id,
-        classification,
-        reason: `recovery: ${recovery.reasoning}`,
-        decision: makeSkipDecision(),
-      });
-      continue;
-    }
+    // Same-Week History & Day-Specific Recovery Fix §6/§7: `recovery`
+    // above is a per-target, once-per-run same-day signal
+    // (`days_since_target_last_trained === 0`, real history as of
+    // `historyAsOfDate` — see recoveryEngine.ts) that is only ever TRUE
+    // for the one real day that actually equals that reference date. It
+    // must never itself gate the whole target out of the entire week's
+    // day loop below (the previous `if (recovery.priority_adjustment ===
+    // 'avoid') { ...; continue; }` here did exactly that — a real
+    // same-day repeat correctly avoided on, say, Monday incorrectly
+    // removed the target from Tuesday through Sunday too). The
+    // legitimate "don't repeat the same real day" protection this signal
+    // exists for is already fully and correctly enforced, per real day,
+    // by the day loop's own minimum-spacing/exposure-cycle gate directly
+    // below (`expectedExposureIntervalDays` is always >= 1, so a real
+    // candidate day whose `daysSinceLastExposure` is 0 is always found
+    // not-due there) — evaluated fresh against `simulatedLastExposureDate`
+    // for every real day this run considers, not a single static
+    // week-wide fact. `recovery.priority_adjustment` remains available
+    // below (badminton lower-body trim, ranking tie-break, and the
+    // explanation `decision.recovery` field) — only its former blanket
+    // whole-week exclusion role is removed.
 
     // Remediation §9: badminton must produce real, targeted programming
     // effects — never a blanket weekly-volume cut (that stays gated by
@@ -2002,10 +2011,29 @@ export function gatherRecentBadmintonSignal(
  * (each with its own real `goal_id`/`goal_priority`/`is_specialization`)
  * the engine itself used, to enrich a `WeeklyProgrammingPlan`'s
  * `targetAllocations` with which real goal a target belongs to for
- * display (spec §16) — never a second, re-derived goal/target mapping. */
-export function assembleWeeklyPlanInput(db: Database.Database, date: string, budgetMinutes: number): WeeklyPlanInput {
-  const state = buildTrainingState(db, date);
-  const weekday = weekdayOfDate(date);
+ * display (spec §16) — never a second, re-derived goal/target mapping.
+ *
+ * Same-Week History & Day-Specific Recovery Fix §3: `date` anchors WHICH
+ * CALENDAR WEEK is being programmed (its own Monday, via
+ * `programmingWeekStart(date)` below, is the week every day in the
+ * returned plan belongs to) — it is NOT, by itself, how much real
+ * training history the planner may see. `historyAsOfDate` is the
+ * separate, explicit answer to "how much real training history do I
+ * know about" (real logged history is never read past this date). It
+ * defaults to `date` so every single-day caller (assembleAndBuildWorkout/
+ * assembleWeeklyProgrammingPlan below, where `date` already IS the one
+ * real day being asked about) is completely unaffected by this
+ * parameter's existence. The one caller that must NOT rely on that
+ * default is the weekly-generation path (computeFreshWeek in
+ * src/server/routes/programming.ts) — there, `date` is deliberately the
+ * week's Monday (for calendar structure) while `historyAsOfDate` is
+ * threaded through as the real current/reference date, so real Tue-Sun
+ * training already logged in the SAME programming week remains visible
+ * to that week's own later regeneration/reconciliation, instead of the
+ * planner behaving as though it is still Monday morning. */
+export function assembleWeeklyPlanInput(db: Database.Database, date: string, budgetMinutes: number, historyAsOfDate: string = date): WeeklyPlanInput {
+  const state = buildTrainingState(db, historyAsOfDate);
+  const weekday = weekdayOfDate(historyAsOfDate);
   const assessmentsRepo = new AestheticAssessmentsRepo(db);
   const badmintonRepo = new BadmintonSessionDetailsRepo(db);
   const sessionsRepo = new WorkoutSessionsRepo(db);
@@ -2066,7 +2094,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
       rolling_window_days: state.rolling_window_days,
       most_recent_assessment: mostRecentAssessment,
       review_cadence_days: reviewCadenceDays,
-      days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, date) : null,
+      days_since_target_last_trained: mostRecentTouch ? daysBetween(mostRecentTouch.date, historyAsOfDate) : null,
       last_trained_date: mostRecentTouch?.date ?? null,
       recent_direct_exposure_dates: recentDirectExposureDates,
       recent_badminton: recentBadmintonSignal,
@@ -2180,7 +2208,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
 
   return {
     weekStart,
-    today: date,
+    today: historyAsOfDate,
     todayWeekday: weekday,
     todayBudgetMinutes: budgetMinutes,
     // Surgical Fix Pass §4/§5: every OTHER real day this week's weekly

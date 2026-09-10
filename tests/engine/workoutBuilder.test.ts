@@ -193,17 +193,34 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
     }
   });
 
-  it('skips (avoids) a target already trained today, per recoveryEngine', () => {
-    const result = buildWorkout({
+  it('Same-Week History & Day-Specific Recovery Fix §6: avoids a same-day repeat for a target already trained today, per recoveryEngine/spacing — but this is day-scoped, never a whole-week exclusion', () => {
+    // last_trained_date is set consistently with days_since_target_last_trained
+    // (real production data always keeps these two in lockstep — see
+    // assembleWeeklyPlanInput's own doc comment on last_trained_date).
+    const target = baseTarget({ days_since_target_last_trained: 0, last_trained_date: '2026-08-31' });
+    const monday = buildWorkout({
       date: '2026-08-31',
       weekday: 'monday',
       budget_minutes: 60,
       available_equipment: CHEST_EQUIPMENT,
       available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
-      targets: [baseTarget({ days_since_target_last_trained: 0 })],
+      targets: [target],
     });
-    expect(result.exercises).toEqual([]);
-    expect(result.skipped_targets[0]!.reason).toContain('recovery');
+    expect(monday.exercises).toEqual([]);
+
+    // The core requirement of this fix: the SAME target, evaluated for a
+    // later real day this week, is not permanently excluded — it gets
+    // real work once genuinely due and compatible again (Friday, for
+    // this push/upper-compatible target).
+    const friday = buildWorkout({
+      date: '2026-09-04',
+      weekday: 'friday',
+      budget_minutes: 60,
+      available_equipment: CHEST_EQUIPMENT,
+      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      targets: [target],
+    });
+    expect(friday.exercises.length).toBeGreaterThan(0);
   });
 
   it('a stagnant target never gets an automatic volume increase — maintains at its existing (non-zero) volume instead', () => {
@@ -476,19 +493,30 @@ describe('buildWorkout — spec §19 pipeline (pure)', () => {
       expect(planned.decision.selection?.substituted_from).toBeNull();
     });
 
-    it('a target skipped before any exposure-cycle decision runs carries recovery but null volume_decision/exposure_decision/selection — never a fabricated decision', () => {
+    it('Same-Week History & Day-Specific Recovery Fix §6/§7: a target genuinely not due today (no other real day this run to succeed on) carries real recovery/volume/exposure_decision facts but null selection — never a fabricated decision', () => {
+      // Only Monday is available this run (no later real day for this
+      // target to succeed on), so the not-due-today outcome genuinely
+      // produces a week-level skip here — unlike the multi-day fixtures
+      // elsewhere in this file, where the same same-day fact no longer
+      // prevents a later real day from succeeding (Fix §6's own point).
       const result = buildWorkout({
         date: '2026-08-31',
         weekday: 'monday',
         budget_minutes: 60,
         available_equipment: CHEST_EQUIPMENT,
-        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
-        targets: [baseTarget({ days_since_target_last_trained: 0 })], // trained today -> 'avoid'
+        available_training_days: ['monday'],
+        targets: [baseTarget({ days_since_target_last_trained: 0, last_trained_date: '2026-08-31' })], // trained today
       });
       const skip = result.skipped_targets.find((s) => s.target_id === 'mid-pec')!;
+      expect(skip.reason_code).toBe('not_current_exposure');
+      // The real same-day fact is still visible on the decision (never
+      // discarded) — it simply no longer short-circuits the whole target
+      // before volume/exposure-cycle decisions ever run.
       expect(skip.decision.recovery.priority_adjustment).toBe('avoid');
-      expect(skip.decision.volume_decision).toBeNull();
-      expect(skip.decision.exposure_decision).toBeNull();
+      expect(skip.decision.volume_decision).not.toBeNull();
+      expect(skip.decision.exposure_decision).not.toBeNull();
+      expect(skip.decision.exposure_decision!.is_due_today).toBe(false);
+      // Exercise selection genuinely never ran — never fabricated.
       expect(skip.decision.selection).toBeNull();
     });
 

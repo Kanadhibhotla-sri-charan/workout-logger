@@ -26,12 +26,21 @@ function db(req: import('express').Request): Database.Database {
  * logged/corrected for a past or future week never touches a program
  * this request has no reason to regenerate or adapt. A pure no-op (via
  * reconcileAfterActualTraining's own guard) when that week has never
- * been persisted at all — nothing exists yet to adapt. */
+ * been persisted at all — nothing exists yet to adapt.
+ *
+ * Same-Week History & Day-Specific Recovery Fix §4/§14: the real
+ * current date (`today`, not `weekStart`) is threaded through to
+ * `computeFreshWeek` as its own explicit `historyAsOfDate` — this is
+ * exactly the canonical reconciliation path spec §14 requires: after
+ * completing e.g. a Tuesday workout, this recomputes the week with real
+ * history read through TODAY (which already includes that just-
+ * completed Tuesday session), not through the week's Monday. */
 function adaptCurrentWeekIfNeeded(database: Database.Database, sessionDate: string): void {
   const weekStart = programmingWeekStart(sessionDate);
-  if (weekStart !== programmingWeekStart(todayForUser(database))) return;
+  const today = todayForUser(database);
+  if (weekStart !== programmingWeekStart(today)) return;
   const budgetMinutes = defaultBudgetMinutes(database);
-  reconcileAfterActualTraining(database, weekStart, sessionDate, () => computeFreshWeek(database, weekStart, budgetMinutes));
+  reconcileAfterActualTraining(database, weekStart, sessionDate, () => computeFreshWeek(database, weekStart, budgetMinutes, today));
 }
 
 workoutsRouter.get('/', (req, res) => {

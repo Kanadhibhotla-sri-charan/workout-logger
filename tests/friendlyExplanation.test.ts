@@ -199,6 +199,24 @@ describe('buildFriendlySkipReasoning — One-Pass Dev Spec v2 §18/§19: switche
     expect(text).toContain('2026-09-07');
   });
 
+  describe('Same-Week History & Day-Specific Recovery Fix §9/§15/§16: "earlier today" is truthful, never a stale planner reference', () => {
+    it('says "earlier today" only when the real last-trained date genuinely equals the evaluated day (days_since === 0)', () => {
+      const text = buildFriendlySkipReasoning(
+        baseSkip({ reason_code: 'recovery', decision: { ...baseSkip().decision, last_trained: { date: '2026-09-11', days_since: 0 } } })
+      );
+      expect(text).toContain('earlier today');
+      expect(text).not.toContain('2026-09-11'); // no duplicated date string alongside "earlier today"
+    });
+
+    it('never says "earlier today" for a genuinely earlier real training date — states the actual date instead (days_since > 0)', () => {
+      const text = buildFriendlySkipReasoning(
+        baseSkip({ reason_code: 'recovery', decision: { ...baseSkip().decision, last_trained: { date: '2026-09-08', days_since: 3 } } })
+      );
+      expect(text).not.toContain('earlier today');
+      expect(text).toContain('2026-09-08');
+    });
+  });
+
   it('a target not due for this exposure reads as a scheduling/exposure reason, distinguishing valid-but-not-due from invalid, never framed as "not this week" (Post-v2 Corrective Fix §22)', () => {
     const text = buildFriendlySkipReasoning(baseSkip({ reason_code: 'not_current_exposure' }));
     expect(text).toContain("isn't due for this exposure");

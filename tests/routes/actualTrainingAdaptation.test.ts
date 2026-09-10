@@ -104,7 +104,9 @@ describe('Phase 7 — remaining-week adaptation from real completed training (sp
 
     const repo = new WeeklyProgramRepo(db);
     const thursdayBefore = repo.getByWeekStart(weekStart)!.sessions.find((s) => s.day_index === 3);
-    const quadsRef = getDevelopmentReference('physique_target', 'quads', 'efficient').weekly_direct_set_reference!;
+    const quadsReference = getDevelopmentReference('physique_target', 'quads', 'efficient');
+    const quadsRef = quadsReference.weekly_direct_set_reference!;
+    const quadsSessionCap = quadsReference.direct_sets_per_exposure!;
     expect(quadsRef).toBeGreaterThan(0);
 
     // Comfortably exceed quads' own real Efficient reference in one
@@ -115,21 +117,27 @@ describe('Phase 7 — remaining-week adaptation from real completed training (sp
     const after = await getWeek();
     const thursdayAfter = repo.getByWeekStart(weekStart)!.sessions.find((s) => s.day_index === 3);
 
-    // Thursday (still unlocked) must reflect the new real accumulated
-    // exposure — quads no longer needs fresh direct development work
-    // this week, so it must not appear as normal_development/planned
-    // work on Thursday's persisted snapshot, and Thursday's session
-    // identity may have genuinely changed as a real consequence (never
-    // required to stay byte-identical, unlike an UNRELATED day).
+    // Same-Week History & Day-Specific Recovery Fix: Thursday remains a
+    // genuinely due, real second exposure this week (quads' own
+    // real ~2/week frequency reference, correctly spaced from Monday) —
+    // the exposure-cycle architecture (established and tested in earlier
+    // phases) never treats "delivered a lot in one session" as "not due
+    // again this week," so Thursday legitimately still receives quads
+    // work. What this test actually protects (never a blind "planned
+    // minus actual, add the difference" rule) is that Thursday's own
+    // real delivered amount stays bounded by quads' own real per-
+    // exposure development reference — never an inflated, unbounded
+    // compensatory session manufactured merely because Monday's actual
+    // volume happened to be large.
     const thursdayQuadsWork = (thursdayAfter?.snapshot as any)?.plannedWork?.filter((w: any) => w.target_id === 'quads') ?? [];
-    expect(thursdayQuadsWork.length).toBe(0);
+    const thursdayQuadsSets = thursdayQuadsWork.reduce((sum: number, w: any) => sum + w.sets, 0);
+    expect(thursdayQuadsSets).toBeLessThanOrEqual(quadsSessionCap);
 
-    // Never a blind "planned minus actual, add the difference" rule:
-    // Thursday's own real day from the API never shows quads work
-    // either, and the day's estimatedMinutes reflect a real, smaller
-    // recomputation — not an inflated compensatory session.
     const thursdayFromApi = after.days.find((d: any) => d.date === thursdayDate);
-    expect(thursdayFromApi.plannedWork.some((w: any) => w.target_id === 'quads')).toBe(false);
+    const thursdayApiQuadsSets = thursdayFromApi.plannedWork
+      .filter((w: any) => w.target_id === 'quads')
+      .reduce((sum: number, w: any) => sum + w.sets, 0);
+    expect(thursdayApiQuadsSets).toBeLessThanOrEqual(quadsSessionCap);
 
     // The day whose real training triggered this adaptation must have
     // been genuinely reconciled too — if it changed, its snapshot
@@ -173,19 +181,29 @@ describe('Phase 7 — remaining-week adaptation from real completed training (sp
     const mondayDate = before.days.find((d: any) => d.weekday === 'monday').date;
     const weekStart = currentWeekStart();
 
-    const quadsRef = getDevelopmentReference('physique_target', 'quads', 'efficient').weekly_direct_set_reference!;
+    const quadsReference = getDevelopmentReference('physique_target', 'quads', 'efficient');
+    const quadsSessionCap = quadsReference.direct_sets_per_exposure!;
     // Simulates a genuinely unplanned exercise the user added themselves
     // via Add Unplanned Exercise — same POST /:id/exercises path, real
     // Blueprint exercise id, comfortably exceeding the reference.
-    await logCompletedQuadsSession(mondayDate, quadsRef + 6);
+    await logCompletedQuadsSession(mondayDate, quadsReference.weekly_direct_set_reference! + 6);
 
     const repo = new WeeklyProgramRepo(db);
     const program = repo.getByWeekStart(weekStart)!;
-    const anyRemainingQuadsWork = program.sessions
-      .filter((s) => s.day_index !== 0)
-      .flatMap((s) => (s.snapshot as any).plannedWork ?? [])
-      .filter((w: any) => w.target_id === 'quads');
-    expect(anyRemainingQuadsWork.length).toBe(0);
+    // Same-Week History & Day-Specific Recovery Fix: a real, large
+    // Monday session never permanently removes quads from the rest of
+    // the week (it remains genuinely due again per its own real
+    // frequency reference) — what this test actually protects is that
+    // this unplanned-but-real Monday training is genuinely counted (not
+    // silently discarded), and that no OTHER remaining day's own real
+    // delivered amount is inflated into an unbounded compensatory
+    // session merely because a lot of work happened on Monday.
+    for (const session of program.sessions.filter((s) => s.day_index !== 0)) {
+      const quadsSets = ((session.snapshot as any).plannedWork ?? [])
+        .filter((w: any) => w.target_id === 'quads')
+        .reduce((sum: number, w: any) => sum + w.sets, 0);
+      expect(quadsSets).toBeLessThanOrEqual(quadsSessionCap);
+    }
   });
 
   it('correcting an ALREADY-completed session\'s own actual work (user-modified work) is accepted, preserves history, and leaves the persisted week internally consistent', async () => {
