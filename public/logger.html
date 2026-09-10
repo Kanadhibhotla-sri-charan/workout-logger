@@ -554,24 +554,106 @@
       return lines.join('\n');
     }
 
+    // Android Copy Button Reliability Fix §4/§5/§6/§16: a progressive
+    // fallback that copies the EXACT same string via whichever mechanism
+    // the browser actually supports, rather than assuming the modern
+    // Clipboard API always succeeds (it silently rejects on some
+    // Android/Chrome builds, notably outside a user-gesture-derived
+    // secure-context grant). Feature-detected, never device/browser
+    // sniffed. Resolves `true` only if a copy mechanism actually
+    // reported success — never assumed, per §7.
+    async function copyTextToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (err) {
+          // Rejected promise or thrown exception — fall through to the
+          // synchronous execCommand fallback below rather than failing
+          // immediately (§4/§5).
+        }
+      }
+      // §6: a traditional, synchronous, browser-compatible fallback for
+      // when the modern API is unavailable or was just rejected — a
+      // temporary offscreen (never visibly shown, §6) textarea,
+      // selected and copied via document.execCommand.
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.top = '-9999px';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        textarea.setSelectionRange(0, text.length);
+        const copied = typeof document.execCommand === 'function' && document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return !!copied;
+      } catch (err) {
+        return false;
+      }
+    }
+
+    // Android Copy Button Reliability Fix §11: wraps a copy function
+    // with a monotonic attempt counter so a slower, OLDER attempt's
+    // async result can never overwrite a NEWER attempt's UI state (e.g.
+    // attempt 1 fails, attempt 2 — tapped before attempt 1's fallback
+    // resolved — succeeds; attempt 1 finishing last must not revert the
+    // UI back to failure). Extracted as its own factory (rather than
+    // inlined in the button's onClick) so this race-safety is directly
+    // testable — see tests/frontend/copyWorkoutText.test.ts.
+    function createCopyController(copyFn) {
+      let attemptId = 0;
+      return function attemptCopy(text, { onStart, onSuccess, onFailure, onClear }) {
+        const thisAttempt = ++attemptId;
+        onStart();
+        return copyFn(text).then((copied) => {
+          if (thisAttempt !== attemptId) return; // superseded by a newer attempt
+          if (copied) onSuccess();
+          else onFailure(text);
+          setTimeout(() => { if (thisAttempt === attemptId) onClear(); }, 3000);
+        });
+      };
+    }
+
     function buildCompletedFooter() {
       const bar = el('div', { class: 'logger-finish-bar' });
       bar.appendChild(el('p', { text: 'Workout completed', style: 'font-weight:700;margin:0 0 0.5rem' }));
       const row = el('div', { class: 'btn-row' });
+      let manualCopyBox = null;
       // Copy is for the performed-exercise table (gym sessions) — a
       // badminton day has no such table to copy.
       if (session.session_type !== 'badminton') {
         const copyStatus = el('span', { class: 'faint', style: 'align-self:center' });
+        // Android Copy Button Reliability Fix §8: the manual
+        // selectable-text fallback, shown ONLY when both the modern
+        // Clipboard API and the execCommand fallback fail (see
+        // createCopyController above for the stale-attempt guard).
+        manualCopyBox = el('div', { class: 'manual-copy-box', hidden: true, style: 'width:100%;margin-top:0.5rem' });
+        const manualCopyTextarea = el('textarea', {
+          rows: '6',
+          readonly: true,
+          style: 'width:100%;resize:vertical;font:inherit',
+          'aria-label': 'Workout text — select and copy manually',
+        });
+        manualCopyBox.appendChild(manualCopyTextarea);
+        const attemptCopy = createCopyController(copyTextToClipboard);
         const copyBtn = createButton({ label: 'Copy', variant: 'secondary', onClick: async () => {
           const text = buildCopyText(session, generated);
-          try {
-            if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('Clipboard API unavailable');
-            await navigator.clipboard.writeText(text);
-            copyStatus.textContent = 'Copied to clipboard';
-          } catch (err) {
-            copyStatus.textContent = "Couldn't copy automatically — please select and copy the text manually.";
-          }
-          setTimeout(() => { copyStatus.textContent = ''; }, 3000);
+          await attemptCopy(text, {
+            onStart: () => { manualCopyBox.hidden = true; copyStatus.textContent = ''; },
+            onSuccess: () => { copyStatus.textContent = 'Copied to clipboard'; },
+            onFailure: (failedText) => {
+              copyStatus.textContent = 'Automatic copy failed. Select the workout text below and copy it manually.';
+              manualCopyTextarea.value = failedText;
+              manualCopyBox.hidden = false;
+              manualCopyTextarea.focus();
+              manualCopyTextarea.select();
+            },
+            onClear: () => { copyStatus.textContent = ''; },
+          });
         }});
         row.appendChild(copyBtn);
         row.appendChild(copyStatus);
@@ -583,6 +665,7 @@
         await reload();
       }}));
       bar.appendChild(row);
+      if (manualCopyBox) bar.appendChild(manualCopyBox);
       return bar;
     }
 
