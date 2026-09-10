@@ -268,16 +268,21 @@ describe('Strict Bug-Fix §11-15/§31 "Multiple exercises": 0/1/multiple exercis
     // lives in the functional_goal path, exercised by
     // finalPassRequiredTests.test.ts Tests 18-20 (functional goals never
     // get a Blueprint package at all). What this test actually protects:
-    // a genuinely small weekly requirement (4 sets) legitimately spans 2
-    // real exercises here because each individual exercise's own authored
-    // per-exposure cap (2 sets) is smaller than the requirement — this is
-    // honest multi-exercise construction, not exposure-cramming.
+    // a genuinely small per-exposure prescription (4 sets — the target's
+    // whole real weekly total, since only ONE real compatible day exists
+    // this run) legitimately spans 2 real exercises here because each
+    // individual exercise's own authored per-exposure cap (2 sets) is
+    // smaller than the requirement — this is honest multi-exercise
+    // construction, not exposure-cramming. Final Remaining Corrective Fix
+    // §7/§19: with only one real compatible day, this target's stable
+    // per-exposure prescription equals its full weekly objective (never
+    // divided across exposures that don't actually occur).
     const result = buildWorkout({
       date: '2026-08-31',
       weekday: 'monday',
       budget_minutes: 60,
       available_equipment: FULL_EQUIPMENT,
-      available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+      available_training_days: ['monday'],
       targets: [normalDevTarget({ target_id: 'obliques', current_weekly_primary_sets: 4, weekly_exposure_units: 4, most_recent_assessment: { rating: 4, date: '2026-08-25' } })],
     });
     const exercises = result.exercises.filter((e) => e.target_id === 'obliques');

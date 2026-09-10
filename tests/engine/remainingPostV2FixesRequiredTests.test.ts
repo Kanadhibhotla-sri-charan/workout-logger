@@ -87,15 +87,14 @@ function weeklyInput(overrides: Partial<WeeklyPlanInput> = {}): WeeklyPlanInput 
   };
 }
 
-describe('Remaining Post-v2 Corrective Fixes §20 Test 1 — a spent weekly reference cannot stop a genuinely due later exposure', () => {
-  it('a target whose real weekly reference is fully delivered by its first real exposure this week still receives its second, genuinely due, real exposure', () => {
-    // 'obliques' (efficient package): weekly_direct_set_reference=16,
-    // direct_sets_per_exposure (sessionCap)=8, sessions_per_week=2.
-    // current_weekly_primary_sets set to EXACTLY sessionCap so the
-    // target's own real weekly reference is fully consumed the instant
-    // its first real exposure delivers a full session — precisely the
-    // "remainingWeeklySets == 0" state spec §9 says must never block a
-    // later real day this same run finds genuinely due.
+describe('Remaining Post-v2 Corrective Fixes §20 Test 1 — a due later exposure is never blocked, and (per the Final Remaining Corrective Fix) is never sized differently than an earlier one', () => {
+  it('a target due on two real days this week receives the same stable per-exposure prescription both times — the second is not blocked, and is not merely "whatever remains" of the first', () => {
+    // 'obliques' (efficient package): direct_sets_per_exposure (sessionCap)=8,
+    // sessions_per_week=2. current_weekly_primary_sets set to sessionCap
+    // so the target's own real weekly objective is exactly sessionCap —
+    // under the Final Remaining Corrective Fix's stable per-exposure
+    // model (weekly objective ÷ real exposure count this run), with
+    // exactly 2 real compatible/due days this run, each gets sessionCap/2.
     const developmentReference = getDevelopmentReference('physique_target', 'obliques', 'efficient');
     const sessionCap = developmentReference.direct_sets_per_exposure!;
     const target = normalDevTarget('obliques', {
@@ -112,15 +111,17 @@ describe('Remaining Post-v2 Corrective Fixes §20 Test 1 — a spent weekly refe
 
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
     const thursday = plan.sessions.find((s) => s.date === '2026-09-03')!;
-    const mondayWork = monday.plannedWork.filter((w) => w.target_id === 'obliques');
-    const thursdayWork = thursday.plannedWork.filter((w) => w.target_id === 'obliques');
+    const mondaySets = monday.plannedWork.filter((w) => w.target_id === 'obliques').reduce((sum, w) => sum + w.sets, 0);
+    const thursdaySets = thursday.plannedWork.filter((w) => w.target_id === 'obliques').reduce((sum, w) => sum + w.sets, 0);
 
-    expect(mondayWork.reduce((sum, w) => sum + w.sets, 0)).toBe(sessionCap);
-    // The core requirement: Thursday is not silently empty just because
-    // Monday's exposure already consumed the entire nominal weekly
-    // reference — it still receives a real, natural exposure.
-    expect(thursdayWork.length).toBeGreaterThan(0);
-    expect(thursdayWork.reduce((sum, w) => sum + w.sets, 0)).toBeGreaterThan(0);
+    // Thursday is not silently empty just because Monday already
+    // delivered a real exposure — it still receives a real, natural one.
+    expect(thursdaySets).toBeGreaterThan(0);
+    // The core requirement of THIS fix: the two due exposures are equal
+    // — Thursday's prescription is not "whatever remains" after Monday's
+    // own delivery, it is the SAME stable per-exposure figure.
+    expect(thursdaySets).toBe(mondaySets);
+    expect(mondaySets).toBe(Math.ceil(sessionCap / 2));
     // Never flagged as any kind of skip — it was never blocked.
     const thursdaySkip = thursday.skipped.find((s) => s.target_id === 'obliques');
     expect(thursdaySkip).toBeUndefined();

@@ -1175,24 +1175,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // (see the day-construction loop below), never by how many
     // exercises happen to be listed in a package.
 
-    // Remaining Post-v2 Corrective Fixes §2/§3/§9: `remainingWeeklyReference`
-    // is real reference/reporting-adjacent state, never an authoritative
-    // gate — it is read ONLY to size a due day's own exposure (so a
-    // 'maintain'/'introspect_needed' target's genuinely small real
-    // established volume, or a fresh target's conservative starting
-    // figure, isn't inflated to the package's full natural per-exposure
-    // amount on its first real exposure this run) and it is allowed to
-    // run out (or go negative) WITHOUT that ever blocking a later real
-    // day this run finds genuinely due — once exhausted, a due day still
-    // gets its own natural per-exposure amount (`sessionCap` when known)
-    // rather than nothing at all ("a target that is due should not be
-    // blocked solely because remainingWeeklySets == 0" — spec §9). This
-    // is the one, narrow, deliberate exception to "never touch it again":
-    // it can legitimately let a target's real total exceed its own
-    // nominal weekly reference when real cadence produces more due
-    // exposures than the reference alone implied (§8: "a development
-    // reference is not a promise... accept the actual programming").
-    let remainingWeeklyReference = fairShareWeekly;
     let globalExerciseIndex = 0;
 
     /** One real Gate-1-6 selection attempt, restricted to `pool`, plus
@@ -1395,6 +1377,55 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // rounding up to 4 would incorrectly mark Thursday not yet due.
     const expectedExposureIntervalDays = Math.max(1, Math.floor(7 / Math.max(sessionsPerWeekForInterval, 0.1)));
 
+    // Final Remaining Corrective Fix §3.C/§7/§19: this target's own
+    // STABLE per-exposure prescription — computed ONCE, here, and used
+    // identically for every real due day this run considers. Never a
+    // mutable weekly bucket that depletes as earlier due days deliver
+    // work: the whole point of this fix is that exposure 2's prescription
+    // must not depend on how much exposure 1 happened to consume.
+    //
+    // The divisor is this target's own REAL achievable exposure count
+    // this run — how many of `orderedGymDays` its session-purpose
+    // compatibility actually allows, capped at the Blueprint frequency
+    // reference (never MORE exposures than the reference implies, but
+    // also never fewer than what the target's real schedule can achieve
+    // just because a textbook reference assumes a different cadence).
+    // This is what correctly gives a target with only ONE real
+    // compatible day per week (e.g. a 3-day split with a single leg day)
+    // its FULL weekly objective on that one exposure, while a target
+    // compatible with several real days per week still divides evenly
+    // across its own real frequency-gated cadence — both computed purely
+    // from due-ness-independent schedule facts (session-purpose
+    // compatibility, a fixed per-week assignment), never from how much
+    // any day actually ends up delivering.
+    const compatibleDaysThisRun = isPhysique
+      ? orderedGymDays.filter((day) => {
+          const purpose = sessionPurposes.get(day) ?? null;
+          return purpose !== null && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purpose);
+        }).length
+      : orderedGymDays.length;
+    const realExposureCountThisRun = Math.max(1, Math.min(compatibleDaysThisRun, Math.ceil(sessionsPerWeekForInterval)));
+
+    // `fairShareWeekly` is this target's real weekly OBJECTIVE (already
+    // correctly derived — decideVolume's own recommendation, capped by
+    // this run's package-sharing fair share when applicable; §8: package
+    // sharing is a once-per-target allocation concern, orthogonal to this
+    // per-exposure derivation, not touched here). Dividing it by the real
+    // exposure count above yields a genuine per-exposure reference (§7's
+    // own worked derivation: "weekly development reference ÷ reference
+    // frequency = per-exposure development reference") — critically, this
+    // is what keeps a 'maintain'/'introspect_needed' target's real,
+    // established (and possibly small) weekly total from being inflated
+    // to the package's own unrelated natural per-exposure figure
+    // (`sessionCap`) merely because that figure is larger (§5/§9: never
+    // force the full development reference into an exposure just because
+    // a mutable bucket was removed). `sessionCap` still applies as the
+    // outer ceiling — a per-exposure prescription never exceeds one
+    // exposure's own natural worth, regardless of how large the weekly
+    // objective is (unchanged from every prior phase's cramming-
+    // regression guarantee).
+    const perExposurePrescription = Math.max(1, Math.min(sessionCap ?? Number.POSITIVE_INFINITY, Math.ceil(fairShareWeekly / realExposureCountThisRun)));
+
     // The target's most recent known direct-exposure date, as of the
     // start of this generation run — real history only. Advances ONLY
     // when THIS SAME run places a real exposure on an earlier real day
@@ -1490,23 +1521,14 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // independent exposure.
       let pool = [...dayCandidatePool];
       const placedTodayIds: BlueprintId[] = [];
-      // Remaining Post-v2 Corrective Fixes §2/§3/§9: this real due day's
-      // own exposure ceiling. While real reference remains
-      // (`remainingWeeklyReference > 0`), size normally against it (bounded
-      // by `sessionCap` when one exists) — this is what keeps a
-      // 'maintain'/'introspect_needed' target's genuinely small real
-      // established volume from being inflated on its first real exposure.
-      // Once that reference is exhausted, a genuinely due day still gets
-      // its own natural per-exposure amount (`sessionCap`, or the fallback
-      // reference figure with no better number) rather than nothing at
-      // all — the reference can run out; due-ness itself is never blocked
-      // by it (spec §9).
-      let sessionRemaining =
-        remainingWeeklyReference > 0
-          ? sessionCap === null
-            ? remainingWeeklyReference
-            : Math.min(remainingWeeklyReference, sessionCap)
-          : (sessionCap ?? fairShareWeekly);
+      // Final Remaining Corrective Fix §2/§4/§12: this real due day's own
+      // exposure ceiling is the target's STABLE `perExposurePrescription`
+      // (computed once, above, identically for every due day this run) —
+      // never a value that depends on what an earlier due day this same
+      // run already delivered. Badminton's real per-session trim is a
+      // legitimate per-exposure adjustment (not a weekly-budget one), so
+      // it is still applied fresh here, identically, on every due day.
+      let sessionRemaining = perExposurePrescription;
       if (badmintonLowerBodyReduce) sessionRemaining = Math.max(1, sessionRemaining - 1);
       let placedAnyToday = false;
       // Surgical Fix Pass §12-16 (retained): Blueprint's own package
@@ -1545,7 +1567,6 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
         const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
         sessionRemaining -= delivered;
-        remainingWeeklyReference -= delivered;
         // Post-v2 Corrective Fix v2 §12: credit this target's real
         // delivered sets toward its shared package's own running total —
         // whichever sibling target this same run processes next reads
