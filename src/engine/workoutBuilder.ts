@@ -1175,14 +1175,24 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // (see the day-construction loop below), never by how many
     // exercises happen to be listed in a package.
 
-    // Surgical Fix Pass §2/§6: this target's real weekly requirement is
-    // distributed session-by-session across its real eligible days, in
-    // real chronological order — NEVER `desiredWeekly /
-    // sessionsRemainingThisWeek`. Badminton's session-level trim is a
-    // real reduction to the target's TOTAL weekly work, applied once up
-    // front (before any day is planned) so a later day can never
-    // silently backfill it.
-    let remainingWeeklySets = badmintonLowerBodyReduce ? Math.max(1, fairShareWeekly - 1) : fairShareWeekly;
+    // Remaining Post-v2 Corrective Fixes §2/§3/§9: `remainingWeeklyReference`
+    // is real reference/reporting-adjacent state, never an authoritative
+    // gate — it is read ONLY to size a due day's own exposure (so a
+    // 'maintain'/'introspect_needed' target's genuinely small real
+    // established volume, or a fresh target's conservative starting
+    // figure, isn't inflated to the package's full natural per-exposure
+    // amount on its first real exposure this run) and it is allowed to
+    // run out (or go negative) WITHOUT that ever blocking a later real
+    // day this run finds genuinely due — once exhausted, a due day still
+    // gets its own natural per-exposure amount (`sessionCap` when known)
+    // rather than nothing at all ("a target that is due should not be
+    // blocked solely because remainingWeeklySets == 0" — spec §9). This
+    // is the one, narrow, deliberate exception to "never touch it again":
+    // it can legitimately let a target's real total exceed its own
+    // nominal weekly reference when real cadence produces more due
+    // exposures than the reference alone implied (§8: "a development
+    // reference is not a promise... accept the actual programming").
+    let remainingWeeklyReference = fairShareWeekly;
     let globalExerciseIndex = 0;
 
     /** One real Gate-1-6 selection attempt, restricted to `pool`, plus
@@ -1412,7 +1422,11 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     let lastComputedExposureDecision: ExposureCycleDecision | null = null;
 
     for (const day of orderedGymDays) {
-      if (remainingWeeklySets <= 0) break;
+      // Remaining Post-v2 Corrective Fixes §2/§9: every real day this
+      // target is considered on is evaluated for due-ness — there is no
+      // early exit here tied to a weekly set counter. Whether a real
+      // exposure happens is decided entirely below, by actual exposure
+      // history/frequency/cadence (`exposureDecision.is_due_today`).
       const date = dateForWeekday.get(day)!;
       const purposeThisDay = isPhysique ? (sessionPurposes.get(day) ?? null) : null;
       const compatibleToday = !isPhysique || (purposeThisDay !== null && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purposeThisDay));
@@ -1476,7 +1490,24 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // independent exposure.
       let pool = [...dayCandidatePool];
       const placedTodayIds: BlueprintId[] = [];
-      let sessionRemaining = sessionCap === null ? remainingWeeklySets : Math.min(remainingWeeklySets, sessionCap);
+      // Remaining Post-v2 Corrective Fixes §2/§3/§9: this real due day's
+      // own exposure ceiling. While real reference remains
+      // (`remainingWeeklyReference > 0`), size normally against it (bounded
+      // by `sessionCap` when one exists) — this is what keeps a
+      // 'maintain'/'introspect_needed' target's genuinely small real
+      // established volume from being inflated on its first real exposure.
+      // Once that reference is exhausted, a genuinely due day still gets
+      // its own natural per-exposure amount (`sessionCap`, or the fallback
+      // reference figure with no better number) rather than nothing at
+      // all — the reference can run out; due-ness itself is never blocked
+      // by it (spec §9).
+      let sessionRemaining =
+        remainingWeeklyReference > 0
+          ? sessionCap === null
+            ? remainingWeeklyReference
+            : Math.min(remainingWeeklyReference, sessionCap)
+          : (sessionCap ?? fairShareWeekly);
+      if (badmintonLowerBodyReduce) sessionRemaining = Math.max(1, sessionRemaining - 1);
       let placedAnyToday = false;
       // Surgical Fix Pass §12-16 (retained): Blueprint's own package
       // exercise count is NOT the ceiling here — the loop continues
@@ -1485,7 +1516,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // shrinks by one real candidate per iteration, so this is bounded
       // by the real number of feasible/prescribed candidates for this
       // target, never an invented cap.
-      while (remainingWeeklySets > 0 && sessionRemaining > 0 && pool.length > 0) {
+      while (sessionRemaining > 0 && pool.length > 0) {
         const attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
         everAttemptedARealCandidate = true;
         lastAttemptedExerciseId = attempt.selection.exercise_id;
@@ -1504,19 +1535,17 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         }
         pool = pool.filter((id) => id !== attempt.selection.exercise_id);
         placedTodayIds.push(attempt.selection.exercise_id);
-        // Surgical Fix Pass §7-10 / Consolidated Fix §3: charge both the
-        // week's remaining reference AND today's own per-exposure budget
-        // by the DELIVERED amount, never the pre-reduction natural cap —
-        // an undelivered set was never actually placed, so it must stay
-        // available for a later exposure to genuinely deliver (never
-        // silently written off). This exercise's own authored
-        // per-session cap (attempt.prescription.sets) is ALWAYS a
-        // ceiling here too — never bypassed (Consolidated Fix §3/§15.B).
+        // Surgical Fix Pass §7-10 / Consolidated Fix §3: charge today's
+        // own per-exposure budget by the DELIVERED amount, never the
+        // pre-reduction natural cap — an undelivered set was never
+        // actually placed. This exercise's own authored per-session cap
+        // (attempt.prescription.sets) is ALWAYS a ceiling here too —
+        // never bypassed (Consolidated Fix §3/§15.B).
         const requested = attempt.prescription.sets === null ? sessionRemaining : Math.min(sessionRemaining, attempt.prescription.sets);
         const reduceThisExercise = globalExerciseIndex === 0 && attempt.progressionDecision?.recommendation === 'reduce';
         const delivered = reduceThisExercise ? Math.max(1, requested - 1) : requested;
-        remainingWeeklySets -= delivered;
         sessionRemaining -= delivered;
+        remainingWeeklyReference -= delivered;
         // Post-v2 Corrective Fix v2 §12: credit this target's real
         // delivered sets toward its shared package's own running total —
         // whichever sibling target this same run processes next reads
