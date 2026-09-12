@@ -288,11 +288,21 @@ describe('correction §6 — bounded validation diagnostics', () => {
     expect(bounded[0]!.endsWith('[truncated]')).toBe(true);
   });
 
-  it('caps the total diagnostic payload at MAX_DIAGNOSTIC_TOTAL_CHARS', () => {
+  it('caps the total diagnostic payload at MAX_DIAGNOSTIC_TOTAL_CHARS — a hard bound, marker included', () => {
     const issues = Array.from({ length: MAX_DIAGNOSTIC_ISSUES }, () => 'y'.repeat(MAX_DIAGNOSTIC_ISSUE_CHARS));
     const bounded = boundDiagnosticIssues(issues);
     const totalChars = bounded.reduce((sum, i) => sum + i.length, 0);
-    expect(totalChars).toBeLessThanOrEqual(MAX_DIAGNOSTIC_TOTAL_CHARS + '[truncated]'.length);
+    // The trailing truncation marker is fit WITHIN the remaining
+    // budget (never appended on top of it), so this is a strict <=,
+    // not "plus a little extra for the marker."
+    expect(totalChars).toBeLessThanOrEqual(MAX_DIAGNOSTIC_TOTAL_CHARS);
+  });
+
+  it('the total-character bound holds even with an enormous number of issues (marker itself gets truncated to fit)', () => {
+    const manyHugeIssues = Array.from({ length: 100_000 }, () => 'z'.repeat(MAX_DIAGNOSTIC_ISSUE_CHARS));
+    const bounded = boundDiagnosticIssues(manyHugeIssues);
+    const totalChars = bounded.reduce((sum, i) => sum + i.length, 0);
+    expect(totalChars).toBeLessThanOrEqual(MAX_DIAGNOSTIC_TOTAL_CHARS);
   });
 
   it('AIOutputDomainInvalidError carries bounded diagnostics, never the raw unbounded issue list', () => {

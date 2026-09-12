@@ -125,7 +125,7 @@ Nothing here is persisted. Re-requesting the same date does not create or reuse 
 | 409 | `AI_TARGET_NOT_EDITABLE` | `targetDate` is in the past or already locked by a completed/in-progress workout session |
 | 500 | `AI_CONTEXT_INCOMPLETE` | Required application state (e.g. no `TrainingProfile`) is missing |
 
-`AI_OUTPUT_SCHEMA_INVALID`/`AI_OUTPUT_DOMAIN_INVALID`'s `details.issues` array is bounded (correction pass §6): at most 20 issues, each at most 500 characters, the whole array at most ~8,000 characters, with an explicit `[truncated]` marker when a limit was hit. Bounding only affects what is returned/logged — it never changes whether the underlying proposal was accepted or rejected.
+`AI_OUTPUT_SCHEMA_INVALID`/`AI_OUTPUT_DOMAIN_INVALID`'s `details.issues` array is bounded (correction pass §6): at most 20 issues, each at most 500 characters, and the combined length of every returned string — including any trailing `[truncated]`/omission marker — at most 8,000 characters, a hard cap (the marker is fit within the remaining budget, never appended past it). Bounding only affects what is returned/logged — it never changes whether the underlying proposal was accepted or rejected.
 
 No response ever includes the Velona API key, an authorization header, or a raw upstream payload.
 
@@ -136,7 +136,7 @@ No response ever includes the Velona API key, an authorization header, or a raw 
 - **"AI_PROVIDER_AUTHENTICATION_ERROR"** — the configured `VELONA_API_KEY` was rejected (HTTP 401/403). Not retried.
 - **"AI_PROVIDER_TIMEOUT"** — increase `VELONA_TIMEOUT_MS` if the configured model is genuinely slow, or check Velona's own status.
 - **"AI_PROVIDER_RATE_LIMITED" / "AI_PROVIDER_UNAVAILABLE"** — transient; the provider already retried up to `VELONA_MAX_RETRIES` times before surfacing this.
-- **"AI_OUTPUT_SCHEMA_INVALID" / "AI_OUTPUT_DOMAIN_INVALID"** — the model's response body is echoed in the error's `details.issues` array (safe, structured text only — never a raw provider payload) for debugging prompt/model quality issues.
+- **"AI_OUTPUT_SCHEMA_INVALID" / "AI_OUTPUT_DOMAIN_INVALID"** — for debugging prompt/model quality issues, the error's `details.issues` array contains only structured, application-authored validation messages (bounded per §6 above), each naming the specific field and value that failed (e.g. `"exercises[0].sets must equal Blueprint-authored value 3; received 8"`). The raw provider response body/payload is never included — only these derived, size-bounded messages.
 
 ## Security
 

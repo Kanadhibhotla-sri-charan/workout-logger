@@ -20,9 +20,13 @@ function truncateIssue(issue: string): string {
 
 /** Bounds a raw validation-issue list to a safe size for an API
  * response/log line: at most `MAX_DIAGNOSTIC_ISSUES` issues, each at
- * most `MAX_DIAGNOSTIC_ISSUE_CHARS` characters, and the whole list at
- * most `MAX_DIAGNOSTIC_TOTAL_CHARS` characters — with an explicit
- * `[truncated]` marker appended whenever either limit was hit. */
+ * most `MAX_DIAGNOSTIC_ISSUE_CHARS` characters, and the whole returned
+ * list — including any trailing `[truncated]`/omission marker — at most
+ * `MAX_DIAGNOSTIC_TOTAL_CHARS` characters combined. This is a hard cap:
+ * the marker itself is fit within the remaining budget (truncated
+ * further if the budget is nearly exhausted) rather than appended on
+ * top of it, so the sum of every returned string's length never
+ * exceeds `MAX_DIAGNOSTIC_TOTAL_CHARS`. */
 export function boundDiagnosticIssues(issues: readonly string[]): string[] {
   const perIssueBounded = issues.slice(0, MAX_DIAGNOSTIC_ISSUES).map(truncateIssue);
   const overflowCount = issues.length - perIssueBounded.length;
@@ -39,10 +43,18 @@ export function boundDiagnosticIssues(issues: readonly string[]): string[] {
     totalChars += issue.length;
   }
 
+  let marker: string | null = null;
   if (overflowCount > 0) {
-    bounded.push(`... ${overflowCount} more issue(s) omitted ${TRUNCATION_MARKER}`);
+    marker = `... ${overflowCount} more issue(s) omitted ${TRUNCATION_MARKER}`;
   } else if (truncatedByTotal) {
-    bounded.push(TRUNCATION_MARKER);
+    marker = TRUNCATION_MARKER;
+  }
+
+  if (marker !== null) {
+    const remaining = MAX_DIAGNOSTIC_TOTAL_CHARS - totalChars;
+    if (remaining > 0) {
+      bounded.push(marker.length <= remaining ? marker : marker.slice(0, remaining));
+    }
   }
 
   return bounded;
