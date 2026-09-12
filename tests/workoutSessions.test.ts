@@ -114,4 +114,68 @@ describe('WorkoutSessionsRepo', () => {
     const session = repo.createSession({ date: '2026-08-29', session_type: 'other' });
     expect(repo.getSession(session.session_id)?.goal_context).toBeNull();
   });
+
+  it('a plain logged exercise (no prescription given) leaves every target_* field null', () => {
+    const session = repo.createSession({ date: '2026-08-29', session_type: 'gym', status: 'in_progress' });
+    const performance = repo.addExercisePerformance(session.session_id, {
+      exercise_id: KNOWN_EXERCISE_ID,
+      order: 1,
+      role: 'primary',
+      sets: [{ set_number: 1, weight: 60, reps: 8, completed: true }],
+    });
+    expect(performance).toMatchObject({
+      target_sets: null,
+      target_reps_min: null,
+      target_reps_max: null,
+      target_rir_min: null,
+      target_rir_max: null,
+      target_rest_seconds: null,
+    });
+    const loaded = repo.getExercisePerformances(session.session_id)[0]!;
+    expect(loaded.target_reps_min).toBeNull();
+    expect(loaded.target_rir_max).toBeNull();
+    // The prescription being absent never affects the PERFORMED values.
+    expect(loaded.sets[0]!.reps).toBe(8);
+  });
+
+  it('an exercise created WITH a planned prescription preserves it exactly, separate from performed set values', () => {
+    const session = repo.createSession({ date: '2026-09-13', session_type: 'gym', status: 'planned' });
+    const performance = repo.addExercisePerformance(session.session_id, {
+      exercise_id: KNOWN_EXERCISE_ID,
+      order: 0,
+      role: 'primary',
+      target_sets: 5,
+      target_reps_min: 7,
+      target_reps_max: 11,
+      target_rir_min: 2,
+      target_rir_max: 4,
+      target_rest_seconds: 137,
+      sets: Array.from({ length: 5 }, (_, i) => ({ set_number: i + 1, completed: false })),
+    });
+    expect(performance).toMatchObject({
+      target_sets: 5,
+      target_reps_min: 7,
+      target_reps_max: 11,
+      target_rir_min: 2,
+      target_rir_max: 4,
+      target_rest_seconds: 137,
+    });
+    // Prescription lives on the exercise, never smuggled into the
+    // performed per-set fields, which stay null until actually logged.
+    for (const set of performance.sets) {
+      expect(set.reps).toBeNull();
+      expect(set.rir).toBeNull();
+      expect(set.rest_seconds).toBeNull();
+    }
+
+    const reloaded = repo.getExercisePerformances(session.session_id)[0]!;
+    expect(reloaded).toMatchObject({
+      target_sets: 5,
+      target_reps_min: 7,
+      target_reps_max: 11,
+      target_rir_min: 2,
+      target_rir_max: 4,
+      target_rest_seconds: 137,
+    });
+  });
 });

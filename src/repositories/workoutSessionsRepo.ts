@@ -86,6 +86,17 @@ export interface AddExercisePerformanceInput {
   order: number;
   role: ExerciseRole | string;
   sets: Array<Partial<Set> & { set_number: number }>;
+  /** Optional PLANNED prescription for this exercise — see
+   * ExercisePerformance's own doc comment. Omitted (all undefined ->
+   * stored as NULL) for a plain logged/performed exercise, which has no
+   * prescription. Never conflated with `sets[].reps`/`rir`, which stay
+   * PERFORMED values regardless of whether a prescription is given. */
+  target_sets?: number | null;
+  target_reps_min?: number | null;
+  target_reps_max?: number | null;
+  target_rir_min?: number | null;
+  target_rir_max?: number | null;
+  target_rest_seconds?: number | null;
 }
 
 export interface UpdateWorkoutSessionInput {
@@ -222,8 +233,12 @@ export class WorkoutSessionsRepo {
       .map((s) => ({ ...DEFAULT_SET, ...s }));
 
     const insertExercise = this.db.prepare(
-      `INSERT INTO workout_exercises (id, workout_session_id, exercise_id, order_index, role)
-       VALUES (@id, @workout_session_id, @exercise_id, @order_index, @role)`
+      `INSERT INTO workout_exercises
+         (id, workout_session_id, exercise_id, order_index, role,
+          target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds)
+       VALUES
+         (@id, @workout_session_id, @exercise_id, @order_index, @role,
+          @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds)`
     );
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
@@ -232,6 +247,15 @@ export class WorkoutSessionsRepo {
          (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes)`
     );
 
+    const prescription = {
+      target_sets: input.target_sets ?? null,
+      target_reps_min: input.target_reps_min ?? null,
+      target_reps_max: input.target_reps_max ?? null,
+      target_rir_min: input.target_rir_min ?? null,
+      target_rir_max: input.target_rir_max ?? null,
+      target_rest_seconds: input.target_rest_seconds ?? null,
+    };
+
     const tx = this.db.transaction(() => {
       insertExercise.run({
         id: performanceId,
@@ -239,6 +263,7 @@ export class WorkoutSessionsRepo {
         exercise_id: input.exercise_id,
         order_index: input.order,
         role: input.role,
+        ...prescription,
       });
       for (const set of sets) {
         insertSet.run({
@@ -265,6 +290,7 @@ export class WorkoutSessionsRepo {
       exercise_id: input.exercise_id,
       order: input.order,
       role: input.role,
+      ...prescription,
       sets,
     };
   }
@@ -312,7 +338,18 @@ export class WorkoutSessionsRepo {
   getExercisePerformances(workoutSessionId: string): ExercisePerformance[] {
     const exerciseRows = this.db
       .prepare('SELECT * FROM workout_exercises WHERE workout_session_id = ? ORDER BY order_index ASC')
-      .all(workoutSessionId) as Array<{ id: string; exercise_id: string; order_index: number; role: string }>;
+      .all(workoutSessionId) as Array<{
+      id: string;
+      exercise_id: string;
+      order_index: number;
+      role: string;
+      target_sets: number | null;
+      target_reps_min: number | null;
+      target_reps_max: number | null;
+      target_rir_min: number | null;
+      target_rir_max: number | null;
+      target_rest_seconds: number | null;
+    }>;
 
     const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
 
@@ -335,6 +372,12 @@ export class WorkoutSessionsRepo {
         exercise_id: row.exercise_id,
         order: row.order_index,
         role: row.role,
+        target_sets: row.target_sets,
+        target_reps_min: row.target_reps_min,
+        target_reps_max: row.target_reps_max,
+        target_rir_min: row.target_rir_min,
+        target_rir_max: row.target_rir_max,
+        target_rest_seconds: row.target_rest_seconds,
         sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
       };
     });

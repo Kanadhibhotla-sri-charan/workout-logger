@@ -115,9 +115,30 @@ export function commitAIProposalToPlannedSession(db: Database.Database, proposal
   }
   const proposal = structural.value;
 
-  // Blueprint/context staleness (spec §13): compare the Blueprint
-  // commit captured at generation time against the current one before
-  // doing anything else.
+  // Blueprint/context staleness (spec §13). NOTE on `record.contextHash`
+  // (`AIProposalRecord.contextHash`, from the generation-time
+  // `AIProgrammerContext.contextHash`): it is deliberately AUDIT
+  // METADATA ONLY here, never compared against a freshly-computed hash
+  // as an equality gate. `hashContext()` (programmerContextDiagnostics.ts)
+  // hashes the FULL context, which includes point-in-time-volatile
+  // fields — `currentDate`, and every target's live
+  // weeklyExposureUnits/rollingExposureUnits/recovery/exerciseHistory —
+  // so an exact-match check would fail almost any proposal more than a
+  // few minutes old regardless of whether anything that actually matters
+  // for commit-safety changed, making the 24h approval window pointless.
+  // The two checks below are the REAL, deliberately-scoped enforcement:
+  // (1) `blueprint_commit` equality, an exact, cheap, semantically
+  // meaningful fingerprint (the same one `programs.blueprint_commit`
+  // already uses elsewhere in this codebase); and (2) a full domain
+  // revalidation against a FRESHLY REBUILT context below, which
+  // precisely re-checks every fact that could invalidate this specific
+  // proposal — an authored prescription that changed, an exercise no
+  // longer valid for its target, a target date/weekday mismatch (which
+  // also transitively catches a TrainingProfile.timezone change that
+  // shifts what "today" is) — without the false positives an opaque
+  // hash comparison would produce. `contextHash` remains stored/returned
+  // purely so a specific historical proposal's exact generation-time
+  // context can be identified for debugging, never as a validity check.
   const currentBlueprintCommit = BlueprintAdapter.getManifest().sourceCommit;
   if (currentBlueprintCommit !== record.blueprintCommit) {
     throw new AIProposalStaleError(proposalId, [
@@ -137,7 +158,13 @@ export function commitAIProposalToPlannedSession(db: Database.Database, proposal
   // catches a changed authored prescription, an exercise that is no
   // longer valid for its target, or a target date/weekday mismatch,
   // exactly the same way generation-time validation did, just re-run
-  // against now-current state instead of generation-time state.
+  // against now-current state instead of generation-time state. This
+  // also catches an exerciseId that resolves only via the SEPARATE
+  // outside-Blueprint-exercise catalogue (approved or not) — this
+  // milestone's proposals accept `source: 'blueprint'` only, and
+  // `BlueprintAdapter.isKnownExercise()` (called inside
+  // validateProposalDomain) never treats an outside-Blueprint exercise
+  // as known, regardless of its own approval state.
   const domain = validateProposalDomain(proposal, context, db);
   if (!domain.ok || !domain.value) {
     throw new AIProposalStaleError(proposalId, domain.errors);
@@ -163,11 +190,25 @@ export function commitAIProposalToPlannedSession(db: Database.Database, proposal
         status: 'planned',
         notes: `AI-proposed session (proposal ${proposal.proposalId})`,
       });
+      // Correction: the proposal's prescription (repsMin/repsMax/
+      // rirMin/rirMax/restSeconds/sets count) is planned data — it goes
+      // into workout_exercises' own target_* prescription columns, NOT
+      // into workout_sets' PERFORMED weight/reps/rir/rpe/rest_seconds
+      // fields, which stay null until the user actually performs the
+      // set (see ExercisePerformance's doc comment in contracts/types.ts).
+      // Each set row's ONLY prescribed fact is which set number it is —
+      // that's why there are exactly `exercise.sets` set rows.
       proposal.exercises.forEach((exercise, index) => {
         sessionsRepo.addExercisePerformance(session.session_id, {
           exercise_id: exercise.exerciseId,
           order: index,
           role: exercise.role,
+          target_sets: exercise.sets,
+          target_reps_min: exercise.repsMin,
+          target_reps_max: exercise.repsMax,
+          target_rir_min: exercise.rirMin,
+          target_rir_max: exercise.rirMax,
+          target_rest_seconds: exercise.restSeconds ?? null,
           sets: Array.from({ length: exercise.sets }, (_, setIndex) => ({
             set_number: setIndex + 1,
             weight: null,
@@ -175,7 +216,7 @@ export function commitAIProposalToPlannedSession(db: Database.Database, proposal
             completed: false,
             rir: null,
             rpe: null,
-            rest_seconds: exercise.restSeconds ?? null,
+            rest_seconds: null,
             technique: null,
             tempo: null,
             notes: null,

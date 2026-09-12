@@ -14,6 +14,7 @@ import { AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION } from '../../src/ai-program
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
+import { OutsideBlueprintExercisesRepo } from '../../src/repositories/outsideBlueprintExercisesRepo.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';
@@ -60,8 +61,18 @@ function validProposalJson(overrides: Record<string, unknown> = {}) {
 /** Generates one valid proposal through the real endpoint and returns
  * its persisted proposalId — the shared setup step for every
  * approve/commit test below. */
-async function generateProposal(): Promise<string> {
-  fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: JSON.stringify(validProposalJson()) } }));
+async function generateProposal(exerciseOverrides: Record<string, unknown> = {}): Promise<string> {
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse(200, {
+      data: {
+        output: JSON.stringify(
+          validProposalJson({
+            exercises: [{ ...validProposalJson().exercises[0], ...exerciseOverrides }],
+          })
+        ),
+      },
+    })
+  );
   const res = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: SUNDAY });
   expect(res.status).toBe(200);
   return res.body.proposalId as string;
@@ -373,5 +384,133 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
     expect(JSON.stringify(res.body)).not.toContain('test-key-not-real');
+  });
+});
+
+describe('commit preserves the full prescription (correction: reps/RIR/rest were previously dropped)', () => {
+  it('an approved proposal with distinctive reps/RIR/rest is committed with that exact prescription intact, not written into performed-value fields', async () => {
+    // ab-wheel-rollout/rectus-abdominis has no Blueprint-authored
+    // prescription (confirmed in earlier phases' fixtures), so these
+    // exact, deliberately unusual numbers are NOT overridden by an
+    // authored-prescription exact-match check — they are genuinely the
+    // AI's own free choice, and are exactly what must survive commit.
+    const proposalId = await generateProposal({
+      exerciseId: 'ab-wheel-rollout',
+      targetType: 'physique_target',
+      targetId: 'rectus-abdominis',
+      sets: 5,
+      repsMin: 7,
+      repsMax: 11,
+      rirMin: 2,
+      rirMax: 4,
+      restSeconds: 137,
+    });
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+    const commitRes = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    expect(commitRes.status).toBe(200);
+    const sessionId = commitRes.body.committedSessionId as string;
+
+    // Read the resulting planned workout back through the real HTTP API
+    // (GET /api/workouts/:id), the same endpoint any client would use —
+    // not just the internal repo state.
+    const sessionRes = await request(app).get(`/api/workouts/${sessionId}`);
+    expect(sessionRes.status).toBe(200);
+    expect(sessionRes.body.status).toBe('planned');
+    const exercise = sessionRes.body.exercises[0];
+    expect(exercise.exercise_id).toBe('ab-wheel-rollout');
+
+    // The PLANNED prescription is fully preserved...
+    expect(exercise.target_sets).toBe(5);
+    expect(exercise.target_reps_min).toBe(7);
+    expect(exercise.target_reps_max).toBe(11);
+    expect(exercise.target_rir_min).toBe(2);
+    expect(exercise.target_rir_max).toBe(4);
+    expect(exercise.target_rest_seconds).toBe(137);
+
+    // ...and it lives in the prescription fields, never smuggled into
+    // the PERFORMED per-set fields, which must all still read as "not
+    // yet performed" (null/false) despite this rich prescription.
+    expect(exercise.sets).toHaveLength(5);
+    for (const set of exercise.sets) {
+      expect(set.reps).toBeNull();
+      expect(set.weight).toBeNull();
+      expect(set.rir).toBeNull();
+      expect(set.rpe).toBeNull();
+      expect(set.rest_seconds).toBeNull();
+      expect(set.completed).toBe(false);
+    }
+  });
+});
+
+describe('commit-time staleness detection beyond Blueprint-commit equality', () => {
+  it('contextHash is audit metadata, not an equality gate: an unrelated context-affecting change (a new active goal) does not by itself block commit', async () => {
+    // Directly demonstrates the documented design decision: adding a
+    // goal changes what a freshly-built AIProgrammerContext (and thus
+    // its contextHash) looks like, but has no bearing on whether THIS
+    // proposal's own exercises/prescription are still valid, so commit
+    // must still succeed.
+    const proposalId = await generateProposal();
+    const { GoalsRepo } = await import('../../src/repositories/goalsRepo.js');
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1, active: true });
+
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    expect(res.status).toBe(200);
+  });
+
+  it('a proposal whose stored sets/reps/RIR drifted from Blueprint\'s authored prescription is rejected at commit (422 AI_PROPOSAL_STALE)', async () => {
+    // flat-barbell-bench-press/mid-pec has an authored prescription of
+    // exactly {sets:3, repsMin:6, repsMax:12, rirMin:1, rirMax:3}
+    // (used unmodified by generateProposal()'s default fixture) — a
+    // fresh domain revalidation at commit time re-derives that SAME
+    // authored truth from Blueprint and must catch a stored value that
+    // no longer matches it, exactly as if the model had proposed
+    // something invalid in the first place.
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+    const stored = db.prepare('SELECT proposal_json FROM ai_program_proposals WHERE id = ?').get(proposalId) as { proposal_json: string };
+    const tampered = JSON.parse(stored.proposal_json);
+    tampered.exercises[0].sets = 8; // authored cap is 3 — this is a drift/tamper, not the original valid value
+    db.prepare('UPDATE ai_program_proposals SET proposal_json = ? WHERE id = ?').run(JSON.stringify(tampered), proposalId);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('AI_PROPOSAL_STALE');
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
+  });
+
+  it('a proposal retargeted (post-generation) at an approved outside-Blueprint exercise is still rejected — this milestone accepts source: "blueprint" only', async () => {
+    // The outside-Blueprint catalogue is a SEPARATE, application-level
+    // approval gate (src/repositories/outsideBlueprintExercisesRepo.ts)
+    // from Blueprint's own exercise pool. Even a fully-approved entry
+    // there is not a "known Blueprint exercise" — BlueprintAdapter.
+    // isKnownExercise() (used inside validateProposalDomain) never
+    // resolves it, so it must still be rejected at commit-time
+    // revalidation exactly like any other unknown exerciseId.
+    const outsideEx = new OutsideBlueprintExercisesRepo(db).propose({
+      name: 'Test Outside Exercise',
+      justification_category: 'meaningful_advantage',
+      justification_text: 'test fixture',
+      target_type: 'physique_target',
+      target_id: 'mid-pec',
+      role: 'primary',
+      equipment: ['bodyweight'],
+      reps_range: '8-12',
+      rir_range: '1-3',
+    });
+    new OutsideBlueprintExercisesRepo(db).approve(outsideEx.id);
+
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+    const stored = db.prepare('SELECT proposal_json FROM ai_program_proposals WHERE id = ?').get(proposalId) as { proposal_json: string };
+    const tampered = JSON.parse(stored.proposal_json);
+    tampered.exercises[0].exerciseId = outsideEx.id;
+    tampered.exercises[0].source = 'blueprint'; // stored shape must still structurally validate; only the id is swapped
+    db.prepare('UPDATE ai_program_proposals SET proposal_json = ? WHERE id = ?').run(JSON.stringify(tampered), proposalId);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('AI_PROPOSAL_STALE');
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
   });
 });

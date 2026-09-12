@@ -266,12 +266,29 @@ CREATE TABLE IF NOT EXISTS workout_sessions (
   created_at TEXT NOT NULL
 );
 
+-- AI Programmer Phase 2 correction: target_sets/target_reps_min/
+-- target_reps_max/target_rir_min/target_rir_max/target_rest_seconds are
+-- the PLANNED prescription for this exercise (all nullable — a plain
+-- logged/performed exercise added via POST /api/workouts/:id/exercises
+-- has no prescription and leaves these NULL). This mirrors
+-- program_session_exercises' own target_sets/target_reps_min/
+-- target_reps_max naming exactly, extended with the RIR range and rest
+-- seconds that table never needed. Never confused with workout_sets'
+-- own weight/reps/rir/rpe columns, which are PERFORMED values (null
+-- until a set is actually logged) — a prescribed rep/RIR RANGE has no
+-- single performed-value column it could correctly be written into.
 CREATE TABLE IF NOT EXISTS workout_exercises (
   id TEXT PRIMARY KEY,
   workout_session_id TEXT NOT NULL REFERENCES workout_sessions(session_id) ON DELETE CASCADE,
   exercise_id TEXT NOT NULL,
   order_index INTEGER NOT NULL,
-  role TEXT NOT NULL
+  role TEXT NOT NULL,
+  target_sets INTEGER,
+  target_reps_min INTEGER,
+  target_reps_max INTEGER,
+  target_rir_min REAL,
+  target_rir_max REAL,
+  target_rest_seconds INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS workout_sets (

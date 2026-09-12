@@ -262,13 +262,28 @@ export interface Set {
   notes: string | null;
 }
 
-/** One exercise as actually performed within a WorkoutSession. */
+/** One exercise within a WorkoutSession. `sets` are always PERFORMED
+ * values (null until actually logged, per the `Set` shape above). The
+ * `target_*` fields, when present, are the separate PLANNED
+ * prescription for this exercise — e.g. an AI-committed planned session
+ * (src/ai-programmer/service/aiProposalLifecycle.ts) sets these from
+ * its proposal's repsMin/repsMax/rirMin/rirMax/restSeconds/sets-count
+ * while every `sets[].reps`/`weight`/`rir`/`rpe` stays null until the
+ * user actually performs the exercise. A plain logged exercise (added
+ * via `POST /api/workouts/:id/exercises`) has no prescription and
+ * leaves every `target_*` field `null`. */
 export interface ExercisePerformance {
   id: string;
   workout_session_id: string;
   exercise_id: BlueprintId;
   order: number;
   role: ExerciseRole | string;
+  target_sets: number | null;
+  target_reps_min: number | null;
+  target_reps_max: number | null;
+  target_rir_min: number | null;
+  target_rir_max: number | null;
+  target_rest_seconds: number | null;
   sets: Set[];
 }
 

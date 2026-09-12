@@ -33,6 +33,18 @@ export interface AIProposalRecord {
   targetDate: string;
   weekday: string;
   proposal: AIWorkoutSessionProposal;
+  /** AUDIT METADATA ONLY — the generation-time
+   * `AIProgrammerContext.contextHash`, kept so a specific historical
+   * proposal's exact source context can be identified for debugging.
+   * NOT compared against a freshly-computed hash at commit time: it
+   * necessarily includes point-in-time-volatile facts (current date,
+   * live exposure/recovery snapshots), so an exact-match check would
+   * fail almost any proposal older than a few minutes regardless of
+   * whether anything commit-relevant actually changed. The real
+   * staleness guard is `blueprintCommit` equality plus a full domain
+   * revalidation against a freshly rebuilt context — see
+   * `commitAIProposalToPlannedSession()` in
+   * `src/ai-programmer/service/aiProposalLifecycle.ts`. */
   contextHash: string;
   blueprintCommit: string;
   modelProvider: string;

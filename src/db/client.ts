@@ -46,6 +46,21 @@ function migrate(db: Database.Database): void {
   addColumnIfMissing(db, 'programs', 'target_allocations_json', 'TEXT');
   addColumnIfMissing(db, 'program_sessions', 'snapshot_json', 'TEXT');
 
+  // AI Programmer Phase 2 correction: workout_exercises gains an
+  // optional PLANNED prescription (target_sets/target_reps_min/
+  // target_reps_max/target_rir_min/target_rir_max/target_rest_seconds),
+  // distinct from workout_sets' own PERFORMED weight/reps/rir/rpe
+  // columns — see schema.sql's comment on workout_exercises. All
+  // nullable/additive, safe on an existing database with real logged
+  // history (every pre-existing row simply has NULL prescription
+  // columns, meaning "no prescription recorded for this performance").
+  addColumnIfMissing(db, 'workout_exercises', 'target_sets', 'INTEGER');
+  addColumnIfMissing(db, 'workout_exercises', 'target_reps_min', 'INTEGER');
+  addColumnIfMissing(db, 'workout_exercises', 'target_reps_max', 'INTEGER');
+  addColumnIfMissing(db, 'workout_exercises', 'target_rir_min', 'REAL');
+  addColumnIfMissing(db, 'workout_exercises', 'target_rir_max', 'REAL');
+  addColumnIfMissing(db, 'workout_exercises', 'target_rest_seconds', 'INTEGER');
+
   const row = db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('contract_version') as
     | { value: string }
     | undefined;

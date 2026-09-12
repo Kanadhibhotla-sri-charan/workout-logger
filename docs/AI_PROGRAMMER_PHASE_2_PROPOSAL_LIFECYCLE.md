@@ -82,6 +82,10 @@ Preconditions checked, in order, before anything is written:
 
 Only once all nine checks pass does the transaction run. Success (`200`) or idempotent-repeat (`200`) response shape is the same as `GET`'s, since a commit result is just the updated record.
 
+### Prescription preservation
+
+`workout_exercises` (`src/db/schema.sql`) has an explicit PLANNED-prescription set of columns: `target_sets`/`target_reps_min`/`target_reps_max`/`target_rir_min`/`target_rir_max`/`target_rest_seconds` — the exact same naming convention `program_session_exercises` already established for `target_sets`/`target_reps_min`/`target_reps_max`, extended with the RIR range and rest seconds that table never needed. The commit mapper writes the proposal's `repsMin`/`repsMax`/`rirMin`/`rirMax`/`restSeconds`/`sets` (count) into these columns, and creates exactly `exercise.sets` rows in `workout_sets` — but every one of THOSE rows' own `weight`/`reps`/`rir`/`rpe`/`rest_seconds` fields is left `null`, since those are PERFORMED values (what actually happened when the set was done), not planned ones, and nothing has been performed yet for a freshly committed session. A set row's only prescribed fact is which set number it is. This mirrors exactly how `workout_sets` already behaves for any newly-created `in_progress`/`planned` session logged by a human — a prescription and a performance are two different kinds of fact, and this schema was already careful to keep them apart everywhere else; the original implementation of this commit path briefly violated that by writing planned reps/RIR/rest into the performed-value columns, which has been corrected.
+
 ## Conflict policy (spec §11)
 
 The task spec's recommended default — **reject, never auto-overwrite** — is what's implemented:
@@ -100,11 +104,21 @@ The task spec's recommended default — **reject, never auto-overwrite** — is 
 
 ## Stale-context / stale-Blueprint detection (spec §13)
 
-Rather than storing the entire generation-time context, only two pieces of fingerprint metadata are stored: `context_hash` (from the first vertical slice's own `hashContext()`) and `blueprint_commit` (`BlueprintAdapter.getManifest().sourceCommit`, the same fingerprint `programs.blueprint_commit`/`WeeklyProgramRepo` already use elsewhere in this codebase). At commit time:
+Rather than storing the entire generation-time context, two pieces of metadata are stored: `context_hash` (from the first vertical slice's own `hashContext()`) and `blueprint_commit` (`BlueprintAdapter.getManifest().sourceCommit`, the same fingerprint `programs.blueprint_commit`/`WeeklyProgramRepo` already use elsewhere in this codebase). They play **different roles**, spelled out explicitly here since it's easy to assume both are enforced equality gates:
 
-- The stored `blueprint_commit` is compared against the current one — a mismatch is an immediate `422 AI_PROPOSAL_STALE`, no further checks needed.
-- A **fresh** context and a full domain-validation re-run (see commit preconditions 7-8 above) catch every other kind of drift the task spec calls out — a changed authored prescription, an exercise no longer valid for its target, a target date whose weekday no longer matches — without needing separate ad hoc staleness checks for each one.
-- The proposal is never silently regenerated or altered when it's found stale — the caller must request an entirely new proposal.
+**`context_hash` is audit metadata only — never an equality gate at commit time.** `hashContext()` hashes the *entire* generation-time context, which includes point-in-time-volatile facts: `currentDate`, and every target's live `weeklyExposureUnits`/`rollingExposureUnits`/recovery decision/`exerciseHistory`. Comparing it against a freshly-computed hash at commit would fail almost any proposal more than a few minutes old — including ones where nothing that actually matters for commit-safety changed — which would make the whole 24-hour approval window pointless (a proposal generated at 9am and approved at 9:05am would already look "stale" the moment the exposure numbers naturally drift). `context_hash` remains stored and returned purely so a specific historical proposal's exact source context can be identified later for debugging.
+
+**The real, deliberately-scoped enforcement is two checks:**
+
+1. **`blueprint_commit` equality** — an exact, cheap, semantically meaningful fingerprint comparison. A mismatch is an immediate `422 AI_PROPOSAL_STALE`, no further checks needed.
+2. **A full domain revalidation against a FRESHLY REBUILT context** (commit preconditions 7-8 above) — this is what precisely catches every OTHER kind of drift that could actually invalidate this specific proposal:
+   - a changed or drifted authored prescription (re-derived from Blueprint's own static truth, not the stored proposal's own values — a proposal whose stored `sets`/`repsMin`/etc. no longer match Blueprint's authored values for that exercise/target is rejected exactly as if the model had proposed them in the first place);
+   - an exercise no longer valid for its target, or one that never was a *Blueprint* exercise at all — including an exercise that legitimately exists in the separate, application-level outside-Blueprint-exercise catalogue (`outside_blueprint_exercises`, possibly even `approved = 1` there) but is still not a *known Blueprint* exercise (`BlueprintAdapter.isKnownExercise()` never resolves it) — this milestone's proposals accept `source: "blueprint"` only, with no exception for an otherwise-approved outside-Blueprint substitute;
+   - a target date/weekday mismatch, which transitively also catches a `TrainingProfile.timezone` change that shifts what "today" is relative to the target date.
+
+   Unlike an opaque hash comparison, this produces no false positives — an unrelated context change (e.g. a new goal being activated, which changes what a freshly-built context looks like but has no bearing on whether this proposal's own chosen exercises/sets/reps are still valid) does not block commit.
+
+The proposal is never silently regenerated or altered when it's found stale — the caller must request an entirely new proposal.
 
 ## Idempotency and concurrency (spec §9)
 
