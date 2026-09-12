@@ -100,9 +100,14 @@ troubleshooting.
 | `PORT` | no | `3000` | HTTP port for the Express server. |
 | `BLUEPRINT_REPO_PATH` | no | — | Only used by `npm run sync-blueprint`. Point it at a local `workout-blueprint` checkout to regenerate the data snapshot without cloning; omit it and the script clones a shallow copy itself. |
 
-No API keys or secrets are required for Phase 1 — there is no AI/LLM
-integration and no external service calls at runtime. See
-`docs/deployment.md` for what changes in production.
+No API keys or secrets are required to run the deterministic
+programmer or the rest of the app. An optional, feature-flagged AI
+Programmer integration exists behind `AI_PROGRAMMER_ENABLED` (default
+off) — see [`docs/AI_PROGRAMMER_INTEGRATION_STATUS.md`](docs/AI_PROGRAMMER_INTEGRATION_STATUS.md)
+for its environment variables, endpoint, and safety boundaries. It
+returns a validated proposal only; it never silently rewrites the
+existing deterministic program. See `docs/deployment.md` for what else
+changes in production.
 
 ## Syncing Blueprint data
 
@@ -125,6 +130,9 @@ src/
   engine/        Training Engine: goal resolution, training state,
                  exposure tracking, constraints, and 6 stubbed modules
                  pending approved design decisions (see docs below)
+  ai-programmer/ AI Programmer integration (context builder, Velona
+                 provider, schema/domain validation, service) — see
+                 docs/AI_PROGRAMMER_INTEGRATION_STATUS.md
   lib/           timezone contract helpers
   repositories/  persistence for users/training profiles/goals/programs/
                  workout sessions
@@ -182,3 +190,6 @@ docs/            architecture note, deployment guide, open decisions,
   (open / proposed / adopted-pending-sign-off).
 - [`docs/logs/`](docs/logs/) — a dated log file per major change to this
   repo (what changed, why, how it was verified).
+- [`docs/AI_PROGRAMMER_INTEGRATION_STATUS.md`](docs/AI_PROGRAMMER_INTEGRATION_STATUS.md)
+  — the AI Programmer integration's current status, environment
+  variables, endpoint contract, error codes, and safety boundaries.

@@ -10,6 +10,7 @@ import { exportRouter } from './routes/export.js';
 import { trainingProfileRouter } from './routes/trainingProfile.js';
 import { outsideBlueprintExercisesRouter } from './routes/outsideBlueprintExercises.js';
 import { programmingRouter } from './routes/programming.js';
+import { aiProgrammerRouter } from './routes/aiProgrammer.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', '..', 'public');
@@ -29,6 +30,7 @@ export function createApp(db: Database.Database): Express {
   app.use('/api/training-profile', trainingProfileRouter);
   app.use('/api/outside-blueprint-exercises', outsideBlueprintExercisesRouter);
   app.use('/api/programming', programmingRouter);
+  app.use('/api/ai-programmer', aiProgrammerRouter);
 
   // Deployment Phase §5: exists solely for deployment verification/uptime
   // checks — never database contents, user data, env vars, filesystem
