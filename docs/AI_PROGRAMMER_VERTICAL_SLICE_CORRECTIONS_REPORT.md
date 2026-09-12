@@ -137,16 +137,16 @@ All commands used the repository's actual `vitest`-based runner (this project ha
 $ git status
 On branch ai-programmer-first-vertical-slice
 Your branch is up to date with 'origin/ai-programmer-first-vertical-slice'.
-(clean after the commit accompanying this report)
+nothing to commit, working tree clean
 
 $ git rev-parse HEAD
-<the commit hash of this correction-pass commit — see the actual commit this report ships with>
+ecbcb3f8401c306604df3c55197ee6f87498465c
 
 $ git log -1 --oneline
-<this correction-pass commit>
+ecbcb3f AI Programmer correction pass: authored-prescription exact match, strict dates, timezone/diagnostics/proposalId fixes
 ```
 
-No `package-lock.json`/`package.json` change occurred. No generated file is missing from the commit — `git status` before committing showed exactly the 13 files listed in §1 (11 modified, 2 new) plus this report and the saved spec doc.
+No `package-lock.json`/`package.json` change occurred. `git status` before committing showed exactly the files listed in §1 (11 modified, 3 new — including this report and `diagnosticsBounds.ts`/`correctionPass.test.ts`), all included in commit `ecbcb3f`.
 
 ## 5. Remaining issues / deviations / follow-up
 
