@@ -127,11 +127,13 @@ Per this session's established discipline: stashed every modified source file (`
 
 ```
 $ git status
-(clean after this report's own commit — see below)
+working tree clean at commit 37144da (this report's own commit); a follow-up
+doc-only commit fills in this exact hash below, per this session's convention
+of never writing a placeholder hash into a report before it's known
 
 $ git rev-parse HEAD
-<recorded at the commit this report ships with — see the commit accompanying this file>
+37144da684f5777e8977019984cfe08482b027cf
 
 $ git log -1 --oneline
-<same commit>
+37144da AI Programmer Phase 2: proposal persistence, approval, and commit workflow
 ```
