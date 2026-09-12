@@ -19,7 +19,14 @@ export type AIProgrammerErrorCode =
   | 'AI_OUTPUT_SCHEMA_INVALID'
   | 'AI_OUTPUT_DOMAIN_INVALID'
   | 'AI_TARGET_NOT_EDITABLE'
-  | 'AI_CONTEXT_INCOMPLETE';
+  | 'AI_CONTEXT_INCOMPLETE'
+  | 'AI_PROPOSAL_NOT_FOUND'
+  | 'AI_PROPOSAL_INVALID_STATE'
+  | 'AI_PROPOSAL_EXPIRED'
+  | 'AI_PROPOSAL_CONFLICT'
+  | 'AI_PROPOSAL_STALE'
+  | 'AI_PROPOSAL_VALIDATION_FAILED'
+  | 'AI_PROPOSAL_COMMIT_FAILED';
 
 /** Base class for every error this integration throws. `statusCode` is
  * the HTTP status the route layer maps it to; `publicMessage` is what a
@@ -108,5 +115,94 @@ export class AITargetNotEditableError extends AIProgrammerError {
 export class AIContextIncompleteError extends AIProgrammerError {
   constructor(missing: string[]) {
     super('AI_CONTEXT_INCOMPLETE', `Cannot build AI programmer context: ${missing.join('; ')}`, 500, { missing });
+  }
+}
+
+// AI Programmer Phase 2
+// (docs/CLAUDE_TASK_AI_PROGRAMMER_PHASE_2_PROPOSAL_APPROVAL_COMMIT.md
+// §14): proposal storage/review/commit errors, following the exact same
+// typed-error convention as the errors above.
+
+export class AIProposalNotFoundError extends AIProgrammerError {
+  constructor(proposalId: string) {
+    super('AI_PROPOSAL_NOT_FOUND', `No AI proposal found with id "${proposalId}".`, 404);
+  }
+}
+
+/** A status-transition request (approve/commit) that this proposal's
+ * CURRENT status does not allow — e.g. approving a rejected/committed
+ * proposal, or committing a pending (never-approved) one. */
+export class AIProposalInvalidStateError extends AIProgrammerError {
+  constructor(proposalId: string, currentStatus: string, action: string) {
+    super(
+      'AI_PROPOSAL_INVALID_STATE',
+      `Proposal "${proposalId}" cannot be ${action} while in status "${currentStatus}".`,
+      409,
+      { proposalId, currentStatus, action }
+    );
+  }
+}
+
+export class AIProposalExpiredError extends AIProgrammerError {
+  constructor(proposalId: string, expiresAt: string) {
+    super('AI_PROPOSAL_EXPIRED', `Proposal "${proposalId}" expired at ${expiresAt} and can no longer be approved or committed.`, 410, {
+      proposalId,
+      expiresAt,
+    });
+  }
+}
+
+/** A target-date conflict discovered at commit time: an existing
+ * completed/in-progress/planned workout session already occupies this
+ * proposal's target date (spec §11: reject planned-session conflicts by
+ * default). Distinct from `AIProposalInvalidStateError`, which is about
+ * the PROPOSAL's own status, not an external scheduling conflict. */
+export class AIProposalConflictError extends AIProgrammerError {
+  constructor(proposalId: string, targetDate: string, conflictingSessionId: string, conflictingStatus: string) {
+    super(
+      'AI_PROPOSAL_CONFLICT',
+      `Proposal "${proposalId}" cannot be committed: a workout session (${conflictingSessionId}, status "${conflictingStatus}") already exists for ${targetDate}.`,
+      409,
+      { proposalId, targetDate, conflictingSessionId, conflictingStatus }
+    );
+  }
+}
+
+/** The proposal no longer matches current Blueprint/profile/context
+ * state — e.g. the Blueprint commit changed, an authored prescription
+ * changed, an exercise is no longer valid, or the target date's weekday
+ * no longer matches. Never silently regenerated or altered — the
+ * caller must request a fresh proposal instead (spec §13). */
+export class AIProposalStaleError extends AIProgrammerError {
+  constructor(proposalId: string, issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_PROPOSAL_STALE', `Proposal "${proposalId}" no longer matches current Blueprint/training state: ${bounded.join('; ')}`, 422, {
+      proposalId,
+      issues: bounded,
+    });
+  }
+}
+
+/** The proposal's stored JSON failed re-validation at commit time
+ * (structural or domain) for a reason other than staleness — e.g.
+ * malformed stored JSON. */
+export class AIProposalValidationFailedError extends AIProgrammerError {
+  constructor(proposalId: string, issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super(
+      'AI_PROPOSAL_VALIDATION_FAILED',
+      `Proposal "${proposalId}" failed revalidation at commit time: ${bounded.join('; ')}`,
+      422,
+      { proposalId, issues: bounded }
+    );
+  }
+}
+
+/** Every precondition passed, but the actual database write (creating
+ * the planned session, or marking the proposal committed) failed. Never
+ * leaks the underlying SQL error message/stack trace to the client. */
+export class AIProposalCommitFailedError extends AIProgrammerError {
+  constructor(proposalId: string) {
+    super('AI_PROPOSAL_COMMIT_FAILED', `Proposal "${proposalId}" could not be committed due to an internal error.`, 500, { proposalId });
   }
 }

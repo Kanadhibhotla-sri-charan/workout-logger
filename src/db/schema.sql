@@ -345,3 +345,38 @@ CREATE TABLE IF NOT EXISTS goal_phase_reviews (
 
 CREATE INDEX IF NOT EXISTS idx_goal_phases_goal ON goal_phases(goal_id);
 CREATE INDEX IF NOT EXISTS idx_goal_phase_reviews_phase ON goal_phase_reviews(goal_phase_id);
+
+-- AI Programmer Phase 2 (docs/CLAUDE_TASK_AI_PROGRAMMER_PHASE_2_PROPOSAL_APPROVAL_COMMIT.md
+-- §4): a persisted, explicitly-reviewed AI workout proposal. Holds the
+-- exact validated AIWorkoutSessionProposal JSON that was returned for
+-- review (src/ai-programmer/contracts/programmerTypes.ts) — never the
+-- raw provider response, never API keys/headers. Status is a simple
+-- state machine (pending -> approved -> committed, or -> rejected/
+-- expired) enforced entirely in application code
+-- (src/repositories/aiProposalRepo.ts), matching this schema's existing
+-- style elsewhere (e.g. goal_phases above) rather than a DB constraint.
+-- committed_session_id references workout_sessions once (and only once)
+-- this proposal has been committed via commitAIProposalToPlannedSession().
+CREATE TABLE IF NOT EXISTS ai_program_proposals (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'committed', 'rejected', 'expired')),
+  target_date TEXT NOT NULL,
+  weekday TEXT NOT NULL,
+  proposal_json TEXT NOT NULL,
+  context_hash TEXT NOT NULL,
+  blueprint_commit TEXT NOT NULL,
+  model_provider TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  committed_session_id TEXT REFERENCES workout_sessions(session_id) ON DELETE SET NULL,
+  failure_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  approved_at TEXT,
+  committed_at TEXT,
+  rejected_at TEXT,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_program_proposals_target_date ON ai_program_proposals(target_date);
+CREATE INDEX IF NOT EXISTS idx_ai_program_proposals_status ON ai_program_proposals(status);

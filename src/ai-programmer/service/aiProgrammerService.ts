@@ -6,6 +6,8 @@
 
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import { BlueprintAdapter } from '../../blueprint/adapter.js';
+import { AIProposalRepo, type AIProposalStatus } from '../../repositories/aiProposalRepo.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
 import type { AIProgrammerContext } from '../context/programmerContextTypes.js';
 import { getProgrammerOutputSchema } from '../contracts/programmerOutputSchema.js';
@@ -58,6 +60,8 @@ export interface GenerateSessionInput {
 
 export interface GenerateSessionResult {
   proposal: AIWorkoutSessionProposal;
+  proposalId: string;
+  status: AIProposalStatus;
   contextHash: string;
   provider: string;
   model: string;
@@ -110,8 +114,26 @@ export class AIProgrammerService {
     // own internal bookkeeping, never as this proposal's real identity.
     const proposal: AIWorkoutSessionProposal = { ...domain.value, proposalId: randomUUID() };
 
+    // Phase 2 §5: only a proposal that has passed BOTH structural and
+    // domain validation is ever persisted — a provider failure or a
+    // validation failure above returns/throws before this point is
+    // reached, so no row is created for it. The row's own `id` reuses
+    // `proposal.proposalId` (never a second, different identifier) so
+    // the id returned to the caller and the id actually persisted are
+    // provably the same value.
+    const record = new AIProposalRepo(this.db).create({
+      proposal,
+      contextHash: context.contextHash,
+      blueprintCommit: BlueprintAdapter.getManifest().sourceCommit,
+      modelProvider: providerResponse.provider,
+      modelName: providerResponse.model,
+      requestId: providerResponse.requestId,
+    });
+
     return {
       proposal,
+      proposalId: record.id,
+      status: record.status,
       contextHash: context.contextHash,
       provider: providerResponse.provider,
       model: providerResponse.model,
