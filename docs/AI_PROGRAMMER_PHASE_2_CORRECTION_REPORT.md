@@ -88,6 +88,12 @@ Unchanged from the original Phase 2 report — no reject endpoint, no multi-user
 ## Final state
 
 ```
-$ git status / git rev-parse HEAD / git log -1 --oneline
+$ git status
+working tree clean at commit bdc3ee7 (this report's own commit)
+
+$ git rev-parse HEAD
+bdc3ee7a18e15c8fef2c4e541da76ffa0ffd2b25
+
+$ git log -1 --oneline
+bdc3ee7 AI Programmer Phase 2 correction: preserve prescription, clarify contextHash, add tests
 ```
-filled in immediately below, in the commit this report ships with (never left as a placeholder before the real hash is known).
