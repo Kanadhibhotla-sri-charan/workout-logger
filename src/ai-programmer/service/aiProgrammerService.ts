@@ -54,7 +54,6 @@ export function buildProgrammerSystemInstruction(): string {
 
 export interface GenerateSessionInput {
   targetDate: string;
-  timezone?: string;
 }
 
 export interface GenerateSessionResult {
@@ -73,7 +72,7 @@ export class AIProgrammerService {
       throw new AIProgrammerDisabledError();
     }
 
-    const context: AIProgrammerContext = buildProgrammerContext(this.db, { targetDate: input.targetDate, timezone: input.timezone });
+    const context: AIProgrammerContext = buildProgrammerContext(this.db, { targetDate: input.targetDate });
 
     const requestId = randomUUID();
     const providerResponse = await this.provider.generate({
@@ -105,8 +104,14 @@ export class AIProgrammerService {
       throw new AIOutputDomainInvalidError(domain.errors);
     }
 
+    // Correction pass §7: proposalId is application-owned, never
+    // trusted from the model. Whatever value the provider returned is
+    // discarded here — it was only used (if at all) for the provider's
+    // own internal bookkeeping, never as this proposal's real identity.
+    const proposal: AIWorkoutSessionProposal = { ...domain.value, proposalId: randomUUID() };
+
     return {
-      proposal: domain.value,
+      proposal,
       contextHash: context.contextHash,
       provider: providerResponse.provider,
       model: providerResponse.model,

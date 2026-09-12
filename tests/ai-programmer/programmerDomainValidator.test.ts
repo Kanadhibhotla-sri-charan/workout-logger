@@ -126,10 +126,10 @@ describe('AI Programmer domain validator', () => {
     expect(result.errors.join(' ')).toMatch(/valid exercise library/);
   });
 
-  it('rejects a set count above the authored cap', () => {
+  it('rejects a set count that differs from the authored value (not just "above a cap")', () => {
     const result = validateProposalDomain(baseProposal({ exercises: [{ ...baseProposal().exercises[0]!, sets: 8 }] }), context, db);
     expect(result.ok).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/exceed the Blueprint-authored cap of 3/);
+    expect(result.errors.join(' ')).toMatch(/sets must equal Blueprint-authored value 3; received 8/);
   });
 
   it('rejects an invalid rep range (repsMin > repsMax already caught upstream, but repsMax over the safety ceiling here)', () => {

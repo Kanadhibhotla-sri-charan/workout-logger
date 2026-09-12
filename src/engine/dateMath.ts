@@ -17,6 +17,23 @@ const WEEKDAY_INDEX: Record<Weekday, number> = {
   saturday: 6,
 };
 
+/** True only for a string that is both shaped like `YYYY-MM-DD` AND a
+ * real calendar date — rejects e.g. "2026-02-31" or "2026-04-31", which
+ * `new Date(...)`/`Date.UTC(...)` would otherwise silently normalize
+ * into a different, real date (2026-02-31 -> 2026-03-03) rather than
+ * signal an error. Verifies round-trip equality against the parsed
+ * UTC components rather than trusting `Date`'s own leniency. The single
+ * shared calendar-date validity check for this app — anything
+ * accepting an external/untrusted date string (e.g. the AI Programmer
+ * route) should call this rather than a second, competing check. */
+export function isValidCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number) as [number, number, number];
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 function parseIsoDate(dateIso: string): Date {
   const d = new Date(`${dateIso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) throw new Error(`Invalid date "${dateIso}", expected YYYY-MM-DD`);

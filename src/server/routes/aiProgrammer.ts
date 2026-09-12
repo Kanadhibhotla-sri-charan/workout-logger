@@ -8,6 +8,7 @@
 
 import { Router } from 'express';
 import type Database from 'better-sqlite3';
+import { isValidCalendarDate } from '../../engine/dateMath.js';
 import { AIProgrammerError } from '../../ai-programmer/errors.js';
 import { createDefaultAIProgrammerService } from '../../ai-programmer/service/aiProgrammerService.js';
 
@@ -22,8 +23,20 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
   if (typeof targetDate !== 'string' || targetDate.trim() === '') {
     return res.status(400).json({ ok: false, error: 'targetDate (string, YYYY-MM-DD) is required' });
   }
-  if (timezone !== undefined && typeof timezone !== 'string') {
-    return res.status(400).json({ ok: false, error: 'timezone must be a string when provided' });
+  if (!isValidCalendarDate(targetDate)) {
+    return res.status(400).json({ ok: false, error: `targetDate "${targetDate}" is not a real calendar date in YYYY-MM-DD format` });
+  }
+  // Correction pass §5 (Option A): the user's stored TrainingProfile
+  // timezone is the single authoritative timezone for every date-
+  // sensitive operation in this request (current date, weekday,
+  // editability, context). A request-level override would otherwise
+  // leave the context's displayed `timezone` field inconsistent with
+  // the timezone actually used to compute `currentDate`/editability —
+  // rejected clearly rather than silently ignored.
+  if (timezone !== undefined) {
+    return res
+      .status(400)
+      .json({ ok: false, error: 'timezone is not accepted in the request — the user\'s TrainingProfile.timezone is always authoritative' });
   }
 
   // Express 4 does not automatically forward a rejected promise from an
@@ -31,7 +44,7 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
   // resolve via res.json/res.status or explicitly call next(err).
   try {
     const service = createDefaultAIProgrammerService(db(req));
-    const result = await service.generateSession({ targetDate, timezone });
+    const result = await service.generateSession({ targetDate });
     res.json({
       ok: true,
       proposal: result.proposal,

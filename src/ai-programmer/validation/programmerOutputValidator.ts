@@ -150,8 +150,12 @@ export function validateProposalSchema(raw: unknown): SchemaValidationResult {
   if (obj.schemaVersion !== AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION) {
     errors.push(`schemaVersion: expected "${AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION}", received ${JSON.stringify(obj.schemaVersion)}`);
   }
-  if (typeof obj.proposalId !== 'string' || obj.proposalId.trim() === '') {
-    errors.push('proposalId: expected a non-empty string');
+  // Correction pass §7: proposalId is application-owned — the service
+  // always overwrites whatever the model returned with a freshly
+  // generated UUID, so this is validated only loosely (a string, when
+  // present) rather than required.
+  if (obj.proposalId !== undefined && typeof obj.proposalId !== 'string') {
+    errors.push('proposalId: expected a string when present');
   }
   if (obj.mode !== 'generate_session') {
     errors.push(`mode: expected "generate_session", received ${JSON.stringify(obj.mode)}`);
@@ -196,7 +200,7 @@ export function validateProposalSchema(raw: unknown): SchemaValidationResult {
     errors: [],
     value: {
       schemaVersion: AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION,
-      proposalId: obj.proposalId as string,
+      proposalId: typeof obj.proposalId === 'string' ? obj.proposalId : '', // overwritten by the service with an app-generated ID regardless
       mode: 'generate_session',
       targetDate: obj.targetDate as string,
       weekday: obj.weekday as string,

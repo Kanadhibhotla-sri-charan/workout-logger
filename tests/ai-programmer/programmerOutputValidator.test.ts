@@ -59,8 +59,16 @@ describe('AI Programmer output schema validator', () => {
 
   it('rejects a missing required field', () => {
     const raw = validRaw();
-    delete (raw as any).proposalId;
+    delete (raw as any).mode;
     expect(validateProposalSchema(raw).ok).toBe(false);
+  });
+
+  it('accepts a response with proposalId omitted entirely (application-owned, never required)', () => {
+    const raw = validRaw();
+    delete (raw as any).proposalId;
+    const result = validateProposalSchema(raw);
+    expect(result.ok).toBe(true);
+    expect(result.value?.proposalId).toBe('');
   });
 
   it('rejects an unknown weekday enum value', () => {

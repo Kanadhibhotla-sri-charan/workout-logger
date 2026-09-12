@@ -25,7 +25,7 @@ import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../../blueprint/developmentPackages.js';
 import { WEEKDAYS, type ActivityType, type Weekday } from '../../contracts/types.js';
-import { addDays, daysBetween } from '../../engine/dateMath.js';
+import { addDays, daysBetween, isValidCalendarDate } from '../../engine/dateMath.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import { applyRecoveryConstraint } from '../../engine/recoveryEngine.js';
 import { exercisesTrainingTarget, roleFor } from '../../engine/exerciseSelector.js';
@@ -69,25 +69,24 @@ const FORBIDDEN_BEHAVIORS = [
   'Return only the requested JSON object — no prose outside it.',
 ];
 
-function isValidIsoDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
 function activityTypesForDailyActivity(activity: 'gym' | 'badminton' | 'both' | 'unselected'): ActivityType[] {
   return activity === 'badminton' || activity === 'both' ? ['badminton'] : [];
 }
 
+/** Correction pass §5 (Option A): the user's stored
+ * `TrainingProfile.timezone` is the single authoritative timezone for
+ * every date-sensitive operation in a request — current-date
+ * calculation, weekday derivation, editability, and the context's own
+ * displayed `timezone` field. A request-level override was removed
+ * entirely: it previously changed only the displayed `context.timezone`
+ * field while `currentDate`/editability kept using the stored profile
+ * timezone regardless, producing an internally inconsistent context. */
 export interface BuildProgrammerContextInput {
   targetDate: string;
-  /** Optional override of the resolved user's own TrainingProfile
-   * timezone — used only for display/consistency-checking, never to
-   * change which real day `targetDate` refers to (dates are always
-   * plain YYYY-MM-DD, spec's own timezone contract). */
-  timezone?: string;
 }
 
 export function buildProgrammerContext(db: Database.Database, input: BuildProgrammerContextInput): AIProgrammerContext {
-  if (!isValidIsoDate(input.targetDate)) {
+  if (!isValidCalendarDate(input.targetDate)) {
     throw new AIContextIncompleteError([`targetDate must be an ISO date (YYYY-MM-DD); received "${input.targetDate}"`]);
   }
 
@@ -247,7 +246,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     schemaVersion: AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
     mode: 'generate_session' as const,
     currentDate,
-    timezone: input.timezone ?? profile.timezone,
+    timezone: profile.timezone,
     reportingBoundary: { weekStartsOn: 'monday' as const, weekEndsOn: 'sunday' as const, weekStart, weekEnd },
     targetDate: input.targetDate,
     targetWeekday,

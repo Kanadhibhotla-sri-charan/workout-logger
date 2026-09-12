@@ -6,6 +6,8 @@
 // traces to a client (spec §13: "do not return raw provider responses
 // containing sensitive headers or credentials").
 
+import { boundDiagnosticIssues } from './validation/diagnosticsBounds.js';
+
 export type AIProgrammerErrorCode =
   | 'AI_PROGRAMMER_DISABLED'
   | 'AI_PROVIDER_CONFIGURATION_ERROR'
@@ -85,13 +87,15 @@ export class AIProviderInvalidResponseError extends AIProgrammerError {
 
 export class AIOutputSchemaInvalidError extends AIProgrammerError {
   constructor(issues: string[]) {
-    super('AI_OUTPUT_SCHEMA_INVALID', `AI output failed structural schema validation: ${issues.join('; ')}`, 502, { issues });
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_OUTPUT_SCHEMA_INVALID', `AI output failed structural schema validation: ${bounded.join('; ')}`, 502, { issues: bounded });
   }
 }
 
 export class AIOutputDomainInvalidError extends AIProgrammerError {
   constructor(issues: string[]) {
-    super('AI_OUTPUT_DOMAIN_INVALID', `AI output failed domain validation: ${issues.join('; ')}`, 502, { issues });
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_OUTPUT_DOMAIN_INVALID', `AI output failed domain validation: ${bounded.join('; ')}`, 502, { issues: bounded });
   }
 }
 

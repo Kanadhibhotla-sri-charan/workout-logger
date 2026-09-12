@@ -14,7 +14,6 @@ export function getProgrammerOutputSchema(): unknown {
     type: 'object',
     required: [
       'schemaVersion',
-      'proposalId',
       'mode',
       'targetDate',
       'weekday',
@@ -27,7 +26,6 @@ export function getProgrammerOutputSchema(): unknown {
     ],
     properties: {
       schemaVersion: { const: AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION },
-      proposalId: { type: 'string' },
       mode: { const: 'generate_session' },
       targetDate: { type: 'string', format: 'date', description: 'Must equal the requested targetDate exactly.' },
       weekday: { type: 'string', description: 'Must equal the real weekday of targetDate (lowercase, e.g. "monday").' },

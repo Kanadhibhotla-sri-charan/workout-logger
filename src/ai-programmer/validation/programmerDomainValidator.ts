@@ -13,8 +13,8 @@ import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { todayForUser } from '../../lib/userTimezone.js';
-import type { AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
-import type { AIProgrammerContext, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
+import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
+import type { AIProgrammerContext, AIProgrammerTargetContext, AIProgrammerValidExerciseContext } from '../context/programmerContextTypes.js';
 
 /** A generic application-level safety ceiling for an exercise with no
  * Blueprint-authored per-session cap for the claimed target (spec
@@ -33,6 +33,34 @@ export interface DomainValidationResult {
 
 function findTarget(context: AIProgrammerContext, targetType: string, targetId: string): AIProgrammerTargetContext | undefined {
   return context.targets.find((t) => t.targetType === targetType && t.targetId === targetId);
+}
+
+/** Correction pass §2: when an exercise has a Blueprint-authored
+ * prescription for its claimed target, EVERY authored field (sets,
+ * repsMin, repsMax, rirMin, rirMax) is authoritative and must match
+ * exactly — not merely stay under a broad global ceiling. A model must
+ * not narrow, widen, or otherwise "improve" an authored prescription
+ * just because its own chosen values remain individually plausible. */
+function validateAuthoredPrescription(
+  exercise: AIWorkoutExerciseProposal,
+  authoredPrescription: NonNullable<AIProgrammerValidExerciseContext['authoredPrescription']>,
+  path: string,
+  errors: string[]
+): void {
+  const fields: Array<[keyof AIWorkoutExerciseProposal, keyof typeof authoredPrescription]> = [
+    ['sets', 'sets'],
+    ['repsMin', 'repsMin'],
+    ['repsMax', 'repsMax'],
+    ['rirMin', 'rirMin'],
+    ['rirMax', 'rirMax'],
+  ];
+  for (const [proposalField, authoredField] of fields) {
+    const expected = authoredPrescription[authoredField];
+    const received = exercise[proposalField];
+    if (received !== expected) {
+      errors.push(`${path}.${proposalField} must equal Blueprint-authored value ${expected}; received ${received}`);
+    }
+  }
 }
 
 /** `db` is optional so tests/callers that already trust `context`'s own
@@ -94,11 +122,12 @@ export function validateProposalDomain(proposal: AIWorkoutSessionProposal, conte
       );
     }
 
-    const cap = catalogueEntry.authoredPrescription?.sets ?? MAX_SETS_WITHOUT_AUTHORED_CAP;
-    if (exercise.sets > cap) {
-      errors.push(
-        `${path}: sets (${exercise.sets}) exceed the ${catalogueEntry.authoredPrescription ? 'Blueprint-authored' : 'application-configured'} cap of ${cap}`
-      );
+    if (catalogueEntry.authoredPrescription) {
+      // Correction pass §2: every authored field is authoritative and
+      // must match exactly — not merely stay under a broad ceiling.
+      validateAuthoredPrescription(exercise, catalogueEntry.authoredPrescription, path, errors);
+    } else if (exercise.sets > MAX_SETS_WITHOUT_AUTHORED_CAP) {
+      errors.push(`${path}: sets (${exercise.sets}) exceed the application-configured cap of ${MAX_SETS_WITHOUT_AUTHORED_CAP} (no Blueprint-authored prescription exists for this exercise/target pair)`);
     }
 
     if (exercise.repsMax > MAX_REPS) {
