@@ -773,12 +773,22 @@ describe('Single-selected-workout precedence: AI/manual session supersedes an ex
     expect(thursdayAfter.plannedSession).toMatchObject({ id: ai.session_id, source: 'ai', status: 'planned' });
     // Explicit provenance: which deterministic row is being superseded.
     expect(typeof thursdayAfter.supersedesProgramSessionId).toBe('string');
+    // §11.G: an empty plannedWork must NEVER be read by a caller as "no
+    // workout planned" / Rest — the day's `activity`/`type` stay 'gym'
+    // precisely because `plannedSession` exists, proving the frontend
+    // (and any other consumer) has a truthful signal to key off instead
+    // of inferring absence from an empty array.
+    expect(thursdayAfter.activity).toBe('gym');
+    expect(thursdayAfter.type).toBe('gym');
+    expect(thursdayAfter.status).not.toBe('rest');
 
     // /today must show the exact same selection — never a stale
     // deterministic plan in one view and the AI session in another.
     const todayRes = await request(app).get('/api/programming/today').query({ date: thursday.date }).expect(200);
     expect(todayRes.body.plannedSession).toMatchObject({ id: ai.session_id, source: 'ai', status: 'planned' });
     expect(todayRes.body.exercises).toEqual([]);
+    expect(todayRes.body.activity).toBe('gym');
+    expect(todayRes.body.sessionType).toBe('gym');
   });
 
   it('the deterministic prescription itself is preserved (recoverable), not deleted, when superseded', async () => {

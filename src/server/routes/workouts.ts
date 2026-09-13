@@ -12,6 +12,7 @@ import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { reconcileAfterActualTraining } from '../../engine/weekProgramReconciliation.js';
 import { computeFreshWeek, defaultBudgetMinutes } from './programming.js';
+import { findActiveGymSessionConflict } from '../../engine/selectedSessionResolver.js';
 
 export const workoutsRouter = Router();
 
@@ -75,6 +76,31 @@ workoutsRouter.post('/', (req, res) => {
   }
 
   const repo = new WorkoutSessionsRepo(db(req));
+
+  // Final Selected Session Resolution and AI/Deterministic Precedence
+  // Fixes §3/§10: this is the ONE generic session-creation entry point
+  // (used directly by "Start workout"/"Log something else" on
+  // today.html, with no conflict checking of its own before this fix) —
+  // the AI-commit path (aiProposalLifecycle.ts) already guards against
+  // creating a second active gym session for a date via its own
+  // pre-commit checks; this closes the exact same gap here, using the
+  // SAME shared rule (`findActiveGymSessionConflict`), so "at most one
+  // active (planned/in_progress) real gym session per date" holds
+  // through every supported write path, not just the AI one. A
+  // `completed` session never blocks this — see the resolver's own doc
+  // comment for why that is the correct, spec-required behavior (a
+  // same-day makeup session is legitimate).
+  if (session_type === 'gym') {
+    const conflict = findActiveGymSessionConflict(repo.listSessionsByDate(date));
+    if (conflict) {
+      return res.status(409).json({
+        error: `${date} already has an active gym session (${conflict.status}). Complete or cancel it before starting another.`,
+        code: 'ACTIVE_GYM_SESSION_EXISTS',
+        conflictingSessionId: conflict.session_id,
+      });
+    }
+  }
+
   const session = repo.createSession({
     date,
     start_time,

@@ -15,6 +15,7 @@ import { UsersRepo } from '../../repositories/usersRepo.js';
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
 import { WeeklyProgramRepo } from '../../repositories/weeklyProgramRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
+import { findActiveGymSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { WEEKDAYS } from '../../contracts/types.js';
 import { programmingWeekStart, weekdayOfDate } from '../../engine/workoutBuilder.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
@@ -273,13 +274,18 @@ export function commitAIProposalToPlannedSession(
     throw new AIProposalStaleError(proposalId, domain.errors);
   }
 
-  // Planned-session conflict (spec §11's recommended default: reject).
+  // Active-session conflict (spec §11's recommended default: reject).
   // Completed/in-progress conflicts are already covered by
   // buildProgrammerContext's own lock check above; a merely-`planned`
   // session is not, since that path only treats completed/in_progress
-  // as locking — so it is checked explicitly here.
+  // as locking — so it is checked explicitly here, via the SAME shared
+  // rule (`findActiveGymSessionConflict`, Final Selected Session
+  // Resolution and AI/Deterministic Precedence Fixes §3/§10) the generic
+  // `POST /api/workouts` route now also enforces — one auditable
+  // definition of "already has an active gym session," not two
+  // independently-maintained checks that could drift apart.
   const sessionsRepo = new WorkoutSessionsRepo(db);
-  const plannedConflict = sessionsRepo.listSessionsByDate(proposal.targetDate).find((s) => s.status === 'planned');
+  const plannedConflict = findActiveGymSessionConflict(sessionsRepo.listSessionsByDate(proposal.targetDate));
   if (plannedConflict) {
     throw new AIProposalConflictError(proposalId, proposal.targetDate, plannedConflict.session_id, plannedConflict.status);
   }

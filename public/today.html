@@ -121,7 +121,19 @@
       section.appendChild(el('h2', { text: "Today's session" }));
 
       const relevant = (todayData.loggedSessions || []).filter((s) => todayData.sessionType !== 'gym' || s.session_type !== 'badminton');
-      const gymSession = todayData.loggedSessions.find((s) => s.session_type === 'gym');
+      // Final Selected Session Resolution and AI/Deterministic
+      // Precedence Fixes §6/§11.G: which session is "the" gym session
+      // for today must come from the SAME authoritative resolver /today
+      // already used to compute `plannedSession` (server-side,
+      // src/engine/selectedSessionResolver.ts) — never independently
+      // re-picked from `loggedSessions` by type alone. If more than one
+      // real gym session ever exists for today (e.g. a completed one
+      // plus a new planned one), picking "the first gym-type entry" here
+      // could disagree with the session `plannedSession`/the logger/
+      // completion resolve to. Look the resolved session up BY ID
+      // instead — identity always comes from the server, this is just a
+      // display-field lookup.
+      const gymSession = todayData.plannedSession ? todayData.loggedSessions.find((s) => s.session_id === todayData.plannedSession.id) : undefined;
 
       if (gymSession) {
         const card = createCard([

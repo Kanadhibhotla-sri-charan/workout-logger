@@ -81,10 +81,40 @@ function rowToProgram(row: ProgramRow, sessionRows: ProgramSessionRow[]): Persis
 export class WeeklyProgramRepo {
   constructor(private db: Database.Database) {}
 
+  /** Final Selected Session Resolution and AI/Deterministic Precedence
+   * Fixes §5: filters to `status = 'active'` explicitly — every program
+   * row THIS repo creates (`create`, below) is written with
+   * `status = 'active'` and never transitions away from it, so this is
+   * a no-op for the happy path, but it closes the hypothetical gap of
+   * ever matching a row the SEPARATE legacy `ProgramsRepo` (the original
+   * draft/active/completed/archived Program concept, over the same
+   * `programs` table — see this file's own top-of-file doc comment)
+   * later marks 'completed'/'archived'/'draft'. `supersedes_program_
+   * session_id` (aiProposalLifecycle.ts) is only ever set from a row
+   * this method returns, so this guard is exactly the "not archived or
+   * obsolete" / "not ambiguous with another program" check spec §5
+   * requires.
+   *
+   * One-program-per-week is otherwise an invariant this repo maintains
+   * procedurally, not via a schema constraint: `programs.start_date` has
+   * no UNIQUE index, because the SAME shared `programs` table also holds
+   * the legacy ProgramsRepo's OWN rows (with a nullable, usually-null,
+   * independently-set `start_date`) — a blanket UNIQUE(start_date)
+   * would risk a spurious constraint violation if a legacy Program ever
+   * set a `start_date` coinciding with a real week-Monday. This is safe
+   * in practice because (a) `ensureWeekProgramGenerated`'s check-then-
+   * create is only ever reached synchronously within one Node.js
+   * request — better-sqlite3 is synchronous, so no `await` point exists
+   * between the `getByWeekStart` read and the `create` write for two
+   * concurrent requests to interleave through — and (b) `create` is the
+   * only code path in this repo that ever inserts a row, always exactly
+   * once per week the first time it is requested. See
+   * `tests/repositories/weeklyProgramRepo.test.ts`'s "§5: one program
+   * per week" test, which exercises this directly. */
   getByWeekStart(weekStart: string): PersistedWeekProgram | undefined {
-    const row = this.db.prepare('SELECT id, start_date, end_date, active_goals_json, target_allocations_json FROM programs WHERE start_date = ?').get(weekStart) as
-      | ProgramRow
-      | undefined;
+    const row = this.db
+      .prepare("SELECT id, start_date, end_date, active_goals_json, target_allocations_json FROM programs WHERE start_date = ? AND status = 'active'")
+      .get(weekStart) as ProgramRow | undefined;
     if (!row) return undefined;
     const sessionRows = this.db
       .prepare('SELECT id, day_index, name, planned_session_type, snapshot_json FROM program_sessions WHERE program_id = ? ORDER BY day_index ASC')

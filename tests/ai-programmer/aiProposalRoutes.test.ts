@@ -294,6 +294,28 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
   });
 
+  // Final Selected Session Resolution and AI/Deterministic Precedence
+  // Fixes §11.B: "Two AI commits target the same date concurrently" —
+  // here, two DIFFERENT proposals (not the same proposal committed
+  // twice, already covered above) both targeting the same date. The
+  // first commit succeeds; the second must be rejected as a conflict
+  // against the session the first one just created, never silently
+  // create a second competing selected workout for that date.
+  it('two different proposals targeting the same date: the first commit succeeds, the second is rejected as a conflict', async () => {
+    const proposalA = await generateProposal();
+    const proposalB = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalA}/approve`);
+    await request(app).post(`/api/ai-programmer/proposals/${proposalB}/approve`);
+
+    const first = await request(app).post(`/api/ai-programmer/proposals/${proposalA}/commit`).send({ intent: 'replace_day_activity' }).expect(200);
+    const second = await request(app).post(`/api/ai-programmer/proposals/${proposalB}/commit`).send({ intent: 'replace_day_activity' });
+
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe('AI_PROPOSAL_CONFLICT');
+    expect(second.body.details.conflictingSessionId).toBe(first.body.committedSessionId);
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
+  });
+
   it('a completed-session conflict is rejected (via the reused editable-date check)', async () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
@@ -321,6 +343,24 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     expect(res.body.error).toBe('AI_PROPOSAL_CONFLICT');
     // Only the pre-existing planned session exists — the proposal's own
     // session was never created.
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
+  });
+
+  // Final Selected Session Resolution and AI/Deterministic Precedence
+  // Fixes §10/§11.C: an explicit mixed-source case named in the required
+  // regression matrix — "AI commit targets a date with selected manual
+  // session." The conflict check (`findActiveGymSessionConflict`,
+  // shared with the generic POST /api/workouts route — see
+  // aiProposalLifecycle.ts) does not discriminate by `source_type`, so
+  // this proves that explicitly rather than only via the source_type-
+  // agnostic 'planned' case above.
+  it('an existing MANUAL selected session on the target date is also rejected as a conflict (mixed-source §10)', async () => {
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+    new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'planned', source_type: 'manual' });
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('AI_PROPOSAL_CONFLICT');
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
   });
 
