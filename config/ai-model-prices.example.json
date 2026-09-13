@@ -1,0 +1,13 @@
+{
+  "_comment": "Example pricing input for `npm run ai:token-report -- --pricing-file`. Illustrative numbers only — verify current prices with Velona before using this for a real cost decision. Copy this file, fill in real per-model prices, and pass your copy's path via --pricing-file. A model with no entry here reports null costs (never guessed).",
+  "models": {
+    "example-small-model": {
+      "inputUsdPerMillionTokens": 0.15,
+      "outputUsdPerMillionTokens": 0.6
+    },
+    "example-large-model": {
+      "inputUsdPerMillionTokens": 3,
+      "outputUsdPerMillionTokens": 15
+    }
+  }
+}

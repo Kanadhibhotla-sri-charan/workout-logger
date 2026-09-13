@@ -120,13 +120,13 @@ describe('GET /api/ai-programmer/token-report — validation (item 9)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('rejects a non-numeric inputPricePerMillionTokens with a clear 400', async () => {
-    const res = await request(app).get('/api/ai-programmer/token-report').query({ mode: 'generate_session', date: SUNDAY, inputPricePerMillionTokens: 'free' });
+  it('rejects a non-numeric inputUsdPerMillionTokens with a clear 400', async () => {
+    const res = await request(app).get('/api/ai-programmer/token-report').query({ mode: 'generate_session', date: SUNDAY, inputUsdPerMillionTokens: 'free' });
     expect(res.status).toBe(400);
   });
 
-  it('rejects a negative outputPricePerMillionTokens with a clear 400', async () => {
-    const res = await request(app).get('/api/ai-programmer/token-report').query({ mode: 'generate_session', date: SUNDAY, outputPricePerMillionTokens: '-1' });
+  it('rejects a negative outputUsdPerMillionTokens with a clear 400', async () => {
+    const res = await request(app).get('/api/ai-programmer/token-report').query({ mode: 'generate_session', date: SUNDAY, outputUsdPerMillionTokens: '-1' });
     expect(res.status).toBe(400);
   });
 });
@@ -149,13 +149,25 @@ describe('GET /api/ai-programmer/token-report — success (never calls Velona)',
   it('returns a reconcile_week report with cost projection applied and never invokes fetch', async () => {
     const res = await request(app)
       .get('/api/ai-programmer/token-report')
-      .query({ mode: 'reconcile_week', date: SUNDAY, reason: 'testing', inputPricePerMillionTokens: '3', outputPricePerMillionTokens: '15' });
+      .query({ mode: 'reconcile_week', date: SUNDAY, reason: 'testing', inputUsdPerMillionTokens: '3', outputUsdPerMillionTokens: '15' });
     expect(res.status).toBe(200);
     expect(res.body.report.mode).toBe('reconcile_week');
     expect(res.body.report.weekStart).toBe('2026-09-07');
-    expect(res.body.report.costProjection.inputPricePerMillionTokens).toBe(3);
-    expect(res.body.report.costProjection.estimatedInputCost).not.toBeNull();
+    expect(res.body.report.costProjection.inputUsdPerMillionTokens).toBe(3);
+    expect(res.body.report.costProjection.pricingSource).toBe('query-params');
+    expect(res.body.report.costProjection.inputCost).not.toBeNull();
+    expect(res.body.report.costProjection.typicalTotalCost).not.toBeNull();
+    expect(res.body.report.costProjection.maximumTotalCost).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports null typical estimates as null, never 0, over HTTP too', async () => {
+    process.env.VELONA_MAX_TOKENS = '1000';
+    const res = await request(app).get('/api/ai-programmer/token-report').query({ mode: 'generate_session', date: SUNDAY });
+    expect(res.status).toBe(200);
+    expect(res.body.report.tokenEstimate.estimatedTypicalOutputTokens).toBeNull();
+    expect(res.body.report.tokenEstimate.estimatedTotalTokens).toBeNull();
+    delete process.env.VELONA_MAX_TOKENS;
   });
 
   it('the HTTP response never contains the API key or an Authorization header value (item 10)', async () => {

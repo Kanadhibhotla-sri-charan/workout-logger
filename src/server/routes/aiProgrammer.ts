@@ -26,7 +26,7 @@ import {
   getWeekReconciliation,
 } from '../../ai-programmer/service/weekReconciliationLifecycle.js';
 import { buildTokenReport } from '../../ai-programmer/service/tokenReport.js';
-import { isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
+import { isAiProgrammerEnabled, loadVelonaConfig } from '../../ai-programmer/provider/config.js';
 
 export const aiProgrammerRouter = Router();
 
@@ -408,7 +408,7 @@ aiProgrammerRouter.get('/token-report', (req, res, next) => {
       return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
     }
 
-    const { mode, date, reason, swapUnavailableReason, inputPricePerMillionTokens, outputPricePerMillionTokens } = req.query;
+    const { mode, date, reason, swapUnavailableReason, inputUsdPerMillionTokens, outputUsdPerMillionTokens } = req.query;
 
     if (typeof mode !== 'string' || !(TOKEN_REPORT_MODES as readonly string[]).includes(mode)) {
       return res.status(400).json({ ok: false, error: `mode query parameter is required and must be one of: ${TOKEN_REPORT_MODES.join(', ')}` });
@@ -431,21 +431,30 @@ aiProgrammerRouter.get('/token-report', (req, res, next) => {
       const parsed = typeof value === 'string' ? Number(value) : NaN;
       return Number.isFinite(parsed) && parsed >= 0 ? parsed : INVALID_PRICE;
     };
-    const inputPrice = parsePrice(inputPricePerMillionTokens);
+    const inputPrice = parsePrice(inputUsdPerMillionTokens);
     if (inputPrice === INVALID_PRICE) {
-      return res.status(400).json({ ok: false, error: 'inputPricePerMillionTokens must be a non-negative number when present' });
+      return res.status(400).json({ ok: false, error: 'inputUsdPerMillionTokens must be a non-negative number when present' });
     }
-    const outputPrice = parsePrice(outputPricePerMillionTokens);
+    const outputPrice = parsePrice(outputUsdPerMillionTokens);
     if (outputPrice === INVALID_PRICE) {
-      return res.status(400).json({ ok: false, error: 'outputPricePerMillionTokens must be a non-negative number when present' });
+      return res.status(400).json({ ok: false, error: 'outputUsdPerMillionTokens must be a non-negative number when present' });
     }
+
+    // Keyed by the actually-configured model, matching how buildTokenReport
+    // itself looks up pricing.models[config.model] — never guesses a price
+    // for a different model than the one this report is actually about.
+    const configuredModel = loadVelonaConfig().model;
+    const pricing =
+      inputPrice !== undefined || outputPrice !== undefined
+        ? { source: 'query-params', models: { [configuredModel]: { inputUsdPerMillionTokens: inputPrice, outputUsdPerMillionTokens: outputPrice } } }
+        : undefined;
 
     const report = buildTokenReport(db(req), {
       mode: mode as (typeof TOKEN_REPORT_MODES)[number],
       targetDate: date,
       reason,
       swapUnavailableReason,
-      costInputs: inputPrice !== undefined || outputPrice !== undefined ? { inputPricePerMillionTokens: inputPrice, outputPricePerMillionTokens: outputPrice } : undefined,
+      pricing,
     });
     res.json({ ok: true, report });
   } catch (err) {
