@@ -246,14 +246,21 @@ describe('VelonaProvider', () => {
   // against both buildVelonaRequestBody's own direct output and the
   // response's own requestDiagnostics.
 
-  it('the exact body sent to fetch equals buildVelonaRequestBody(request, config), byte for byte', async () => {
+  it('the exact body sent to fetch equals buildVelonaRequestBody(request, config).body, byte for byte', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
     const provider = new VelonaProvider(CONFIG);
     await provider.generate(BASE_REQUEST);
 
     const [, init] = fetchMock.mock.calls[0]!;
-    const expectedBody = buildVelonaRequestBody(BASE_REQUEST, CONFIG);
-    expect(init.body).toBe(JSON.stringify(expectedBody));
+    const expected = buildVelonaRequestBody(BASE_REQUEST, CONFIG);
+    expect(init.body).toBe(JSON.stringify(expected.body));
+  });
+
+  it('buildVelonaRequestBody also returns the individual pieces (systemInstruction/userTurnContent/outputSchemaJson) needed for dry-run measurement, matching body exactly', () => {
+    const result = buildVelonaRequestBody(BASE_REQUEST, CONFIG);
+    expect(result.systemInstruction).toBe(result.body.turns[0]!.content);
+    expect(result.userTurnContent).toBe(result.body.turns[1]!.content);
+    expect(result.outputSchemaJson).toBe(JSON.stringify(BASE_REQUEST.outputSchema));
   });
 
   it('buildVelonaUserTurnContent needs no VelonaConfig and matches the exact user-turn content actually sent', async () => {

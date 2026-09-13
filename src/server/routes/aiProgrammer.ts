@@ -25,6 +25,7 @@ import {
   getLatestWeekReconciliationForDate,
   getWeekReconciliation,
 } from '../../ai-programmer/service/weekReconciliationLifecycle.js';
+import { buildTokenReport } from '../../ai-programmer/service/tokenReport.js';
 import { isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
 
 export const aiProgrammerRouter = Router();
@@ -364,6 +365,89 @@ aiProgrammerRouter.post('/week-reconciliations/:reconciliationId/commit', (req, 
     requireEnabled();
     const { reconciliation } = commitWeekReconciliation(db(req), req.params.reconciliationId);
     res.json({ ok: true, ...serializeWeekReconciliation(reconciliation) });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+const TOKEN_REPORT_MODES = ['generate_session', 'reconcile_week'] as const;
+const INVALID_PRICE = Symbol('invalid-price');
+
+/** Real Dry-Run Token Report spec §8: "development/admin protection;
+ * never available anonymously in production." This is a standalone gate
+ * — deliberately not tied to `requireEnabled()`/AI_PROGRAMMER_ENABLED,
+ * since a dry-run cost/size report is exactly the tool a developer needs
+ * BEFORE turning the live feature on. Disabled by default (opt-in via
+ * AI_TOKEN_REPORT_ENABLED), same disabled-by-default posture as the rest
+ * of this module. If an access token is configured, it is required
+ * unconditionally (dev or prod); otherwise the route is only reachable
+ * outside NODE_ENV=production. Every denial path returns a bare 404 (not
+ * 403/401) so the route's existence is never revealed to anonymous
+ * probing in production. */
+function isTokenReportAccessAllowed(req: import('express').Request): boolean {
+  if (process.env.AI_TOKEN_REPORT_ENABLED !== 'true') return false;
+  const accessToken = process.env.AI_TOKEN_REPORT_ACCESS_TOKEN;
+  if (accessToken) {
+    return req.header('x-token-report-token') === accessToken;
+  }
+  return process.env.NODE_ENV !== 'production';
+}
+
+/** Real Dry-Run Token Report spec: a diagnostic-only endpoint that
+ * builds the exact current Generate/Reconcile request payload from real
+ * database state and reports its serialized size/estimated tokens —
+ * never calls Velona, never returns/logs the API key, never persists the
+ * full context. See service/tokenReport.ts for the measurement itself;
+ * this route only validates input and enforces access control. */
+aiProgrammerRouter.get('/token-report', (req, res, next) => {
+  try {
+    if (!isTokenReportAccessAllowed(req)) {
+      return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
+    }
+
+    const { mode, date, reason, swapUnavailableReason, inputPricePerMillionTokens, outputPricePerMillionTokens } = req.query;
+
+    if (typeof mode !== 'string' || !(TOKEN_REPORT_MODES as readonly string[]).includes(mode)) {
+      return res.status(400).json({ ok: false, error: `mode query parameter is required and must be one of: ${TOKEN_REPORT_MODES.join(', ')}` });
+    }
+    if (typeof date !== 'string' || date.trim() === '') {
+      return res.status(400).json({ ok: false, error: 'date (string, YYYY-MM-DD) query parameter is required' });
+    }
+    if (!isValidCalendarDate(date)) {
+      return res.status(400).json({ ok: false, error: `date "${date}" is not a real calendar date in YYYY-MM-DD format` });
+    }
+    if (reason !== undefined && typeof reason !== 'string') {
+      return res.status(400).json({ ok: false, error: 'reason must be a string when present' });
+    }
+    if (swapUnavailableReason !== undefined && typeof swapUnavailableReason !== 'string') {
+      return res.status(400).json({ ok: false, error: 'swapUnavailableReason must be a string when present' });
+    }
+
+    const parsePrice = (value: unknown): number | undefined | typeof INVALID_PRICE => {
+      if (value === undefined) return undefined;
+      const parsed = typeof value === 'string' ? Number(value) : NaN;
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : INVALID_PRICE;
+    };
+    const inputPrice = parsePrice(inputPricePerMillionTokens);
+    if (inputPrice === INVALID_PRICE) {
+      return res.status(400).json({ ok: false, error: 'inputPricePerMillionTokens must be a non-negative number when present' });
+    }
+    const outputPrice = parsePrice(outputPricePerMillionTokens);
+    if (outputPrice === INVALID_PRICE) {
+      return res.status(400).json({ ok: false, error: 'outputPricePerMillionTokens must be a non-negative number when present' });
+    }
+
+    const report = buildTokenReport(db(req), {
+      mode: mode as (typeof TOKEN_REPORT_MODES)[number],
+      targetDate: date,
+      reason,
+      swapUnavailableReason,
+      costInputs: inputPrice !== undefined || outputPrice !== undefined ? { inputPricePerMillionTokens: inputPrice, outputPricePerMillionTokens: outputPrice } : undefined,
+    });
+    res.json({ ok: true, report });
   } catch (err) {
     if (err instanceof AIProgrammerError) {
       return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });

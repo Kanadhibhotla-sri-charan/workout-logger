@@ -116,20 +116,44 @@ export interface VelonaRequestBody {
   output: { format: 'json' };
 }
 
-/** Fix AI Weekly Reconciliation Review, Finding 2: the ONE place this
- * exact request body is constructed — used both by the real fetch path
- * (`generate()` below) and by the diagnostics attached to its response,
- * so the two can never disagree about what was actually sent. */
-export function buildVelonaRequestBody(request: AIProgrammerProviderRequest, config: VelonaConfig): VelonaRequestBody {
-  return {
+/** Real Dry-Run Token Report spec §3: the individual pieces a caller
+ * needs to measure request size WITHOUT re-deriving them (and therefore
+ * risking drift from what `body` itself actually contains) —
+ * `systemInstruction`/`userTurnContent` are exactly `body.turns[0]
+ * .content`/`body.turns[1].content`; `outputSchemaJson` is
+ * `JSON.stringify(request.outputSchema)` alone (never re-embedded — it
+ * already lives inside `userTurnContent`, so a caller measuring both
+ * must not sum them as if they were disjoint). */
+export interface VelonaPayloadBuildResult {
+  body: VelonaRequestBody;
+  systemInstruction: string;
+  userTurnContent: string;
+  outputSchemaJson: string;
+}
+
+/** Fix AI Weekly Reconciliation Review, Finding 2 / Real Dry-Run Token
+ * Report spec §3: the ONE place this exact request body is constructed —
+ * used both by the real fetch path (`generate()` below, which reads
+ * `.body` off this result) and by dry-run token-report diagnostics
+ * (`tokenReport.ts`), so production and diagnostics can never disagree
+ * about what was actually (or would actually be) sent. */
+export function buildVelonaRequestBody(request: AIProgrammerProviderRequest, config: VelonaConfig): VelonaPayloadBuildResult {
+  const userTurnContent = buildVelonaUserTurnContent(request);
+  const body: VelonaRequestBody = {
     model: config.model,
     turns: [
       { role: 'system', content: request.systemInstruction },
-      { role: 'user', content: buildVelonaUserTurnContent(request) },
+      { role: 'user', content: userTurnContent },
     ],
     stream: false,
     config: { temperature: config.temperature, max_tokens: config.maxTokens },
     output: { format: 'json' },
+  };
+  return {
+    body,
+    systemInstruction: request.systemInstruction,
+    userTurnContent,
+    outputSchemaJson: JSON.stringify(request.outputSchema),
   };
 }
 
@@ -137,7 +161,7 @@ export class VelonaProvider implements AIProgrammerProvider {
   constructor(private readonly config: VelonaConfig) {}
 
   async generate(request: AIProgrammerProviderRequest): Promise<AIProgrammerProviderResponse> {
-    const body = buildVelonaRequestBody(request, this.config);
+    const { body, systemInstruction, userTurnContent } = buildVelonaRequestBody(request, this.config);
 
     let attempt = 0;
     for (;;) {
@@ -154,8 +178,8 @@ export class VelonaProvider implements AIProgrammerProvider {
         return {
           ...result,
           requestDiagnostics: {
-            systemInstructionChars: request.systemInstruction.length,
-            userTurnChars: body.turns[1]!.content.length,
+            systemInstructionChars: systemInstruction.length,
+            userTurnChars: userTurnContent.length,
             wirePayloadChars: JSON.stringify(body).length,
             configuredMaxOutputTokens: this.config.maxTokens,
           },
