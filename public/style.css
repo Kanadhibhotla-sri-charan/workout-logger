@@ -304,6 +304,13 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transf
 .planned-vs-actual { display: flex; gap: var(--space-4); margin-top: var(--space-2); font-size: 0.85rem; }
 .planned-vs-actual .pva-label { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; display: block; }
 
+/* AI Programmer Proposal Review UI: a clearly separate, additive
+   section within an existing panel/modal — never styled to look like
+   part of the deterministic plan above it. */
+.ai-proposal-section { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.ai-proposal-panel { border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: var(--space-4); margin: var(--space-3) 0; background: var(--surface-muted); }
+.card-warning { border-left: 4px solid var(--warning); background: var(--warning-bg); }
+
 /* Small, visually subordinate personal note for a single session —
    never as prominent as the exercise list itself. */
 .session-note-section { margin-top: var(--space-4); }

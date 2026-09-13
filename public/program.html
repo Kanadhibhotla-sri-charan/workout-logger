@@ -29,6 +29,40 @@
     let weekData = null;
     let lastFocusedEl = null;
 
+    // AI Programmer Proposal Review UI: id -> display-name catalogs,
+    // fetched once at page load, used only to resolve an AI proposal's
+    // raw exerciseId/targetId to a real Blueprint name (see
+    // buildAiExerciseCard below). A fetch failure here never blocks the
+    // page — names simply fall back to their raw id.
+    let blueprintExerciseNamesById = new Map();
+    let blueprintTargetNamesById = new Map();
+    let blueprintFunctionalGoalNamesById = new Map();
+
+    async function loadAiNameCatalogs() {
+      try {
+        const [exercises, targets, functionalGoals] = await Promise.all([
+          api('/api/blueprint/exercises'),
+          api('/api/blueprint/targets'),
+          api('/api/blueprint/functional-goals'),
+        ]);
+        blueprintExerciseNamesById = new Map(exercises.map((e) => [e.id, e.name]));
+        blueprintTargetNamesById = new Map(targets.map((t) => [t.id, t.name]));
+        blueprintFunctionalGoalNamesById = new Map(functionalGoals.map((g) => [g.id, g.name]));
+      } catch {
+        // Names fall back to raw ids (resolveExerciseDisplayName /
+        // resolveTargetDisplayName below) — never blocks the page.
+      }
+    }
+
+    function resolveExerciseDisplayName(exerciseId) {
+      return blueprintExerciseNamesById.get(exerciseId) || exerciseId;
+    }
+
+    function resolveTargetDisplayName(targetType, targetId) {
+      const map = targetType === 'functional_goal' ? blueprintFunctionalGoalNamesById : blueprintTargetNamesById;
+      return map.get(targetId) || targetId;
+    }
+
     // Blueprint Picker/Daily Activity spec §11: Gym/Badminton/Both/Rest,
     // matching the same labels used on the Profile page's weekly
     // schedule editor.
@@ -140,6 +174,8 @@
         panel.appendChild(el('p', { class: 'muted', text: `No gym session planned — ${formatSessionType(day.type).toLowerCase()} day.` }));
       }
 
+      panel.appendChild(buildAiProposalSection(day));
+
       const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
       backdrop.addEventListener('click', (e) => {
         if (e.target === backdrop) closeDayModal();
@@ -217,6 +253,224 @@
       return card;
     }
 
+    // ---------- AI Programmer Proposal Review UI ----------
+    // docs/CLAUDE_TASK_AI_PROGRAMMER_PROPOSAL_REVIEW_UI.md: a focused,
+    // additive review panel for the single-session AI proposal
+    // generate -> review -> approve -> commit workflow, scoped to
+    // whichever day's modal is currently open. This never replaces or
+    // recomputes anything the deterministic engine already rendered
+    // above in this same modal — it is a separate, clearly-labeled
+    // "awaiting review" surface using the existing AI Programmer API
+    // (src/server/routes/aiProgrammer.ts) exactly as implemented,
+    // nothing duplicated or re-validated client-side.
+
+    const AI_STATUS_LABELS = { pending: 'Pending review', approved: 'Approved', committed: 'Committed', expired: 'Expired', rejected: 'Rejected' };
+    function formatAiProposalStatus(status) {
+      return AI_STATUS_LABELS[status] || capitalize(status);
+    }
+
+    function buildAiExerciseCard(item, pendingReview) {
+      const card = createCard();
+      card.classList.add('exercise-card');
+      if (pendingReview) card.classList.add('exercise-unplanned'); // amber border — "not yet part of your real program"
+      const header = el('div', { class: 'exercise-header' });
+      const left = el('div');
+      left.appendChild(el('div', { class: 'exercise-name', text: resolveExerciseDisplayName(item.exerciseId) }));
+      left.appendChild(el('div', { class: 'exercise-targets', text: `${resolveTargetDisplayName(item.targetType, item.targetId)} · ${capitalize(item.role)}` }));
+      header.appendChild(left);
+      header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(item.sets, item.repsMin, item.repsMax) }));
+      card.appendChild(header);
+
+      const metaParts = [formatRirRange(item.rirMin, item.rirMax)];
+      const restText = formatRestSeconds(item.restSeconds);
+      if (restText) metaParts.push(restText);
+      card.appendChild(el('p', { class: 'faint', text: metaParts.join(' · '), style: 'margin:0.25rem 0 0' }));
+
+      if (item.rationale && item.rationale.length > 0) {
+        const explain = el('details', { class: 'exercise-explanation' });
+        explain.appendChild(el('summary', { text: 'Rationale' }));
+        for (const r of item.rationale) explain.appendChild(el('p', { text: r, style: 'margin:0.2rem 0' }));
+        card.appendChild(explain);
+      }
+      return card;
+    }
+
+    /** Renders the full read-only review content for a persisted
+     * proposal record (the shared response shape GET/approve/commit all
+     * return — see serializeProposal in src/server/routes/
+     * aiProgrammer.ts). Never invents a field: every value shown here
+     * comes directly from that response. */
+    function buildAiProposalReview(state) {
+      const wrap = el('div', { class: 'ai-proposal-panel' });
+      const proposal = state.proposal;
+
+      wrap.appendChild(el('div', { class: 'card-row' }, [
+        el('div', { class: 'card-subtitle', text: formatDate(state.targetDate, { weekday: 'long' }) }),
+        createStatusBadge(state.status, formatAiProposalStatus(state.status)),
+      ]));
+      if (state.createdAt) {
+        wrap.appendChild(el('p', { class: 'faint', text: `Generated ${formatTimestamp(state.createdAt)}`, style: 'margin:0.2rem 0 0' }));
+      }
+      if (state.provider && state.model) {
+        wrap.appendChild(el('p', { class: 'faint', text: `via ${state.provider} · ${state.model}`, style: 'margin:0.1rem 0 0' }));
+      }
+      if (proposal.sessionFocus && proposal.sessionFocus.length > 0) {
+        wrap.appendChild(el('p', { class: 'muted', text: `Focus: ${proposal.sessionFocus.join(', ')}`, style: 'margin-top:0.5rem' }));
+      }
+
+      const pendingReview = state.status === 'pending' || state.status === 'approved';
+      for (const ex of proposal.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+
+      if (proposal.programmingRationale && proposal.programmingRationale.length > 0) {
+        const details = el('details', { class: 'exercise-explanation' });
+        details.appendChild(el('summary', { text: 'Programming rationale' }));
+        for (const r of proposal.programmingRationale) details.appendChild(el('p', { text: r, style: 'margin:0.25rem 0' }));
+        wrap.appendChild(details);
+      }
+      if (proposal.warnings && proposal.warnings.length > 0) {
+        const warnBlock = el('div', { class: 'card card-warning', role: 'status' });
+        for (const w of proposal.warnings) warnBlock.appendChild(el('p', { text: `Warning: ${w}`, style: 'margin:0.15rem 0' }));
+        wrap.appendChild(warnBlock);
+      }
+      return wrap;
+    }
+
+    /** The Generate -> Review -> Approve -> Commit workflow for one
+     * day's modal. `state` (the persisted proposal record, or null
+     * before one is generated) lives only in this closure — reopening
+     * the day modal later starts fresh (see the implementation report's
+     * "Remaining limitations"). `aiProposalActionsFor` (app.js) is the
+     * single source of truth for which action is available for a given
+     * status; this function only wires it to actual DOM/network calls. */
+    function buildAiProposalSection(day) {
+      const section = el('div', { class: 'ai-proposal-section' });
+      section.appendChild(el('h3', { text: 'AI Workout Proposal' }));
+
+      const locked = day.status === 'completed' || day.status === 'in_progress';
+      if (locked) {
+        section.appendChild(el('p', { class: 'faint', text: `AI proposals aren't available — this day already has a ${formatSessionType(day.status).toLowerCase()} workout.` }));
+        return section;
+      }
+
+      section.appendChild(el('p', { class: 'faint', text: 'Generate an AI-suggested session for this day. Nothing is added to your program until you explicitly approve and commit it.' }));
+
+      let state = null;
+      let inFlight = false;
+      const reviewEl = el('div');
+      const actionsEl = el('div');
+      const statusEl = el('div');
+      section.append(reviewEl, actionsEl, statusEl);
+
+      function renderReview() {
+        reviewEl.innerHTML = '';
+        if (state) reviewEl.appendChild(buildAiProposalReview(state));
+      }
+
+      function renderActions() {
+        actionsEl.innerHTML = '';
+        const actions = aiProposalActionsFor(state ? state.status : null);
+
+        if (actions.canGenerate) {
+          const label = state ? 'Generate a new proposal' : 'Generate AI Workout Proposal';
+          actionsEl.appendChild(createButton({ label: inFlight ? 'Generating…' : label, disabled: inFlight, onClick: onGenerate }));
+          return;
+        }
+        if (actions.canApprove) {
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+            createButton({ label: inFlight ? 'Approving…' : 'Approve Proposal', variant: 'secondary', disabled: inFlight, onClick: onApprove }),
+          ]));
+          return;
+        }
+        if (actions.canCommit) {
+          actionsEl.appendChild(el('p', { class: 'muted', text: 'Approved — not yet added to your program.' }));
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+            createButton({ label: inFlight ? 'Committing…' : 'Commit to Planned Workout', disabled: inFlight, onClick: onCommit }),
+          ]));
+          return;
+        }
+        if (actions.isCommitted) {
+          actionsEl.appendChild(el('p', { class: 'muted', text: 'Committed — this is now a real planned workout.' }));
+          if (state.committedSessionId) {
+            actionsEl.appendChild(el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${state.committedSessionId}`, text: 'Open planned workout' }));
+          }
+        }
+      }
+
+      /** Re-fetches the canonical server state after a failed approve/
+       * commit — a failure can mean the proposal's real status already
+       * moved on (e.g. it expired, or another request already
+       * committed it), and the UI must never keep showing stale
+       * buttons for a status that no longer exists (spec §3: "do not
+       * silently retry an operation that could create an unintended
+       * state transition" — this is the opposite: resyncing display,
+       * never re-attempting the action itself). */
+      async function resyncState() {
+        try {
+          state = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}`);
+        } catch {
+          state = null; // the proposal itself is gone/unreachable — offer a fresh Generate
+        }
+      }
+
+      async function onGenerate() {
+        if (inFlight) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Generating…');
+        renderActions();
+        try {
+          const generated = await aiApi('/api/ai-programmer/generate-session', { method: 'POST', body: { targetDate: day.date } });
+          state = await aiApi(`/api/ai-programmer/proposals/${generated.proposalId}`);
+          showInlineStatus(statusEl, null, null);
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+        } finally {
+          inFlight = false;
+          renderReview();
+          renderActions();
+        }
+      }
+
+      async function onApprove() {
+        if (inFlight || !state) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Approving…');
+        renderActions();
+        try {
+          state = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/approve`, { method: 'POST' });
+          showInlineStatus(statusEl, null, null);
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+          await resyncState();
+        } finally {
+          inFlight = false;
+          renderReview();
+          renderActions();
+        }
+      }
+
+      async function onCommit() {
+        if (inFlight || !state) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Committing…');
+        renderActions();
+        try {
+          state = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/commit`, { method: 'POST' });
+          showInlineStatus(statusEl, null, null);
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+          await resyncState();
+        } finally {
+          inFlight = false;
+          renderReview();
+          renderActions();
+        }
+      }
+
+      renderReview();
+      renderActions();
+      return section;
+    }
+
     const GROUP_ORDER = ['Goal 1', 'Goal 2', 'Normal development', 'Maintenance'];
 
     function renderGoalSummary() {
@@ -266,6 +520,7 @@
     }
 
     loadWeek();
+    loadAiNameCatalogs();
   </script>
 </body>
 </html>

@@ -144,10 +144,54 @@ function formatDuration(minutes) {
   return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
 }
 
+/** A closed [min, max] range -> "6" (when min===max) or "6–8" — the one
+ * place this collapsing rule lives, shared by every range-shaped
+ * prescription field (reps, RIR, ...). */
+function formatRange(min, max) {
+  return min === max ? `${min}` : `${min}–${max}`;
+}
+
 /** {sets, reps_min, reps_max} -> "4 × 6–8" (or "4 × 8" when min===max). */
 function formatSets(sets, repsMin, repsMax) {
-  const reps = repsMin === repsMax ? `${repsMin}` : `${repsMin}–${repsMax}`;
-  return `${sets} × ${reps}`;
+  return `${sets} × ${formatRange(repsMin, repsMax)}`;
+}
+
+/** AI Programmer Proposal Review UI: an exercise proposal's rirMin/
+ * rirMax -> "RIR 1–3" (or "RIR 2" when min===max) — the RIR analogue of
+ * formatSets, reusing the exact same range-collapsing rule. */
+function formatRirRange(rirMin, rirMax) {
+  return `RIR ${formatRange(rirMin, rirMax)}`;
+}
+
+/** AI Programmer Proposal Review UI: an exercise proposal's optional
+ * restSeconds -> "90s rest" / "1m 30s rest" / "2m rest". Returns null
+ * (never a fabricated "0s"/"—") when restSeconds is absent — the
+ * caller is expected to simply omit the line rather than show a
+ * placeholder for a field the proposal itself didn't include. */
+function formatRestSeconds(seconds) {
+  if (seconds === null || seconds === undefined) return null;
+  if (seconds < 60) return `${seconds}s rest`;
+  const m = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return rem === 0 ? `${m}m rest` : `${m}m ${rem}s rest`;
+}
+
+/** An ISO instant (e.g. a proposal's createdAt) -> "Sep 13, 4:15 PM" in
+ * the browser's own local time. Returns '' for a missing/invalid value
+ * — callers should skip the line entirely rather than show it. */
+function formatTimestamp(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/** Any non-empty word -> the same word with its first letter
+ * capitalized ("primary" -> "Primary"). The single shared
+ * implementation formatSessionType also uses. */
+function capitalize(word) {
+  if (!word) return '';
+  return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
 /** A GoalType ('aesthetic'|'functional') -> its display label. */
@@ -159,8 +203,7 @@ function formatGoalType(goalType) {
  * 'other'|anything) -> a Title Case label — never assumes only these
  * values exist (spec §41). */
 function formatSessionType(type) {
-  if (!type) return 'Other';
-  return type.charAt(0).toUpperCase() + type.slice(1);
+  return type ? capitalize(type) : 'Other';
 }
 
 const CLASSIFICATION_LABEL = {
@@ -247,6 +290,12 @@ const BADGE_VARIANT = {
   skipped: 'badge-warning',
   rest: 'badge-rest',
   badminton: 'badge-activity',
+  // AI Programmer Proposal Review UI: proposal lifecycle statuses.
+  pending: 'badge-warning',
+  approved: 'badge-progress',
+  committed: 'badge-success',
+  expired: 'badge-neutral',
+  rejected: 'badge-neutral',
 };
 
 /** A status word ('planned'|'in_progress'|'completed'|'rest'|'skipped'|
@@ -353,6 +402,90 @@ function createBlueprintExercisePicker(exercises, { onChange } = {}) {
       results.innerHTML = '';
       results.hidden = true;
     },
+  };
+}
+
+// ---------- AI Programmer proposal review (Proposal Review UI spec) ----------
+
+/** Every backend AI Programmer error code this app knows how to
+ * translate into a short, safe, user-facing sentence — spec §5's
+ * required mapping. Deliberately a closed lookup table: an unmapped
+ * code (a future backend error this table hasn't been updated for)
+ * falls through to mapAiErrorCode's generic fallback rather than ever
+ * showing the raw code or the backend's own `message`/`details`
+ * fields, which may contain more technical detail than is safe to
+ * render directly. */
+const AI_ERROR_MESSAGES = {
+  AI_PROGRAMMER_DISABLED: 'AI Programmer is disabled.',
+  AI_TARGET_NOT_EDITABLE: "This date can't be edited — it already has a workout logged, or it's in the past.",
+  AI_PROVIDER_CONFIGURATION_ERROR: 'The AI provider is temporarily unavailable. Please try again in a moment.',
+  AI_PROVIDER_AUTHENTICATION_ERROR: 'The AI provider is temporarily unavailable. Please try again in a moment.',
+  AI_PROVIDER_TIMEOUT: 'The AI provider is temporarily unavailable. Please try again in a moment.',
+  AI_PROVIDER_RATE_LIMITED: 'The AI provider is temporarily unavailable. Please try again in a moment.',
+  AI_PROVIDER_UNAVAILABLE: 'The AI provider is temporarily unavailable. Please try again in a moment.',
+  AI_PROVIDER_INVALID_RESPONSE: 'The proposal could not be validated. Please try generating again.',
+  AI_OUTPUT_SCHEMA_INVALID: 'The proposal could not be validated. Please try generating again.',
+  AI_OUTPUT_DOMAIN_INVALID: 'The proposal could not be validated. Please try generating again.',
+  AI_CONTEXT_INCOMPLETE: 'Your training profile is incomplete. Please finish setup on the Profile page first.',
+  AI_PROPOSAL_NOT_FOUND: 'This proposal could not be found. It may have expired or been removed.',
+  AI_PROPOSAL_INVALID_STATE: "This proposal's status no longer allows that action.",
+  AI_PROPOSAL_EXPIRED: 'This proposal expired. Please generate a new one.',
+  AI_PROPOSAL_CONFLICT: 'A planned workout already exists for this date.',
+  AI_PROPOSAL_STALE: 'This proposal is out of date and must be regenerated.',
+  AI_PROPOSAL_VALIDATION_FAILED: 'The proposal could not be validated. Please try generating again.',
+  AI_PROPOSAL_COMMIT_FAILED: 'This proposal could not be committed. Please try again.',
+};
+
+function mapAiErrorCode(code) {
+  return AI_ERROR_MESSAGES[code] || 'Something went wrong. Please try again.';
+}
+
+/** A dedicated fetch wrapper for the AI Programmer endpoints — NOT the
+ * shared `api()` helper, because these routes return a richer
+ * `{ok, error, message, details}` envelope (see src/server/routes/
+ * aiProgrammer.ts) whose `message`/`details` fields may legitimately
+ * contain more technical detail than is safe to show a user (they are
+ * meant for logs/debugging, not display). Every error this throws has
+ * already been mapped to one of AI_ERROR_MESSAGES (or the generic
+ * fallback) — callers can always show `err.message` directly without
+ * re-checking what kind of error it was. `err.code` carries the raw
+ * backend code too, for callers that need to branch on it (e.g. to
+ * decide whether to re-fetch current state). */
+async function aiApi(path, options = {}) {
+  let res;
+  try {
+    res = await fetch(path, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw new Error('Something went wrong. Please try again.');
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.ok === false) {
+    const err = new Error(mapAiErrorCode(body.error));
+    err.code = body.error || null;
+    throw err;
+  }
+  return body;
+}
+
+/** Pure lifecycle-representation logic (Proposal Review UI spec §3):
+ * given a proposal's current status (or `null` before one has been
+ * generated yet), which of the four actions should the UI offer right
+ * now? Kept separate from any DOM code specifically so the lifecycle
+ * rules themselves — "approval is a separate action from commit",
+ * "commit is never available before approval", "a committed/expired/
+ * rejected proposal offers only 'generate a new one'" — are a single,
+ * directly testable source of truth, not something re-derived ad hoc
+ * wherever a button happens to be rendered. */
+function aiProposalActionsFor(status) {
+  return {
+    canGenerate: status === null || status === undefined || status === 'expired' || status === 'rejected',
+    canApprove: status === 'pending',
+    canCommit: status === 'approved',
+    isCommitted: status === 'committed',
   };
 }
 
