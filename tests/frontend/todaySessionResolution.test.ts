@@ -53,6 +53,11 @@ describe('today.html: resolves the gym session from historicalSession/selectedPl
     const conflictBlock = html.slice(html.indexOf('if (todayData.selectionConflict)'), html.indexOf('} else if (historicalSession)'));
     expect(conflictBlock).not.toMatch(/logger\.html\?session=/);
   });
+
+  it('the actionable branch opens the logger by the exact resolved session id, never a fallback', () => {
+    const actionableBranch = html.slice(html.indexOf('} else if (actionableSession) {'), html.indexOf('} else if (todayData.sessionType'));
+    expect(actionableBranch).toMatch(/logger\.html\?session=\$\{actionableSession\.session_id\}/);
+  });
 });
 
 describe('program.html: surfaces selectionConflict rather than opening an arbitrary session', () => {

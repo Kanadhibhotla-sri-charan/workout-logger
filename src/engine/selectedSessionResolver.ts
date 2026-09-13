@@ -43,15 +43,21 @@ export interface SelectionConflict {
  * - `selectedPlannedWorkout`: the `planned` workout the user may start
  *   or continue — `null` whenever a `historicalSession` exists for the
  *   date (§2: a completed/in-progress session blocks any other session
- *   from being actionable, it does not merely outrank it for display)
- *   or when nothing planned exists at all.
+ *   from being actionable, it does not merely outrank it for display),
+ *   when nothing planned exists at all, OR whenever `selectionConflict`
+ *   is non-null (Final Conflict Selection Safety Fix: an ambiguous
+ *   active-planned-session state has NO authoritative actionable
+ *   workout — a "most recently created" recovery candidate is not a
+ *   real selection, and returning one here let `/today`/`/week`/the
+ *   logger silently treat it as if it were).
  * - `selectionConflict`: non-null only when the underlying data is
  *   genuinely ambiguous (§5) — never populated merely because a
  *   historical session exists alongside an excluded planned one; that
  *   case is unambiguous (the historical session wins, per §2) and is
  *   expressed purely through `historicalSession`/`selectedPlannedWorkout`.
  * - `source`: which tier produced the result — `'conflict'` exactly
- *   when `selectionConflict` is non-null.
+ *   when `selectionConflict` is non-null, and whenever `source` is
+ *   `'conflict'`, `selectedPlannedWorkout` is always `null`.
  */
 export interface SelectedSessionResolution {
   historicalSession: WorkoutSession | null;
@@ -100,12 +106,13 @@ function buildConflict(sessions: readonly WorkoutSession[]): SelectionConflict {
  *   3. `planned`, `source_type` `'ai'`/`'manual'` — selected only when
  *      no historical session exists for the date (§2/§4.3). More than
  *      one such session existing simultaneously is a genuine
- *      `selectionConflict` (§5) — never silently resolved by recency;
- *      a deterministic recovery candidate (the most recent) is still
- *      returned as `selectedPlannedWorkout` so a read endpoint stays
- *      usable, but `source` is `'conflict'` and `selectionConflict` is
- *      populated so no caller can mistake it for an unconditionally
- *      valid answer.
+ *      `selectionConflict` (§5) — never silently resolved by recency,
+ *      and never exposed as `selectedPlannedWorkout` either (Final
+ *      Conflict Selection Safety Fix): a conflicted candidate is not an
+ *      authoritative selection, so `selectedPlannedWorkout` is `null`
+ *      and `source` is `'conflict'`. `sessionIds` on the conflict object
+ *      is what a caller uses to build its own recovery UI, never a
+ *      silently-chosen "the" session.
  *   4. `planned`, `source_type` `'deterministic'` — the day's own
  *      generated plan, merely started; same conflict handling as (3)
  *      if more than one exists.
@@ -132,19 +139,18 @@ export function resolveSelectedSession(sessionsOnDate: readonly WorkoutSession[]
 
   const plannedAi = gymSessions.filter((s) => s.status === 'planned' && s.source_type !== 'deterministic');
   if (plannedAi.length > 0) {
-    const conflict = plannedAi.length > 1 ? buildConflict(plannedAi) : null;
-    return { historicalSession: null, selectedPlannedWorkout: mostRecent(plannedAi), selectionConflict: conflict, source: conflict ? 'conflict' : 'ai' };
+    if (plannedAi.length > 1) {
+      return { historicalSession: null, selectedPlannedWorkout: null, selectionConflict: buildConflict(plannedAi), source: 'conflict' };
+    }
+    return { historicalSession: null, selectedPlannedWorkout: plannedAi[0]!, selectionConflict: null, source: 'ai' };
   }
 
   const plannedDeterministic = gymSessions.filter((s) => s.status === 'planned' && s.source_type === 'deterministic');
   if (plannedDeterministic.length > 0) {
-    const conflict = plannedDeterministic.length > 1 ? buildConflict(plannedDeterministic) : null;
-    return {
-      historicalSession: null,
-      selectedPlannedWorkout: mostRecent(plannedDeterministic),
-      selectionConflict: conflict,
-      source: conflict ? 'conflict' : 'deterministic',
-    };
+    if (plannedDeterministic.length > 1) {
+      return { historicalSession: null, selectedPlannedWorkout: null, selectionConflict: buildConflict(plannedDeterministic), source: 'conflict' };
+    }
+    return { historicalSession: null, selectedPlannedWorkout: plannedDeterministic[0]!, selectionConflict: null, source: 'deterministic' };
   }
 
   return { historicalSession: null, selectedPlannedWorkout: null, selectionConflict: null, source: 'none' };

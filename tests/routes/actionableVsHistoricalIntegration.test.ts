@@ -125,11 +125,12 @@ describe('Endpoint/integration: /today, /week, logger, completion agree via the 
     expect(afterPatch.body.selectedPlannedWorkout).toBeNull();
   });
 
-  it('multiple active planned AI sessions (simulating pre-existing bad data) surface a selectionConflict consistently on /week and /today', async () => {
+  it('multiple active planned AI sessions (simulating pre-existing bad data) surface a selectionConflict consistently on /week and /today, with NO actionable workout selected', async () => {
     setupProfile(['thursday']);
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
     const before = await getWeek();
     const thursday = before.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursday.plannedWork.length).toBeGreaterThan(0); // a real deterministic prescription exists for this slot
 
     const sessionsRepo = new WorkoutSessionsRepo(db);
     const older = sessionsRepo.createSession({ date: thursday.date, session_type: 'gym', status: 'planned', source_type: 'ai' });
@@ -140,12 +141,31 @@ describe('Endpoint/integration: /today, /week, logger, completion agree via the 
     expect(thursdayAfter.selectionConflict).not.toBeNull();
     expect(thursdayAfter.selectionConflict.code).toBe('MULTIPLE_ACTIVE_PLANNED_SESSIONS');
     expect(thursdayAfter.selectionConflict.sessionIds.sort()).toEqual([older.session_id, newer.session_id].sort());
-    // A deterministic recovery candidate is still exposed for usability.
-    expect(thursdayAfter.selectedPlannedWorkout).not.toBeNull();
+    // Final Conflict Selection Safety Fix: an ambiguous conflict must
+    // NEVER return an actionable selection — not the "most recent"
+    // conflicting session, and not the deterministic snapshot either
+    // (which would silently look like a valid, current plan sitting
+    // right next to the conflict warning).
+    expect(thursdayAfter.selectedPlannedWorkout).toBeNull();
+    expect(thursdayAfter.historicalSession).toBeNull();
+    expect(thursdayAfter.plannedWork).toEqual([]);
+    // The backward-compat combined field must also not silently expose
+    // either conflicting session or the deterministic snapshot as "the"
+    // plan during a conflict.
+    expect(thursdayAfter.plannedSession).toBeNull();
 
     const today = await request(app).get('/api/programming/today').query({ date: thursday.date }).expect(200);
-    expect(today.body.selectionConflict).toEqual(thursdayAfter.selectionConflict);
-    expect(today.body.selectedPlannedWorkout).toEqual(thursdayAfter.selectedPlannedWorkout);
+    // Compared field-by-field (with sessionIds sorted) rather than a
+    // blanket deep-equal: two independent `listSessionsByDate` queries
+    // for rows with an identical (null) start_time have no guaranteed
+    // relative ordering, so the array's ELEMENT order is not itself part
+    // of the contract — only its content and the conflict's other fields
+    // must agree between /week and /today.
+    expect(today.body.selectionConflict.code).toBe(thursdayAfter.selectionConflict.code);
+    expect(today.body.selectionConflict.message).toBe(thursdayAfter.selectionConflict.message);
+    expect(today.body.selectionConflict.sessionIds.sort()).toEqual(thursdayAfter.selectionConflict.sessionIds.sort());
+    expect(today.body.selectedPlannedWorkout).toBeNull();
+    expect(today.body.exercises).toEqual([]);
   });
 
   it('completion updates ONLY the selected session — an uninvolved historical session on a different date is untouched', async () => {

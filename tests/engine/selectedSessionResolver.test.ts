@@ -119,7 +119,7 @@ describe('resolveSelectedSession — required resolver cases', () => {
     }
   });
 
-  it('9. multiple active AI planned sessions -> a conflict is returned, not a silent recency pick', () => {
+  it('9. multiple active AI planned sessions -> a conflict is returned, not a silent recency pick, and NO session is selected', () => {
     const older = session({ status: 'planned', source_type: 'ai', created_at: '2026-09-10T00:00:01.000Z' });
     const newer = session({ status: 'planned', source_type: 'ai', created_at: '2026-09-10T00:00:05.000Z' });
     const r = resolveSelectedSession([older, newer]);
@@ -127,18 +127,21 @@ describe('resolveSelectedSession — required resolver cases', () => {
     expect(r.selectionConflict!.code).toBe('MULTIPLE_ACTIVE_PLANNED_SESSIONS');
     expect(r.selectionConflict!.sessionIds.sort()).toEqual([older.session_id, newer.session_id].sort());
     expect(r.source).toBe('conflict');
-    // A deterministic recovery candidate is still exposed, but the
-    // conflict marker means it must not be trusted unconditionally.
-    expect(r.selectedPlannedWorkout).toBe(newer);
+    // Final Conflict Selection Safety Fix: a conflicted candidate is
+    // NOT an authoritative selection — selectedPlannedWorkout must be
+    // null, never "whichever one is most recent."
+    expect(r.selectedPlannedWorkout).toBeNull();
+    expect(r.historicalSession).toBeNull();
   });
 
-  it('10. multiple active deterministic planned sessions -> conflict, same explicit invariant', () => {
+  it('10. multiple active deterministic planned sessions -> conflict, same explicit invariant, NO session selected', () => {
     const a = session({ status: 'planned', source_type: 'deterministic', created_at: '2026-09-10T00:00:01.000Z' });
     const b = session({ status: 'planned', source_type: 'deterministic', created_at: '2026-09-10T00:00:05.000Z' });
     const r = resolveSelectedSession([a, b]);
     expect(r.selectionConflict).not.toBeNull();
     expect(r.selectionConflict!.code).toBe('MULTIPLE_ACTIVE_PLANNED_SESSIONS');
     expect(r.source).toBe('conflict');
+    expect(r.selectedPlannedWorkout).toBeNull();
   });
 
   it('11. superseded/cancelled sessions are excluded from active selection (a "skipped" status is never selectable)', () => {
@@ -155,15 +158,16 @@ describe('resolveSelectedSession — required resolver cases', () => {
     expect(r.historicalSession).toBeNull();
   });
 
-  it('13. tie-breaking (most-recently-created) is used only WITHIN an already-conflicted tier to keep a read endpoint usable — it is never a substitute for reporting the conflict itself', () => {
+  it('13. tie-breaking (most-recently-created) is NEVER used as a substitute for reporting the conflict — mostRecent() must not populate selectedPlannedWorkout during a conflict', () => {
     const older = session({ status: 'planned', source_type: 'ai', created_at: '2026-09-10T00:00:01.000Z' });
     const newer = session({ status: 'planned', source_type: 'ai', created_at: '2026-09-10T00:00:05.000Z' });
     const r = resolveSelectedSession([older, newer]);
     expect(r.selectionConflict).not.toBeNull(); // the conflict is always reported
-    expect(r.selectedPlannedWorkout).toBe(newer); // AND a usable candidate is still exposed
+    expect(r.selectedPlannedWorkout).toBeNull(); // NEVER "the most recent one" — not an authoritative selection
+    expect(r.source).toBe('conflict');
   });
 
-  it('does not depend on repository row order for any tier (fuzz across several permutations)', () => {
+  it('does not depend on repository row order for any tier (fuzz across several permutations) — a conflicted tier never leaks a selection regardless of array order', () => {
     const a = session({ status: 'planned', source_type: 'deterministic', created_at: '2026-09-10T00:00:01.000Z' });
     const b = session({ status: 'planned', source_type: 'ai', created_at: '2026-09-10T00:00:02.000Z' });
     const c = session({ status: 'planned', source_type: 'manual', created_at: '2026-09-10T00:00:03.000Z' });
@@ -174,10 +178,12 @@ describe('resolveSelectedSession — required resolver cases', () => {
       [c, a, b],
     ];
     for (const perm of permutations) {
-      // b and c are both non-deterministic and 'planned' -> conflict tier; c is more recent.
+      // b and c are both non-deterministic and 'planned' -> conflict tier.
       const r = resolveSelectedSession(perm);
       expect(r.selectionConflict).not.toBeNull();
-      expect(r.selectedPlannedWorkout).toBe(c);
+      expect(r.selectionConflict!.sessionIds.sort()).toEqual([b.session_id, c.session_id].sort());
+      expect(r.selectedPlannedWorkout).toBeNull();
+      expect(r.source).toBe('conflict');
     }
   });
 

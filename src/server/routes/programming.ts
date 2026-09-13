@@ -160,7 +160,16 @@ function resolveGymDaySelection(
 ): { showDeterministic: boolean; combinedSession: WorkoutSession | null } {
   const combinedSession = resolution.historicalSession ?? resolution.selectedPlannedWorkout;
   const supersedes = !!combinedSession && combinedSession.source_type !== 'deterministic';
-  return { showDeterministic: !!persistedSnapshot && !supersedes, combinedSession };
+  // Final Conflict Selection Safety Fix: an ambiguous active-planned-
+  // session state (`source: 'conflict'`) must never fall through to
+  // showing the deterministic snapshot as if it were the valid, current
+  // plan — `combinedSession` is `null` in this state (neither field is
+  // populated, by design), which would otherwise make `supersedes` false
+  // and silently resurrect `plannedWork` right alongside the very
+  // `selectionConflict` warning that says the day's real state is
+  // unresolved. Suppress it explicitly instead.
+  const showDeterministic = !!persistedSnapshot && resolution.source !== 'conflict' && !supersedes;
+  return { showDeterministic, combinedSession };
 }
 
 /** The real recurring-activity type for a non-gym day, straight from the
