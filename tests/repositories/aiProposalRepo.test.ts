@@ -214,6 +214,67 @@ describe('AIProposalRepo — status transitions', () => {
   });
 });
 
+// Discovery/Rehydration
+// (docs/CLAUDE_TASK_AI_PROGRAMMER_PROPOSAL_DISCOVERY_REHYDRATION.md
+// §3): repository-level tests for the ordering/date-scoping contract
+// findLatestForTargetDate makes — the service-layer/route-level tests
+// (tests/ai-programmer/aiProposalRoutes.test.ts) cover the same
+// behavior end-to-end through HTTP; these isolate the SQL query itself.
+describe('AIProposalRepo — findLatestForTargetDate', () => {
+  it('returns undefined when no proposal exists for the date', () => {
+    const repo = new AIProposalRepo(db);
+    expect(repo.findLatestForTargetDate('2026-09-13')).toBeUndefined();
+  });
+
+  it('returns the single proposal for a date when only one exists', () => {
+    const repo = new AIProposalRepo(db);
+    repo.create({ proposal: makeProposal(), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    expect(repo.findLatestForTargetDate('2026-09-13')?.id).toBe('proposal-1');
+  });
+
+  it('orders by created_at DESC — the most recently created proposal wins, not insertion order', () => {
+    const repo = new AIProposalRepo(db);
+    repo.create({ proposal: makeProposal({ proposalId: 'proposal-older' }), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    repo.create({ proposal: makeProposal({ proposalId: 'proposal-newer' }), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    // Force explicit, unambiguous created_at values rather than relying
+    // on real insertion timing being fast enough to differ.
+    db.prepare("UPDATE ai_program_proposals SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = 'proposal-older'").run();
+    db.prepare("UPDATE ai_program_proposals SET created_at = '2026-06-01T00:00:00.000Z' WHERE id = 'proposal-newer'").run();
+
+    expect(repo.findLatestForTargetDate('2026-09-13')?.id).toBe('proposal-newer');
+  });
+
+  it('breaks a created_at tie deterministically by id', () => {
+    const repo = new AIProposalRepo(db);
+    repo.create({ proposal: makeProposal({ proposalId: 'proposal-aaa' }), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    repo.create({ proposal: makeProposal({ proposalId: 'proposal-zzz' }), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    const sameInstant = '2026-01-01T00:00:00.000Z';
+    db.prepare("UPDATE ai_program_proposals SET created_at = ? WHERE id = 'proposal-aaa'").run(sameInstant);
+    db.prepare("UPDATE ai_program_proposals SET created_at = ? WHERE id = 'proposal-zzz'").run(sameInstant);
+
+    // Deterministic (id DESC), not "whichever the DB happens to return
+    // first" — run it twice to rule out incidental row-order stability.
+    expect(repo.findLatestForTargetDate('2026-09-13')?.id).toBe('proposal-zzz');
+    expect(repo.findLatestForTargetDate('2026-09-13')?.id).toBe('proposal-zzz');
+  });
+
+  it('never returns a proposal for a different target date', () => {
+    const repo = new AIProposalRepo(db);
+    repo.create({ proposal: makeProposal({ proposalId: 'proposal-sun', targetDate: '2026-09-13', weekday: 'sunday' }), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    repo.create({ proposal: makeProposal({ proposalId: 'proposal-mon', targetDate: '2026-09-14', weekday: 'monday' }), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+
+    expect(repo.findLatestForTargetDate('2026-09-13')?.id).toBe('proposal-sun');
+    expect(repo.findLatestForTargetDate('2026-09-14')?.id).toBe('proposal-mon');
+  });
+
+  it('returns a proposal regardless of its status — expired/rejected/committed are still "the latest attempt for this date"', () => {
+    const repo = new AIProposalRepo(db);
+    repo.create({ proposal: makeProposal(), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    db.prepare("UPDATE ai_program_proposals SET status = 'rejected' WHERE id = 'proposal-1'").run();
+    expect(repo.findLatestForTargetDate('2026-09-13')?.status).toBe('rejected');
+  });
+});
+
 describe('effectiveStatus()', () => {
   it('reports "expired" for a pending/approved record past its expiresAt, without mutating anything', () => {
     const past = { status: 'pending' as const, expiresAt: '2020-01-01T00:00:00.000Z' };

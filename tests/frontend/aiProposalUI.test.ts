@@ -61,6 +61,7 @@ interface AiHelpers {
   mapAiErrorCode: (code?: string | null) => string;
   aiApi: (path: string, options?: { method?: string; body?: unknown; headers?: Record<string, string> }) => Promise<any>;
   aiProposalActionsFor: (status: string | null | undefined) => { canGenerate: boolean; canApprove: boolean; canCommit: boolean; isCommitted: boolean };
+  aiProposalNoticeFor: (status: string | null | undefined) => string | null;
   formatRirRange: (min: number, max: number) => string;
   formatRestSeconds: (seconds: number | null | undefined) => string | null;
   capitalize: (word: string) => string;
@@ -80,6 +81,7 @@ beforeAll(() => {
   // copyTextToClipboard).
   const aiApiSrc = `async ${extractFunction(appJs, 'aiApi')}`;
   const aiProposalActionsForSrc = extractFunction(appJs, 'aiProposalActionsFor');
+  const aiProposalNoticeForSrc = extractFunction(appJs, 'aiProposalNoticeFor');
   const formatRangeSrc = extractFunction(appJs, 'formatRange');
   const formatRirRangeSrc = extractFunction(appJs, 'formatRirRange');
   const formatRestSecondsSrc = extractFunction(appJs, 'formatRestSeconds');
@@ -94,12 +96,13 @@ beforeAll(() => {
     ${mapAiErrorCodeSrc}
     ${aiApiSrc}
     ${aiProposalActionsForSrc}
+    ${aiProposalNoticeForSrc}
     ${formatRangeSrc}
     ${formatRirRangeSrc}
     ${formatRestSecondsSrc}
     ${capitalizeSrc}
     ${formatTimestampSrc}
-    return { mapAiErrorCode, aiApi, aiProposalActionsFor, formatRirRange, formatRestSeconds, capitalize, formatTimestamp };
+    return { mapAiErrorCode, aiApi, aiProposalActionsFor, aiProposalNoticeFor, formatRirRange, formatRestSeconds, capitalize, formatTimestamp };
     `
   );
   makeAiHelpers = factory as any;
@@ -259,6 +262,92 @@ describe('aiProposalActionsFor: exactly one action is available per lifecycle st
   });
 });
 
+// ---------- aiProposalNoticeFor: the "no longer active" informational note ----------
+
+describe('aiProposalNoticeFor: expired/rejected get a non-blocking notice, every other status gets none', () => {
+  let aiProposalNoticeFor: AiHelpers['aiProposalNoticeFor'];
+  beforeAll(() => {
+    ({ aiProposalNoticeFor } = makeAiHelpers(vi.fn()));
+  });
+
+  it('returns the "no longer active" note for expired and rejected', () => {
+    expect(aiProposalNoticeFor('expired')).toMatch(/no longer active/i);
+    expect(aiProposalNoticeFor('rejected')).toMatch(/no longer active/i);
+  });
+
+  it('returns null (no notice) for every other status, including no proposal at all', () => {
+    for (const status of [null, undefined, 'pending', 'approved', 'committed']) {
+      expect(aiProposalNoticeFor(status)).toBeNull();
+    }
+  });
+
+  it('never says the user is blocked from generating — it is purely informational (spec §4: "does not block generation")', () => {
+    expect(aiProposalNoticeFor('expired')).not.toMatch(/cannot|can't|unable|blocked/i);
+    expect(aiProposalNoticeFor('rejected')).not.toMatch(/cannot|can't|unable|blocked/i);
+  });
+});
+
+// ---------- isModalTokenCurrent / bumpModalToken: the stale-discovery guard ----------
+//
+// Discovery/Rehydration spec §5 ("prevent overlapping discovery
+// requests from causing an older response to overwrite a newer
+// selected date"): extracted directly from program.html — a genuinely
+// pure, DOM-free pair of functions sharing one module-level counter, so
+// the exact staleness semantics are testable without a browser/DOM.
+
+describe('isModalTokenCurrent / bumpModalToken: a token is only "current" until the next open/close bumps it', () => {
+  let tokenHelpers: { bumpModalToken: () => number; isModalTokenCurrent: (token: number) => boolean };
+
+  beforeAll(() => {
+    const programHtml = readFile('program.html');
+    const bumpModalTokenSrc = extractFunction(programHtml, 'bumpModalToken');
+    const isModalTokenCurrentSrc = extractFunction(programHtml, 'isModalTokenCurrent');
+    // eslint-disable-next-line no-new-func
+    const factory = new Function(
+      `
+      let currentModalToken = 0;
+      ${bumpModalTokenSrc}
+      ${isModalTokenCurrentSrc}
+      return { bumpModalToken, isModalTokenCurrent };
+      `
+    );
+    tokenHelpers = factory();
+  });
+
+  it('a freshly bumped token is current', () => {
+    const { bumpModalToken, isModalTokenCurrent } = tokenHelpers;
+    const token = bumpModalToken();
+    expect(isModalTokenCurrent(token)).toBe(true);
+  });
+
+  it('an older token is no longer current once the token is bumped again (switching to a different day)', () => {
+    const { bumpModalToken, isModalTokenCurrent } = tokenHelpers;
+    const staleToken = bumpModalToken(); // e.g. day A's modal opens
+    bumpModalToken(); // e.g. day B's modal opens before day A's discovery resolved
+    expect(isModalTokenCurrent(staleToken)).toBe(false);
+  });
+
+  it('a token also stops being current once bumped by a close (not only by switching days)', () => {
+    const { bumpModalToken, isModalTokenCurrent } = tokenHelpers;
+    const openToken = bumpModalToken(); // modal opens
+    bumpModalToken(); // modal closes
+    expect(isModalTokenCurrent(openToken)).toBe(false);
+  });
+
+  it('an older response can never be mistaken for current after a newer one has already been issued', () => {
+    const { bumpModalToken, isModalTokenCurrent } = tokenHelpers;
+    const first = bumpModalToken();
+    const second = bumpModalToken();
+    const third = bumpModalToken();
+    // Even if the earliest request's response arrives LAST (the classic
+    // out-of-order network scenario), it is never reported current once
+    // a newer one has already superseded it.
+    expect(isModalTokenCurrent(first)).toBe(false);
+    expect(isModalTokenCurrent(second)).toBe(false);
+    expect(isModalTokenCurrent(third)).toBe(true);
+  });
+});
+
 // ---------- Formatting helpers ----------
 
 describe('formatRirRange / formatRestSeconds / capitalize / formatTimestamp — real executable output', () => {
@@ -351,5 +440,84 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     const generateBody = html.slice(html.indexOf('async function onGenerate()'), html.indexOf('async function onApprove()'));
     expect(generateBody).not.toMatch(/\/approve`/);
     expect(generateBody).not.toMatch(/\/commit`/);
+  });
+});
+
+// ---------- Discovery/Rehydration wiring ----------
+//
+// (docs/CLAUDE_TASK_AI_PROGRAMMER_PROPOSAL_DISCOVERY_REHYDRATION.md):
+// the DOM-building side of discovery (buildAiProposalSection calling
+// `el()`/appendChild) has no jsdom harness to execute against in this
+// repo, so — matching the existing convention just above — the actual
+// pure logic pieces (aiProposalActionsFor, aiProposalNoticeFor,
+// isModalTokenCurrent/bumpModalToken) are extracted and executed for
+// real above, and the DOM-wiring claims below are proven as source-level
+// assertions against the shipped program.html text.
+describe('program.html: AI Programmer proposal discovery/rehydration wiring', () => {
+  const html = readFile('program.html');
+
+  it('discovers before deciding which action to show — GET /proposals/latest?targetDate=<day> is called on section build', () => {
+    expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/latest\?targetDate=\$\{encodeURIComponent\(day\.date\)\}`\)/);
+    // Called from a function named discover(), invoked once when the
+    // section is built (never inside a loop/retry).
+    expect(html).toMatch(/async function discover\(\)/);
+    expect(html).toMatch(/discover\(\);\s*\n\s*return section;/);
+  });
+
+  it('seeds state from the discovery result — found:false means "no known proposal", found:true means the returned record', () => {
+    expect(html).toMatch(/state = result\.found \? result : null;/);
+  });
+
+  it('every action (Generate/Approve/Commit/Open link) is still decided by the SAME aiProposalActionsFor call used before this task — discovery only seeds `state` earlier, it never duplicates the decision logic', () => {
+    const sectionBody = html.slice(html.indexOf('function buildAiProposalSection('), html.indexOf('const GROUP_ORDER'));
+    const matches = sectionBody.match(/aiProposalActionsFor\(state \? state\.status : null\)/g) || [];
+    expect(matches.length).toBe(1); // one render path, reused for both the discovered and the freshly-generated/approved/committed state
+  });
+
+  it('gates every action behind discovery completing — never offers Generate (or anything else) while it is still unknown whether an active proposal already exists', () => {
+    const renderActionsBody = html.slice(html.indexOf('function renderActions()'), html.indexOf('function discover()'));
+    expect(renderActionsBody).toMatch(/if \(!discoveryDone\)/);
+    expect(renderActionsBody).toMatch(/Checking for an existing proposal/);
+    // discoveryDone only ever flips to true from inside discover() itself.
+    expect(html).toMatch(/discoveryDone = true;/);
+    const discoveryDoneAssignments = html.match(/discoveryDone = true;/g) || [];
+    expect(discoveryDoneAssignments.length).toBe(1);
+  });
+
+  it('shows the "no longer active" notice via aiProposalNoticeFor, never inline duplicated logic, and never blocks Generate', () => {
+    expect(html).toMatch(/function renderNotice\(\) \{/);
+    const renderNoticeBody = html.slice(html.indexOf('function renderNotice()'), html.indexOf('function renderActions()'));
+    expect(renderNoticeBody).toMatch(/aiProposalNoticeFor\(state \? state\.status : null\)/);
+    // renderNotice never itself decides canGenerate — that stays solely
+    // aiProposalActionsFor's job (checked in the test above).
+    expect(renderNoticeBody).not.toMatch(/canGenerate/);
+  });
+
+  it('every async continuation (discover/generate/approve/commit) checks isCurrent() before applying its result — the stale-response guard', () => {
+    expect(html).toMatch(/function isCurrent\(\) \{\s*\n\s*return isModalTokenCurrent\(modalToken\);\s*\n\s*\}/);
+    const guardCalls = html.match(/if \(!isCurrent\(\)\) return;/g) || [];
+    // discover(): try + catch + finally = 3; onGenerate/onApprove/onCommit:
+    // success + finally each = 2 apiece = 6. 9 total call sites guard a
+    // result from being applied to a superseded modal/day.
+    expect(guardCalls.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it('openDayModal captures a fresh token via bumpModalToken() and passes it into buildAiProposalSection', () => {
+    expect(html).toMatch(/const modalToken = bumpModalToken\(\);/);
+    expect(html).toMatch(/buildAiProposalSection\(day, modalToken\)/);
+  });
+
+  it('closeDayModal also bumps the token — closing the modal invalidates in-flight requests too, not only switching days', () => {
+    const closeStart = html.indexOf('function closeDayModal()');
+    const closeBody = html.slice(closeStart, html.indexOf('\n    }\n', closeStart));
+    expect(closeBody).toMatch(/bumpModalToken\(\);/);
+  });
+
+  it('a discovery failure degrades to "no known proposal" and a safe inline error — never blocks the day or throws unhandled', () => {
+    const discoverBody = html.slice(html.indexOf('async function discover()'), html.indexOf('async function resyncState()'));
+    expect(discoverBody).toMatch(/state = null;/);
+    expect(discoverBody).toMatch(/showInlineStatus\(statusEl, 'error', err\.message\)/);
+    expect(discoverBody).not.toMatch(/err\.details/);
+    expect(discoverBody).not.toMatch(/err\.stack/);
   });
 });

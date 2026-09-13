@@ -29,6 +29,34 @@
     let weekData = null;
     let lastFocusedEl = null;
 
+    // AI Programmer Discovery/Rehydration spec §5: incremented every
+    // time a day's modal opens or closes, so an in-flight AI proposal
+    // discovery request started for one modal can tell — when it
+    // eventually resolves — whether IT is still the current modal or has
+    // been superseded (modal closed, or a different day opened). Bumping
+    // this on both open and close means a discovery started for day A
+    // can never be mistaken for still-current after the modal was closed
+    // entirely, not only after switching to a different day.
+    let currentModalToken = 0;
+
+    /** Bumps and returns the new `currentModalToken` — called from
+     * `openDayModal` (a day just opened) and `closeDayModal` (the modal
+     * just closed), so both events invalidate any request token
+     * captured by a now-superseded `buildAiProposalSection` closure. */
+    function bumpModalToken() {
+      currentModalToken += 1;
+      return currentModalToken;
+    }
+
+    /** True only if `token` (a value `bumpModalToken()` returned
+     * earlier) is still the live token — i.e. the modal that requested
+     * it is still open and still showing the same day. A pure,
+     * side-effect-free check, deliberately kept separate from any DOM
+     * code so it can be tested directly. */
+    function isModalTokenCurrent(token) {
+      return token === currentModalToken;
+    }
+
     // AI Programmer Proposal Review UI: id -> display-name catalogs,
     // fetched once at page load, used only to resolve an AI proposal's
     // raw exerciseId/targetId to a real Blueprint name (see
@@ -135,6 +163,7 @@
     }
 
     function openDayModal(day, triggerEl) {
+      const modalToken = bumpModalToken();
       lastFocusedEl = triggerEl;
       const root = document.getElementById('day-modal-root');
       root.innerHTML = '';
@@ -174,7 +203,7 @@
         panel.appendChild(el('p', { class: 'muted', text: `No gym session planned — ${formatSessionType(day.type).toLowerCase()} day.` }));
       }
 
-      panel.appendChild(buildAiProposalSection(day));
+      panel.appendChild(buildAiProposalSection(day, modalToken));
 
       const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
       backdrop.addEventListener('click', (e) => {
@@ -190,6 +219,7 @@
     }
 
     function closeDayModal() {
+      bumpModalToken(); // invalidate any still-in-flight discovery request for the now-closed modal
       document.getElementById('day-modal-root').innerHTML = '';
       document.removeEventListener('keydown', onModalKeydown);
       if (lastFocusedEl) lastFocusedEl.focus();
@@ -336,13 +366,26 @@
     }
 
     /** The Generate -> Review -> Approve -> Commit workflow for one
-     * day's modal. `state` (the persisted proposal record, or null
-     * before one is generated) lives only in this closure — reopening
-     * the day modal later starts fresh (see the implementation report's
-     * "Remaining limitations"). `aiProposalActionsFor` (app.js) is the
-     * single source of truth for which action is available for a given
-     * status; this function only wires it to actual DOM/network calls. */
-    function buildAiProposalSection(day) {
+     * day's modal — now preceded by a discovery step (Discovery/
+     * Rehydration spec §4) so a proposal already generated for this date
+     * in an earlier modal session is found and restored, rather than the
+     * UI only ever knowing about a proposal it created itself in the
+     * current closure. `state` still lives only in this closure — but it
+     * is now SEEDED from the backend on open rather than always starting
+     * `null`. `aiProposalActionsFor` (app.js) remains the single source
+     * of truth for which action is available for a given status; this
+     * function only wires it to actual DOM/network calls.
+     *
+     * `modalToken` is the value `currentModalToken` had at the moment
+     * THIS modal opened (see openDayModal). It is captured once, in the
+     * closure, and compared against the live `currentModalToken` inside
+     * every async continuation below (spec §5: "prevent overlapping
+     * discovery requests from causing an older response to overwrite a
+     * newer selected date") — if they no longer match, this modal was
+     * closed or replaced by a different day's modal while the request
+     * was in flight, and the response is discarded rather than applied
+     * to (now-detached, but still checked defensively) DOM. */
+    function buildAiProposalSection(day, modalToken) {
       const section = el('div', { class: 'ai-proposal-section' });
       section.appendChild(el('h3', { text: 'AI Workout Proposal' }));
 
@@ -356,18 +399,42 @@
 
       let state = null;
       let inFlight = false;
+      // Gates action rendering until discovery resolves — never shows
+      // "Generate" (or any other action) while it's still unknown
+      // whether an active proposal already exists for this date, which
+      // is what prevents an accidental duplicate generation (spec §6).
+      let discoveryDone = false;
+      const noticeEl = el('div');
       const reviewEl = el('div');
       const actionsEl = el('div');
       const statusEl = el('div');
-      section.append(reviewEl, actionsEl, statusEl);
+      section.append(noticeEl, reviewEl, actionsEl, statusEl);
+
+      function isCurrent() {
+        return isModalTokenCurrent(modalToken);
+      }
 
       function renderReview() {
         reviewEl.innerHTML = '';
         if (state) reviewEl.appendChild(buildAiProposalReview(state));
       }
 
+      /** Discovery/Rehydration spec §4's "expired/rejected proposal
+       * found" case: a small, non-blocking note — never prevents
+       * Generate from showing (aiProposalActionsFor already treats
+       * expired/rejected the same as "no proposal" for that purpose). */
+      function renderNotice() {
+        noticeEl.innerHTML = '';
+        const notice = aiProposalNoticeFor(state ? state.status : null);
+        if (notice) noticeEl.appendChild(el('p', { class: 'faint', text: notice }));
+      }
+
       function renderActions() {
         actionsEl.innerHTML = '';
+        if (!discoveryDone) {
+          actionsEl.appendChild(el('p', { class: 'faint', text: 'Checking for an existing proposal…' }));
+          return;
+        }
         const actions = aiProposalActionsFor(state ? state.status : null);
 
         if (actions.canGenerate) {
@@ -396,6 +463,31 @@
         }
       }
 
+      /** Discovery/Rehydration spec §2/§4: on open, ask the backend
+       * whether a proposal already exists for this date (the backend,
+       * never client-side memory, remains authoritative — spec §5) and
+       * seed `state` from it before any action is offered. A discovery
+       * failure degrades to "no known proposal" (offers a fresh
+       * Generate) rather than blocking the day entirely — a transient
+       * discovery failure must not make the day unusable. */
+      async function discover() {
+        try {
+          const result = await aiApi(`/api/ai-programmer/proposals/latest?targetDate=${encodeURIComponent(day.date)}`);
+          if (!isCurrent()) return; // superseded — a newer/closed modal, discard
+          state = result.found ? result : null;
+        } catch (err) {
+          if (!isCurrent()) return;
+          state = null;
+          showInlineStatus(statusEl, 'error', err.message);
+        } finally {
+          if (!isCurrent()) return;
+          discoveryDone = true;
+          renderReview();
+          renderNotice();
+          renderActions();
+        }
+      }
+
       /** Re-fetches the canonical server state after a failed approve/
        * commit — a failure can mean the proposal's real status already
        * moved on (e.g. it expired, or another request already
@@ -419,13 +511,18 @@
         renderActions();
         try {
           const generated = await aiApi('/api/ai-programmer/generate-session', { method: 'POST', body: { targetDate: day.date } });
-          state = await aiApi(`/api/ai-programmer/proposals/${generated.proposalId}`);
+          const fresh = await aiApi(`/api/ai-programmer/proposals/${generated.proposalId}`);
+          if (!isCurrent()) return;
+          state = fresh;
           showInlineStatus(statusEl, null, null);
         } catch (err) {
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
         } finally {
+          if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
           renderActions();
         }
       }
@@ -436,14 +533,19 @@
         showInlineStatus(statusEl, 'saving', 'Approving…');
         renderActions();
         try {
-          state = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/approve`, { method: 'POST' });
+          const approved = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/approve`, { method: 'POST' });
+          if (!isCurrent()) return;
+          state = approved;
           showInlineStatus(statusEl, null, null);
         } catch (err) {
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
           await resyncState();
         } finally {
+          if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
           renderActions();
         }
       }
@@ -454,20 +556,25 @@
         showInlineStatus(statusEl, 'saving', 'Committing…');
         renderActions();
         try {
-          state = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/commit`, { method: 'POST' });
+          const committed = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/commit`, { method: 'POST' });
+          if (!isCurrent()) return;
+          state = committed;
           showInlineStatus(statusEl, null, null);
         } catch (err) {
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
           await resyncState();
         } finally {
+          if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
           renderActions();
         }
       }
 
-      renderReview();
-      renderActions();
+      renderActions(); // shows the "Checking…" placeholder immediately
+      discover();
       return section;
     }
 

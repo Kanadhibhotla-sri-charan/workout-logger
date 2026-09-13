@@ -534,3 +534,140 @@ describe('commit-time staleness detection beyond Blueprint-commit equality', () 
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
   });
 });
+
+// Discovery/Rehydration
+// (docs/CLAUDE_TASK_AI_PROGRAMMER_PROPOSAL_DISCOVERY_REHYDRATION.md
+// §3/§8): "is there an existing relevant AI proposal for this target
+// date?" — the frontend's rehydration entry point. Reuses the exact
+// same response shape (`serializeProposal`) as GET /proposals/:id, so
+// most of these tests assert against that shared contract rather than a
+// new one.
+describe('GET /api/ai-programmer/proposals/latest', () => {
+  const MONDAY = '2026-09-14';
+
+  /** Same shape as the shared `generateProposal()` helper above, but for
+   * an arbitrary target date/weekday — needed to exercise the "belongs
+   * to a different date" and ordering tests below without disturbing
+   * any existing test's use of the SUNDAY-only helper. */
+  async function generateProposalForDate(targetDate: string, weekday: string, exerciseOverrides: Record<string, unknown> = {}): Promise<string> {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        data: {
+          output: JSON.stringify(
+            validProposalJson({
+              targetDate,
+              weekday,
+              exercises: [{ ...validProposalJson().exercises[0], ...exerciseOverrides }],
+            })
+          ),
+        },
+      })
+    );
+    const res = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate });
+    expect(res.status).toBe(200);
+    return res.body.proposalId as string;
+  }
+
+  it('returns found:false when no proposal has ever been generated for the date (not an error)', async () => {
+    const res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, found: false });
+  });
+
+  it('returns the latest relevant proposal for a target date, matching GET /proposals/:id exactly', async () => {
+    const proposalId = await generateProposal();
+    const byId = await request(app).get(`/api/ai-programmer/proposals/${proposalId}`);
+    const latest = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(latest.status).toBe(200);
+    expect(latest.body).toEqual({ ok: true, found: true, ...byId.body });
+  });
+
+  it('uses deterministic ordering — the most recently CREATED proposal for the date wins, regardless of table insertion order', async () => {
+    const olderId = await generateProposal();
+    const newerId = await generateProposal();
+    // Force explicit, unambiguous created_at values so this asserts
+    // real ordering by timestamp, not incidental insertion speed.
+    db.prepare('UPDATE ai_program_proposals SET created_at = ? WHERE id = ?').run('2026-09-01T00:00:00.000Z', olderId);
+    db.prepare('UPDATE ai_program_proposals SET created_at = ? WHERE id = ?').run('2026-09-02T00:00:00.000Z', newerId);
+
+    const res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.body.proposalId).toBe(newerId);
+  });
+
+  it('does not return an expired proposal as active — reports (and persists) effective status "expired" once past expiresAt', async () => {
+    const proposalId = await generateProposal();
+    db.prepare("UPDATE ai_program_proposals SET expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(proposalId);
+
+    const res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.body.found).toBe(true);
+    expect(res.body.status).toBe('expired');
+    expect(db.prepare('SELECT status FROM ai_program_proposals WHERE id = ?').get(proposalId)).toEqual({ status: 'expired' });
+  });
+
+  it('a rejected proposal is reported as rejected, not treated as active', async () => {
+    const proposalId = await generateProposal();
+    db.prepare("UPDATE ai_program_proposals SET status = 'rejected', rejected_at = ? WHERE id = ?").run('2026-09-13T00:00:00.000Z', proposalId);
+
+    const res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.body.found).toBe(true);
+    expect(res.body.status).toBe('rejected');
+  });
+
+  it('handles a missing targetDate query parameter with a 400, not a crash or a false "not found"', async () => {
+    const res = await request(app).get('/api/ai-programmer/proposals/latest');
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it('handles a malformed targetDate with a 400', async () => {
+    const res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: 'not-a-real-date' });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it('never exposes provider payloads, API keys, or internal fields — same sanitized shape as GET /proposals/:id, plus only "found"', async () => {
+    const proposalId = await generateProposal();
+    const byId = await request(app).get(`/api/ai-programmer/proposals/${proposalId}`);
+    const res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(Object.keys(res.body).sort()).toEqual([...Object.keys(byId.body), 'found'].sort());
+    const raw = JSON.stringify(res.body);
+    expect(raw.toLowerCase()).not.toMatch(/velona_api_key|test-key-not-real|authorization|stack/);
+  });
+
+  it('correctly reflects pending, approved, and committed states as the proposal progresses', async () => {
+    const proposalId = await generateProposal();
+    let res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.body.status).toBe('pending');
+
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+    res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.body.status).toBe('approved');
+
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.body.status).toBe('committed');
+    expect(res.body.committedSessionId).toBeTruthy();
+  });
+
+  it('never returns a proposal belonging to a different target date', async () => {
+    const sundayId = await generateProposal();
+    const mondayId = await generateProposalForDate(MONDAY, 'monday');
+
+    const sundayRes = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(sundayRes.body.proposalId).toBe(sundayId);
+    expect(sundayRes.body.targetDate).toBe(SUNDAY);
+
+    const mondayRes = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: MONDAY });
+    expect(mondayRes.body.proposalId).toBe(mondayId);
+    expect(mondayRes.body.targetDate).toBe(MONDAY);
+  });
+
+  it('respects the AI_PROGRAMMER_ENABLED flag — disabled discovery returns 503, before touching the database', async () => {
+    const proposalId = await generateProposal();
+    delete process.env.AI_PROGRAMMER_ENABLED;
+    const res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('AI_PROGRAMMER_DISABLED');
+    void proposalId; // only asserting the flag short-circuits before any lookup
+  });
+});

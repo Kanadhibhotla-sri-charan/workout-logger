@@ -23,24 +23,51 @@ import {
 import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
 import { validateProposalSchema } from '../validation/programmerOutputValidator.js';
 
-/** Loads a proposal and, if it is still `pending`/`approved` but past
- * its `expires_at`, persists the lazy pending/approved -> expired
- * transition right now (never on a background timer — see
- * AIProposalRepo.markExpired's own doc comment) before returning it, so
- * every caller (retrieval, approve, commit) observes a consistent,
- * truthful status. */
-function loadCurrent(db: Database.Database, proposalId: string): AIProposalRecord {
-  const repo = new AIProposalRepo(db);
-  const record = repo.getById(proposalId);
-  if (!record) throw new AIProposalNotFoundError(proposalId);
+/** If `record` is still `pending`/`approved` but past its `expires_at`,
+ * persists the lazy pending/approved -> expired transition right now
+ * (never on a background timer — see AIProposalRepo.markExpired's own
+ * doc comment) and returns the updated record; otherwise returns
+ * `record` unchanged. Shared by every read path (retrieval by id,
+ * discovery by target date, approve, commit) so they all observe a
+ * consistent, truthful status. */
+function expireIfNeeded(repo: AIProposalRepo, record: AIProposalRecord): AIProposalRecord {
   if ((record.status === 'pending' || record.status === 'approved') && record.expiresAt < nowIso()) {
-    return repo.markExpired(proposalId) ?? record;
+    return repo.markExpired(record.id) ?? record;
   }
   return record;
 }
 
+/** Loads a proposal and, if it is still `pending`/`approved` but past
+ * its `expires_at`, persists the lazy pending/approved -> expired
+ * transition right now before returning it, so every caller (retrieval,
+ * approve, commit) observes a consistent, truthful status. */
+function loadCurrent(db: Database.Database, proposalId: string): AIProposalRecord {
+  const repo = new AIProposalRepo(db);
+  const record = repo.getById(proposalId);
+  if (!record) throw new AIProposalNotFoundError(proposalId);
+  return expireIfNeeded(repo, record);
+}
+
 export function getProposal(db: Database.Database, proposalId: string): AIProposalRecord {
   return loadCurrent(db, proposalId);
+}
+
+/** Discovery/Rehydration spec §2/§3: "is there an existing relevant AI
+ * proposal for this target date?" — returns the single most recently
+ * created proposal for `targetDate` (see
+ * AIProposalRepo.findLatestForTargetDate for the exact ordering
+ * contract), with the same lazy pending/approved -> expired transition
+ * `getProposal`/approve/commit already apply, so a proposal that has
+ * quietly passed its `expiresAt` is never reported as still active.
+ * Returns `undefined` when no proposal has ever been generated for this
+ * date — never throws AIProposalNotFoundError, since "no proposal yet"
+ * is the normal, expected case here (unlike `getProposal`, which is
+ * always given an id the caller already believes exists). */
+export function getLatestProposalForDate(db: Database.Database, targetDate: string): AIProposalRecord | undefined {
+  const repo = new AIProposalRepo(db);
+  const record = repo.findLatestForTargetDate(targetDate);
+  if (!record) return undefined;
+  return expireIfNeeded(repo, record);
 }
 
 /** Explicit approval only — never commits, never mutates the proposal's

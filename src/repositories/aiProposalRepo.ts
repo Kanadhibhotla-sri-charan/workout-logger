@@ -188,6 +188,22 @@ export class AIProposalRepo {
     return row ? rowToRecord(row) : undefined;
   }
 
+  /** Discovery/Rehydration spec §3: the single most recently CREATED
+   * proposal for a given target date, regardless of its status —
+   * deterministic ordering (`created_at DESC`, `id` as a stable
+   * tie-breaker for two rows with an identical `created_at`), never
+   * relying on unspecified SQLite row order. Returns every status
+   * (`pending`/`approved`/`committed`/`expired`/`rejected`) — the
+   * caller (service layer) is what applies lazy expiry and decides which
+   * statuses the UI treats as "active"; this method's only contract is
+   * "the newest attempt for this date, whatever became of it". */
+  findLatestForTargetDate(targetDate: string): AIProposalRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM ai_program_proposals WHERE target_date = ? ORDER BY created_at DESC, id DESC LIMIT 1')
+      .get(targetDate) as AIProposalRow | undefined;
+    return row ? rowToRecord(row) : undefined;
+  }
+
   /** Every planned/completed/etc. workout session created FROM a
    * committed proposal is found via `committed_session_id` on the
    * proposal row, not the other way around — no reverse index needed at

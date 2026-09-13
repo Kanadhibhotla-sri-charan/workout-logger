@@ -12,7 +12,12 @@ import { isValidCalendarDate } from '../../engine/dateMath.js';
 import { AIProgrammerError, AIProgrammerDisabledError } from '../../ai-programmer/errors.js';
 import type { AIProposalRecord } from '../../repositories/aiProposalRepo.js';
 import { createDefaultAIProgrammerService } from '../../ai-programmer/service/aiProgrammerService.js';
-import { approveProposal, commitAIProposalToPlannedSession, getProposal } from '../../ai-programmer/service/aiProposalLifecycle.js';
+import {
+  approveProposal,
+  commitAIProposalToPlannedSession,
+  getLatestProposalForDate,
+  getProposal,
+} from '../../ai-programmer/service/aiProposalLifecycle.js';
 import { isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
 
 export const aiProgrammerRouter = Router();
@@ -97,6 +102,47 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
       model: result.model,
       requestId: result.requestId,
     });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+/** Discovery/Rehydration spec §2/§3/§4: "is there an existing relevant
+ * AI proposal for this target date?" — used by the frontend on every
+ * day-modal open, BEFORE deciding which action (Generate/Approve/
+ * Commit/Open planned workout) to show, so proposal state survives a
+ * closed-and-reopened modal instead of living only in local JS state.
+ *
+ * Registered BEFORE `/proposals/:proposalId` below so the literal path
+ * segment `latest` is never captured as a `:proposalId` value by that
+ * route instead (Express matches routes in registration order).
+ *
+ * Returns `{ok: true, found: false}` — never a 404 — when no proposal
+ * has ever been generated for this date; that is the normal, expected
+ * case for a day the user hasn't asked the AI Programmer about yet, not
+ * an error. Response safety, ordering, and effective-status/expiry
+ * semantics are identical to `GET /proposals/:proposalId` (same
+ * `serializeProposal`, same lazy expiry via `getLatestProposalForDate`) —
+ * this route only adds "how a proposal for this date is found",
+ * everything else is deliberately unchanged. */
+aiProgrammerRouter.get('/proposals/latest', (req, res, next) => {
+  try {
+    requireEnabled();
+    const { targetDate } = req.query;
+    if (typeof targetDate !== 'string' || targetDate.trim() === '') {
+      return res.status(400).json({ ok: false, error: 'targetDate (string, YYYY-MM-DD) query parameter is required' });
+    }
+    if (!isValidCalendarDate(targetDate)) {
+      return res.status(400).json({ ok: false, error: `targetDate "${targetDate}" is not a real calendar date in YYYY-MM-DD format` });
+    }
+    const record = getLatestProposalForDate(db(req), targetDate);
+    if (!record) {
+      return res.json({ ok: true, found: false });
+    }
+    res.json({ ok: true, found: true, ...serializeProposal(record) });
   } catch (err) {
     if (err instanceof AIProgrammerError) {
       return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });

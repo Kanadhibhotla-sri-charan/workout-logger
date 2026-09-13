@@ -489,6 +489,21 @@ function aiProposalActionsFor(status) {
   };
 }
 
+/** Discovery/Rehydration spec §4's "expired/rejected proposal found"
+ * case: a small, non-blocking note explaining why a previously-active
+ * proposal is no longer shown as such — never a reason to block
+ * generation (aiProposalActionsFor already reports canGenerate: true
+ * for both statuses). Returns null for every other status, meaning
+ * "show no notice". Pure and DOM-free so the exact set of statuses that
+ * trigger this message is directly testable, matching
+ * aiProposalActionsFor's own pattern. */
+function aiProposalNoticeFor(status) {
+  if (status === 'expired' || status === 'rejected') {
+    return 'The previous proposal is no longer active. You can generate a new one.';
+  }
+  return null;
+}
+
 // ---------- Save-in-flight helper (spec §8) ----------
 
 /** Wraps a save button: disables it (preventing duplicate POST/PATCH),
