@@ -81,10 +81,40 @@ function rowToProgram(row: ProgramRow, sessionRows: ProgramSessionRow[]): Persis
 export class WeeklyProgramRepo {
   constructor(private db: Database.Database) {}
 
+  /** Final Selected Session Resolution and AI/Deterministic Precedence
+   * Fixes §5: filters to `status = 'active'` explicitly — every program
+   * row THIS repo creates (`create`, below) is written with
+   * `status = 'active'` and never transitions away from it, so this is
+   * a no-op for the happy path, but it closes the hypothetical gap of
+   * ever matching a row the SEPARATE legacy `ProgramsRepo` (the original
+   * draft/active/completed/archived Program concept, over the same
+   * `programs` table — see this file's own top-of-file doc comment)
+   * later marks 'completed'/'archived'/'draft'. `supersedes_program_
+   * session_id` (aiProposalLifecycle.ts) is only ever set from a row
+   * this method returns, so this guard is exactly the "not archived or
+   * obsolete" / "not ambiguous with another program" check spec §5
+   * requires.
+   *
+   * One-program-per-week is otherwise an invariant this repo maintains
+   * procedurally, not via a schema constraint: `programs.start_date` has
+   * no UNIQUE index, because the SAME shared `programs` table also holds
+   * the legacy ProgramsRepo's OWN rows (with a nullable, usually-null,
+   * independently-set `start_date`) — a blanket UNIQUE(start_date)
+   * would risk a spurious constraint violation if a legacy Program ever
+   * set a `start_date` coinciding with a real week-Monday. This is safe
+   * in practice because (a) `ensureWeekProgramGenerated`'s check-then-
+   * create is only ever reached synchronously within one Node.js
+   * request — better-sqlite3 is synchronous, so no `await` point exists
+   * between the `getByWeekStart` read and the `create` write for two
+   * concurrent requests to interleave through — and (b) `create` is the
+   * only code path in this repo that ever inserts a row, always exactly
+   * once per week the first time it is requested. See
+   * `tests/repositories/weeklyProgramRepo.test.ts`'s "§5: one program
+   * per week" test, which exercises this directly. */
   getByWeekStart(weekStart: string): PersistedWeekProgram | undefined {
-    const row = this.db.prepare('SELECT id, start_date, end_date, active_goals_json, target_allocations_json FROM programs WHERE start_date = ?').get(weekStart) as
-      | ProgramRow
-      | undefined;
+    const row = this.db
+      .prepare("SELECT id, start_date, end_date, active_goals_json, target_allocations_json FROM programs WHERE start_date = ? AND status = 'active'")
+      .get(weekStart) as ProgramRow | undefined;
     if (!row) return undefined;
     const sessionRows = this.db
       .prepare('SELECT id, day_index, name, planned_session_type, snapshot_json FROM program_sessions WHERE program_id = ? ORDER BY day_index ASC')
@@ -130,7 +160,39 @@ export class WeeklyProgramRepo {
   /** Creates or replaces the ONE session for (programId, dayIndex) —
    * touches no other day. If a row already exists for this day, its id
    * is preserved (session identity stable — spec §6/§20) and only its
-   * content is updated. */
+   * content is updated.
+   *
+   * Fix 6 (Activity Scheduling and AI Alignment Fixes) — identity
+   * semantics review: this row's `id` represents a STABLE DAY SLOT
+   * (program_id, day_index), never a stable prescription-artifact
+   * identity. Overwriting content in place (as here, and as
+   * scheduleOperations.ts's swapDayActivities does when it exchanges two
+   * days' content) is therefore correct, not a shortcut — audited
+   * consumers of this id:
+   *   - `program_session_exercises.program_session_id` (schema.sql) —
+   *     written only by the separate, legacy `ProgramsRepo`
+   *     (draft/active/completed Program concept), which creates and
+   *     reads its OWN program/program_session rows and never reads rows
+   *     this repo writes; swap/reconciliation here never touch that
+   *     table.
+   *   - `workout_sessions.program_session_id` (schema.sql, ON DELETE SET
+   *     NULL) — the column exists, but no code path in this codebase
+   *     (POST /api/workouts, aiProposalLifecycle.ts's commit, or any
+   *     frontend page) ever sets it when creating a session; it is
+   *     always null in current practice. A real session therefore never
+   *     references a specific `program_sessions` row today, so
+   *     overwriting that row's content in place cannot silently change
+   *     what an existing session "points to."
+   *   - No UI state and no historical/audit logic anywhere in this
+   *     codebase is keyed by a `program_sessions.id` value.
+   * Conclusion: nothing currently depends on a `program_sessions.id`
+   * continuing to denote the SAME prescription content over time — only
+   * on it continuing to denote the same (program, day_index) slot, which
+   * `upsertSession` already guarantees. If a future feature starts
+   * setting `workout_sessions.program_session_id` (e.g. to link a
+   * started workout back to its originating prescription), this
+   * conclusion must be re-checked before any code swaps day content in
+   * place again — see this task's own final report. */
   upsertSession(programId: string, dayIndex: number, name: string, plannedSessionType: string, snapshot: unknown): PersistedWeekSession {
     const existing = this.db
       .prepare('SELECT id FROM program_sessions WHERE program_id = ? AND day_index = ?')

@@ -7,6 +7,7 @@ import type {
   Set,
   SessionType,
   WorkoutSession,
+  WorkoutSessionSourceType,
   WorkoutSessionStatus,
 } from '../contracts/types.js';
 import { newId, nowIso } from './ids.js';
@@ -40,6 +41,8 @@ interface WorkoutSessionRow {
   status: WorkoutSessionStatus;
   notes: string | null;
   created_at: string;
+  source_type: WorkoutSessionSourceType;
+  supersedes_program_session_id: string | null;
 }
 
 function rowToSession(row: WorkoutSessionRow): WorkoutSession {
@@ -65,6 +68,8 @@ function rowToSession(row: WorkoutSessionRow): WorkoutSession {
     status: row.status,
     notes: row.notes,
     created_at: row.created_at,
+    source_type: row.source_type,
+    supersedes_program_session_id: row.supersedes_program_session_id,
   };
 }
 
@@ -79,6 +84,18 @@ export interface CreateWorkoutSessionInput {
   goal_context?: GoalContext | null;
   status?: WorkoutSessionStatus;
   notes?: string | null;
+  /** Final AI-Deterministic Precedence and Scheduling Fixes §1: which
+   * generator created this session — defaults to 'deterministic' (the
+   * pre-existing, only-ever-deterministic behavior every caller before
+   * this fix relied on). `aiProposalLifecycle.ts`'s commit is the only
+   * caller that passes `'ai'`; a "log something else outside the
+   * generated plan" flow should pass `'manual'`. */
+  source_type?: WorkoutSessionSourceType;
+  /** Set only when this session's content REPLACES a deterministic
+   * `program_sessions` prescription that already existed for this date
+   * — never set for a plain 'deterministic'-sourced session (which IS
+   * that prescription, not a replacement of it). */
+  supersedes_program_session_id?: string | null;
 }
 
 export interface AddExercisePerformanceInput {
@@ -86,6 +103,17 @@ export interface AddExercisePerformanceInput {
   order: number;
   role: ExerciseRole | string;
   sets: Array<Partial<Set> & { set_number: number }>;
+  /** Optional PLANNED prescription for this exercise — see
+   * ExercisePerformance's own doc comment. Omitted (all undefined ->
+   * stored as NULL) for a plain logged/performed exercise, which has no
+   * prescription. Never conflated with `sets[].reps`/`rir`, which stay
+   * PERFORMED values regardless of whether a prescription is given. */
+  target_sets?: number | null;
+  target_reps_min?: number | null;
+  target_reps_max?: number | null;
+  target_rir_min?: number | null;
+  target_rir_max?: number | null;
+  target_rest_seconds?: number | null;
 }
 
 export interface UpdateWorkoutSessionInput {
@@ -124,6 +152,8 @@ export class WorkoutSessionsRepo {
       status: input.status ?? 'planned',
       notes: input.notes ?? null,
       created_at: nowIso(),
+      source_type: input.source_type ?? 'deterministic',
+      supersedes_program_session_id: input.supersedes_program_session_id ?? null,
     };
 
     this.db
@@ -131,11 +161,11 @@ export class WorkoutSessionsRepo {
         `INSERT INTO workout_sessions
            (session_id, date, start_time, end_time, duration_minutes, session_type,
             program_id, program_session_id, goal_type, goal_id, goal_priority, program_phase,
-            status, notes, created_at)
+            status, notes, created_at, source_type, supersedes_program_session_id)
          VALUES
            (@session_id, @date, @start_time, @end_time, @duration_minutes, @session_type,
             @program_id, @program_session_id, @goal_type, @goal_id, @goal_priority, @program_phase,
-            @status, @notes, @created_at)`
+            @status, @notes, @created_at, @source_type, @supersedes_program_session_id)`
       )
       .run({
         session_id: session.session_id,
@@ -150,12 +180,26 @@ export class WorkoutSessionsRepo {
         goal_id: session.goal_context?.goal_id ?? null,
         goal_priority: session.goal_context?.priority ?? null,
         program_phase: session.goal_context?.program_phase ?? null,
+        source_type: session.source_type,
+        supersedes_program_session_id: session.supersedes_program_session_id,
         status: session.status,
         notes: session.notes,
         created_at: session.created_at,
       });
 
     return session;
+  }
+
+  /** AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 2):
+   * reassigns which calendar date a session belongs to — used ONLY by
+   * src/engine/scheduleOperations.ts's swap operation, to move a still-
+   * `planned` AI-committed session along with its day during a schedule
+   * swap (the session's own exercises/sets are never touched, only
+   * `date`). Never called for a `completed`/`in_progress` session —
+   * callers check that before ever reaching here (a locked day's real
+   * history must never move). */
+  moveDate(id: string, newDate: string): void {
+    this.db.prepare('UPDATE workout_sessions SET date = @date WHERE session_id = @session_id').run({ session_id: id, date: newDate });
   }
 
   updateSession(id: string, input: UpdateWorkoutSessionInput): WorkoutSession | undefined {
@@ -222,8 +266,12 @@ export class WorkoutSessionsRepo {
       .map((s) => ({ ...DEFAULT_SET, ...s }));
 
     const insertExercise = this.db.prepare(
-      `INSERT INTO workout_exercises (id, workout_session_id, exercise_id, order_index, role)
-       VALUES (@id, @workout_session_id, @exercise_id, @order_index, @role)`
+      `INSERT INTO workout_exercises
+         (id, workout_session_id, exercise_id, order_index, role,
+          target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds)
+       VALUES
+         (@id, @workout_session_id, @exercise_id, @order_index, @role,
+          @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds)`
     );
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
@@ -232,6 +280,15 @@ export class WorkoutSessionsRepo {
          (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes)`
     );
 
+    const prescription = {
+      target_sets: input.target_sets ?? null,
+      target_reps_min: input.target_reps_min ?? null,
+      target_reps_max: input.target_reps_max ?? null,
+      target_rir_min: input.target_rir_min ?? null,
+      target_rir_max: input.target_rir_max ?? null,
+      target_rest_seconds: input.target_rest_seconds ?? null,
+    };
+
     const tx = this.db.transaction(() => {
       insertExercise.run({
         id: performanceId,
@@ -239,6 +296,7 @@ export class WorkoutSessionsRepo {
         exercise_id: input.exercise_id,
         order_index: input.order,
         role: input.role,
+        ...prescription,
       });
       for (const set of sets) {
         insertSet.run({
@@ -265,6 +323,7 @@ export class WorkoutSessionsRepo {
       exercise_id: input.exercise_id,
       order: input.order,
       role: input.role,
+      ...prescription,
       sets,
     };
   }
@@ -312,7 +371,18 @@ export class WorkoutSessionsRepo {
   getExercisePerformances(workoutSessionId: string): ExercisePerformance[] {
     const exerciseRows = this.db
       .prepare('SELECT * FROM workout_exercises WHERE workout_session_id = ? ORDER BY order_index ASC')
-      .all(workoutSessionId) as Array<{ id: string; exercise_id: string; order_index: number; role: string }>;
+      .all(workoutSessionId) as Array<{
+      id: string;
+      exercise_id: string;
+      order_index: number;
+      role: string;
+      target_sets: number | null;
+      target_reps_min: number | null;
+      target_reps_max: number | null;
+      target_rir_min: number | null;
+      target_rir_max: number | null;
+      target_rest_seconds: number | null;
+    }>;
 
     const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
 
@@ -335,6 +405,12 @@ export class WorkoutSessionsRepo {
         exercise_id: row.exercise_id,
         order: row.order_index,
         role: row.role,
+        target_sets: row.target_sets,
+        target_reps_min: row.target_reps_min,
+        target_reps_max: row.target_reps_max,
+        target_rir_min: row.target_rir_min,
+        target_rir_max: row.target_rir_max,
+        target_rest_seconds: row.target_rest_seconds,
         sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
       };
     });

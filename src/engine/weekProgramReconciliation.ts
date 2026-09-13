@@ -78,7 +78,13 @@ export interface ReconciliationTrigger {
 
 const DEFAULT_TRIGGER: ReconciliationTrigger = { kind: 'activity_override', dayIndex: null };
 
-function isDayLocked(db: Database.Database, date: string): boolean {
+/** A day is "locked" once any real WorkoutSession on it is `completed`
+ * or `in_progress` — historical or currently-happening truth that must
+ * never be touched by a schedule/reconciliation write. Exported for
+ * reuse by src/engine/scheduleOperations.ts, which needs the exact same
+ * definition for its own swap/move lock checks rather than a second,
+ * possibly-drifting copy of this rule. */
+export function isDayLocked(db: Database.Database, date: string): boolean {
   const logged = new WorkoutSessionsRepo(db).listSessionsByDate(date);
   return logged.some((s) => s.status === 'completed' || s.status === 'in_progress');
 }

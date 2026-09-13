@@ -248,6 +248,23 @@ CREATE TABLE IF NOT EXISTS program_session_exercises (
   notes TEXT
 );
 
+-- Final AI-Deterministic Precedence and Scheduling Fixes §1/§2:
+-- `source_type` records WHO created this real session — 'deterministic'
+-- (the day's own generated program_sessions prescription, started by
+-- the user; the DEFAULT — this is the overwhelming common case and
+-- preserves every pre-existing caller's behavior unchanged), 'ai' (an
+-- AI proposal committed via aiProposalLifecycle.ts), or 'manual' (an ad
+-- hoc session logged outside the generated plan, e.g. today.html's "Log
+-- something else"). `supersedes_program_session_id` is set only when
+-- this session's own content REPLACES a deterministic prescription that
+-- already existed for this date (e.g. an AI commit with intent
+-- 'fill_existing_gym_day' on a day that already has a persisted
+-- program_sessions row) — the deterministic row itself is never
+-- deleted (it remains recoverable history), only display precedence
+-- changes (see programming.ts's renderWeekDays). Both columns are
+-- read by the single shared precedence rule every real-session-aware
+-- read path (GET /week, GET /today) uses — never re-derived
+-- independently per route.
 CREATE TABLE IF NOT EXISTS workout_sessions (
   session_id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
@@ -263,15 +280,34 @@ CREATE TABLE IF NOT EXISTS workout_sessions (
   program_phase TEXT,
   status TEXT NOT NULL CHECK (status IN ('planned', 'in_progress', 'completed', 'skipped')),
   notes TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'deterministic' CHECK (source_type IN ('ai', 'deterministic', 'manual')),
+  supersedes_program_session_id TEXT REFERENCES program_sessions(id) ON DELETE SET NULL
 );
 
+-- AI Programmer Phase 2 correction: target_sets/target_reps_min/
+-- target_reps_max/target_rir_min/target_rir_max/target_rest_seconds are
+-- the PLANNED prescription for this exercise (all nullable — a plain
+-- logged/performed exercise added via POST /api/workouts/:id/exercises
+-- has no prescription and leaves these NULL). This mirrors
+-- program_session_exercises' own target_sets/target_reps_min/
+-- target_reps_max naming exactly, extended with the RIR range and rest
+-- seconds that table never needed. Never confused with workout_sets'
+-- own weight/reps/rir/rpe columns, which are PERFORMED values (null
+-- until a set is actually logged) — a prescribed rep/RIR RANGE has no
+-- single performed-value column it could correctly be written into.
 CREATE TABLE IF NOT EXISTS workout_exercises (
   id TEXT PRIMARY KEY,
   workout_session_id TEXT NOT NULL REFERENCES workout_sessions(session_id) ON DELETE CASCADE,
   exercise_id TEXT NOT NULL,
   order_index INTEGER NOT NULL,
-  role TEXT NOT NULL
+  role TEXT NOT NULL,
+  target_sets INTEGER,
+  target_reps_min INTEGER,
+  target_reps_max INTEGER,
+  target_rir_min REAL,
+  target_rir_max REAL,
+  target_rest_seconds INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS workout_sets (
@@ -345,3 +381,77 @@ CREATE TABLE IF NOT EXISTS goal_phase_reviews (
 
 CREATE INDEX IF NOT EXISTS idx_goal_phases_goal ON goal_phases(goal_id);
 CREATE INDEX IF NOT EXISTS idx_goal_phase_reviews_phase ON goal_phase_reviews(goal_phase_id);
+
+-- AI Programmer Phase 2 (docs/CLAUDE_TASK_AI_PROGRAMMER_PHASE_2_PROPOSAL_APPROVAL_COMMIT.md
+-- §4): a persisted, explicitly-reviewed AI workout proposal. Holds the
+-- exact validated AIWorkoutSessionProposal JSON that was returned for
+-- review (src/ai-programmer/contracts/programmerTypes.ts) — never the
+-- raw provider response, never API keys/headers. Status is a simple
+-- state machine (pending -> approved -> committed, or -> rejected/
+-- expired) enforced entirely in application code
+-- (src/repositories/aiProposalRepo.ts), matching this schema's existing
+-- style elsewhere (e.g. goal_phases above) rather than a DB constraint.
+-- committed_session_id references workout_sessions once (and only once)
+-- this proposal has been committed via commitAIProposalToPlannedSession().
+CREATE TABLE IF NOT EXISTS ai_program_proposals (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'committed', 'rejected', 'expired')),
+  target_date TEXT NOT NULL,
+  weekday TEXT NOT NULL,
+  proposal_json TEXT NOT NULL,
+  context_hash TEXT NOT NULL,
+  blueprint_commit TEXT NOT NULL,
+  model_provider TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  committed_session_id TEXT REFERENCES workout_sessions(session_id) ON DELETE SET NULL,
+  failure_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  approved_at TEXT,
+  committed_at TEXT,
+  rejected_at TEXT,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_program_proposals_target_date ON ai_program_proposals(target_date);
+CREATE INDEX IF NOT EXISTS idx_ai_program_proposals_status ON ai_program_proposals(status);
+
+-- AI-Powered Weekly Reconciliation: a DISTINCT table from
+-- ai_program_proposals above — deliberately NOT reused, since that
+-- table is day-scoped (one target_date/weekday/committed_session_id per
+-- row) and cannot represent a whole-week, multi-day AI proposal without
+-- pretending a week object is a single session (explicitly the thing
+-- this feature must not do). Same lifecycle convention (pending ->
+-- approved -> committed, or -> rejected/expired), enforced entirely in
+-- application code (src/repositories/aiWeekReconciliationRepo.ts), same
+-- as ai_program_proposals. committed_session_id references the ONE new
+-- real workout_sessions row created for target_date on commit — see
+-- src/ai-programmer/service/weekReconciliationLifecycle.ts's own doc
+-- comment for why only the target date gets a real session (other days
+-- in the reconciled week get their program_sessions snapshot updated
+-- instead, never a new real session of their own).
+CREATE TABLE IF NOT EXISTS ai_week_reconciliation_proposals (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'committed', 'rejected', 'expired')),
+  target_date TEXT NOT NULL,
+  week_start TEXT NOT NULL,
+  requested_activity TEXT NOT NULL,
+  proposal_json TEXT NOT NULL,
+  context_hash TEXT NOT NULL,
+  blueprint_commit TEXT NOT NULL,
+  model_provider TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  committed_session_id TEXT REFERENCES workout_sessions(session_id) ON DELETE SET NULL,
+  failure_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  approved_at TEXT,
+  committed_at TEXT,
+  rejected_at TEXT,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_week_reconciliation_proposals_target_date ON ai_week_reconciliation_proposals(target_date);
+CREATE INDEX IF NOT EXISTS idx_ai_week_reconciliation_proposals_status ON ai_week_reconciliation_proposals(status);

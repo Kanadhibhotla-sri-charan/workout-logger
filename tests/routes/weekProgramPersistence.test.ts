@@ -21,6 +21,7 @@ import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { WeeklyProgramRepo } from '../../src/repositories/weeklyProgramRepo.js';
+import { WeekActivityOverridesRepo } from '../../src/repositories/weekActivityOverridesRepo.js';
 import { programmingWeekStart } from '../../src/engine/workoutBuilder.js';
 import { todayForUser } from '../../src/lib/userTimezone.js';
 import type { DailyActivity } from '../../src/contracts/types.js';
@@ -48,8 +49,13 @@ function currentWeekStart(): string {
   return programmingWeekStart(todayForUser(db));
 }
 
-function putActivity(day: string, activity: DailyActivity) {
-  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity });
+// Fix 7 / Final AI-Deterministic Precedence Fixes §6: prescriptionPolicy
+// is required and direction-dependent — 'regenerate' for a Gym/Both
+// target activity, 'schedule-only' for anything else — preserving every
+// pre-existing call site's original behavior in this file.
+function putActivity(day: string, activity: DailyActivity, extra: Record<string, unknown> = {}) {
+  const defaultPolicy = activity === 'gym' || activity === 'both' ? 'regenerate' : 'schedule-only';
+  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity, prescriptionPolicy: defaultPolicy, ...extra });
 }
 
 function tableRowCount(table: 'programs' | 'program_sessions'): number {
@@ -221,7 +227,7 @@ describe('§22.4 — completed/in-progress history protection (locked persisted 
     expect(after.snapshot).toEqual(mondaySession.snapshot);
   });
 
-  it('changing a completed/locked day\'s own activity leaves its persisted program_sessions row untouched even though the override was recorded', async () => {
+  it('changing an in-progress day\'s own activity is rejected outright, before anything is written (AI Activity Alignment / Non-Regenerative Schedule Fixes Part 4 supersedes the prior "record the override anyway" behavior)', async () => {
     setupProfile(['monday']);
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
 
@@ -229,20 +235,28 @@ describe('§22.4 — completed/in-progress history protection (locked persisted 
     const repo = new WeeklyProgramRepo(db);
     const weekStart = currentWeekStart();
     const before = repo.getByWeekStart(weekStart)!.sessions.find((s) => s.day_index === 0)!;
+    const overridesBefore = new WeekActivityOverridesRepo(db).get((new TrainingProfileRepo(db).get(new UsersRepo(db).getOrCreateDefault().id))!.id, weekStart);
 
     new WorkoutSessionsRepo(db).createSession({ date: weekStart, session_type: 'gym', status: 'in_progress', duration_minutes: 0 });
 
-    // Attempt to switch the LOCKED day itself to badminton — the
-    // override is recorded (spec never forbids recording it), but the
-    // persisted gym prescription for that already-locked date must
-    // survive exactly as it was, since real history/in-progress work
-    // must never be silently discarded (spec §8.1/§14/§16).
-    await putActivity('monday', 'badminton').expect(200);
+    // AI Activity Alignment / Non-Regenerative Schedule Fixes Part 4:
+    // an in-progress session's day must reject the conflicting schedule
+    // change entirely with a clear explanation — a superseding, more
+    // protective rule than this route's prior behavior (which recorded
+    // the override anyway and merely protected the persisted
+    // prescription row). Neither the override nor the persisted
+    // prescription changes as a result of the rejected request.
+    const res = await putActivity('monday', 'badminton').expect(409);
+    expect(res.body.error).toMatch(/in progress/i);
 
     const after = repo.getByWeekStart(weekStart)!.sessions.find((s) => s.day_index === 0)!;
     expect(after).toBeDefined();
     expect(after.id).toBe(before.id);
     expect(after.snapshot).toEqual(before.snapshot);
+
+    const profile = new TrainingProfileRepo(db).get(new UsersRepo(db).getOrCreateDefault().id)!;
+    const overridesAfter = new WeekActivityOverridesRepo(db).get(profile.id, weekStart);
+    expect(overridesAfter).toEqual(overridesBefore);
   });
 });
 

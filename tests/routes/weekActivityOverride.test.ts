@@ -44,8 +44,13 @@ async function getWeek() {
   return res.body;
 }
 
-function putActivity(day: string, activity: DailyActivity) {
-  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity });
+// Fix 7 / Final AI-Deterministic Precedence Fixes §6: prescriptionPolicy
+// is required and direction-dependent — 'regenerate' for a Gym/Both
+// target activity, 'schedule-only' for anything else — preserving every
+// pre-existing call site's original behavior in this file.
+function putActivity(day: string, activity: DailyActivity, extra: Record<string, unknown> = {}) {
+  const defaultPolicy = activity === 'gym' || activity === 'both' ? 'regenerate' : 'schedule-only';
+  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity, prescriptionPolicy: defaultPolicy, ...extra });
 }
 
 beforeEach(() => {
