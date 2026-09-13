@@ -9,7 +9,7 @@ import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { AIProposalRepo, type AIProposalRecord } from '../../repositories/aiProposalRepo.js';
 import { nowIso } from '../../repositories/ids.js';
-import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
+import { UnknownExerciseError, WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
 import {
   AIProposalCommitFailedError,
@@ -67,6 +67,18 @@ export function approveProposal(db: Database.Database, proposalId: string): AIPr
 export interface CommitAIProposalResult {
   sessionId: string;
   proposal: AIProposalRecord;
+}
+
+/** Cleanup pass §1: `failure_reason` is a PERSISTED, retrievable field
+ * (surfaced via `GET /proposals/:id`) — it must never contain a raw
+ * `err.message`/stack trace, which can carry SQL text, table/column
+ * names, or other internal detail. This maps any commit-transaction
+ * failure to one of a small, fixed set of safe, stable categories. The
+ * raw error is still logged server-side (see the catch block below) for
+ * real debugging — just never persisted or returned to a client. */
+function classifyCommitFailure(err: unknown): string {
+  if (err instanceof UnknownExerciseError) return 'exercise_resolution_failed';
+  return 'commit_transaction_failed';
 }
 
 /** The only function in this codebase allowed to translate an AI
@@ -188,7 +200,13 @@ export function commitAIProposalToPlannedSession(db: Database.Database, proposal
         date: proposal.targetDate,
         session_type: 'gym',
         status: 'planned',
-        notes: `AI-proposed session (proposal ${proposal.proposalId})`,
+        // Cleanup pass §3: `record.id` (the loaded, persisted
+        // ai_program_proposals row id) is the authoritative identity —
+        // `proposal.proposalId` is the same value today (AIProposalRepo.
+        // create() guarantees that by construction), but this note
+        // should reference the persisted record, not the in-memory
+        // proposal object, in case that ever changes.
+        notes: `AI-proposed session (proposal ${record.id})`,
       });
       // Correction: the proposal's prescription (repsMin/repsMax/
       // rirMin/rirMax/restSeconds/sets count) is planned data — it goes
@@ -225,23 +243,35 @@ export function commitAIProposalToPlannedSession(db: Database.Database, proposal
       });
       const committed = repo.markCommitted(proposalId, session.session_id);
       if (!committed) {
-        // Lost a race with another commit attempt for this same
-        // proposal between loadCurrent() above and this conditional
-        // UPDATE — throwing here rolls back the whole transaction
-        // (db.transaction wraps this in BEGIN/COMMIT/ROLLBACK), so the
-        // just-created session is never left orphaned.
-        throw new AIProposalInvalidStateError(proposalId, record.status, 'committed');
+        // Cleanup pass §2: markCommitted()'s WHERE clause now checks
+        // BOTH status AND expiry atomically, so a zero-row result here
+        // means either the status changed (a race with another commit
+        // attempt) or the proposal crossed its expiry boundary between
+        // the pre-checks above and this exact call — re-read to report
+        // whichever actually happened. Throwing here rolls back the
+        // whole transaction (db.transaction wraps this in BEGIN/COMMIT/
+        // ROLLBACK), so the just-created session is never left orphaned.
+        const current = repo.getById(proposalId);
+        if (current && current.status !== 'expired' && current.expiresAt < nowIso()) {
+          throw new AIProposalExpiredError(proposalId, current.expiresAt);
+        }
+        throw new AIProposalInvalidStateError(proposalId, current?.status ?? record.status, 'committed');
       }
       return session.session_id;
     });
     sessionId = tx();
   } catch (err) {
-    if (err instanceof AIProposalInvalidStateError) throw err;
+    if (err instanceof AIProposalInvalidStateError || err instanceof AIProposalExpiredError) throw err;
     // Atomicity (spec §9): the transaction above rolled back entirely on
     // any thrown error — no partial session/exercise/set rows, and the
-    // proposal was never marked committed. Record why, for audit, but
-    // never leak the raw error message/stack trace to the client.
-    repo.recordFailure(proposalId, err instanceof Error ? err.message : 'unknown commit error');
+    // proposal was never marked committed. The raw error (which may
+    // contain SQL text, table/column names, or other internal detail)
+    // is logged to the server's own controlled log for real debugging,
+    // but only a safe, fixed-category string — never `err.message` or a
+    // stack trace — is persisted into `failure_reason` (cleanup pass
+    // §1), since that field is retrievable via `GET /proposals/:id`.
+    console.error(`AI proposal commit failed for proposal ${proposalId}:`, err);
+    repo.recordFailure(proposalId, classifyCommitFailure(err));
     throw new AIProposalCommitFailedError(proposalId);
   }
 

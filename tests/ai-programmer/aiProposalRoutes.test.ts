@@ -239,6 +239,11 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const session = sessionsRepo.getSession(res.body.committedSessionId);
     expect(session?.status).toBe('planned');
     expect(session?.date).toBe(SUNDAY);
+    // Cleanup pass §3: the note references the persisted proposal
+    // record's own id (record.id), not a separately-held in-memory
+    // value — verified by checking it contains the exact id this test
+    // itself used to look the proposal up.
+    expect(session?.notes).toContain(proposalId);
     const exercises = sessionsRepo.getExercisePerformances(res.body.committedSessionId);
     expect(exercises).toHaveLength(1);
     expect(exercises[0]?.exercise_id).toBe('flat-barbell-bench-press');
@@ -354,13 +359,19 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
 
+    // Cleanup pass §1: this distinctive internal message must never
+    // reach the client OR be persisted into `failure_reason` — it
+    // stands in for something a raw error could plausibly contain (a
+    // SQL constraint name, a column name, etc.).
+    const DISTINCTIVE_INTERNAL_MESSAGE = 'SQLITE_CONSTRAINT: FOREIGN KEY constraint failed on internal_table_xyz';
     const spy = vi.spyOn(WorkoutSessionsRepo.prototype, 'addExercisePerformance').mockImplementation(() => {
-      throw new Error('simulated mid-transaction persistence failure');
+      throw new Error(DISTINCTIVE_INTERNAL_MESSAGE);
     });
 
     const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('AI_PROPOSAL_COMMIT_FAILED');
+    expect(JSON.stringify(res.body)).not.toContain(DISTINCTIVE_INTERNAL_MESSAGE); // API response stays generic
     spy.mockRestore();
 
     // Atomicity: the half-created session must not have been left behind.
@@ -368,6 +379,15 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const getRes = await request(app).get(`/api/ai-programmer/proposals/${proposalId}`);
     expect(getRes.body.status).toBe('approved'); // never advanced to committed
     expect(getRes.body.committedSessionId).toBeNull();
+
+    // The persisted failure_reason must be a safe, fixed category — not
+    // the raw error message or a stack trace.
+    const stored = db.prepare('SELECT failure_reason FROM ai_program_proposals WHERE id = ?').get(proposalId) as {
+      failure_reason: string | null;
+    };
+    expect(stored.failure_reason).not.toContain(DISTINCTIVE_INTERNAL_MESSAGE);
+    expect(stored.failure_reason).not.toContain('SQLITE_CONSTRAINT');
+    expect(stored.failure_reason).toBe('commit_transaction_failed');
   });
 
   it('respects the AI_PROGRAMMER_ENABLED flag — disabled commit returns 503, never persists', async () => {

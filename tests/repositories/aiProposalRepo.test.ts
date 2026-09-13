@@ -159,6 +159,31 @@ describe('AIProposalRepo — status transitions', () => {
     expect(repo.getById('proposal-1')?.committedSessionId).toBe(sessionId1); // still the first session, never overwritten
   });
 
+  it('markCommitted(): rejects an approved proposal whose expires_at has already passed, even before markExpired() has run (cleanup pass §2 atomic expiry guard)', () => {
+    const repo = new AIProposalRepo(db);
+    const sessionId = createRealSession(db);
+    repo.create({ proposal: makeProposal(), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    repo.approve('proposal-1');
+    // Simulate the row having crossed its expiry boundary without the
+    // lazy pending/approved -> expired transition having run yet — the
+    // stored `status` still reads 'approved'.
+    db.prepare('UPDATE ai_program_proposals SET expires_at = ? WHERE id = ?').run('2020-01-01T00:00:00.000Z', 'proposal-1');
+    expect(repo.getById('proposal-1')?.status).toBe('approved'); // status alone doesn't yet reflect expiry
+
+    expect(repo.markCommitted('proposal-1', sessionId)).toBeUndefined(); // the atomic WHERE clause rejects it anyway
+    expect(repo.getById('proposal-1')?.status).toBe('approved'); // untouched — no partial/incorrect commit
+    expect(repo.getById('proposal-1')?.committedSessionId).toBeNull();
+  });
+
+  it('markCommitted(): still succeeds for an approved proposal that has not yet expired', () => {
+    const repo = new AIProposalRepo(db);
+    const sessionId = createRealSession(db);
+    repo.create({ proposal: makeProposal(), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });
+    repo.approve('proposal-1');
+    db.prepare('UPDATE ai_program_proposals SET expires_at = ? WHERE id = ?').run('2099-01-01T00:00:00.000Z', 'proposal-1');
+    expect(repo.markCommitted('proposal-1', sessionId)?.status).toBe('committed');
+  });
+
   it('markExpired(): pending -> expired, and approved -> expired', () => {
     const repo = new AIProposalRepo(db);
     repo.create({ proposal: makeProposal({ proposalId: 'p-pending' }), contextHash: 'h', blueprintCommit: 'b', modelProvider: 'velona', modelName: 'm', requestId: 'r' });

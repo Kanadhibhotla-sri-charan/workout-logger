@@ -203,7 +203,15 @@ export class AIProposalRepo {
    * constraints, [or] conditional updates... do not implement race
    * protection only with an in-memory boolean" — this is the conditional-
    * update option, not an in-memory flag). */
-  private transition(id: string, from: readonly AIProposalStatus[], to: AIProposalStatus, extraSql: string, extraParams: Record<string, unknown> = {}): AIProposalRecord | undefined {
+  private transition(
+    id: string,
+    from: readonly AIProposalStatus[],
+    to: AIProposalStatus,
+    extraSql: string,
+    extraParams: Record<string, unknown> = {},
+    extraWhereSql = '',
+    extraWhereParams: Record<string, unknown> = {}
+  ): AIProposalRecord | undefined {
     const fromParams: Record<string, unknown> = {};
     const whereIn = from.map((status, i) => {
       fromParams[`from${i}`] = status;
@@ -211,9 +219,9 @@ export class AIProposalRepo {
     });
     const result = this.db
       .prepare(
-        `UPDATE ai_program_proposals SET status = @status, updated_at = @updated_at${extraSql} WHERE id = @id AND status IN (${whereIn.join(', ')})`
+        `UPDATE ai_program_proposals SET status = @status, updated_at = @updated_at${extraSql} WHERE id = @id AND status IN (${whereIn.join(', ')})${extraWhereSql}`
       )
-      .run({ id, status: to, updated_at: nowIso(), ...extraParams, ...fromParams });
+      .run({ id, status: to, updated_at: nowIso(), ...extraParams, ...fromParams, ...extraWhereParams });
     if (result.changes === 0) return undefined;
     return this.getById(id);
   }
@@ -231,12 +239,30 @@ export class AIProposalRepo {
 
   /** approved -> committed. `sessionId` is the `workout_sessions.session_id`
    * created for this proposal — recorded so a repeated commit request is
-   * idempotent (spec §9). */
+   * idempotent (spec §9).
+   *
+   * Cleanup pass §2: the WHERE clause enforces `status = 'approved' AND
+   * expires_at >= now` in the SAME atomic UPDATE — not just `status`.
+   * The service layer (`commitAIProposalToPlannedSession`) already
+   * checks approval/expiry before starting its transaction, but that
+   * check happens moments before this call, with real (synchronous, but
+   * non-trivial) work — a fresh context rebuild and a full domain
+   * revalidation — in between. Embedding the expiry bound in this final
+   * transition closes that gap architecturally, rather than relying on
+   * "the earlier check is recent enough in practice": a proposal that
+   * crosses its `expires_at` between the pre-check and this call is
+   * rejected here too (`changes: 0`), the exact same way a status change
+   * already was. */
   markCommitted(id: string, sessionId: string): AIProposalRecord | undefined {
-    return this.transition(id, ['approved'], 'committed', ', committed_at = @committed_at, committed_session_id = @committed_session_id', {
-      committed_at: nowIso(),
-      committed_session_id: sessionId,
-    });
+    return this.transition(
+      id,
+      ['approved'],
+      'committed',
+      ', committed_at = @committed_at, committed_session_id = @committed_session_id',
+      { committed_at: nowIso(), committed_session_id: sessionId },
+      ' AND expires_at >= @now',
+      { now: nowIso() }
+    );
   }
 
   /** (pending|approved) -> expired. Called lazily by the approve/commit
