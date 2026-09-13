@@ -35,7 +35,7 @@ import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverri
 import { WeeklyProgramRepo, type PersistedWeekProgram, type PersistedWeekSession } from '../../repositories/weeklyProgramRepo.js';
 import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } from '../../engine/weekProgramReconciliation.js';
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
-import { resolveSelectedSession } from '../../engine/selectedSessionResolver.js';
+import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning } from '../friendlyExplanation.js';
 import type { SkippedTarget } from '../../engine/workoutBuilder.js';
@@ -100,76 +100,67 @@ function goalLabels(database: Database.Database): { labels: Map<string, string>;
  * never inferred from the generated plan itself (a generated plan says
  * what SHOULD happen; only a real WorkoutSession row says what actually
  * did). Delegates to `resolveSelectedSession` (the same authoritative
- * resolver `findGymDaySession` below uses) rather than re-deriving its
- * own completed/in_progress/planned tiering — a day's "real status" and
- * "which session is selected" must never be able to disagree. */
+ * resolver `resolveGymDayResolution` below uses) rather than re-deriving
+ * its own completed/in_progress/planned tiering — a day's "real status"
+ * and "which session is selected" must never be able to disagree.
+ * Final Actionable vs Historical Session Resolution Fixes §1: a day's
+ * real status now comes ONLY from `historicalSession` (a `completed` or
+ * `in_progress` row) — never from `selectedPlannedWorkout`, which by
+ * construction is never in either of those statuses. No real session
+ * (or an unresolved `conflict`) both fall back to 'planned', matching
+ * this function's pre-existing default. */
 function realSessionStatus(database: Database.Database, date: string): 'planned' | 'in_progress' | 'completed' {
   const logged = new WorkoutSessionsRepo(database).listSessionsByDate(date);
-  const status = resolveSelectedSession(logged)?.status;
+  const status = resolveSelectedSession(logged).historicalSession?.status;
   return status === 'completed' || status === 'in_progress' ? status : 'planned';
 }
 
 /** Final Selected Session Resolution and AI/Deterministic Precedence
- * Fixes §1: the real gym `workout_sessions` row `renderWeekDays` treats
- * as authoritative for `date`, if any — shaped as the user-facing
- * `plannedSession` field, never fabricated `plannedWork`-style
- * prescription data, just enough for a UI to say "a planned workout
- * exists" and link to it.
- *
- * This is a thin wrapper over `resolveSelectedSession` — the ONE
- * authoritative resolver (`src/engine/selectedSessionResolver.ts`),
- * shared by every read path in this file. It replaces the previous
- * `findRealGymSession()`, which picked whichever row
- * `listSessionsByDate` happened to return first (`ORDER BY start_time
- * ASC`) — not a valid precedence rule once a deterministic session, an
- * AI session, and/or a manual session can coexist for one date (spec
- * §1's own worked example). `source` is read directly from the
- * resolved session's own persisted `source_type` (never re-guessed per
- * call site). Returns `undefined` when no real session exists yet for
- * this date (nothing to open). */
-function findGymDaySession(database: Database.Database, date: string) {
+ * Fixes §1, extended by the Actionable vs Historical fix: the full
+ * resolver answer for `date`'s real gym `workout_sessions` rows — a thin
+ * wrapper over `resolveSelectedSession`, the ONE authoritative resolver
+ * (`src/engine/selectedSessionResolver.ts`), shared by every read path
+ * in this file. */
+function resolveGymDayResolution(database: Database.Database, date: string) {
   return resolveSelectedSession(new WorkoutSessionsRepo(database).listSessionsByDate(date));
 }
 
-function toPlannedSessionField(session: ReturnType<typeof findGymDaySession>): { id: string; source: WorkoutSession['source_type']; status: 'planned' | 'in_progress' | 'completed' } | null {
+function toSessionField(session: WorkoutSession | null): { id: string; source: WorkoutSession['source_type']; status: 'planned' | 'in_progress' | 'completed' } | null {
   if (!session) return null;
   return { id: session.session_id, source: session.source_type, status: session.status as 'planned' | 'in_progress' | 'completed' };
 }
 
-/** Final AI-Deterministic Precedence and Scheduling Fixes §1/§2/§8: the
- * ONE shared rule `renderWeekDays` (and therefore every read path built
- * on it — GET /week, GET /today) uses to decide what a gym day's
- * `plannedWork` should show, given that BOTH a deterministic
- * `program_sessions` prescription and a real `workout_sessions` row can
- * exist for the same date at once. Precedence (spec §2):
+/** Final AI-Deterministic Precedence and Scheduling Fixes §1/§2/§8,
+ * extended by the Actionable vs Historical fix: the ONE shared rule
+ * `renderWeekDays` (and therefore every read path built on it — GET
+ * /week, GET /today) uses to decide what a gym day's `plannedWork`
+ * should show, given that BOTH a deterministic `program_sessions`
+ * prescription and a real `workout_sessions` row can exist for the same
+ * date at once.
  *
- *   1. No real session at all -> the deterministic snapshot (if any) is
- *      the plan; nothing to supersede.
- *   2. A real session whose `source_type` is 'deterministic' (the
- *      default — this is simply "the day's own generated plan,
- *      started") -> the deterministic snapshot remains the displayed
- *      plan; the real session is additionally exposed via
- *      `plannedSession` so /today's status card and the logger can find
- *      it, exactly as before this fix.
- *   3. A real session whose `source_type` is 'ai' or 'manual' -> this
- *      SUPERSEDES the deterministic snapshot for display (Option 1,
- *      "AI replacement/supersession" — the deterministic row is never
- *      deleted, only display precedence changes). `plannedWork` is left
- *      empty rather than fabricated (workout_exercises does not retain
- *      target_type/target_id/classification — see the caller's own
- *      note); the real exercises remain visible via the session's own
- *      detail endpoint, exactly as logger.html already reads them
- *      (`session.exercises`, never the deterministic `generated.
- *      exercises`) — this function's rule and logger's own resolution
- *      are the same rule applied at two different call sites, not two
- *      independent ones.
+ * `combinedSession` is whichever real session the resolver considers
+ * relevant for this date — its `historicalSession` if one exists
+ * (completed/in-progress always wins for display purposes, per the
+ * resolver's own precedence), else its `selectedPlannedWorkout`
+ * (actionable, or a conflict's deterministic recovery candidate). A
+ * `source_type` other than `'deterministic'` on that session SUPERSEDES
+ * the deterministic snapshot for display (Option 1, "AI replacement/
+ * supersession" — the deterministic row is never deleted, only display
+ * precedence changes). `plannedWork` is left empty rather than
+ * fabricated in that case (workout_exercises does not retain
+ * target_type/target_id/classification); the real exercises remain
+ * fully visible via the session's own detail endpoint.
  *
  * Never used to decide whether a day IS a gym day (`isGymActivity`
  * alone still decides that, from the profile/override layer only —
  * Non-Goal: never infer activity from workout-session rows). */
-function resolveGymDaySelection(persistedSnapshot: PersistedWeekSession | undefined, realSession: ReturnType<typeof findGymDaySession>): { showDeterministic: boolean } {
-  const supersedes = !!realSession && realSession.source_type !== 'deterministic';
-  return { showDeterministic: !!persistedSnapshot && !supersedes };
+function resolveGymDaySelection(
+  persistedSnapshot: PersistedWeekSession | undefined,
+  resolution: ReturnType<typeof resolveGymDayResolution>
+): { showDeterministic: boolean; combinedSession: WorkoutSession | null } {
+  const combinedSession = resolution.historicalSession ?? resolution.selectedPlannedWorkout;
+  const supersedes = !!combinedSession && combinedSession.source_type !== 'deterministic';
+  return { showDeterministic: !!persistedSnapshot && !supersedes, combinedSession };
 }
 
 /** The real recurring-activity type for a non-gym day, straight from the
@@ -391,8 +382,22 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
     const activity = deriveDailyActivity(weekday, effective.trainingDays, effective.otherActivitySchedule);
     const isGymActivity = activity === 'gym' || activity === 'both';
     const persisted = program.sessions.find((s) => s.day_index === i);
-    const realSession = isGymActivity || persisted ? findGymDaySession(database, dayDate) : undefined;
-    const { showDeterministic } = resolveGymDaySelection(persisted, realSession);
+    const resolution = isGymActivity || persisted ? resolveGymDayResolution(database, dayDate) : null;
+    const { showDeterministic, combinedSession } = resolution
+      ? resolveGymDaySelection(persisted, resolution)
+      : { showDeterministic: false, combinedSession: null };
+    const historicalSession = toSessionField(resolution?.historicalSession ?? null);
+    const selectedPlannedWorkout = toSessionField(resolution?.selectedPlannedWorkout ?? null);
+    const selectionConflict = resolution?.selectionConflict ?? null;
+    if (selectionConflict) {
+      logSessionConflict({
+        operation: 'GET /week (or /today) day resolution',
+        date: dayDate,
+        sessionType: 'gym',
+        code: selectionConflict.code,
+        conflictingSessionIds: selectionConflict.sessionIds,
+      });
+    }
 
     if (showDeterministic && persisted) {
       const snap = persisted.snapshot as {
@@ -417,7 +422,10 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
         skipped: snap.skipped,
         badmintonContext: snap.badmintonContext,
         resourceAllocation: snap.resourceAllocation,
-        plannedSession: toPlannedSessionField(realSession),
+        plannedSession: toSessionField(combinedSession),
+        historicalSession,
+        selectedPlannedWorkout,
+        selectionConflict,
         supersedesProgramSessionId: null,
       };
     }
@@ -452,7 +460,10 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
         skipped: [],
         badmintonContext: null,
         resourceAllocation: [],
-        plannedSession: toPlannedSessionField(realSession),
+        plannedSession: toSessionField(combinedSession),
+        historicalSession,
+        selectedPlannedWorkout,
+        selectionConflict,
         // Explicit provenance (spec §1's own suggested field) — only
         // meaningful when a persisted deterministic snapshot actually
         // existed for this slot and is being superseded by the real
@@ -474,6 +485,9 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
       badmintonContext: null,
       resourceAllocation: [],
       plannedSession: null,
+      historicalSession: null,
+      selectedPlannedWorkout: null,
+      selectionConflict: null,
       supersedesProgramSessionId: null,
     };
   });
@@ -828,6 +842,9 @@ programmingRouter.get('/today', (req, res) => {
     // deterministic-`exercises` view (an AI-committed or superseded
     // day) still say "a planned workout exists" and link to it.
     plannedSession: today.plannedSession,
+    historicalSession: today.historicalSession,
+    selectedPlannedWorkout: today.selectedPlannedWorkout,
+    selectionConflict: today.selectionConflict,
     supersedesProgramSessionId: today.supersedesProgramSessionId,
     estimatedMinutes: today.estimatedMinutes,
     skippedTargets: today.skipped,

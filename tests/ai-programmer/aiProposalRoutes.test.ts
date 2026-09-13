@@ -316,22 +316,31 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
   });
 
-  it('a completed-session conflict is rejected (via the reused editable-date check)', async () => {
+  it('a completed-session conflict is rejected (via the reused editable-date check), with no partial write', async () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'completed' });
     const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('AI_TARGET_NOT_EDITABLE');
+    // Actionable vs Historical fix's own write-path requirement: no
+    // partial write — only the pre-existing completed session exists,
+    // the proposal's own session was never created.
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
+    const record = await request(app).get(`/api/ai-programmer/proposals/${proposalId}`).expect(200);
+    expect(record.body.status).toBe('approved');
   });
 
-  it('an in-progress-session conflict is rejected', async () => {
+  it('an in-progress-session conflict is rejected, with no partial write', async () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'in_progress' });
     const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('AI_TARGET_NOT_EDITABLE');
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
+    const record = await request(app).get(`/api/ai-programmer/proposals/${proposalId}`).expect(200);
+    expect(record.body.status).toBe('approved');
   });
 
   it('an existing planned-session conflict is rejected per the documented default policy (409 AI_PROPOSAL_CONFLICT)', async () => {

@@ -12,7 +12,7 @@ import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { reconcileAfterActualTraining } from '../../engine/weekProgramReconciliation.js';
 import { computeFreshWeek, defaultBudgetMinutes } from './programming.js';
-import { findActiveGymSessionConflict } from '../../engine/selectedSessionResolver.js';
+import { findActiveGymSessionConflict, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 
 export const workoutsRouter = Router();
 
@@ -78,24 +78,33 @@ workoutsRouter.post('/', (req, res) => {
   const repo = new WorkoutSessionsRepo(db(req));
 
   // Final Selected Session Resolution and AI/Deterministic Precedence
-  // Fixes §3/§10: this is the ONE generic session-creation entry point
-  // (used directly by "Start workout"/"Log something else" on
-  // today.html, with no conflict checking of its own before this fix) —
-  // the AI-commit path (aiProposalLifecycle.ts) already guards against
-  // creating a second active gym session for a date via its own
-  // pre-commit checks; this closes the exact same gap here, using the
-  // SAME shared rule (`findActiveGymSessionConflict`), so "at most one
-  // active (planned/in_progress) real gym session per date" holds
-  // through every supported write path, not just the AI one. A
-  // `completed` session never blocks this — see the resolver's own doc
-  // comment for why that is the correct, spec-required behavior (a
-  // same-day makeup session is legitimate).
+  // Fixes §3/§10, widened by the Actionable vs Historical fix §2/§7:
+  // this is the ONE generic session-creation entry point (used directly
+  // by "Start workout"/"Log something else" on today.html, with no
+  // conflict checking of its own before those fixes) — the AI-commit
+  // path (aiProposalLifecycle.ts) already guards against creating a
+  // second active gym session for a date via its own pre-commit checks;
+  // this closes the same gap here, using the SAME shared rule
+  // (`findActiveGymSessionConflict`), so "no hidden replacement planned
+  // Gym session" holds through every supported write path, not just the
+  // AI one. A `completed` session now ALSO blocks this (Actionable vs
+  // Historical fix §2 — reversing the prior phase's "completed never
+  // blocks" behavior; a same-day makeup session is explicitly deferred
+  // to a future, separate feature per that spec's own scope note), using
+  // the distinct, spec-suggested error code so callers can tell "there's
+  // a still-actionable session in the way" apart from "this date is
+  // already historically closed out."
   if (session_type === 'gym') {
     const conflict = findActiveGymSessionConflict(repo.listSessionsByDate(date));
     if (conflict) {
+      const isHistorical = conflict.status === 'completed' || conflict.status === 'in_progress';
+      const code = isHistorical ? 'DATE_ALREADY_HAS_COMPLETED_OR_IN_PROGRESS_GYM_SESSION' : 'ACTIVE_GYM_SESSION_EXISTS';
+      logSessionConflict({ operation: 'POST /api/workouts', date, sessionType: session_type, code, conflictingSessionIds: [conflict.session_id] });
       return res.status(409).json({
-        error: `${date} already has an active gym session (${conflict.status}). Complete or cancel it before starting another.`,
-        code: 'ACTIVE_GYM_SESSION_EXISTS',
+        error: isHistorical
+          ? `${date} already has a ${conflict.status} gym session. It cannot be replaced by a new planned workout.`
+          : `${date} already has an active gym session (${conflict.status}). Complete or cancel it before starting another.`,
+        code,
         conflictingSessionId: conflict.session_id,
       });
     }

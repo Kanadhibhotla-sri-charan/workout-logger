@@ -15,7 +15,7 @@ import { UsersRepo } from '../../repositories/usersRepo.js';
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
 import { WeeklyProgramRepo } from '../../repositories/weeklyProgramRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
-import { findActiveGymSessionConflict } from '../../engine/selectedSessionResolver.js';
+import { findActiveGymSessionConflict, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { WEEKDAYS } from '../../contracts/types.js';
 import { programmingWeekStart, weekdayOfDate } from '../../engine/workoutBuilder.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
@@ -287,6 +287,13 @@ export function commitAIProposalToPlannedSession(
   const sessionsRepo = new WorkoutSessionsRepo(db);
   const plannedConflict = findActiveGymSessionConflict(sessionsRepo.listSessionsByDate(proposal.targetDate));
   if (plannedConflict) {
+    logSessionConflict({
+      operation: 'AI proposal commit',
+      date: proposal.targetDate,
+      sessionType: 'gym',
+      code: 'AI_PROPOSAL_CONFLICT',
+      conflictingSessionIds: [plannedConflict.session_id],
+    });
     throw new AIProposalConflictError(proposalId, proposal.targetDate, plannedConflict.session_id, plannedConflict.status);
   }
 

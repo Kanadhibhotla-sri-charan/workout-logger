@@ -82,7 +82,9 @@
       // real planned workout.
       if (todayData.sessionType !== 'gym') {
         showEmptyInline(container, `No gym session planned today — ${formatSessionType(todayData.sessionType).toLowerCase()} day.`);
-      } else if (todayData.exercises.length === 0 && todayData.plannedSession) {
+      } else if (todayData.exercises.length === 0 && todayData.selectionConflict) {
+        showEmptyInline(container, "Today's workout selection is ambiguous — see below before starting or continuing anything.");
+      } else if (todayData.exercises.length === 0 && (todayData.historicalSession || todayData.selectedPlannedWorkout)) {
         showEmptyInline(container, "This workout was created from an AI proposal — open it below to see the planned exercises.");
       } else if (todayData.exercises.length === 0) {
         showEmptyInline(container, 'No exercises were placed for today. Check your training profile and goals on the Program page for details.');
@@ -121,31 +123,52 @@
       section.appendChild(el('h2', { text: "Today's session" }));
 
       const relevant = (todayData.loggedSessions || []).filter((s) => todayData.sessionType !== 'gym' || s.session_type !== 'badminton');
-      // Final Selected Session Resolution and AI/Deterministic
-      // Precedence Fixes §6/§11.G: which session is "the" gym session
-      // for today must come from the SAME authoritative resolver /today
-      // already used to compute `plannedSession` (server-side,
-      // src/engine/selectedSessionResolver.ts) — never independently
-      // re-picked from `loggedSessions` by type alone. If more than one
-      // real gym session ever exists for today (e.g. a completed one
-      // plus a new planned one), picking "the first gym-type entry" here
-      // could disagree with the session `plannedSession`/the logger/
-      // completion resolve to. Look the resolved session up BY ID
-      // instead — identity always comes from the server, this is just a
-      // display-field lookup.
-      const gymSession = todayData.plannedSession ? todayData.loggedSessions.find((s) => s.session_id === todayData.plannedSession.id) : undefined;
+      // Final Actionable vs Historical Session Resolution Fixes §10: a
+      // completed/in-progress session (`historicalSession`) and an
+      // actionable one (`selectedPlannedWorkout`) are DIFFERENT server
+      // fields now, never conflated into one ambiguous "the gym
+      // session." Whichever is present is looked up by its exact id in
+      // `loggedSessions` for display fields only (duration_minutes etc.)
+      // — never an unqualified `.find()` by type/recency; identity
+      // always comes from the server-resolved id. A `selectionConflict`
+      // is checked first and, when present, shows a recovery/error
+      // state instead of opening any session at all — never guess which
+      // of several ambiguous sessions the user meant.
+      const findByResolvedId = (ref) => (ref ? todayData.loggedSessions.find((s) => s.session_id === ref.id) : null);
+      const historicalSession = findByResolvedId(todayData.historicalSession);
+      const actionableSession = findByResolvedId(todayData.selectedPlannedWorkout);
 
-      if (gymSession) {
+      if (todayData.selectionConflict) {
+        const card = createCard([
+          el('div', { class: 'card-row' }, [el('div', { text: 'Today’s workout state is ambiguous' })]),
+          el('p', { class: 'muted', text: todayData.selectionConflict.message }),
+        ]);
+        section.appendChild(card);
+        section.appendChild(el('p', { class: 'muted', text: 'Open Program to review this day before starting or continuing a workout.' }));
+      } else if (historicalSession) {
         const card = createCard([
           el('div', { class: 'card-row' }, [
-            el('div', { text: `${formatSessionType(gymSession.session_type)} — ${gymSession.duration_minutes ? formatDuration(gymSession.duration_minutes) : 'in progress'}` }),
-            createStatusBadge(gymSession.status, formatSessionType(gymSession.status)),
+            el('div', { text: `${formatSessionType(historicalSession.session_type)} — ${historicalSession.duration_minutes ? formatDuration(historicalSession.duration_minutes) : 'in progress'}` }),
+            createStatusBadge(historicalSession.status, formatSessionType(historicalSession.status)),
           ]),
         ]);
         section.appendChild(card);
         const cta = createButton({
-          label: gymSession.status === 'completed' ? 'View workout' : 'Continue workout',
-          onClick: () => (window.location.href = `/logger.html?session=${gymSession.session_id}`),
+          label: historicalSession.status === 'completed' ? 'View workout' : 'Continue workout',
+          onClick: () => (window.location.href = `/logger.html?session=${historicalSession.session_id}`),
+        });
+        section.appendChild(cta);
+      } else if (actionableSession) {
+        const card = createCard([
+          el('div', { class: 'card-row' }, [
+            el('div', { text: `${formatSessionType(actionableSession.session_type)} — ${actionableSession.duration_minutes ? formatDuration(actionableSession.duration_minutes) : 'not started'}` }),
+            createStatusBadge(actionableSession.status, formatSessionType(actionableSession.status)),
+          ]),
+        ]);
+        section.appendChild(card);
+        const cta = createButton({
+          label: 'Continue workout',
+          onClick: () => (window.location.href = `/logger.html?session=${actionableSession.session_id}`),
         });
         section.appendChild(cta);
       } else if (todayData.sessionType === 'gym' && todayData.exercises.length > 0) {

@@ -155,7 +155,13 @@
         // deterministic plannedWork to count — showing "0 exercises"
         // would falsely imply nothing is scheduled when a real planned
         // workout (day.plannedSession) already exists.
-        const meta = day.plannedWork.length === 0 && day.plannedSession
+        // Final Actionable vs Historical Session Resolution Fixes §9/§10:
+        // a selectionConflict (more than one active planned session for
+        // this date) is flagged plainly here rather than silently shown
+        // as a normal planned/AI-planned day.
+        const meta = day.selectionConflict
+          ? 'Needs review — ambiguous workout state'
+          : day.plannedWork.length === 0 && day.plannedSession
           ? 'AI-planned workout'
           : `${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} · ${formatDuration(day.estimatedMinutes)}`;
         head.appendChild(el('div', { class: 'wd-meta', text: meta }));
@@ -190,7 +196,14 @@
       if (day.type === 'gym') {
         panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
 
-        if (day.plannedWork.length === 0 && day.plannedSession) {
+        if (day.selectionConflict) {
+          // Final Actionable vs Historical Session Resolution Fixes
+          // §9/§10: more than one active planned session exists for
+          // this date — show a clear recovery/error state rather than
+          // opening an arbitrary one of them.
+          panel.appendChild(el('p', { class: 'muted', text: day.selectionConflict.message }));
+          panel.appendChild(el('p', { class: 'faint', text: `Conflicting session ids: ${day.selectionConflict.sessionIds.join(', ')}` }));
+        } else if (day.plannedWork.length === 0 && day.plannedSession) {
           // Fix 8: a real planned workout exists (created via an AI
           // proposal replacement) but has no deterministic plannedWork
           // to list here — say so plainly and link to it, rather than
