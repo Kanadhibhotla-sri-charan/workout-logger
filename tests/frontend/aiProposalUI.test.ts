@@ -479,9 +479,17 @@ describe('program.html: AI Programmer proposal discovery/rehydration wiring', ()
     const renderActionsBody = html.slice(html.indexOf('function renderActions()'), html.indexOf('function discover()'));
     expect(renderActionsBody).toMatch(/if \(!discoveryDone\)/);
     expect(renderActionsBody).toMatch(/Checking for an existing proposal/);
-    // discoveryDone only ever flips to true from inside discover() itself.
-    expect(html).toMatch(/discoveryDone = true;/);
-    const discoveryDoneAssignments = html.match(/discoveryDone = true;/g) || [];
+    // discoveryDone only ever flips to true from inside THIS section's
+    // own discover() — scoped to buildAiProposalSection's body, since
+    // buildWeekReconciliationSection (AI-Powered Weekly Reconciliation)
+    // legitimately has its own, separate discoveryDone flag following
+    // the exact same pattern.
+    const sectionBody = html.slice(
+      html.indexOf('function buildAiProposalSection('),
+      html.indexOf('// ---------- AI-Powered Weekly Reconciliation UI ----------')
+    );
+    expect(sectionBody).toMatch(/discoveryDone = true;/);
+    const discoveryDoneAssignments = sectionBody.match(/discoveryDone = true;/g) || [];
     expect(discoveryDoneAssignments.length).toBe(1);
   });
 

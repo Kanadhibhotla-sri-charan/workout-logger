@@ -130,25 +130,30 @@ describe('aiWeekReconciliationActionsFor: the exact same pending -> approved -> 
 
 describe('program.html: AI Week Reorganization section wiring', () => {
   const html = readFile('program.html');
+  const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
 
-  it('is reached only from the deterministic "generationRequired" fallback, and only when the requested activity is exactly "gym"', () => {
+  it('is built at modal-open time (not only reactively) and passed the modal token, exactly like buildAiProposalSection', () => {
+    expect(html).toMatch(/const weekReconciliation = buildWeekReconciliationSection\(day, modalToken\);/);
+    expect(html).toMatch(/buildChangeActivitySection\(day, weekReconciliation\)/);
+    expect(html).toMatch(/panel\.appendChild\(weekReconciliation\.element\);/);
+  });
+
+  it('reveals itself from the deterministic "generationRequired" fallback only when the requested activity is exactly "gym"', () => {
     const clickBody = html.slice(html.indexOf("const saveBtn = createButton({ label: 'Change activity"), html.indexOf('const row = el(', html.indexOf("const saveBtn = createButton({ label: 'Change activity")));
     expect(clickBody).toMatch(/if \(err\.body && err\.body\.generationRequired\)/);
-    expect(clickBody).toMatch(/if \(select\.value === 'gym'\) \{\s*\n\s*statusEl\.appendChild\(buildWeekReconciliationSection\(day\)\);/);
+    expect(clickBody).toMatch(/if \(select\.value === 'gym'\) \{\s*\n\s*weekReconciliation\.revealForSwapFailure\(\);/);
     // The prior purely-deterministic path stays available for "both",
     // which the reconcile-week route does not support.
     expect(clickBody).toMatch(/label: 'Generate a new workout for this day'/);
   });
 
   it('calls the real reconcile-week/approve/commit endpoints — never a deterministic regenerate relabeled as AI', () => {
-    const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
     expect(sectionBody).toMatch(/aiApi\('\/api\/ai-programmer\/reconcile-week', \{ method: 'POST', body: \{ targetDate: day\.date, requestedActivity: 'gym' \} \}\)/);
     expect(sectionBody).toMatch(/aiApi\(`\/api\/ai-programmer\/week-reconciliations\/\$\{state\.reconciliationId\}\/approve`, \{ method: 'POST' \}\)/);
     expect(sectionBody).toMatch(/aiApi\(`\/api\/ai-programmer\/week-reconciliations\/\$\{state\.reconciliationId\}\/commit`, \{ method: 'POST' \}\)/);
   });
 
   it('approve and commit are two distinct functions, never combined into one', () => {
-    const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
     expect(sectionBody).toMatch(/async function onApprove\(\)/);
     expect(sectionBody).toMatch(/async function onCommit\(\)/);
     const approveBody = sectionBody.slice(sectionBody.indexOf('async function onApprove()'), sectionBody.indexOf('async function onCommit()'));
@@ -156,7 +161,6 @@ describe('program.html: AI Week Reorganization section wiring', () => {
   });
 
   it('never auto-approves or auto-commits right after asking the AI', () => {
-    const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
     const generateBody = sectionBody.slice(sectionBody.indexOf('async function onGenerate()'), sectionBody.indexOf('async function onApprove()'));
     expect(generateBody).not.toMatch(/\/approve`/);
     expect(generateBody).not.toMatch(/\/commit`/);
@@ -167,7 +171,6 @@ describe('program.html: AI Week Reorganization section wiring', () => {
   });
 
   it('guards every action against duplicate/overlapping submissions', () => {
-    const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
     const matches = sectionBody.match(/if \(inFlight/g) || [];
     expect(matches.length).toBeGreaterThanOrEqual(3); // generate, approve, commit
   });
@@ -183,14 +186,99 @@ describe('program.html: AI Week Reorganization section wiring', () => {
   });
 
   it('never renders a raw error field beyond the pre-mapped err.message', () => {
-    const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
     expect(sectionBody).not.toMatch(/err\.details/);
     expect(sectionBody).not.toMatch(/err\.stack/);
   });
 
   it('closes the modal and reloads the week only after a successful commit', () => {
-    const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
-    const commitBody = sectionBody.slice(sectionBody.indexOf('async function onCommit()'), sectionBody.indexOf('renderActions();\n      return wrap;'));
+    const commitBody = sectionBody.slice(sectionBody.indexOf('async function onCommit()'), sectionBody.indexOf('renderActions(); // shows'));
     expect(commitBody).toMatch(/closeDayModal\(\);\s*\n\s*await loadWeek\(\);/);
+  });
+});
+
+// ---------- Discovery/Rehydration wiring (Fix AI Weekly Reconciliation
+// Review, Finding 3) ----------
+//
+// The DOM-building side of discovery has no jsdom harness to execute
+// against in this repo (matching aiProposalUI.test.ts's own established
+// convention) — so the pure logic (aiWeekReconciliationActionsFor,
+// isModalTokenCurrent/bumpModalToken) is proven executable elsewhere in
+// this file / aiProposalUI.test.ts, and every DOM-wiring claim below is
+// a source-level assertion against the shipped program.html.
+describe('program.html: week-reconciliation discovery/rehydration wiring', () => {
+  const html = readFile('program.html');
+  const sectionBody = html.slice(html.indexOf('function buildWeekReconciliationSection('), html.indexOf('const GROUP_ORDER'));
+
+  it('discovers before deciding what to show — GET /week-reconciliations/latest?targetDate=<day> is called on section build, unconditionally', () => {
+    expect(sectionBody).toMatch(/aiApi\(`\/api\/ai-programmer\/week-reconciliations\/latest\?targetDate=\$\{encodeURIComponent\(day\.date\)\}`\)/);
+    expect(sectionBody).toMatch(/async function discover\(\)/);
+    // Called once, unconditionally, right where the section is built —
+    // never gated behind the swap-failure reveal, so a day reopened with
+    // an existing reconciliation is discovered whether or not the user
+    // ever touches the deterministic swap control this session.
+    expect(sectionBody).toMatch(/renderActions\(\); \/\/ shows the "Checking…" placeholder immediately once revealed\s*\n\s*discover\(\);/);
+  });
+
+  it('seeds state from the discovery result — found:false means "no known reconciliation", found:true means the returned record (reopening a day with no reconciliation vs. one with a pending/approved/committed one)', () => {
+    expect(sectionBody).toMatch(/state = result\.found \? result : null;/);
+  });
+
+  it('a reopened day with an existing reconciliation is shown immediately — visibility is driven by discovery, not only by a swap failure this session', () => {
+    expect(sectionBody).toMatch(/function updateVisibility\(\) \{/);
+    const visibilityBody = sectionBody.slice(sectionBody.indexOf('function updateVisibility()'), sectionBody.indexOf('function renderReview()'));
+    expect(visibilityBody).toMatch(/wrap\.hidden = !\(swapFailed \|\| state !== null\);/);
+    // Called from inside discover()'s own finally block — so a found
+    // record reveals the section without any swap ever being attempted.
+    const discoverBody = sectionBody.slice(sectionBody.indexOf('async function discover()'), sectionBody.indexOf('async function resyncState()'));
+    expect(discoverBody).toMatch(/updateVisibility\(\);/);
+  });
+
+  it('reopening a DIFFERENT target date never hydrates the wrong record — a fresh section (and its own discover()) is built per day.date, never a shared/global reconciliation variable', () => {
+    // buildWeekReconciliationSection is a factory called fresh with the
+    // specific `day` for the currently-open modal (see openDayModal's
+    // own call site) — `day.date` is baked into the discovery URL at
+    // call time, so a different day literally cannot share this state.
+    expect(html).toMatch(/const weekReconciliation = buildWeekReconciliationSection\(day, modalToken\);/);
+    expect(sectionBody).toMatch(/week-reconciliations\/latest\?targetDate=\$\{encodeURIComponent\(day\.date\)\}/);
+  });
+
+  it('reopening the modal never triggers a new AI call by itself — discover() only ever reads (GET), onGenerate (the only POST to /reconcile-week) is never invoked from discover()', () => {
+    const discoverBody = sectionBody.slice(sectionBody.indexOf('async function discover()'), sectionBody.indexOf('async function resyncState()'));
+    expect(discoverBody).not.toMatch(/reconcile-week/);
+    expect(discoverBody).not.toMatch(/onGenerate\(\)/);
+  });
+
+  it('gates every action behind discovery completing — never offers "Ask AI" (or anything else) while it is still unknown whether a reconciliation already exists', () => {
+    const renderActionsBody = sectionBody.slice(sectionBody.indexOf('function renderActions()'), sectionBody.indexOf('async function discover()'));
+    expect(renderActionsBody).toMatch(/if \(!discoveryDone\)/);
+    const discoveryDoneAssignments = sectionBody.match(/discoveryDone = true;/g) || [];
+    expect(discoveryDoneAssignments.length).toBe(1); // only discover() itself ever sets this
+  });
+
+  it('a failed/expired reconciliation renders a retry state — aiWeekReconciliationActionsFor treats it the same as "no reconciliation", offering a fresh "Ask AI" rather than a dead end', () => {
+    expect(sectionBody).toMatch(/aiWeekReconciliationActionsFor\(state \? state\.status : null\)/);
+    // aiWeekReconciliationActionsFor delegates to aiProposalActionsFor,
+    // whose own canGenerate rule already covers expired/rejected —
+    // verified executable in the "aiWeekReconciliationActionsFor" describe
+    // block above; this only proves the section actually calls it.
+  });
+
+  it('every async continuation (discover/generate/approve/commit) checks isCurrent() before applying its result — the stale-response guard, shared with buildAiProposalSection\'s own modalToken', () => {
+    expect(sectionBody).toMatch(/function isCurrent\(\) \{\s*\n\s*return isModalTokenCurrent\(modalToken\);\s*\n\s*\}/);
+    const guardCalls = sectionBody.match(/if \(!isCurrent\(\)\) return;/g) || [];
+    expect(guardCalls.length).toBeGreaterThanOrEqual(9); // discover (3), onGenerate (3), onApprove (2), onCommit (2)+
+  });
+
+  it('a failed approve/commit resyncs canonical state from the backend rather than trusting only local optimistic state', () => {
+    expect(sectionBody).toMatch(/async function resyncState\(\)/);
+    const approveBody = sectionBody.slice(sectionBody.indexOf('async function onApprove()'), sectionBody.indexOf('async function onCommit()'));
+    expect(approveBody).toMatch(/await resyncState\(\);/);
+    const commitBody = sectionBody.slice(sectionBody.indexOf('async function onCommit()'), sectionBody.indexOf('renderActions(); // shows'));
+    expect(commitBody).toMatch(/await resyncState\(\);/);
+  });
+
+  it('a discovery failure degrades to "no known reconciliation" rather than throwing unhandled or blocking the day', () => {
+    const discoverBody = sectionBody.slice(sectionBody.indexOf('async function discover()'), sectionBody.indexOf('async function resyncState()'));
+    expect(discoverBody).toMatch(/state = null;/);
   });
 });

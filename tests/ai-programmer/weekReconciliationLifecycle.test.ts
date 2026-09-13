@@ -21,6 +21,7 @@ import {
   getWeekReconciliation,
 } from '../../src/ai-programmer/service/weekReconciliationLifecycle.js';
 import {
+  AITargetNotEditableError,
   AIWeekReconciliationCommitFailedError,
   AIWeekReconciliationConflictError,
   AIWeekReconciliationExpiredError,
@@ -356,5 +357,92 @@ describe('commitWeekReconciliation', () => {
     expect(finalRecord.committedSessionId).toBeNull();
     expect(finalRecord.failureReason).toBe('commit_transaction_failed');
     expect(finalRecord.failureReason).not.toContain(DISTINCTIVE_INTERNAL_MESSAGE);
+  });
+
+  // Fix AI Weekly Reconciliation Review, Finding 1: every conflict check
+  // and the target-session creation now happen inside the SAME
+  // transaction, reloaded fresh — these tests exercise the specific
+  // race/idempotency/duplicate-prevention guarantees that restructuring
+  // is required to provide.
+
+  it('an existing COMPLETED session on the target date blocks commit (never replaced, never converted to a generic failure)', () => {
+    const context = buildReconciliationContext(db, { targetDate: SUNDAY, requestedActivity: 'gym' });
+    const record = insertReconciliation(context, multiDayOutput(context));
+    approveWeekReconciliation(db, record.id);
+    const completed = new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'completed' });
+
+    let thrown: unknown;
+    try {
+      commitWeekReconciliation(db, record.id);
+    } catch (err) {
+      thrown = err;
+    }
+    // A completed/in-progress target date is caught by
+    // buildReconciliationContext's own lock check (AITargetNotEditableError,
+    // a 409) — it must propagate as-is, never reclassified as
+    // AIWeekReconciliationCommitFailedError, and never recorded as a
+    // generic transaction failure.
+    expect(thrown).toBeInstanceOf(AITargetNotEditableError);
+    expect(thrown).not.toBeInstanceOf(AIWeekReconciliationCommitFailedError);
+
+    const sessions = new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.session_id).toBe(completed.session_id);
+    expect(sessions[0]!.status).toBe('completed'); // never replaced/overwritten
+
+    const finalRecord = getWeekReconciliation(db, record.id);
+    expect(finalRecord.status).toBe('approved'); // never advanced, never marked failed
+    expect(finalRecord.failureReason).toBeNull();
+  });
+
+  it('an existing IN-PROGRESS session on the target date blocks commit and is left completely untouched', () => {
+    const context = buildReconciliationContext(db, { targetDate: SUNDAY, requestedActivity: 'gym' });
+    const record = insertReconciliation(context, multiDayOutput(context));
+    approveWeekReconciliation(db, record.id);
+    const inProgress = new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'in_progress' });
+
+    expect(() => commitWeekReconciliation(db, record.id)).toThrow(AITargetNotEditableError);
+
+    const sessions = new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.session_id).toBe(inProgress.session_id);
+    expect(sessions[0]!.status).toBe('in_progress');
+  });
+
+  it('two reconciliations targeting the same date: the first commit succeeds, the second is safely rejected as a conflict — never a duplicate actionable session', () => {
+    const context = buildReconciliationContext(db, { targetDate: SUNDAY, requestedActivity: 'gym' });
+    const first = insertReconciliation(context, multiDayOutput(context));
+    const second = insertReconciliation(context, { ...multiDayOutput(context), proposalId: 'app-generated-id-2' });
+    approveWeekReconciliation(db, first.id);
+    approveWeekReconciliation(db, second.id);
+
+    // Simulates the "concurrent commit attempts" scenario this app's
+    // single-process synchronous execution model serializes in
+    // practice (see aiProposalLifecycle.ts's own documented rationale)
+    // — by the time the second commit's fresh, in-transaction conflict
+    // check runs, the first commit's session already exists.
+    const firstResult = commitWeekReconciliation(db, first.id);
+    expect(() => commitWeekReconciliation(db, second.id)).toThrow(AIWeekReconciliationConflictError);
+
+    const sessions = new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY);
+    expect(sessions).toHaveLength(1); // exactly one actionable session — never two
+    expect(sessions[0]!.session_id).toBe(firstResult.sessionId);
+
+    const secondRecord = getWeekReconciliation(db, second.id);
+    expect(secondRecord.status).toBe('approved'); // rejected, never advanced to committed
+    expect(secondRecord.committedSessionId).toBeNull();
+  });
+
+  it('the target-day session created by commit is the only new actionable AI session for that date', () => {
+    const context = buildReconciliationContext(db, { targetDate: SUNDAY, requestedActivity: 'gym' });
+    const record = insertReconciliation(context, multiDayOutput(context));
+    approveWeekReconciliation(db, record.id);
+    const before = new WorkoutSessionsRepo(db).listSessions().length;
+    commitWeekReconciliation(db, record.id);
+    const after = new WorkoutSessionsRepo(db).listSessions();
+    expect(after.length).toBe(before + 1);
+    const created = after.find((s) => s.date === SUNDAY)!;
+    expect(created.source_type).toBe('ai');
+    expect(created.status).toBe('planned');
   });
 });

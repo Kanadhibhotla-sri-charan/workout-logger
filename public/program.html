@@ -191,7 +191,16 @@
       closeBtn.addEventListener('click', closeDayModal);
       header.appendChild(closeBtn);
       panel.appendChild(header);
-      panel.appendChild(buildChangeActivitySection(day));
+      // Fix AI Weekly Reconciliation Review, Finding 3: built (and its
+      // own discovery started) HERE, at modal-open time — independent of
+      // whether the deterministic swap below ever fails — so reopening a
+      // day that already has a pending/approved/committed reconciliation
+      // shows it immediately, never resetting to a blank slate.
+      // buildChangeActivitySection only reveals it early if a swap
+      // attempt during THIS modal session hits generationRequired.
+      const weekReconciliation = buildWeekReconciliationSection(day, modalToken);
+      panel.appendChild(buildChangeActivitySection(day, weekReconciliation));
+      panel.appendChild(weekReconciliation.element);
 
       if (day.type === 'gym') {
         panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
@@ -266,7 +275,7 @@
     // the week to reflect it. On failure, the panel stays open with the
     // error shown and nothing is re-fetched (spec §12: no partial UI
     // update).
-    function buildChangeActivitySection(day) {
+    function buildChangeActivitySection(day, weekReconciliation) {
       const section = el('div', { class: 'change-activity' });
       section.appendChild(el('p', { class: 'faint', text: `Current activity: ${formatDailyActivity(day.activity)}`, style: 'margin:0 0 0.4rem' }));
       section.appendChild(el('p', { class: 'faint', text: 'This changes only the current week — your recurring Training Profile schedule is unchanged.', style: 'margin:0 0 0.6rem' }));
@@ -313,7 +322,7 @@
             // this iteration — "both" keeps the prior, purely
             // deterministic single-day regeneration.
             if (select.value === 'gym') {
-              statusEl.appendChild(buildWeekReconciliationSection(day));
+              weekReconciliation.revealForSwapFailure();
             } else {
               statusEl.appendChild(createButton({
                 label: 'Generate a new workout for this day',
@@ -733,27 +742,49 @@
       return wrap;
     }
 
-    /** The Ask AI -> Review -> Approve -> Apply workflow, scoped to one
-     * change-activity attempt — `day` is the day whose activity change
-     * triggered this (day.date is the reconciliation's targetDate).
-     * Deliberately no discovery/rehydration step (unlike
-     * buildAiProposalSection): this section only ever exists for the
-     * lifetime of one open modal, created fresh each time the
-     * generationRequired fallback fires, so there is nothing to
-     * rehydrate — closing and reopening the modal starts over, which is
-     * correct here since the underlying "nothing to reuse" condition is
-     * re-checked from scratch by buildChangeActivitySection anyway. */
-    function buildWeekReconciliationSection(day) {
-      const wrap = el('div', { class: 'ai-proposal-section' });
+    /** The Ask AI -> Review -> Approve -> Apply workflow for one day's
+     * modal — `day.date` is the reconciliation's targetDate.
+     *
+     * Fix AI Weekly Reconciliation Review, Finding 3: discovery now runs
+     * as soon as this section is built (at modal-open time, from
+     * `openDayModal`), exactly mirroring buildAiProposalSection's own
+     * discover()/isCurrent()/modalToken discipline — so reopening a day
+     * that already has a pending/approved/committed/rejected/expired
+     * reconciliation restores that exact state, never resetting to a
+     * blank "Ask AI" slate. Visibility is separate from discovery
+     * result: the section stays hidden (no competing option shown
+     * alongside the deterministic swap control) until EITHER a real
+     * reconciliation is found for this date OR the caller explicitly
+     * reveals it via the returned `revealForSwapFailure()` (called only
+     * from buildChangeActivitySection's own generationRequired
+     * fallback) — never a fresh Generate call merely because the modal
+     * was reopened. `modalToken` is the same token `openDayModal`
+     * captured for this exact modal instance. */
+    function buildWeekReconciliationSection(day, modalToken) {
+      const wrap = el('div', { class: 'ai-proposal-section', hidden: true });
       wrap.appendChild(el('h3', { text: 'AI Week Reorganization' }));
       wrap.appendChild(el('p', { class: 'faint', text: 'Ask the AI Programmer to generate a workout for this day and reorganize the rest of the week around it. Nothing changes until you approve and apply it.' }));
 
       let state = null;
       let inFlight = false;
+      let discoveryDone = false;
+      let swapFailed = false;
       const reviewEl = el('div');
       const actionsEl = el('div');
       const statusEl = el('div');
       wrap.append(reviewEl, actionsEl, statusEl);
+
+      function isCurrent() {
+        return isModalTokenCurrent(modalToken);
+      }
+
+      function updateVisibility() {
+        // Shown once a real reconciliation is known to exist for this
+        // date (any status), OR the deterministic swap has failed this
+        // modal session — never pre-emptively, so a day with a perfectly
+        // good simple-swap path never shows a competing AI option.
+        wrap.hidden = !(swapFailed || state !== null);
+      }
 
       function renderReview() {
         reviewEl.innerHTML = '';
@@ -762,6 +793,10 @@
 
       function renderActions() {
         actionsEl.innerHTML = '';
+        if (!discoveryDone) {
+          if (swapFailed) actionsEl.appendChild(el('p', { class: 'faint', text: 'Checking for an existing AI reorganization…' }));
+          return;
+        }
         const actions = aiWeekReconciliationActionsFor(state ? state.status : null);
         if (actions.canGenerate) {
           actionsEl.appendChild(createButton({ label: inFlight ? 'Asking AI…' : 'Ask AI to reorganize this week', variant: 'secondary', disabled: inFlight, onClick: onGenerate }));
@@ -781,6 +816,42 @@
         }
       }
 
+      /** Discovery/Rehydration, applied to week reconciliations: on
+       * build, ask the backend whether a reconciliation already exists
+       * for this target date — the backend, never client-side memory,
+       * remains authoritative. A discovery failure degrades to "no known
+       * reconciliation" (offers a fresh Generate once revealed) rather
+       * than blocking the day entirely. */
+      async function discover() {
+        try {
+          const result = await aiApi(`/api/ai-programmer/week-reconciliations/latest?targetDate=${encodeURIComponent(day.date)}`);
+          if (!isCurrent()) return;
+          state = result.found ? result : null;
+        } catch (err) {
+          if (!isCurrent()) return;
+          state = null;
+        } finally {
+          if (!isCurrent()) return;
+          discoveryDone = true;
+          renderReview();
+          renderActions();
+          updateVisibility();
+        }
+      }
+
+      /** Re-fetches the canonical server state after a failed approve/
+       * commit — never re-attempts the action itself, only resyncs what
+       * is displayed (spec: "refresh state from the backend rather than
+       * relying only on local optimistic state"). */
+      async function resyncState() {
+        if (!state) return;
+        try {
+          state = await aiApi(`/api/ai-programmer/week-reconciliations/${state.reconciliationId}`);
+        } catch {
+          state = null;
+        }
+      }
+
       async function onGenerate() {
         if (inFlight) return;
         inFlight = true;
@@ -788,13 +859,17 @@
         renderActions();
         try {
           state = await aiApi('/api/ai-programmer/reconcile-week', { method: 'POST', body: { targetDate: day.date, requestedActivity: 'gym' } });
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, null, null);
         } catch (err) {
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
         } finally {
+          if (!isCurrent()) return;
           inFlight = false;
           renderReview();
           renderActions();
+          updateVisibility();
         }
       }
 
@@ -805,10 +880,14 @@
         renderActions();
         try {
           state = await aiApi(`/api/ai-programmer/week-reconciliations/${state.reconciliationId}/approve`, { method: 'POST' });
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, null, null);
         } catch (err) {
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
+          await resyncState();
         } finally {
+          if (!isCurrent()) return;
           inFlight = false;
           renderReview();
           renderActions();
@@ -822,19 +901,35 @@
         renderActions();
         try {
           state = await aiApi(`/api/ai-programmer/week-reconciliations/${state.reconciliationId}/commit`, { method: 'POST' });
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, 'success', 'Week updated.');
           closeDayModal();
           await loadWeek();
         } catch (err) {
+          if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
+          await resyncState();
           inFlight = false;
           renderReview();
           renderActions();
         }
       }
 
-      renderActions();
-      return wrap;
+      renderActions(); // shows the "Checking…" placeholder immediately once revealed
+      discover();
+
+      return {
+        element: wrap,
+        /** Called only from buildChangeActivitySection's own
+         * generationRequired fallback — reveals this section for a
+         * day whose deterministic swap just failed, without disturbing
+         * whatever discovery has already found (or is still finding). */
+        revealForSwapFailure() {
+          swapFailed = true;
+          updateVisibility();
+          renderActions();
+        },
+      };
     }
 
     const GROUP_ORDER = ['Goal 1', 'Goal 2', 'Normal development', 'Maintenance'];

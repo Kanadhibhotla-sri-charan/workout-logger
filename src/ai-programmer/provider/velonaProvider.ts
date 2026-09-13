@@ -91,28 +91,53 @@ export function safeLogFields(config: VelonaConfig, requestId: string, extra: Re
   return { requestId, provider: 'velona', model: config.model, baseUrl: config.baseUrl, ...extra };
 }
 
+/** Fix AI Weekly Reconciliation Review, Finding 2: the exact user-turn
+ * JSON string Velona receives — a PURE function of `request` alone (it
+ * needs no `VelonaConfig`), reused as-is by `buildVelonaRequestBody`
+ * below AND by `tokenDiagnostics.ts` (which has no `VelonaConfig` of its
+ * own, since the application service is provider-independent) so the
+ * "estimated input tokens" figure is computed from the real text this
+ * provider would actually send, for every provider, not just Velona —
+ * never a second, independently-drifting reconstruction of this shape. */
+export function buildVelonaUserTurnContent(request: AIProgrammerProviderRequest): string {
+  return JSON.stringify({
+    request: { mode: request.mode, requestId: request.requestId },
+    context: request.context,
+    outputSchema: request.outputSchema,
+    instruction: 'Return exactly one JSON object conforming to outputSchema. No prose outside the JSON object.',
+  });
+}
+
+export interface VelonaRequestBody {
+  model: string;
+  turns: Array<{ role: 'system' | 'user'; content: string }>;
+  stream: false;
+  config: { temperature: number; max_tokens: number };
+  output: { format: 'json' };
+}
+
+/** Fix AI Weekly Reconciliation Review, Finding 2: the ONE place this
+ * exact request body is constructed — used both by the real fetch path
+ * (`generate()` below) and by the diagnostics attached to its response,
+ * so the two can never disagree about what was actually sent. */
+export function buildVelonaRequestBody(request: AIProgrammerProviderRequest, config: VelonaConfig): VelonaRequestBody {
+  return {
+    model: config.model,
+    turns: [
+      { role: 'system', content: request.systemInstruction },
+      { role: 'user', content: buildVelonaUserTurnContent(request) },
+    ],
+    stream: false,
+    config: { temperature: config.temperature, max_tokens: config.maxTokens },
+    output: { format: 'json' },
+  };
+}
+
 export class VelonaProvider implements AIProgrammerProvider {
   constructor(private readonly config: VelonaConfig) {}
 
   async generate(request: AIProgrammerProviderRequest): Promise<AIProgrammerProviderResponse> {
-    const body = {
-      model: this.config.model,
-      turns: [
-        { role: 'system', content: request.systemInstruction },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            request: { mode: request.mode, requestId: request.requestId },
-            context: request.context,
-            outputSchema: request.outputSchema,
-            instruction: 'Return exactly one JSON object conforming to outputSchema. No prose outside the JSON object.',
-          }),
-        },
-      ],
-      stream: false,
-      config: { temperature: this.config.temperature, max_tokens: this.config.maxTokens },
-      output: { format: 'json' },
-    };
+    const body = buildVelonaRequestBody(request, this.config);
 
     let attempt = 0;
     for (;;) {
@@ -123,7 +148,18 @@ export class VelonaProvider implements AIProgrammerProvider {
         // success/failure. safeLogFields never includes the API key or
         // raw context/prompt content.
         console.log('[velona] request succeeded', safeLogFields(this.config, request.requestId, { attempt, resolvedModel: result.model }));
-        return result;
+        // Finding 2: measured from the EXACT `body` this attempt sent
+        // (never a re-derived approximation) — see `buildVelonaRequestBody`'s
+        // own doc comment.
+        return {
+          ...result,
+          requestDiagnostics: {
+            systemInstructionChars: request.systemInstruction.length,
+            userTurnChars: body.turns[1]!.content.length,
+            wirePayloadChars: JSON.stringify(body).length,
+            configuredMaxOutputTokens: this.config.maxTokens,
+          },
+        };
       } catch (err) {
         if (err instanceof RetryableProviderError && attempt <= this.config.maxRetries) {
           console.warn('[velona] request failed, retrying', safeLogFields(this.config, request.requestId, { attempt, reason: err.cause.message }));

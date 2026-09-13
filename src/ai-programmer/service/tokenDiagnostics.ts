@@ -3,77 +3,110 @@
 // selection can be based on real request size, not guesswork. Never
 // logs API keys, authorization headers, full user data, or full workout
 // history — only aggregate character/token counts.
+//
+// Fix AI Weekly Reconciliation Review, Finding 2: the previous version
+// summed three independently-stringified pieces (systemInstruction,
+// context alone, outputSchema alone) that did not match what the
+// provider actually serializes onto the wire — Velona's real user-turn
+// content wraps `{request, context, outputSchema, instruction}` into
+// ONE JSON string, so summing context and outputSchema separately both
+// missed the wrapper overhead and, depending on the call site, could
+// double count. This version measures the EXACT text a request would
+// produce by reusing `buildVelonaUserTurnContent` (velonaProvider.ts) —
+// the single function that also builds the real fetch body — rather
+// than reconstructing an approximation of it here. `wirePayloadChars`
+// and `configuredMaxOutputTokens` additionally require the provider's
+// own configuration (model/temperature/max_tokens), which this
+// provider-independent service layer does not hold; those two fields
+// are populated only when the provider itself supplies them via
+// `response.requestDiagnostics` (see providerTypes.ts), and are left
+// undefined — never fabricated — otherwise.
 
-import type { AIProgrammerMode } from '../contracts/providerTypes.js';
-import type { AIProgrammerProviderResponse } from '../contracts/providerTypes.js';
+import { buildVelonaUserTurnContent } from '../provider/velonaProvider.js';
+import type { AIProgrammerMode, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../contracts/providerTypes.js';
 
 export interface TokenDiagnostics {
   mode: AIProgrammerMode;
   requestId: string;
+  /** Length of the exact system-turn content. */
   systemInstructionChars: number;
-  userPayloadChars: number;
-  totalSerializedInputChars: number;
+  /** Length of the exact user-turn content (context + outputSchema +
+   * request metadata + instruction, wrapped exactly as the provider
+   * would serialize it — outputSchema is never counted separately, it
+   * is already included here). */
+  userTurnChars: number;
+  /** Length of `JSON.stringify(body)` for the full wire request
+   * (system + user turns, model, config, output format) — only known
+   * when the serving provider supplies `requestDiagnostics`. */
+  wirePayloadChars?: number;
+  /** A documented, clearly-labeled APPROXIMATION only — never claimed
+   * exact. No tokenizer for the actual selected model is bundled in
+   * this repo (no such dependency exists in package.json), so this
+   * uses the widely-cited ~4-characters-per-token heuristic, computed
+   * from the exact system + user-turn text (`inputText` below), not
+   * partial/mismatched components. */
   estimatedInputTokens: number;
-  outputSchemaChars: number;
+  /** The provider's own configured output-token limit (e.g. Velona's
+   * `config.max_tokens`) — a LIMIT, never actual usage. Only known when
+   * the serving provider supplies `requestDiagnostics`. */
+  configuredMaxOutputTokens?: number;
+  /** Same ~4-chars-per-token heuristic, applied to the raw response
+   * text — an approximation, not authoritative. */
   estimatedOutputTokens: number;
-  /** True when `estimatedOutputTokens` came from the provider's own
-   * usage metadata (authoritative — spec §12: "if the provider returns
-   * actual usage metadata, use it as authoritative"); false when it is
-   * this module's own character-based approximation, clearly labeled as
-   * such rather than claimed exact. */
-  outputTokensAreExact: boolean;
+  /** The provider's own authoritative usage metadata, when its response
+   * included one (Velona's `data.usage`) — never fabricated from the
+   * heuristic above. Absent (not zero, not estimated) when the provider
+   * did not report usage. */
+  actualInputTokens?: number;
+  actualOutputTokens?: number;
+  actualTotalTokens?: number;
 }
 
-/** A documented, clearly-labeled APPROXIMATION only — never claimed
- * exact (spec §12: "do not claim it is exact"). No tokenizer for the
- * actual selected model is bundled in this repo (no such dependency
- * exists in package.json), so this uses the widely-cited ~4
- * characters-per-token heuristic for English-language JSON/prose text,
- * exposed alongside the raw character count so a caller can judge for
- * itself rather than trust a single number. */
 const APPROX_CHARS_PER_TOKEN = 4;
 
 export function estimateTokensFromChars(chars: number): number {
   return Math.ceil(chars / APPROX_CHARS_PER_TOKEN);
 }
 
-/** Builds the diagnostics for one provider request. `userPayload` is
- * whatever was actually serialized into the request's user-turn content
- * (context + outputSchema + instruction, matching VelonaProvider's own
- * request body construction) — passed in already-stringified so this
- * module never needs its own opinion on the provider's exact wire
- * format. `response` is optional so diagnostics can be computed even
- * when the provider call itself failed (output fields are then all
- * zero/estimated-from-nothing, `outputTokensAreExact: false`). */
+/** Builds the diagnostics for one provider request. `request` is the
+ * exact `AIProgrammerProviderRequest` passed to `provider.generate()` —
+ * `userTurnChars`/`estimatedInputTokens` are derived from
+ * `buildVelonaUserTurnContent(request)`, the identical pure function
+ * `VelonaProvider` itself uses to build its real wire body, so these
+ * figures are byte-exact whenever the serving provider actually is
+ * Velona (the only provider this application ships), and a same-shape
+ * estimate for any other provider (e.g. a test fake) — never a second,
+ * independently-drifting reconstruction of that shape. `response` is
+ * optional so diagnostics can still be computed when the provider call
+ * itself failed (output/usage fields are then all absent/estimated from
+ * nothing). */
 export function buildTokenDiagnostics(
   mode: AIProgrammerMode,
-  requestId: string,
-  systemInstruction: string,
-  userPayloadJson: string,
-  outputSchemaJson: string,
-  response?: Pick<AIProgrammerProviderResponse, 'rawText' | 'usage'>
+  request: AIProgrammerProviderRequest,
+  response?: Pick<AIProgrammerProviderResponse, 'rawText' | 'usage' | 'requestDiagnostics'>
 ): TokenDiagnostics {
-  const systemInstructionChars = systemInstruction.length;
-  const userPayloadChars = userPayloadJson.length;
-  const outputSchemaChars = outputSchemaJson.length;
-  // outputSchema is embedded in the actual request payload sent to the
-  // provider (part of the user turn, per VelonaProvider's own request
-  // construction) — it counts toward input size, not output.
-  const totalSerializedInputChars = systemInstructionChars + userPayloadChars + outputSchemaChars;
+  const userTurnContent = buildVelonaUserTurnContent(request);
+  const exact = response?.requestDiagnostics;
 
-  const exactOutputTokens = response?.usage?.outputTokens;
-  const exactInputTokens = response?.usage?.inputTokens;
+  const systemInstructionChars = exact?.systemInstructionChars ?? request.systemInstruction.length;
+  const userTurnChars = exact?.userTurnChars ?? userTurnContent.length;
+
+  // The exact text this request would actually send — outputSchema is
+  // already inside userTurnContent, never summed a second time.
+  const inputText = [request.systemInstruction, userTurnContent].join('\n');
 
   return {
     mode,
-    requestId,
+    requestId: request.requestId,
     systemInstructionChars,
-    userPayloadChars,
-    totalSerializedInputChars,
-    estimatedInputTokens: exactInputTokens ?? estimateTokensFromChars(totalSerializedInputChars),
-    outputSchemaChars,
-    estimatedOutputTokens: exactOutputTokens ?? estimateTokensFromChars(response?.rawText.length ?? 0),
-    outputTokensAreExact: exactOutputTokens !== undefined,
+    userTurnChars,
+    wirePayloadChars: exact?.wirePayloadChars,
+    estimatedInputTokens: estimateTokensFromChars(inputText.length),
+    configuredMaxOutputTokens: exact?.configuredMaxOutputTokens,
+    estimatedOutputTokens: estimateTokensFromChars(response?.rawText.length ?? 0),
+    actualInputTokens: response?.usage?.inputTokens,
+    actualOutputTokens: response?.usage?.outputTokens,
+    actualTotalTokens: response?.usage?.totalTokens,
   };
 }
 

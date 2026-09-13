@@ -16,7 +16,7 @@ import { buildReconciliationContext } from '../context/reconciliationContextBuil
 import type { AIReconciliationContext } from '../context/reconciliationContextTypes.js';
 import { getProgrammerOutputSchema } from '../contracts/programmerOutputSchema.js';
 import type { AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
-import type { AIProgrammerProvider } from '../contracts/providerTypes.js';
+import type { AIProgrammerProvider, AIProgrammerProviderRequest } from '../contracts/providerTypes.js';
 import { getWeekReconciliationOutputSchema } from '../contracts/weekReconciliationOutputSchema.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
 import { AIOutputSchemaInvalidError, AIOutputDomainInvalidError, AIProgrammerDisabledError, AIWeekReconciliationOutputDomainInvalidError, AIWeekReconciliationOutputSchemaInvalidError } from '../errors.js';
@@ -149,14 +149,9 @@ export class AIProgrammerService {
     const requestId = randomUUID();
     const systemInstruction = buildProgrammerSystemInstruction();
     const outputSchema = getProgrammerOutputSchema();
-    const providerResponse = await this.provider.generate({
-      mode: 'generate_session',
-      systemInstruction,
-      context,
-      outputSchema,
-      requestId,
-    });
-    const diagnostics = buildTokenDiagnostics('generate_session', requestId, systemInstruction, JSON.stringify(context), JSON.stringify(outputSchema), providerResponse);
+    const providerRequest: AIProgrammerProviderRequest = { mode: 'generate_session', systemInstruction, context, outputSchema, requestId };
+    const providerResponse = await this.provider.generate(providerRequest);
+    const diagnostics = buildTokenDiagnostics('generate_session', providerRequest, providerResponse);
     logTokenDiagnostics(diagnostics);
 
     let parsedJson: unknown;
@@ -248,14 +243,9 @@ export class AIProgrammerService {
     const requestId = randomUUID();
     const systemInstruction = buildWeekReconciliationSystemInstruction();
     const outputSchema = getWeekReconciliationOutputSchema();
-    const providerResponse = await this.provider.generate({
-      mode: 'reconcile_week',
-      systemInstruction,
-      context,
-      outputSchema,
-      requestId,
-    });
-    const diagnostics = buildTokenDiagnostics('reconcile_week', requestId, systemInstruction, JSON.stringify(context), JSON.stringify(outputSchema), providerResponse);
+    const providerRequest: AIProgrammerProviderRequest = { mode: 'reconcile_week', systemInstruction, context, outputSchema, requestId };
+    const providerResponse = await this.provider.generate(providerRequest);
+    const diagnostics = buildTokenDiagnostics('reconcile_week', providerRequest, providerResponse);
     logTokenDiagnostics(diagnostics);
 
     let parsedJson: unknown;

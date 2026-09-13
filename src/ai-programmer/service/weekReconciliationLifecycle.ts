@@ -21,6 +21,7 @@ import { programmingWeekStart, weekdayOfDate } from '../../engine/workoutBuilder
 import { buildReconciliationContext } from '../context/reconciliationContextBuilder.js';
 import type { AIWeekReconciliationDay, AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
 import {
+  AIProgrammerError,
   AIWeekReconciliationCommitFailedError,
   AIWeekReconciliationConflictError,
   AIWeekReconciliationExpiredError,
@@ -122,67 +123,122 @@ function toSnapshot(day: AIWeekReconciliationDay): unknown {
   };
 }
 
+/** Every error this commit can deliberately throw — every
+ * `AIWeekReconciliation*` lifecycle/validation/conflict error AND
+ * `AITargetNotEditableError`/`AIContextIncompleteError` (thrown by
+ * `buildReconciliationContext`, now called from inside the same
+ * transaction) — is an `AIProgrammerError` subclass, already carrying
+ * its own safe `publicMessage` and correct `statusCode`. Any such error
+ * represents an EXPECTED, business-logic rejection of this specific
+ * commit attempt, as opposed to a truly unexpected internal failure
+ * (a thrown plain `Error`, a raw SQLite constraint violation, etc.).
+ * Thrown from inside the transaction below, an `AIProgrammerError` must
+ * propagate to the caller completely unchanged: never reclassified as
+ * `AIWeekReconciliationCommitFailedError`, and never recorded via
+ * `recordFailure` (that field is reserved for the "commit transaction
+ * failed for an unclassified internal reason" case). */
+function isExpectedCommitRejection(err: unknown): boolean {
+  return err instanceof AIProgrammerError;
+}
+
+/** Fix AI Weekly Reconciliation Review, Finding 1: every fact this
+ * commit relies on — the reconciliation's own lifecycle state, its
+ * persisted output, Blueprint/domain validity, and (most importantly)
+ * whether an active/duplicate Gym session already exists for the target
+ * date — is reloaded and re-checked FRESH, INSIDE this single
+ * `db.transaction()`, with the target-session INSERT itself as the very
+ * next statement after the conflict check passes. There is no gap
+ * between "we decided this is safe" and "we wrote it" for any of these
+ * facts to change in — this repository's own existing transaction
+ * abstraction (`Database.transaction()`, the same one every other
+ * commit path in this codebase already uses) is the only mechanism
+ * used; no second one is invented. A thrown error of any kind rolls the
+ * whole transaction back automatically (better-sqlite3's own guarantee)
+ * before propagating, so a rejected commit can never leave a partial
+ * write behind. */
 export function commitWeekReconciliation(db: Database.Database, reconciliationId: string): CommitWeekReconciliationResult {
   const repo = new AIWeekReconciliationRepo(db);
-  const record = loadCurrent(db, reconciliationId);
-
-  if (record.status === 'committed') {
-    if (!record.committedSessionId) throw new AIWeekReconciliationCommitFailedError(reconciliationId);
-    return { sessionId: record.committedSessionId, reconciliation: record };
-  }
-  if (record.status === 'expired') throw new AIWeekReconciliationExpiredError(reconciliationId, record.expiresAt);
-  if (record.status !== 'approved') throw new AIWeekReconciliationInvalidStateError(reconciliationId, record.status, 'committed');
-
-  const structural = validateWeekReconciliationSchema(record.proposal);
-  if (!structural.ok || !structural.value) {
-    throw new AIWeekReconciliationValidationFailedError(reconciliationId, structural.errors);
-  }
-  const output: AIWeekReconciliationOutput = structural.value;
-
-  const currentBlueprintCommit = BlueprintAdapter.getManifest().sourceCommit;
-  if (currentBlueprintCommit !== record.blueprintCommit) {
-    throw new AIWeekReconciliationStaleError(reconciliationId, [
-      `Blueprint changed since this proposal was generated (was "${record.blueprintCommit}", now "${currentBlueprintCommit}")`,
-    ]);
-  }
-
-  // Rebuild the FULL context fresh against current DB state — reuses
-  // buildReconciliationContext's own lock/editability checks (throws
-  // AITargetNotEditableError, an AIProgrammerError with its own 409, if
-  // the target date itself became locked or moved into the past).
-  const context = buildReconciliationContext(db, {
-    targetDate: output.targetDate,
-    requestedActivity: output.requestedActivity,
-    reason: undefined,
-    swapUnavailableReason: undefined,
-  });
-
-  const domain = validateWeekReconciliationDomain(output, context, db);
-  if (!domain.ok || !domain.value) {
-    throw new AIWeekReconciliationStaleError(reconciliationId, domain.errors);
-  }
-
-  const sessionsRepo = new WorkoutSessionsRepo(db);
-  const plannedConflict = findActiveGymSessionConflict(sessionsRepo.listSessionsByDate(output.targetDate));
-  if (plannedConflict) {
-    logSessionConflict({
-      operation: 'AI week-reconciliation commit',
-      date: output.targetDate,
-      sessionType: 'gym',
-      code: 'AI_WEEK_RECONCILIATION_CONFLICT',
-      conflictingSessionIds: [plannedConflict.session_id],
-    });
-    throw new AIWeekReconciliationConflictError(reconciliationId, output.targetDate, plannedConflict.session_id, plannedConflict.status);
-  }
-
-  const user = new UsersRepo(db).getOrCreateDefault();
-  const profile = new TrainingProfileRepo(db).get(user.id);
-  const weekStart = programmingWeekStart(output.targetDate);
-  const weekEnd = addDays(weekStart, 6);
 
   let sessionId: string;
   try {
-    const tx = db.transaction(() => {
+    const tx = db.transaction((): string => {
+      // 1 & 2: reload the record fresh and confirm it is still
+      // approvable/approved — never trust a snapshot taken before this
+      // transaction opened. Lazy expiry (expireIfNeeded) is applied here
+      // too, exactly as every other read of a reconciliation record
+      // applies it, so an accompanying status transition is persisted in
+      // the same breath as everything else this call decides.
+      const loaded = repo.getById(reconciliationId);
+      if (!loaded) throw new AIWeekReconciliationNotFoundError(reconciliationId);
+      const record = expireIfNeeded(repo, loaded);
+
+      // Idempotency: a second commit for an already-committed
+      // reconciliation returns its existing result — no new session, no
+      // re-run of any check below, nothing further written.
+      if (record.status === 'committed') {
+        if (!record.committedSessionId) throw new AIWeekReconciliationCommitFailedError(reconciliationId);
+        return record.committedSessionId;
+      }
+      if (record.status === 'expired') throw new AIWeekReconciliationExpiredError(reconciliationId, record.expiresAt);
+      if (record.status !== 'approved') throw new AIWeekReconciliationInvalidStateError(reconciliationId, record.status, 'committed');
+
+      // 3: reload the persisted output fresh from the just-reloaded record.
+      const structural = validateWeekReconciliationSchema(record.proposal);
+      if (!structural.ok || !structural.value) {
+        throw new AIWeekReconciliationValidationFailedError(reconciliationId, structural.errors);
+      }
+      const output: AIWeekReconciliationOutput = structural.value;
+
+      const currentBlueprintCommit = BlueprintAdapter.getManifest().sourceCommit;
+      if (currentBlueprintCommit !== record.blueprintCommit) {
+        throw new AIWeekReconciliationStaleError(reconciliationId, [
+          `Blueprint changed since this proposal was generated (was "${record.blueprintCommit}", now "${currentBlueprintCommit}")`,
+        ]);
+      }
+
+      // Rebuild the FULL context fresh against current DB state — reuses
+      // buildReconciliationContext's own lock/editability checks (throws
+      // AITargetNotEditableError, an AIProgrammerError with its own 409,
+      // if the target date itself became locked or moved into the past)
+      // and is what answers step 6, "is the target program day still
+      // eligible for replacement."
+      const context = buildReconciliationContext(db, {
+        targetDate: output.targetDate,
+        requestedActivity: output.requestedActivity,
+        reason: undefined,
+        swapUnavailableReason: undefined,
+      });
+
+      const domain = validateWeekReconciliationDomain(output, context, db);
+      if (!domain.ok || !domain.value) {
+        throw new AIWeekReconciliationStaleError(reconciliationId, domain.errors);
+      }
+
+      // 4, 5 & 7: re-read every session for the target date and re-run
+      // the SAME authoritative active-Gym-session conflict rule the
+      // generic write path and the single-session AI commit already
+      // share (`findActiveGymSessionConflict`) — this is the actual
+      // race-safety boundary, and there is now nothing between this
+      // check passing and the INSERT immediately below it.
+      const sessionsRepo = new WorkoutSessionsRepo(db);
+      const plannedConflict = findActiveGymSessionConflict(sessionsRepo.listSessionsByDate(output.targetDate));
+      if (plannedConflict) {
+        logSessionConflict({
+          operation: 'AI week-reconciliation commit',
+          date: output.targetDate,
+          sessionType: 'gym',
+          code: 'AI_WEEK_RECONCILIATION_CONFLICT',
+          conflictingSessionIds: [plannedConflict.session_id],
+        });
+        throw new AIWeekReconciliationConflictError(reconciliationId, output.targetDate, plannedConflict.session_id, plannedConflict.status);
+      }
+
+      // Only past this point does anything actually get written.
+      const user = new UsersRepo(db).getOrCreateDefault();
+      const profile = new TrainingProfileRepo(db).get(user.id);
+      const weekStart = programmingWeekStart(output.targetDate);
+      const weekEnd = addDays(weekStart, 6);
+
       const weeklyProgramRepo = new WeeklyProgramRepo(db);
       const program = weeklyProgramRepo.getByWeekStart(weekStart) ?? weeklyProgramRepo.create(weekStart, weekEnd);
 
@@ -224,6 +280,8 @@ export function commitWeekReconciliation(db: Database.Database, reconciliationId
 
       // The ONE real, actionable session — for targetDate only (see
       // toSnapshot's own doc comment on why other days never get one).
+      // This INSERT is the very next write after the conflict check
+      // above passed — the whole point of this restructuring.
       const targetDay = output.days.find((d) => d.date === output.targetDate)!;
       const session = sessionsRepo.createSession({
         date: output.targetDate,
@@ -271,7 +329,7 @@ export function commitWeekReconciliation(db: Database.Database, reconciliationId
     });
     sessionId = tx();
   } catch (err) {
-    if (err instanceof AIWeekReconciliationInvalidStateError || err instanceof AIWeekReconciliationExpiredError) throw err;
+    if (isExpectedCommitRejection(err)) throw err;
     console.error(`AI week-reconciliation commit failed for reconciliation ${reconciliationId}:`, err);
     repo.recordFailure(reconciliationId, classifyCommitFailure(err));
     throw new AIWeekReconciliationCommitFailedError(reconciliationId);

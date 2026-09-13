@@ -29,6 +29,22 @@ export interface AIProgrammerProviderResponse {
     outputTokens?: number;
     totalTokens?: number;
   };
+  /** Fix AI Weekly Reconciliation Review, Finding 2: exact wire-format
+   * facts about the ACTUAL request this provider implementation just
+   * sent — populated only by a provider that genuinely serializes a
+   * request onto some wire format and therefore actually knows these
+   * numbers exactly (see velonaProvider.ts's `buildVelonaRequestBody`,
+   * the single function that builds both the real fetch body and these
+   * figures, so they can never drift apart). Absent for a provider with
+   * no such wire body (e.g. a test fake) — `tokenDiagnostics.ts` falls
+   * back to its own same-shape reconstruction in that case, never to a
+   * fabricated number. */
+  requestDiagnostics?: {
+    systemInstructionChars: number;
+    userTurnChars: number;
+    wirePayloadChars: number;
+    configuredMaxOutputTokens: number;
+  };
 }
 
 export interface AIProgrammerProvider {

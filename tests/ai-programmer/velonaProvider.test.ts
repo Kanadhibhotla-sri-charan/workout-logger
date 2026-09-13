@@ -4,7 +4,7 @@
 // real Velona API key is ever used or required.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { VelonaProvider } from '../../src/ai-programmer/provider/velonaProvider.js';
+import { VelonaProvider, buildVelonaRequestBody, buildVelonaUserTurnContent } from '../../src/ai-programmer/provider/velonaProvider.js';
 import {
   AIProgrammerError,
   AIProviderAuthenticationError,
@@ -237,5 +237,67 @@ describe('VelonaProvider', () => {
     const provider = new VelonaProvider(CONFIG);
     const result = await provider.generate(BASE_REQUEST);
     expect(result.usage).toBeUndefined();
+  });
+
+  // Fix AI Weekly Reconciliation Review, Finding 2: buildVelonaRequestBody
+  // is the ONE shared function that builds both the real fetch body and
+  // the diagnostics attached to the response — these tests prove the two
+  // can never disagree, by comparing the exact bytes fetch received
+  // against both buildVelonaRequestBody's own direct output and the
+  // response's own requestDiagnostics.
+
+  it('the exact body sent to fetch equals buildVelonaRequestBody(request, config), byte for byte', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
+    const provider = new VelonaProvider(CONFIG);
+    await provider.generate(BASE_REQUEST);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const expectedBody = buildVelonaRequestBody(BASE_REQUEST, CONFIG);
+    expect(init.body).toBe(JSON.stringify(expectedBody));
+  });
+
+  it('buildVelonaUserTurnContent needs no VelonaConfig and matches the exact user-turn content actually sent', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
+    const provider = new VelonaProvider(CONFIG);
+    await provider.generate(BASE_REQUEST);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const sentBody = JSON.parse(init.body);
+    expect(sentBody.turns[1].content).toBe(buildVelonaUserTurnContent(BASE_REQUEST));
+  });
+
+  it('the user-turn content wraps context AND outputSchema together — outputSchema is never a separate top-level field', async () => {
+    const content = buildVelonaUserTurnContent(BASE_REQUEST);
+    const parsed = JSON.parse(content);
+    expect(parsed.context).toEqual(BASE_REQUEST.context);
+    expect(parsed.outputSchema).toEqual(BASE_REQUEST.outputSchema);
+    expect(parsed.request).toEqual({ mode: BASE_REQUEST.mode, requestId: BASE_REQUEST.requestId });
+    expect(typeof parsed.instruction).toBe('string');
+    expect(parsed.instruction.length).toBeGreaterThan(0);
+  });
+
+  it('a successful response carries requestDiagnostics measuring the exact wire body just sent', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
+    const provider = new VelonaProvider(CONFIG);
+    const result = await provider.generate(BASE_REQUEST);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const sentBodyString = init.body as string;
+    const sentBody = JSON.parse(sentBodyString);
+
+    expect(result.requestDiagnostics).toBeDefined();
+    expect(result.requestDiagnostics!.systemInstructionChars).toBe(BASE_REQUEST.systemInstruction.length);
+    expect(result.requestDiagnostics!.userTurnChars).toBe((sentBody.turns[1].content as string).length);
+    expect(result.requestDiagnostics!.wirePayloadChars).toBe(sentBodyString.length);
+    expect(result.requestDiagnostics!.configuredMaxOutputTokens).toBe(CONFIG.maxTokens);
+  });
+
+  it('requestDiagnostics.wirePayloadChars reflects a changed max_tokens/temperature config', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
+    const provider = new VelonaProvider({ ...CONFIG, maxTokens: 8192, temperature: 0.7 });
+    const result = await provider.generate(BASE_REQUEST);
+    expect(result.requestDiagnostics!.configuredMaxOutputTokens).toBe(8192);
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(result.requestDiagnostics!.wirePayloadChars).toBe((init.body as string).length);
   });
 });
