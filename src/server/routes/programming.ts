@@ -106,6 +106,22 @@ function realSessionStatus(database: Database.Database, date: string): 'planned'
   return 'planned';
 }
 
+/** Fix 8 (Activity Scheduling and AI Alignment Fixes): the real gym
+ * `workout_sessions` row for `date`, if any, shaped as the user-facing
+ * `plannedSession` field — never fabricated `plannedWork`-style
+ * prescription data, just enough for a UI to say "a planned workout
+ * exists" and link to it. `source` is 'deterministic' when this day has
+ * a persisted `program_sessions` snapshot (the normal generated-program
+ * case) and 'ai' otherwise (an AI-committed session with no
+ * deterministic snapshot — the exact case this fix addresses; see
+ * renderWeekDays' own doc comment). Returns `null` when no real session
+ * exists yet for this date (nothing to open). */
+function resolvePlannedSession(database: Database.Database, date: string, source: 'deterministic' | 'ai'): { id: string; source: 'deterministic' | 'ai'; status: 'planned' | 'in_progress' | 'completed' } | null {
+  const session = new WorkoutSessionsRepo(database).listSessionsByDate(date).find((s) => s.session_type === 'gym');
+  if (!session) return null;
+  return { id: session.session_id, source, status: session.status as 'planned' | 'in_progress' | 'completed' };
+}
+
 /** The real recurring-activity type for a non-gym day, straight from the
  * user's own TrainingProfile.other_activity_schedule — 'rest' only when
  * no real recurring activity is recorded for that weekday (spec §41:
@@ -348,6 +364,7 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
         skipped: snap.skipped,
         badmintonContext: snap.badmintonContext,
         resourceAllocation: snap.resourceAllocation,
+        plannedSession: resolvePlannedSession(database, dayDate, 'deterministic'),
       };
     }
     if (isGymActivity) {
@@ -365,12 +382,12 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
       // empty rather than reconstructed from workout_exercises — that
       // table does not retain target_type/target_id/classification, so
       // a fabricated PlannedWorkItem would misrepresent the real
-      // prescription. The real exercises remain fully visible via the
-      // session's own detail endpoint (the AI proposal review UI's
-      // "Open planned workout" link). `hasUncommittedSnapshot` is a
-      // truthful, additive signal for a future UI to act on — not a
-      // second inference of the day's ACTIVITY, only of whether this
-      // specific display gap applies to it.
+      // prescription. Fix 8: `plannedSession` (below) is the truthful,
+      // UI-consumed signal that a real workout exists here — the real
+      // exercises remain fully visible via the session's own detail
+      // endpoint (logger.html's "Open planned workout" link, driven by
+      // `plannedSession.id`). This REPLACES the prior release's
+      // `hasUnpersistedSnapshot: true` flag, which no UI ever consumed.
       return {
         date: dayDate,
         weekday,
@@ -384,7 +401,7 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
         skipped: [],
         badmintonContext: null,
         resourceAllocation: [],
-        hasUnpersistedSnapshot: true,
+        plannedSession: resolvePlannedSession(database, dayDate, 'ai'),
       };
     }
     return {
@@ -434,30 +451,54 @@ programmingRouter.get('/week', (req, res) => {
   res.json(buildWeekResponse(database, weekStart, program, profile));
 });
 
+const PRESCRIPTION_POLICIES = ['reuse', 'regenerate'] as const;
+type PrescriptionPolicy = (typeof PRESCRIPTION_POLICIES)[number];
+
 // PUT /api/programming/week/days/:day/activity — Current-Week
 // Reconciliation Fix §11/§19: change ONE day's activity for the CURRENT
 // week only. Never touches the recurring TrainingProfile (see
-// WeekActivityOverridesRepo's own doc comment). Unlike a plain GET, this
-// ALWAYS recomputes via the planner (it has to, to know what changed)
-// and then reconciles — writing only the days that actually need to
-// change (spec §6/§20), never blindly replacing the whole persisted
-// week. This is the "replace" operation of AI Activity Alignment /
-// Non-Regenerative Schedule Fixes Part 1 — unlike `swap`, replacing a
-// single day's activity with something the week has no other copy of
-// genuinely may need the planner (Part 1's own "replace" definition:
-// "this may require a new gym prescription if no valid existing
-// prescription can be moved or reused"); a `swap` is what lets the
-// common case (a day that HAS another day's prescription to reuse)
-// avoid that entirely.
+// WeekActivityOverridesRepo's own doc comment). This is the "replace"
+// operation of AI Activity Alignment / Non-Regenerative Schedule Fixes
+// Part 1 / Activity Scheduling and AI Alignment Fixes Fix 7 — unlike
+// `swap` (which only ever rearranges already-persisted content and
+// NEVER calls the planner), replacing a single day's activity with
+// something the week has no other copy of genuinely may need a new
+// prescription, so this endpoint requires the caller to be explicit
+// about which of the two it wants via `prescriptionPolicy`:
+//
+//   'reuse'      — never calls the planner. If this exact day already
+//                  has a persisted gym prescription (this week's own
+//                  program_sessions row for its day_index), the override
+//                  is written and that existing content is kept as-is.
+//                  If no such prescription exists to reuse, nothing is
+//                  written and a clear "generation required" response
+//                  is returned instead of silently generating one
+//                  (Fix 7 / Rule 2: "do not silently fall back from
+//                  reuse to regenerate").
+//   'regenerate' — explicit, caller-approved generation: calls the
+//                  planner and reconciles exactly as this endpoint
+//                  always has, writing only the days that actually need
+//                  to change (spec §6/§20), never blindly replacing the
+//                  whole persisted week.
+//
+// `prescriptionPolicy` is REQUIRED (mirroring Fix 1's `intent` — the
+// same "reject unsafe ambiguous operations rather than silently
+// guessing" principle) so there is no silently-regenerating default;
+// every caller must say which it means. Turning a day AWAY from Gym
+// never needs a prescription at all — `prescriptionPolicy` is validated
+// but otherwise irrelevant for that direction (see below).
 programmingRouter.put('/week/days/:day/activity', (req, res) => {
   const database = db(req);
   const day = req.params.day;
   if (!WEEKDAYS.includes(day as Weekday)) {
     return res.status(400).json({ error: `day must be one of ${WEEKDAYS.join('|')}` });
   }
-  const { activity, confirmReplacePlanned } = req.body ?? {};
+  const { activity, prescriptionPolicy } = req.body ?? {};
   if (!DAILY_ACTIVITIES.includes(activity)) {
     return res.status(400).json({ error: `activity must be one of ${DAILY_ACTIVITIES.join('|')}` });
+  }
+  if (!PRESCRIPTION_POLICIES.includes(prescriptionPolicy)) {
+    return res.status(400).json({ error: `prescriptionPolicy is required and must be one of ${PRESCRIPTION_POLICIES.join('|')}` });
   }
 
   const user = new UsersRepo(database).getOrCreateDefault();
@@ -489,23 +530,45 @@ programmingRouter.put('/week/days/:day/activity', (req, res) => {
     });
   }
 
-  // Part 3/4 "Planned session": moving a day AWAY from a gym-having
-  // activity must not silently leave a real, still-planned AI-committed
-  // session (workout_sessions) contradicting the new activity — require
-  // an explicit confirmation. This endpoint has no cancellation
+  // Fix 3 (supersedes the prior release's confirmReplacePlanned escape
+  // hatch): moving a day AWAY from a gym-having activity must not leave
+  // a real, still-planned AI-committed session (workout_sessions)
+  // contradicting the new activity. This endpoint has no cancellation
   // workflow (none exists in this codebase, and building one is outside
-  // this task's scope — see its own Non-Goals), so confirming changes
-  // the activity WITHOUT deleting the planned session; the response
-  // says so explicitly rather than leaving that silent.
+  // this task's scope — see its own Non-Goals) and no way to MOVE that
+  // session elsewhere (that is `/week/swap`'s job, not this endpoint's),
+  // so there is no safe way to proceed — the change is REJECTED
+  // unconditionally, never silently detaching the session while leaving
+  // it looking active (Invariant 3). The caller must move the planned
+  // session (via `/week/swap`, onto a day it can occupy) or implement a
+  // cancellation workflow before this activity change can succeed.
   const wantsGym = activity === 'gym' || activity === 'both';
   if (!wantsGym) {
     const plannedSession = sessionsRepo.listSessionsByDate(targetDate).find((s) => s.status === 'planned');
-    if (plannedSession && confirmReplacePlanned !== true) {
+    if (plannedSession) {
       return res.status(409).json({
-        error: `${targetDate} already has a planned workout session (${plannedSession.session_id}). Pass confirmReplacePlanned: true to change this day's activity anyway — the planned session itself will NOT be deleted and will remain scheduled for this date.`,
+        error: `${targetDate} has an active planned workout session (${plannedSession.session_id}). Move or cancel that session before changing the activity.`,
         conflictingSessionId: plannedSession.session_id,
       });
     }
+  }
+
+  // Fix 7: under 'reuse', never call the planner — either this exact
+  // day already has a persisted gym prescription to keep as-is (the
+  // override alone is written), or there is nothing to reuse and the
+  // caller is told generation is required, instead of one being
+  // silently produced.
+  if (wantsGym && (prescriptionPolicy as PrescriptionPolicy) === 'reuse') {
+    const existingProgram = new WeeklyProgramRepo(database).getByWeekStart(weekStart);
+    const existingSession = existingProgram?.sessions.find((s) => s.day_index === dayIndex);
+    if (!existingSession) {
+      return res.status(409).json({
+        error: `${targetDate} has no existing gym prescription to reuse. Pass prescriptionPolicy: "regenerate" to explicitly generate a new one for this day.`,
+        generationRequired: true,
+      });
+    }
+    new WeekActivityOverridesRepo(database).setOverride(profile.id, weekStart, day as Weekday, activity as DailyActivity);
+    return res.json(buildWeekResponse(database, weekStart, existingProgram!, profile));
   }
 
   new WeekActivityOverridesRepo(database).setOverride(profile.id, weekStart, day as Weekday, activity as DailyActivity);
@@ -517,7 +580,7 @@ programmingRouter.put('/week/days/:day/activity', (req, res) => {
   res.json(buildWeekResponse(database, weekStart, program, profile));
 });
 
-/** Shared by the two schedule-operation routes below — see
+/** Backs the one schedule-operation route below (`/week/swap`) — see
  * src/engine/scheduleOperations.ts's swapDayActivities for the full
  * contract (never calls the planner, never the LLM, atomic, reversible). */
 function respondToSwap(database: Database.Database, dayA: unknown, dayB: unknown, res: import('express').Response, dayAField: string, dayBField: string): void {
@@ -567,19 +630,19 @@ programmingRouter.post('/week/swap', (req, res) => {
   respondToSwap(db(req), dayA, dayB, res, 'dayA', 'dayB');
 });
 
-// POST /api/programming/week/move — body { fromDay, toDay }. A "move"
-// is exposed as a thin alias for swap (see scheduleOperations.ts's own
-// ScheduleChangeMode doc comment): moving Thursday's gym workout onto
-// Wednesday IS swapping Wednesday and Thursday — the task's own worked
-// example ("Thursday becomes Rest") is exactly what a swap already
-// produces when Wednesday started out as Rest. A distinct "discard the
-// destination day's own activity outright" move (rather than swapping
-// it back) is not implemented in this vertical slice — see this
-// route's own final report entry.
-programmingRouter.post('/week/move', (req, res) => {
-  const { fromDay, toDay } = req.body ?? {};
-  respondToSwap(db(req), fromDay, toDay, res, 'fromDay', 'toDay');
-});
+// Activity Scheduling and AI Alignment Fixes, Fix 4 (Option A): there is
+// deliberately NO `/week/move` route. The prior release exposed one as
+// a thin alias for `/week/swap` (`fromDay`/`toDay` renamed straight
+// onto `dayA`/`dayB`) reasoning that "move Thursday's gym workout onto
+// Wednesday" and "swap Wednesday and Thursday" produce the same result
+// when Wednesday starts out as Rest — but a swap (A<->B) and a true move
+// (A->B, discarding B's own prior activity rather than swapping it back
+// onto A) are NOT equivalent in general (Fix 4's own Badminton/Gym
+// counter-example: swapping leaves Badminton on the source day, a true
+// move would not). Naming that alias `/week/move` claimed a semantics
+// it didn't implement. Only `swap` is exposed until true move semantics
+// (explicit source/destination behavior, per Fix 4 Option B) are
+// actually built — see this task's own final report for the decision.
 
 // GET /api/programming/today — today's own real slice of the SAME
 // PERSISTED weekly plan /week reads (spec §17/§47/§58): built from the
@@ -624,6 +687,10 @@ programmingRouter.get('/today', (req, res) => {
     activity: today.activity,
     status: loggedSessions.length > 0 ? status : 'planned',
     exercises: today.plannedWork.map(toTodayExerciseShape),
+    // Fix 8: same field /week's own day objects carry — lets a
+    // gym-day-with-no-deterministic-`exercises` view (an AI-committed
+    // day) still say "a planned workout exists" and link to it.
+    plannedSession: today.plannedSession,
     estimatedMinutes: today.estimatedMinutes,
     skippedTargets: today.skipped,
     activeGoals,

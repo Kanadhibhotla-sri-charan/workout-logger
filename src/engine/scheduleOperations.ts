@@ -24,14 +24,20 @@ import { applyWeekOverrides, deriveDailyActivity } from '../lib/dailyActivity.js
 
 /** Illustrative only (task's own Part 1.1 caveat: "adapt to the
  * existing architecture") — this vertical slice implements `swap` as
- * the one general-purpose primitive. A "move" from a gym day onto a
- * currently-Rest day (the task's own worked example) is mathematically
- * identical to swapping with that Rest day, so it is exposed as a thin
- * alias (see `POST /api/programming/week/move` in programming.ts) rather
- * than a second, separately-implemented operation. `replace` is the
- * existing single-day `PUT /week/days/:day/activity` endpoint (unchanged
- * lifecycle, now with lock/planned-session guards — see programming.ts).
- * `regenerate` is that same endpoint's existing planner-call path. */
+ * the one general-purpose schedule-rearrangement primitive, exposed as
+ * `POST /api/programming/week/swap`. Activity Scheduling and AI
+ * Alignment Fixes, Fix 4 (Option A): there is deliberately no `move`
+ * route — a prior release exposed `/week/move` as a thin alias for swap,
+ * but swap (A<->B) and a true move (A->B, discarding B's own prior
+ * activity) are not equivalent in general, so claiming a `move` name for
+ * swap semantics was misleading and has been removed; `'move'` stays in
+ * this union only as a documented, UNIMPLEMENTED future mode (Fix 4
+ * Option B — explicit source/destination semantics), never routed to
+ * anything today. `replace` is the existing single-day
+ * `PUT /week/days/:day/activity` endpoint (unchanged lifecycle, now with
+ * lock/planned-session guards and an explicit `prescriptionPolicy` —
+ * see programming.ts). `regenerate` is that same endpoint's explicit
+ * planner-call path. */
 export type ScheduleChangeMode = 'swap' | 'move' | 'replace' | 'regenerate';
 
 export type ScheduleOperationErrorCode = 'SAME_DAY' | 'DAY_LOCKED' | 'NO_TRAINING_PROFILE';
@@ -51,9 +57,11 @@ export interface SwapResult {
   weekStart: string;
   dayA: Weekday;
   dayB: Weekday;
-  /** session_ids of any real, `planned` (AI-committed) workout_sessions
-   * rows whose date moved as part of this swap — for API transparency/
-   * testability, never used as a decision input by any caller. */
+  /** session_ids of any real `workout_sessions` rows with
+   * `status === 'planned'` whose date moved as part of this swap — see
+   * Fix 5's own rule (below, on swapDayActivities) for exactly which
+   * sessions this is. For API transparency/testability, never used as a
+   * decision input by any caller. */
   movedPlannedSessionIds: string[];
 }
 
@@ -79,9 +87,29 @@ export interface SwapResult {
  *      identity (see WeeklyProgramRepo.upsertSession's own doc comment
  *      on what "identity" means in this schema — Part 5's own note that
  *      the exact implementation should follow the current schema).
- *   3. Any real, still-`planned` AI-committed `workout_sessions` row on
+ *   3. Any real `workout_sessions` row with `status === 'planned'` on
  *      either date — only its `date` column changes; its own exercises/
  *      sets are completely untouched.
+ *
+ * Fix 5 (Activity Scheduling and AI Alignment Fixes) — which planned
+ * sessions move: Option A, "all planned sessions are schedule-bound."
+ * The query above is deliberately `status === 'planned'`, not "any
+ * session an AI proposal happened to create" — a `workout_sessions` row
+ * becomes `planned` only by being explicitly scheduled for a specific
+ * date and not yet started (today, only AI-committed sessions reach
+ * that status in practice — a deterministic gym day has no real session
+ * row at all until the user starts one, at which point it is created
+ * directly as `in_progress`, per aiProposalLifecycle.ts's and
+ * workouts.ts's own doc comments — but this function does not, and must
+ * not, assume "planned implies AI-created"). Any FUTURE code path that
+ * creates a `planned` session by some other means (e.g. a manual
+ * schedule-ahead feature) is schedule-bound by this same rule and WILL
+ * move with its day — this is a deliberate, tested consequence of using
+ * `status` as the sole criterion (see tests/engine/scheduleOperations.
+ * test.ts's own "a manually-created planned session is schedule-bound
+ * too" case), not an oversight. A session origin/ownership column
+ * (Option B) is not needed unless a future planned-session source
+ * should be EXCLUDED from moving with its day.
  */
 export function swapDayActivities(db: Database.Database, weekStart: string, dayA: Weekday, dayB: Weekday): SwapResult {
   if (dayA === dayB) {

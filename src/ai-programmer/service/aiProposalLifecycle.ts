@@ -29,10 +29,14 @@ import {
 import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
 import { validateProposalSchema } from '../validation/programmerOutputValidator.js';
 
-/** AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 3):
- * which of the two supported commit intents applies. Optional on the
- * public API for backward compatibility (see commitAIProposalToPlannedSession's
- * own doc comment) — every NEW caller (program.html) always passes one. */
+/** AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 3),
+ * now REQUIRED on every commit (Activity Scheduling and AI Alignment
+ * Fixes, Fix 1, Option A): which of the two supported commit intents
+ * applies — filling an already-Gym day, or explicitly replacing a
+ * Rest/Badminton day's activity with Gym. There is no longer an
+ * "omitted" case that preserves old behavior; the route validates
+ * presence before this function is ever called (see aiProgrammer.ts's
+ * commit route). */
 export type AICommitIntent = 'fill_existing_gym_day' | 'replace_day_activity';
 
 /** The SAME effective-activity computation `src/server/routes/
@@ -159,29 +163,32 @@ function classifyCommitFailure(err: unknown): string {
  * at all. The conditional UPDATE is what makes that a real guarantee
  * rather than an assumption that happens to hold today.
  *
- * AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 3):
- * `options.intent` tells commit whether the target date is ALREADY
- * effectively Gym/Both (`'fill_existing_gym_day'` — commit only fills in
- * the workout, the weekly activity representation is untouched) or is
- * being explicitly turned into Gym (`'replace_day_activity'` — commit
- * ALSO writes a `WeekActivityOverridesRepo` override for that date, in
- * the SAME transaction as session creation, so a commit failure never
- * leaves an inconsistent override behind and a successful commit never
- * leaves the weekly program silently contradicting the real planned
- * session it just created — the exact gap this task's Part 3
- * describes). `intent` is OPTIONAL for backward compatibility with
- * every caller that predates this task (their behavior is byte-for-byte
- * unchanged: no override is written, exactly as before) — every NEW
- * caller (program.html) always passes one, computed from the day's own
- * already-known current activity, never inferred here from the mere
- * existence of a proposal (Implementation Guidance §7). `intent` is
- * validated against the CURRENT effective activity, not the proposal's
- * own generation-time context, so a stale client assumption is caught
- * even if the day's activity changed after the proposal was generated. */
+ * AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 3),
+ * hardened by Activity Scheduling and AI Alignment Fixes (Fix 1/2):
+ * `options.intent` (now REQUIRED — see AICommitIntent's own doc
+ * comment) tells commit whether the target date is ALREADY effectively
+ * Gym/Both (`'fill_existing_gym_day'` — commit only fills in the
+ * workout, the weekly activity representation is untouched) or is being
+ * explicitly turned into Gym (`'replace_day_activity'` — commit ALSO
+ * writes a `WeekActivityOverridesRepo` override for that date). Both the
+ * override write (when applicable) and session creation happen in the
+ * SAME `db.transaction()` below as marking the proposal committed, so a
+ * commit failure never leaves an inconsistent override or an orphaned
+ * session behind (Fix 2's transaction requirement — there is no
+ * "best-effort independent writes" path here at all: either every one
+ * of override/session/committed-status changes, or none of it does).
+ * `intent` is validated against the CURRENT effective activity, not the
+ * proposal's own generation-time context, so a stale client assumption
+ * is caught even if the day's activity changed after the proposal was
+ * generated. This function never invokes the deterministic
+ * planner/reconciliation (Fix 2's "do not invoke full program
+ * generation merely because the user selected replacement") — the
+ * override write alone is sufficient for `/week`'s own
+ * override-applied activity computation to show Gym for this date. */
 export function commitAIProposalToPlannedSession(
   db: Database.Database,
   proposalId: string,
-  options: { intent?: AICommitIntent } = {}
+  options: { intent: AICommitIntent }
 ): CommitAIProposalResult {
   const repo = new AIProposalRepo(db);
   const record = loadCurrent(db, proposalId);
@@ -275,15 +282,17 @@ export function commitAIProposalToPlannedSession(
     throw new AIProposalConflictError(proposalId, proposal.targetDate, plannedConflict.session_id, plannedConflict.status);
   }
 
-  // Part 3: validate the requested intent against the day's CURRENT
-  // effective activity before writing anything. 'fill_existing_gym_day'
-  // asserts the day is already Gym/Both — a mismatch means the caller's
-  // assumption about the day is wrong/stale, so this rejects rather than
-  // silently treating it as a replace. 'replace_day_activity' has no
-  // precondition (it works whether the day was Rest, Badminton, or
-  // already Gym) — its own alignment write is applied inside the
-  // transaction below. Omitting `intent` entirely skips this whole
-  // block, preserving pre-existing behavior exactly.
+  // Part 3 / Fix 1-2: validate the requested intent against the day's
+  // CURRENT effective activity before writing anything.
+  // 'fill_existing_gym_day' asserts the day is already Gym/Both — a
+  // mismatch means the caller's assumption about the day is wrong/stale,
+  // so this rejects rather than silently treating it as a replace.
+  // 'replace_day_activity' IS the explicit confirmation that this
+  // request should replace the day's current (Rest/Badminton/already-
+  // Gym) activity with Gym (Fix 2 step 4, "confirm that replacement is
+  // explicitly requested") — it has no precondition on the day's current
+  // activity; its own alignment write is applied inside the transaction
+  // below.
   const { activity: currentActivity, profileId } = effectiveActivityForDate(db, proposal.targetDate);
   const isCurrentlyGym = currentActivity === 'gym' || currentActivity === 'both';
   if (options.intent === 'fill_existing_gym_day' && !isCurrentlyGym) {

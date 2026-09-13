@@ -75,8 +75,15 @@
         container.appendChild(why);
       }
 
+      // Fix 8: a Gym day created via an AI proposal replacement has a
+      // real planned session but no deterministic `exercises` to show
+      // here — "No exercises were placed" would wrongly suggest nothing
+      // is scheduled when "Today's session" (below) already links to a
+      // real planned workout.
       if (todayData.sessionType !== 'gym') {
         showEmptyInline(container, `No gym session planned today — ${formatSessionType(todayData.sessionType).toLowerCase()} day.`);
+      } else if (todayData.exercises.length === 0 && todayData.plannedSession) {
+        showEmptyInline(container, "This workout was created from an AI proposal — open it below to see the planned exercises.");
       } else if (todayData.exercises.length === 0) {
         showEmptyInline(container, 'No exercises were placed for today. Check your training profile and goals on the Program page for details.');
       } else {

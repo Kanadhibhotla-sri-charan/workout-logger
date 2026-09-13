@@ -57,8 +57,12 @@ function move(fromDay: string, toDay: string) {
   return request(app).post('/api/programming/week/move').send({ fromDay, toDay });
 }
 
+// Fix 7: prescriptionPolicy is now required — 'regenerate' as the
+// helper's own default preserves every pre-existing call site's
+// original (pre-Fix-7) behavior; a test specifically about the 'reuse'
+// policy passes it explicitly via `extra`.
 function putActivity(day: string, activity: string, extra: Record<string, unknown> = {}) {
-  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity, ...extra });
+  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity, prescriptionPolicy: 'regenerate', ...extra });
 }
 
 beforeEach(() => {
@@ -261,17 +265,19 @@ describe('POST /api/programming/week/swap — validation', () => {
   });
 });
 
-describe('POST /api/programming/week/move — alias for swap onto a Rest day', () => {
-  it('"move Thursday to Wednesday" produces the exact same result as swapping them', async () => {
+// Activity Scheduling and AI Alignment Fixes, Fix 4 (Option A): the
+// prior release exposed `/week/move` as a thin, misleadingly-named alias
+// for `/week/swap` — removed entirely rather than continuing to claim
+// move semantics it never implemented (see scheduleOperations.ts's own
+// ScheduleChangeMode doc comment). This route must not exist.
+describe('POST /api/programming/week/move — removed (Fix 4)', () => {
+  it('no longer exists — 404, not a swap alias', async () => {
     setupProfile(['thursday']);
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
-    const before = await getWeek();
-    const thursdayBefore = before.days.find((d: any) => d.weekday === 'thursday');
+    await getWeek();
 
-    const res = await move('thursday', 'wednesday').expect(200);
-
-    expect(res.body.days.find((d: any) => d.weekday === 'wednesday').plannedWork).toEqual(thursdayBefore.plannedWork);
-    expect(res.body.days.find((d: any) => d.weekday === 'thursday').activity).toBe('unselected');
+    const res = await move('thursday', 'wednesday');
+    expect(res.status).toBe(404);
   });
 });
 
@@ -300,7 +306,7 @@ describe('PUT /week/days/:day/activity — new Part 4 guards', () => {
     await putActivity('monday', 'badminton').expect(200);
   });
 
-  it('rejects moving a gym-having day to a non-gym activity when a planned session exists, without confirmReplacePlanned', async () => {
+  it('Fix 3: rejects moving a gym-having day to a non-gym activity when a planned session exists — unconditionally, with no bypass', async () => {
     setupProfile(['monday']);
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
     const before = await getWeek();
@@ -309,26 +315,27 @@ describe('PUT /week/days/:day/activity — new Part 4 guards', () => {
 
     const res = await putActivity('monday', 'unselected').expect(409);
     expect(res.body.conflictingSessionId).toBe(planned.session_id);
+    expect(res.body.error).toMatch(/active planned workout session/i);
 
     const after = await getWeek();
     expect(after.days.find((d: any) => d.weekday === 'monday').activity).toBe('gym');
   });
 
-  it('proceeds when confirmReplacePlanned: true is passed, without deleting the planned session', async () => {
+  it('Fix 3: there is no bypass field — passing the old confirmReplacePlanned: true no longer has any effect, still 409', async () => {
     setupProfile(['monday']);
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
     const before = await getWeek();
     const mondayDate = before.days.find((d: any) => d.weekday === 'monday').date;
     const planned = new WorkoutSessionsRepo(db).createSession({ date: mondayDate, session_type: 'gym', status: 'planned' });
 
-    await putActivity('monday', 'unselected', { confirmReplacePlanned: true }).expect(200);
+    const res = await putActivity('monday', 'unselected', { confirmReplacePlanned: true }).expect(409);
+    expect(res.body.conflictingSessionId).toBe(planned.session_id);
 
+    // Never silently detached (Invariant 3): the day's activity is
+    // untouched, and the planned session is untouched.
     const after = await getWeek();
-    expect(after.days.find((d: any) => d.weekday === 'monday').activity).toBe('unselected');
-    // The planned session itself was never deleted (no cancellation
-    // workflow exists in this codebase — see this route's own doc
-    // comment).
-    expect(new WorkoutSessionsRepo(db).getSession(planned.session_id)).toBeDefined();
+    expect(after.days.find((d: any) => d.weekday === 'monday').activity).toBe('gym');
+    expect(new WorkoutSessionsRepo(db).getSession(planned.session_id)?.status).toBe('planned');
   });
 
   it('does not require confirmation when moving TO a gym-having activity (only away from one)', async () => {
@@ -336,6 +343,72 @@ describe('PUT /week/days/:day/activity — new Part 4 guards', () => {
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
     await getWeek();
     await putActivity('wednesday', 'gym').expect(200);
+  });
+});
+
+describe('PUT /week/days/:day/activity — Fix 7: explicit prescriptionPolicy', () => {
+  it('rejects a request with prescriptionPolicy omitted — 400, no silently-regenerating default', async () => {
+    setupProfile([]);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    await getWeek();
+    const res = await request(app).put('/api/programming/week/days/wednesday/activity').send({ activity: 'gym' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/prescriptionPolicy/);
+  });
+
+  it('rejects an invalid prescriptionPolicy value with 400', async () => {
+    setupProfile([]);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    await getWeek();
+    const res = await putActivity('wednesday', 'gym', { prescriptionPolicy: 'invent_one' });
+    expect(res.status).toBe(400);
+  });
+
+  it("'reuse' on a day with no existing gym prescription returns generationRequired, without calling the planner or writing the override", async () => {
+    setupProfile([]); // every day starts Rest — nothing to reuse anywhere
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    await getWeek();
+
+    const res = await putActivity('wednesday', 'gym', { prescriptionPolicy: 'reuse' });
+    expect(res.status).toBe(409);
+    expect(res.body.generationRequired).toBe(true);
+
+    const after = await getWeek();
+    const wednesday = after.days.find((d: any) => d.weekday === 'wednesday');
+    expect(wednesday.activity).toBe('unselected'); // override never written
+    expect(wednesday.type).toBe('rest');
+  });
+
+  it("'reuse' on a day that already has a persisted gym prescription keeps that exact content and never regenerates", async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const before = await getWeek();
+    const thursdayBefore = before.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayBefore.plannedWork.length).toBeGreaterThan(0);
+
+    // Re-applying the SAME activity via 'reuse' must keep the exact
+    // persisted content (byte-for-byte) rather than recomputing it.
+    const res = await putActivity('thursday', 'gym', { prescriptionPolicy: 'reuse' }).expect(200);
+    const thursdayAfter = res.body.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayAfter.plannedWork).toEqual(thursdayBefore.plannedWork);
+  });
+
+  it("'regenerate' on a day with no existing prescription generates one (pre-existing behavior, explicit now)", async () => {
+    setupProfile([]);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    await getWeek();
+
+    const res = await putActivity('wednesday', 'gym', { prescriptionPolicy: 'regenerate' }).expect(200);
+    const wednesday = res.body.days.find((d: any) => d.weekday === 'wednesday');
+    expect(wednesday.activity).toBe('gym');
+    expect(wednesday.type).toBe('gym');
+  });
+
+  it('turning a day AWAY from gym succeeds regardless of prescriptionPolicy value (no prescription needed either way)', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    await getWeek();
+    await putActivity('thursday', 'unselected', { prescriptionPolicy: 'reuse' }).expect(200);
   });
 });
 
@@ -360,6 +433,55 @@ describe('GET /week — a Gym-via-alignment-override day with no deterministic s
     expect(wednesdayAfter.activity).toBe('gym');
     expect(wednesdayAfter.type).toBe('gym'); // never 'rest' — the actual bug this task fixes
     expect(wednesdayAfter.status).toBe('planned');
-    expect(wednesdayAfter.hasUnpersistedSnapshot).toBe(true);
+    // Fix 8: replaces the prior release's unconsumed
+    // `hasUnpersistedSnapshot` flag with a user-facing `plannedSession`
+    // field — a UI can show "a planned workout exists" and link to it,
+    // without ever fabricating deterministic `plannedWork` data.
+    expect(wednesdayAfter.hasUnpersistedSnapshot).toBeUndefined();
+    expect(wednesdayAfter.plannedSession).toMatchObject({ source: 'ai', status: 'planned' });
+    expect(typeof wednesdayAfter.plannedSession.id).toBe('string');
+  });
+
+  it('Fix 8: a deterministic gym day with a real started session reports plannedSession with source "deterministic"', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const before = await getWeek();
+    const thursdayDate = before.days.find((d: any) => d.weekday === 'thursday').date;
+    const started = new WorkoutSessionsRepo(db).createSession({ date: thursdayDate, session_type: 'gym', status: 'in_progress' });
+
+    const after = await getWeek();
+    const thursdayAfter = after.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayAfter.plannedSession).toMatchObject({ id: started.session_id, source: 'deterministic', status: 'in_progress' });
+  });
+
+  it('Fix 8: GET /today reports the SAME plannedSession as /week for an AI-committed today', async () => {
+    setupProfile([]); // every day starts Rest by default
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const today = todayForUser(db);
+    const weekStart = programmingWeekStart(today);
+    await getWeek();
+
+    const user = new UsersRepo(db).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(db).get(user.id)!;
+    const WEEKDAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+    const todayOffset = Math.floor((new Date(today + 'T00:00:00Z').getTime() - new Date(weekStart + 'T00:00:00Z').getTime()) / 86400000);
+    const todayWeekday = WEEKDAY_NAMES[todayOffset]!;
+    new WeekActivityOverridesRepo(db).setOverride(profile.id, weekStart, todayWeekday, 'gym');
+    const committed = new WorkoutSessionsRepo(db).createSession({ date: today, session_type: 'gym', status: 'planned', notes: 'AI-proposed session' });
+
+    const weekAfter = await getWeek();
+    const todayInWeek = weekAfter.days.find((d: any) => d.date === today);
+    const todayRes = await request(app).get('/api/programming/today').expect(200);
+
+    expect(todayRes.body.plannedSession).toEqual(todayInWeek.plannedSession);
+    expect(todayRes.body.plannedSession).toMatchObject({ id: committed.session_id, source: 'ai', status: 'planned' });
+  });
+
+  it('Fix 8: a gym day with no real session at all reports plannedSession: null (nothing to open yet)', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const after = await getWeek();
+    const thursdayAfter = after.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayAfter.plannedSession).toBeNull();
   });
 });

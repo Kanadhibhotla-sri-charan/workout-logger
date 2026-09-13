@@ -14,7 +14,14 @@ async function api(path, options = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || 'request failed');
+    const error = new Error(err.error || 'request failed');
+    // Fix 7 (Activity Scheduling and AI Alignment Fixes): some error
+    // bodies carry structured fields beyond `error` (e.g.
+    // `generationRequired`, `conflictingSessionId`) that a caller may
+    // need to react to differently — attached here, additively, so
+    // every existing message-only caller is unaffected.
+    error.body = err;
+    throw error;
   }
   return res.status === 204 ? null : res.json();
 }

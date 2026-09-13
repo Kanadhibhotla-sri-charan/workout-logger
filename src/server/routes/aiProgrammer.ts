@@ -187,18 +187,23 @@ const AI_COMMIT_INTENTS = ['fill_existing_gym_day', 'replace_day_activity'] as c
  * `generate-session` or `approve` automatically (spec §17: "no
  * automatic fallback from failed AI generation to automatic commit").
  *
- * AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 3):
- * `intent` is an OPTIONAL body field (`'fill_existing_gym_day' |
- * 'replace_day_activity'`) — see commitAIProposalToPlannedSession's own
- * doc comment for why it is optional (backward compatibility) and what
- * each value does. A present-but-invalid value is a 400; an absent
- * value is passed straight through as `undefined`. */
+ * Activity Scheduling and AI Alignment Fixes (Fix 1, Option A): `intent`
+ * is now a REQUIRED body field (`'fill_existing_gym_day' |
+ * 'replace_day_activity'`) — the prior release accepted an omitted
+ * intent and silently preserved pre-existing behavior (create the
+ * planned session, never touch the weekly activity representation),
+ * which could leave a real planned Gym session committed on a day the
+ * weekly activity still calls Rest/Badminton. That fallback is removed
+ * entirely: a missing or invalid intent is a `400` here, before
+ * `commitAIProposalToPlannedSession` runs at all — no session is
+ * created, no override is written, and the proposal is not marked
+ * committed. */
 aiProgrammerRouter.post('/proposals/:proposalId/commit', (req, res, next) => {
   try {
     requireEnabled();
     const { intent } = req.body ?? {};
-    if (intent !== undefined && !AI_COMMIT_INTENTS.includes(intent)) {
-      return res.status(400).json({ ok: false, error: `intent, if given, must be one of ${AI_COMMIT_INTENTS.join('|')}` });
+    if (!AI_COMMIT_INTENTS.includes(intent)) {
+      return res.status(400).json({ ok: false, error: `intent is required and must be one of ${AI_COMMIT_INTENTS.join('|')}` });
     }
     const { proposal } = commitAIProposalToPlannedSession(db(req), req.params.proposalId, { intent });
     res.json({ ok: true, ...serializeProposal(proposal) });

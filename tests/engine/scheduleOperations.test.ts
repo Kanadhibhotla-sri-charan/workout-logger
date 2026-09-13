@@ -124,6 +124,9 @@ describe('swapDayActivities — both days already Gym (Monday <-> Thursday)', ()
     programRepo.upsertSession(program.id, 0, 'Push', 'gym', mondaySnapshot);
     programRepo.upsertSession(program.id, 3, 'Legs', 'gym', thursdaySnapshot);
 
+    const mondayRowIdBefore = programRepo.getSession(program.id, 0)!.id;
+    const thursdayRowIdBefore = programRepo.getSession(program.id, 3)!.id;
+
     swapDayActivities(db, WEEK_START, 'monday', 'thursday');
 
     expect(effectiveActivity('monday')).toBe('gym');
@@ -131,6 +134,14 @@ describe('swapDayActivities — both days already Gym (Monday <-> Thursday)', ()
     const after = programRepo.getByWeekStart(WEEK_START)!;
     expect(after.sessions.find((s) => s.day_index === 0)!.snapshot).toEqual(thursdaySnapshot);
     expect(after.sessions.find((s) => s.day_index === 3)!.snapshot).toEqual(mondaySnapshot);
+
+    // Fix 6: program_sessions.id denotes a stable DAY SLOT, not a
+    // stable prescription identity — the row at day_index 0 keeps its
+    // OWN id even though its content is now Thursday's former
+    // prescription (see weeklyProgramRepo.ts's upsertSession doc
+    // comment for the full identity-semantics audit this proves).
+    expect(after.sessions.find((s) => s.day_index === 0)!.id).toBe(mondayRowIdBefore);
+    expect(after.sessions.find((s) => s.day_index === 3)!.id).toBe(thursdayRowIdBefore);
   });
 });
 
@@ -174,6 +185,24 @@ describe('swapDayActivities — no persisted prescription on either day', () => 
 });
 
 describe('swapDayActivities — moves a real planned (AI-committed) session', () => {
+  it('Fix 5: a manually-created planned session (not AI-committed) is schedule-bound too — status alone decides, not origin', () => {
+    // Option A ("all planned sessions are schedule-bound"): the swap's
+    // own query is `status === 'planned'`, with no dependence on HOW the
+    // session got that status. Created directly via the repo here
+    // (bypassing aiProposalLifecycle.ts entirely) to prove the rule is
+    // not secretly "only AI-created sessions move."
+    setupProfile(['thursday']);
+    const thursdayDate = '2026-09-03';
+    const wednesdayDate = '2026-09-02';
+    const sessionsRepo = new WorkoutSessionsRepo(db);
+    const manuallyPlanned = sessionsRepo.createSession({ date: thursdayDate, session_type: 'gym', status: 'planned', notes: 'manually scheduled, not via AI proposal' });
+
+    const result = swapDayActivities(db, WEEK_START, 'wednesday', 'thursday');
+
+    expect(sessionsRepo.getSession(manuallyPlanned.session_id)!.date).toBe(wednesdayDate);
+    expect(result.movedPlannedSessionIds).toEqual([manuallyPlanned.session_id]);
+  });
+
   it('moves a planned workout_sessions row\'s date along with the swap', () => {
     setupProfile(['thursday']);
     const thursdayDate = '2026-09-03';

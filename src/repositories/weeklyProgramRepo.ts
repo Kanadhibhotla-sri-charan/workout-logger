@@ -130,7 +130,39 @@ export class WeeklyProgramRepo {
   /** Creates or replaces the ONE session for (programId, dayIndex) —
    * touches no other day. If a row already exists for this day, its id
    * is preserved (session identity stable — spec §6/§20) and only its
-   * content is updated. */
+   * content is updated.
+   *
+   * Fix 6 (Activity Scheduling and AI Alignment Fixes) — identity
+   * semantics review: this row's `id` represents a STABLE DAY SLOT
+   * (program_id, day_index), never a stable prescription-artifact
+   * identity. Overwriting content in place (as here, and as
+   * scheduleOperations.ts's swapDayActivities does when it exchanges two
+   * days' content) is therefore correct, not a shortcut — audited
+   * consumers of this id:
+   *   - `program_session_exercises.program_session_id` (schema.sql) —
+   *     written only by the separate, legacy `ProgramsRepo`
+   *     (draft/active/completed Program concept), which creates and
+   *     reads its OWN program/program_session rows and never reads rows
+   *     this repo writes; swap/reconciliation here never touch that
+   *     table.
+   *   - `workout_sessions.program_session_id` (schema.sql, ON DELETE SET
+   *     NULL) — the column exists, but no code path in this codebase
+   *     (POST /api/workouts, aiProposalLifecycle.ts's commit, or any
+   *     frontend page) ever sets it when creating a session; it is
+   *     always null in current practice. A real session therefore never
+   *     references a specific `program_sessions` row today, so
+   *     overwriting that row's content in place cannot silently change
+   *     what an existing session "points to."
+   *   - No UI state and no historical/audit logic anywhere in this
+   *     codebase is keyed by a `program_sessions.id` value.
+   * Conclusion: nothing currently depends on a `program_sessions.id`
+   * continuing to denote the SAME prescription content over time — only
+   * on it continuing to denote the same (program, day_index) slot, which
+   * `upsertSession` already guarantees. If a future feature starts
+   * setting `workout_sessions.program_session_id` (e.g. to link a
+   * started workout back to its originating prescription), this
+   * conclusion must be re-checked before any code swaps day content in
+   * place again — see this task's own final report. */
   upsertSession(programId: string, dayIndex: number, name: string, plannedSessionType: string, snapshot: unknown): PersistedWeekSession {
     const existing = this.db
       .prepare('SELECT id FROM program_sessions WHERE program_id = ? AND day_index = ?')

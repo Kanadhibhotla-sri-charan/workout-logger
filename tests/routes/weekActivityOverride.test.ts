@@ -44,8 +44,11 @@ async function getWeek() {
   return res.body;
 }
 
-function putActivity(day: string, activity: DailyActivity) {
-  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity });
+// Fix 7 (Activity Scheduling and AI Alignment Fixes): prescriptionPolicy
+// is now required on this endpoint — 'regenerate' preserves every
+// pre-existing call site's original behavior in this file.
+function putActivity(day: string, activity: DailyActivity, extra: Record<string, unknown> = {}) {
+  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity, prescriptionPolicy: 'regenerate', ...extra });
 }
 
 beforeEach(() => {

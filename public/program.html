@@ -151,7 +151,14 @@
         el('div', { class: 'wd-purpose', text: day.activity === 'both' ? `${purposeText} + Badminton` : purposeText })
       );
       if (day.type === 'gym') {
-        head.appendChild(el('div', { class: 'wd-meta', text: `${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} · ${formatDuration(day.estimatedMinutes)}` }));
+        // Fix 8: a Gym day created via an AI proposal replacement has no
+        // deterministic plannedWork to count — showing "0 exercises"
+        // would falsely imply nothing is scheduled when a real planned
+        // workout (day.plannedSession) already exists.
+        const meta = day.plannedWork.length === 0 && day.plannedSession
+          ? 'AI-planned workout'
+          : `${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} · ${formatDuration(day.estimatedMinutes)}`;
+        head.appendChild(el('div', { class: 'wd-meta', text: meta }));
       }
       btn.appendChild(head);
       const statusWord = day.type === 'gym' ? day.status : day.type;
@@ -183,7 +190,15 @@
       if (day.type === 'gym') {
         panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
 
-        if (day.plannedWork.length === 0) {
+        if (day.plannedWork.length === 0 && day.plannedSession) {
+          // Fix 8: a real planned workout exists (created via an AI
+          // proposal replacement) but has no deterministic plannedWork
+          // to list here — say so plainly and link to it, rather than
+          // showing "No exercises were placed on this day," which would
+          // wrongly imply nothing is scheduled.
+          panel.appendChild(el('p', { class: 'muted', text: 'This day\'s workout was created from an AI proposal — open it to see the planned exercises.' }));
+          panel.appendChild(el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${day.plannedSession.id}`, text: 'Open planned workout' }));
+        } else if (day.plannedWork.length === 0) {
           panel.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
         }
         for (const item of day.plannedWork) {
@@ -247,15 +262,43 @@
         DAILY_ACTIVITY_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text, ...(day.activity === opt.value ? { selected: 'selected' } : {}) }))
       );
       const statusEl = el('div');
+
+      // Fix 7: ordinary activity changes never silently regenerate a
+      // prescription — 'reuse' is tried first. If the backend reports
+      // `generationRequired` (nothing exists yet to reuse for a Gym/Both
+      // day), the user is told explicitly and offered a separate,
+      // deliberate "Generate a new workout" action rather than the
+      // change silently falling back to regeneration on its own.
+      async function changeActivity(prescriptionPolicy) {
+        return withSaving(saveBtn, statusEl, () => api(`/api/programming/week/days/${day.weekday}/activity`, {
+          method: 'PUT',
+          body: { activity: select.value, prescriptionPolicy },
+        }), 'Activity updated for this week.');
+      }
+
       const saveBtn = createButton({ label: 'Change activity (this week)', variant: 'secondary', onClick: async () => {
         try {
-          await withSaving(saveBtn, statusEl, () => api(`/api/programming/week/days/${day.weekday}/activity`, {
-            method: 'PUT',
-            body: { activity: select.value },
-          }), 'Activity updated for this week.');
+          await changeActivity('reuse');
           closeDayModal();
           await loadWeek();
-        } catch (err) { /* values preserved — panel stays open with the error shown */ }
+        } catch (err) {
+          if (err.body && err.body.generationRequired) {
+            statusEl.innerHTML = '';
+            statusEl.appendChild(el('p', { class: 'faint', text: err.message }));
+            statusEl.appendChild(createButton({
+              label: 'Generate a new workout for this day',
+              variant: 'secondary',
+              onClick: async () => {
+                try {
+                  await changeActivity('regenerate');
+                  closeDayModal();
+                  await loadWeek();
+                } catch (err2) { /* values preserved — panel stays open with the error shown */ }
+              },
+            }));
+          }
+          /* otherwise: values preserved — panel stays open with the error shown */
+        }
       }});
 
       const row = el('div', { class: 'btn-row' }, [select, saveBtn]);

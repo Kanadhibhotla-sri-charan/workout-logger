@@ -16,6 +16,7 @@ import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../../src/repositories/outsideBlueprintExercisesRepo.js';
 import { WeekActivityOverridesRepo } from '../../src/repositories/weekActivityOverridesRepo.js';
+import { WeeklyProgramRepo } from '../../src/repositories/weeklyProgramRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../src/lib/dailyActivity.js';
 import { programmingWeekStart, weekdayOfDate } from '../../src/engine/workoutBuilder.js';
 
@@ -204,7 +205,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/approve', () => {
   it('approving a committed proposal returns 409 AI_PROPOSAL_INVALID_STATE', async () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
-    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('AI_PROPOSAL_INVALID_STATE');
@@ -233,7 +234,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
   it('commits an approved proposal, creating a real planned session with the proposed exercises', async () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('committed');
     expect(typeof res.body.committedSessionId).toBe('string');
@@ -255,7 +256,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
 
   it('a pending (never-approved) proposal cannot be committed (409 AI_PROPOSAL_INVALID_STATE)', async () => {
     const proposalId = await generateProposal();
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('AI_PROPOSAL_INVALID_STATE');
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
@@ -265,7 +266,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     db.prepare("UPDATE ai_program_proposals SET expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(proposalId);
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(410);
     expect(res.body.error).toBe('AI_PROPOSAL_EXPIRED');
   });
@@ -273,8 +274,8 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
   it('repeated commit is idempotent: same committedSessionId, no duplicate session created', async () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
-    const first = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
-    const second = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const first = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
+    const second = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(second.status).toBe(200);
     expect(second.body.committedSessionId).toBe(first.body.committedSessionId);
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(1);
@@ -284,8 +285,8 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     const [a, b] = await Promise.all([
-      request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`),
-      request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`),
+      request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' }),
+      request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' }),
     ]);
     const succeeded = [a, b].filter((r) => r.status === 200);
     expect(succeeded.length).toBe(2); // one actually commits, the other observes the idempotent already-committed result
@@ -297,7 +298,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'completed' });
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('AI_TARGET_NOT_EDITABLE');
   });
@@ -306,7 +307,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'in_progress' });
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('AI_TARGET_NOT_EDITABLE');
   });
@@ -315,7 +316,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     new WorkoutSessionsRepo(db).createSession({ date: SUNDAY, session_type: 'gym', status: 'planned' });
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('AI_PROPOSAL_CONFLICT');
     // Only the pre-existing planned session exists — the proposal's own
@@ -327,7 +328,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     db.prepare('UPDATE ai_program_proposals SET blueprint_commit = ? WHERE id = ?').run('a-different-blueprint-commit', proposalId);
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('AI_PROPOSAL_STALE');
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
@@ -341,7 +342,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     tampered.exercises[0].exerciseId = 'totally-made-up-exercise-id';
     db.prepare('UPDATE ai_program_proposals SET proposal_json = ? WHERE id = ?').run(JSON.stringify(tampered), proposalId);
 
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('AI_PROPOSAL_STALE');
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
@@ -352,7 +353,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     db.prepare('UPDATE ai_program_proposals SET proposal_json = ? WHERE id = ?').run('{not valid json', proposalId);
 
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).not.toBe(200);
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
     expect(JSON.stringify(res.body).toLowerCase()).not.toContain('at aiproposalrepo'); // no stack trace leak
@@ -371,7 +372,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
       throw new Error(DISTINCTIVE_INTERNAL_MESSAGE);
     });
 
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('AI_PROPOSAL_COMMIT_FAILED');
     expect(JSON.stringify(res.body)).not.toContain(DISTINCTIVE_INTERNAL_MESSAGE); // API response stays generic
@@ -397,7 +398,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     delete process.env.AI_PROGRAMMER_ENABLED;
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(503);
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
   });
@@ -405,7 +406,7 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit', () => {
   it('the commit response never contains a raw provider payload or API key', async () => {
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(JSON.stringify(res.body)).not.toContain('test-key-not-real');
   });
 });
@@ -429,7 +430,7 @@ describe('commit preserves the full prescription (correction: reps/RIR/rest were
       restSeconds: 137,
     });
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
-    const commitRes = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const commitRes = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(commitRes.status).toBe(200);
     const sessionId = commitRes.body.committedSessionId as string;
 
@@ -477,7 +478,7 @@ describe('commit-time staleness detection beyond Blueprint-commit equality', () 
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1, active: true });
 
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(200);
   });
 
@@ -496,7 +497,7 @@ describe('commit-time staleness detection beyond Blueprint-commit equality', () 
     tampered.exercises[0].sets = 8; // authored cap is 3 — this is a drift/tamper, not the original valid value
     db.prepare('UPDATE ai_program_proposals SET proposal_json = ? WHERE id = ?').run(JSON.stringify(tampered), proposalId);
 
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('AI_PROPOSAL_STALE');
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
@@ -531,7 +532,7 @@ describe('commit-time staleness detection beyond Blueprint-commit equality', () 
     tampered.exercises[0].source = 'blueprint'; // stored shape must still structurally validate; only the id is swapped
     db.prepare('UPDATE ai_program_proposals SET proposal_json = ? WHERE id = ?').run(JSON.stringify(tampered), proposalId);
 
-    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('AI_PROPOSAL_STALE');
     expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
@@ -646,7 +647,7 @@ describe('GET /api/ai-programmer/proposals/latest', () => {
     res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
     expect(res.body.status).toBe('approved');
 
-    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     res = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: SUNDAY });
     expect(res.body.status).toBe('committed');
     expect(res.body.committedSessionId).toBeTruthy();
@@ -711,14 +712,36 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit — intent (Part 
     return deriveDailyActivity(weekday, effective.trainingDays, effective.otherActivitySchedule);
   }
 
-  it('intent omitted (backward compatibility): commit succeeds exactly as before, and never touches the weekly activity override', async () => {
+  it('Fix 1 (Option A): intent omitted is rejected with 400 — no session created, no override written, proposal not committed', async () => {
     expect(effectiveActivityFor(SUNDAY)).toBe('unselected');
     const proposalId = await generateProposal();
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
 
     const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
-    expect(res.status).toBe(200);
-    expect(effectiveActivityFor(SUNDAY)).toBe('unselected'); // unchanged — the pre-existing gap, deliberately preserved when intent is omitted
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toMatch(/intent/i);
+
+    expect(effectiveActivityFor(SUNDAY)).toBe('unselected'); // never touched
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0); // no session created
+    const getRes = await request(app).get(`/api/ai-programmer/proposals/${proposalId}`);
+    expect(getRes.body.status).toBe('approved'); // never advanced to committed
+  });
+
+  it('Fix 1: intent omitted on a Badminton day is also rejected with 400', async () => {
+    const BADMINTON_DAY = '2026-09-16'; // Wednesday — not a training day in this fixture
+    const user = new UsersRepo(db).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(db).get(user.id)!;
+    new WeekActivityOverridesRepo(db).setOverride(profile.id, programmingWeekStart(BADMINTON_DAY), 'wednesday', 'badminton');
+    expect(effectiveActivityFor(BADMINTON_DAY)).toBe('badminton');
+
+    const proposalId = await generateProposalForDate(BADMINTON_DAY, 'wednesday');
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    expect(res.status).toBe(400);
+    expect(effectiveActivityFor(BADMINTON_DAY)).toBe('badminton');
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(BADMINTON_DAY)).toHaveLength(0);
   });
 
   it('intent: "replace_day_activity" on a Rest day aligns the weekly override to Gym, in the same request', async () => {
@@ -728,6 +751,22 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit — intent (Part 
     const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
     expect(res.status).toBe(200);
     expect(effectiveActivityFor(SUNDAY)).toBe('gym');
+  });
+
+  it('Fix 2: "replace_day_activity" never invokes full program generation — no program_sessions row is created for the day', async () => {
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' }).expect(200);
+
+    // The deterministic planner/reconciliation writes `program_sessions`
+    // rows (WeeklyProgramRepo) — commit must never call it, so this
+    // week's persisted program (if it even exists yet) has no row for
+    // Sunday's day_index.
+    const weekStart = programmingWeekStart(SUNDAY);
+    const program = new WeeklyProgramRepo(db).getByWeekStart(weekStart);
+    const sundayDayIndex = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].indexOf(weekdayOfDate(SUNDAY));
+    expect(program?.sessions.find((s) => s.day_index === sundayDayIndex)).toBeUndefined();
   });
 
   it('intent: "fill_existing_gym_day" on a Rest day is rejected (409 AI_COMMIT_INTENT_MISMATCH) — the caller\'s assumption about the day is wrong', async () => {
