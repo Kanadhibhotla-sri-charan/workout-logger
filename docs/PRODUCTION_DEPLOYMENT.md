@@ -149,6 +149,21 @@ DB_PATH=/var/lib/workout-logger/workout-logger.sqlite
 No `BLUEPRINT_REPO_PATH` — production only ever reads the committed
 snapshot at `src/blueprint/snapshot/`.
 
+**AI Programmer (real live Velona integration)**: leave
+`AI_PROGRAMMER_ENABLED` unset/`false` to keep this feature exactly as
+off as it always was. To turn it on, add to this same file (real values,
+never the Git checkout, never chat):
+
+```
+AI_PROGRAMMER_ENABLED=true
+VELONA_API_KEY=<real secret from your Velona account>
+VELONA_MODEL=<a real model id, e.g. anthropic/claude-sonnet-5>
+```
+
+See `docs/REAL_AI_INTEGRATION_REPORT.md` for the full operational
+reference (verifying config without printing the secret, testing the
+Generate button, inspecting logs, rotating the key, disabling safely).
+
 Finish handing ownership of the application directory to the service
 account:
 

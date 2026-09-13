@@ -26,11 +26,21 @@ DB_PATH=./data/dev.sqlite PORT=4000 npm run dev
 | `DB_PATH` | `src/db/client.ts` | optional, defaults to `./data/workout-logger.sqlite` | **must** point at a persistent volume/disk (see below) |
 | `PORT` | `src/server/index.ts` | optional, defaults to `3000` | set by most hosts automatically (e.g. Render sets `PORT`) |
 | `BLUEPRINT_REPO_PATH` | `scripts/sync-blueprint.mts` only | optional — point at a local `workout-blueprint` checkout to skip cloning | not used at runtime; only needed by whoever re-runs the sync script |
+| `AI_PROGRAMMER_ENABLED` | `src/ai-programmer/provider/config.ts` | optional, defaults to disabled (any value other than the exact string `true`) | set explicitly to `true` to turn on the AI Programmer feature |
+| `VELONA_API_KEY` | `src/ai-programmer/provider/config.ts` | **required** if `AI_PROGRAMMER_ENABLED=true` | **required**, real secret from your Velona account — never committed, never logged, never sent to the frontend |
+| `VELONA_MODEL` | `src/ai-programmer/provider/config.ts` | **required** if `AI_PROGRAMMER_ENABLED=true`, no default | **required** — a real model id from Velona's own catalogue (`GET https://velona.in/gateway/v1/models`); see `docs/REAL_AI_INTEGRATION_REPORT.md` for the one currently recommended |
+| `VELONA_BASE_URL` | `src/ai-programmer/provider/config.ts` | optional, defaults to `https://velona.in/gateway/v1` (the real gateway) | same default; override only for testing against a different gateway |
+| `VELONA_TIMEOUT_MS` / `VELONA_MAX_RETRIES` / `VELONA_TEMPERATURE` / `VELONA_MAX_TOKENS` | `src/ai-programmer/provider/config.ts` | optional, sane defaults (60s / 1 / 0.2 / 4096) | same, tune per model/cost if needed |
 
-There are **no API keys or third-party secrets** in Phase 1 — no LLM/AI
-calls, no external service integrations at request time. The old Python
-CLI tool this repo replaced used a `GEMINI_API_KEY`; that dependency is
-gone.
+**This is no longer accurate as of the real Velona AI integration**:
+there IS now a real third-party secret and a real external API call at
+request time (`AI_PROGRAMMER_ENABLED=true` + `POST /api/ai-programmer/generate-session`
+→ Velona's `/inference/run`). See `docs/REAL_AI_INTEGRATION_REPORT.md`
+for the full picture — provider, model, exact call path, and how the
+secret is configured on the production VM. The feature is fully disabled
+by default (`AI_PROGRAMMER_ENABLED` unset), so a deployment that never
+sets these variables behaves exactly as this paragraph originally
+described.
 
 ## Production deployment
 

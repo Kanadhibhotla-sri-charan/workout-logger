@@ -21,8 +21,18 @@ import {
 } from '../errors.js';
 import type { VelonaConfig } from './config.js';
 
+// Confirmed real response/error shape (docs/DEV_CORRECTION_REAL_VELONA_AI_INTEGRATION_AND_NPM_AUDIT.md
+// §2.1, and directly observed from a live unauthenticated probe against
+// the real endpoint: a 401 with no Authorization header returns exactly
+// `{request_id, status: "error", error: {code: "INVALID_KEY", message,
+// docs}}`). `status` distinguishes success/error at the body level —
+// checked even when the HTTP status itself is 2xx, since some gateways
+// report an application-level error under an otherwise-200 response.
 interface VelonaResponseBody {
+  request_id?: string;
+  status?: 'success' | 'error';
   data?: {
+    run_id?: string;
     output?: unknown;
     model?: string;
     finish?: string;
@@ -35,8 +45,22 @@ interface VelonaResponseBody {
   meta?: {
     latency_ms?: number;
     billed_usd?: number;
+    timestamp?: string;
   };
-  error?: unknown;
+  error?: {
+    code?: string;
+    message?: string;
+    docs?: string;
+  };
+}
+
+function describeVelonaError(payload: VelonaResponseBody | undefined, httpStatus: number): string {
+  const code = payload?.error?.code;
+  const message = payload?.error?.message;
+  if (code || message) {
+    return `Velona returned HTTP ${httpStatus} (${code ?? 'unknown code'}): ${message ?? 'no message'}.`;
+  }
+  return `Velona returned HTTP ${httpStatus}.`;
 }
 
 /** Internal-only wrapper marking an error as safe to retry, carrying
@@ -86,7 +110,7 @@ export class VelonaProvider implements AIProgrammerProvider {
         },
       ],
       stream: false,
-      config: { temperature: 0, top_p: 1 },
+      config: { temperature: this.config.temperature, max_tokens: this.config.maxTokens },
       output: { format: 'json' },
     };
 
@@ -94,13 +118,24 @@ export class VelonaProvider implements AIProgrammerProvider {
     for (;;) {
       attempt++;
       try {
-        return await this.attemptOnce(body, request.requestId);
+        const result = await this.attemptOnce(body, request.requestId);
+        // Deployment §2.10: how to inspect logs for provider-call
+        // success/failure. safeLogFields never includes the API key or
+        // raw context/prompt content.
+        console.log('[velona] request succeeded', safeLogFields(this.config, request.requestId, { attempt, resolvedModel: result.model }));
+        return result;
       } catch (err) {
         if (err instanceof RetryableProviderError && attempt <= this.config.maxRetries) {
+          console.warn('[velona] request failed, retrying', safeLogFields(this.config, request.requestId, { attempt, reason: err.cause.message }));
           await delay(err.retryAfterMs ?? 300 * attempt);
           continue;
         }
-        throw err instanceof RetryableProviderError ? err.cause : err;
+        const final = err instanceof RetryableProviderError ? err.cause : err;
+        console.error(
+          '[velona] request failed',
+          safeLogFields(this.config, request.requestId, { attempt, reason: final instanceof Error ? final.message : String(final) })
+        );
+        throw final;
       }
     }
   }
@@ -126,18 +161,36 @@ export class VelonaProvider implements AIProgrammerProvider {
       clearTimeout(timeout);
     }
 
+    // Every branch below that can read a documented `{status, error}`
+    // body does so defensively (a non-JSON or empty body still falls
+    // back to the plain HTTP-status message) — Velona's real error
+    // shape was confirmed live: a 401 with no Authorization header
+    // returns exactly `{request_id, status: "error", error: {code:
+    // "INVALID_KEY", message, docs}}`.
+    let errorPayload: VelonaResponseBody | undefined;
+    if (!response.ok) {
+      errorPayload = await response
+        .clone()
+        .json()
+        .then((v) => v as VelonaResponseBody)
+        .catch(() => undefined);
+    }
+
     if (response.status === 401 || response.status === 403) {
       throw new AIProviderAuthenticationError();
+    }
+    if (response.status === 402) {
+      throw new AIProviderUnavailableError(describeVelonaError(errorPayload, response.status));
     }
     if (response.status === 429) {
       const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
       throw new RetryableProviderError(new AIProviderRateLimitedError(retryAfterMs !== undefined ? retryAfterMs / 1000 : undefined), retryAfterMs);
     }
     if (response.status === 408 || (response.status >= 500 && response.status < 600)) {
-      throw new RetryableProviderError(new AIProviderUnavailableError(`Velona returned HTTP ${response.status}.`));
+      throw new RetryableProviderError(new AIProviderUnavailableError(describeVelonaError(errorPayload, response.status)));
     }
     if (!response.ok) {
-      throw new AIProviderInvalidResponseError(`Velona returned HTTP ${response.status}.`);
+      throw new AIProviderInvalidResponseError(describeVelonaError(errorPayload, response.status));
     }
 
     let payload: VelonaResponseBody;
@@ -145,6 +198,13 @@ export class VelonaProvider implements AIProgrammerProvider {
       payload = (await response.json()) as VelonaResponseBody;
     } catch {
       throw new AIProviderInvalidResponseError('Velona response body was not valid JSON.');
+    }
+
+    // A gateway can report an application-level failure under an
+    // otherwise-200 HTTP response — never treated as success just
+    // because the transport layer succeeded.
+    if (payload.status === 'error') {
+      throw new AIProviderInvalidResponseError(describeVelonaError(payload, response.status));
     }
 
     const rawOutput = payload.data?.output;

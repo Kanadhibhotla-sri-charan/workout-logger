@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VelonaProvider } from '../../src/ai-programmer/provider/velonaProvider.js';
 import {
+  AIProgrammerError,
   AIProviderAuthenticationError,
   AIProviderInvalidResponseError,
   AIProviderRateLimitedError,
@@ -20,6 +21,8 @@ const CONFIG: VelonaConfig = {
   model: 'test-model',
   timeoutMs: 5000,
   maxRetries: 1,
+  temperature: 0.2,
+  maxTokens: 4096,
 };
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
@@ -64,7 +67,7 @@ describe('VelonaProvider', () => {
     expect(JSON.parse(result.rawText)).toEqual({ ok: true });
   });
 
-  it('sends the correct endpoint, authorization header, and request body shape', async () => {
+  it('sends the correct endpoint, method, authorization header, and request body shape', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
     const provider = new VelonaProvider(CONFIG);
     await provider.generate(BASE_REQUEST);
@@ -72,6 +75,8 @@ describe('VelonaProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://velona.test/gateway/v1/inference/run');
+    expect(init.method).toBe('POST');
+    expect(init.headers['Content-Type']).toBe('application/json');
     expect(init.headers.Authorization).toBe('Bearer test-key-never-a-real-secret');
     const body = JSON.parse(init.body);
     expect(body.model).toBe('test-model');
@@ -79,6 +84,15 @@ describe('VelonaProvider', () => {
     expect(body.output).toEqual({ format: 'json' });
     expect(body.turns[0]).toEqual({ role: 'system', content: 'system' });
     expect(body.turns[1].role).toBe('user');
+  });
+
+  it('sends the configured temperature and max_tokens in config (per the documented Velona contract)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
+    const provider = new VelonaProvider({ ...CONFIG, temperature: 0.2, maxTokens: 4096 });
+    await provider.generate(BASE_REQUEST);
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse(init.body);
+    expect(body.config).toEqual({ temperature: 0.2, max_tokens: 4096 });
   });
 
   it('never includes the API key anywhere in a request/response log helper', async () => {
@@ -107,6 +121,51 @@ describe('VelonaProvider', () => {
     const provider = new VelonaProvider({ ...CONFIG, maxRetries: 2 });
     await expect(provider.generate(BASE_REQUEST)).rejects.toBeInstanceOf(AIProviderAuthenticationError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('authentication failure with the real documented Velona error body (401, INVALID_KEY) is still AIProviderAuthenticationError', async () => {
+    // Confirmed live against the real endpoint with no Authorization header.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, {
+        request_id: 'req_unknown',
+        status: 'error',
+        error: { code: 'INVALID_KEY', message: 'Missing Authorization header', docs: 'https://velona.in/docs/errors#INVALID_KEY' },
+      })
+    );
+    const provider = new VelonaProvider(CONFIG);
+    await expect(provider.generate(BASE_REQUEST)).rejects.toBeInstanceOf(AIProviderAuthenticationError);
+  });
+
+  it('insufficient credits (402) throws AIProviderUnavailableError with the upstream code/message surfaced, without retrying', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(402, { request_id: 'req_x', status: 'error', error: { code: 'INSUFFICIENT_CREDITS', message: 'Account balance is too low.' } })
+    );
+    const provider = new VelonaProvider({ ...CONFIG, maxRetries: 2 });
+    const err = await provider.generate(BASE_REQUEST).catch((e) => e);
+    expect(err).toBeInstanceOf(AIProviderUnavailableError);
+    expect((err as AIProgrammerError).message).toContain('INSUFFICIENT_CREDITS');
+    expect((err as AIProgrammerError).message).toContain('Account balance is too low.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a documented error body surfaces its code/message on a non-retryable 4xx', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(422, { request_id: 'req_y', status: 'error', error: { code: 'VALIDATION_FAILED', message: 'model is not a valid identifier.' } })
+    );
+    const provider = new VelonaProvider(CONFIG);
+    const err = await provider.generate(BASE_REQUEST).catch((e) => e);
+    expect(err).toBeInstanceOf(AIProviderInvalidResponseError);
+    expect((err as AIProgrammerError).message).toContain('VALIDATION_FAILED');
+  });
+
+  it('an application-level error reported under an HTTP 200 body is never treated as success', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { request_id: 'req_z', status: 'error', error: { code: 'MODEL_UNAVAILABLE', message: 'The requested model is temporarily unavailable.' } })
+    );
+    const provider = new VelonaProvider(CONFIG);
+    const err = await provider.generate(BASE_REQUEST).catch((e) => e);
+    expect(err).toBeInstanceOf(AIProviderInvalidResponseError);
+    expect((err as AIProgrammerError).message).toContain('MODEL_UNAVAILABLE');
   });
 
   it('rate limiting (429) throws AIProviderRateLimitedError after exhausting bounded retries', async () => {
@@ -148,6 +207,29 @@ describe('VelonaProvider', () => {
     const provider = new VelonaProvider({ ...CONFIG, maxRetries: 1 });
     await expect(provider.generate(BASE_REQUEST)).rejects.toBeInstanceOf(AIProviderUnavailableError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs provider-call success and failure without ever including the API key', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
+      const provider = new VelonaProvider(CONFIG);
+      await provider.generate(BASE_REQUEST);
+      expect(logSpy).toHaveBeenCalled();
+
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { status: 'error', error: { code: 'INVALID_KEY', message: 'bad key' } }));
+      await provider.generate(BASE_REQUEST).catch(() => undefined);
+      expect(errorSpy).toHaveBeenCalled();
+
+      const allLoggedText = [...logSpy.mock.calls, ...warnSpy.mock.calls, ...errorSpy.mock.calls].map((call) => JSON.stringify(call)).join('\n');
+      expect(allLoggedText).not.toContain(CONFIG.apiKey);
+    } finally {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 
   it('missing usage/billing metadata is handled without throwing', async () => {
