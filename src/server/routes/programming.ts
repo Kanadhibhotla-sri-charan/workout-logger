@@ -141,8 +141,11 @@ function toSessionField(session: WorkoutSession | null): { id: string; source: W
  * `combinedSession` is whichever real session the resolver considers
  * relevant for this date — its `historicalSession` if one exists
  * (completed/in-progress always wins for display purposes, per the
- * resolver's own precedence), else its `selectedPlannedWorkout`
- * (actionable, or a conflict's deterministic recovery candidate). A
+ * resolver's own precedence), else its `selectedPlannedWorkout` (the
+ * single actionable planned session, deterministic or AI). During a
+ * conflict (`resolution.source === 'conflict'`) BOTH fields are `null`
+ * by construction — there is no candidate of any kind to fall back to;
+ * see the explicit suppression below. A
  * `source_type` other than `'deterministic'` on that session SUPERSEDES
  * the deterministic snapshot for display (Option 1, "AI replacement/
  * supersession" — the deterministic row is never deleted, only display
