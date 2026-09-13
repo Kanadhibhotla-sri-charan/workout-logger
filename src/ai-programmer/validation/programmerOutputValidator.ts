@@ -34,24 +34,33 @@ export interface SchemaValidationResult {
   errors: string[];
 }
 
-function isIsoDate(value: unknown): value is string {
+export function isIsoDate(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-function isStringArray(value: unknown): value is string[] {
+export function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === 'string');
 }
 
-function isPositiveInt(value: unknown): value is number {
+export function isPositiveInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
 }
 
-function isNonNegativeNumber(value: unknown): value is number {
+export function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
-function validateExercise(raw: unknown, index: number, errors: string[]): AIWorkoutExerciseProposal | null {
-  const path = `exercises[${index}]`;
+export { containsDangerousContent };
+
+/** Validates one exercise entry's CORE fields — the exact fields
+ * `AIWorkoutExerciseProposal` requires. Reused as-is (never
+ * reimplemented) by weekReconciliationOutputValidator.ts, whose entries
+ * are a strict superset (`AIWorkoutExerciseProposal & {classification}`)
+ * — that caller checks `classification` itself on top of this. `path`
+ * is caller-supplied so error messages read correctly in both a flat
+ * `exercises[i]` context and a nested `days[i].session.exercises[j]`
+ * one. */
+export function validateExercise(raw: unknown, path: string, errors: string[]): AIWorkoutExerciseProposal | null {
   if (typeof raw !== 'object' || raw === null) {
     errors.push(`${path}: expected an object`);
     return null;
@@ -173,7 +182,7 @@ export function validateProposalSchema(raw: unknown): SchemaValidationResult {
   if (!Array.isArray(obj.exercises)) {
     errors.push('exercises: expected an array');
   } else {
-    const validated = obj.exercises.map((e, i) => validateExercise(e, i, errors));
+    const validated = obj.exercises.map((e, i) => validateExercise(e, `exercises[${i}]`, errors));
     exercises = validated.every((e): e is AIWorkoutExerciseProposal => e !== null) ? (validated as AIWorkoutExerciseProposal[]) : null;
 
     const seen = new Set<string>();

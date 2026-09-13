@@ -3,8 +3,15 @@
 // never directly on Velona — so tests can mock it and a future provider
 // can replace Velona without touching the service/validators.
 
+// AI-Powered Weekly Reconciliation: a second, distinct request mode.
+// The provider itself needs no special-casing per mode (spec §4.1) — it
+// only ever sees systemInstruction/context/outputSchema/requestId, all
+// mode-specific shaping happens above this interface, in the service/
+// context-builder layer.
+export type AIProgrammerMode = 'generate_session' | 'reconcile_week';
+
 export interface AIProgrammerProviderRequest {
-  mode: 'generate_session';
+  mode: AIProgrammerMode;
   systemInstruction: string;
   context: unknown;
   outputSchema: unknown;

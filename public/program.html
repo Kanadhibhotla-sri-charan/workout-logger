@@ -303,17 +303,30 @@
           if (err.body && err.body.generationRequired) {
             statusEl.innerHTML = '';
             statusEl.appendChild(el('p', { class: 'faint', text: err.message }));
-            statusEl.appendChild(createButton({
-              label: 'Generate a new workout for this day',
-              variant: 'secondary',
-              onClick: async () => {
-                try {
-                  await changeActivity('regenerate');
-                  closeDayModal();
-                  await loadWeek();
-                } catch (err2) { /* values preserved — panel stays open with the error shown */ }
-              },
-            }));
+            // AI-Powered Weekly Reconciliation: this is exactly the case
+            // where a simple day-swap isn't appropriate — nothing exists
+            // yet to reuse for this Gym day, so a genuine AI call (never
+            // a deterministic-only fallback dressed up as one) is
+            // offered to generate a session AND reorganize whichever
+            // other days actually need to change around it. Only
+            // requestedActivity "gym" is supported by this route in
+            // this iteration — "both" keeps the prior, purely
+            // deterministic single-day regeneration.
+            if (select.value === 'gym') {
+              statusEl.appendChild(buildWeekReconciliationSection(day));
+            } else {
+              statusEl.appendChild(createButton({
+                label: 'Generate a new workout for this day',
+                variant: 'secondary',
+                onClick: async () => {
+                  try {
+                    await changeActivity('regenerate');
+                    closeDayModal();
+                    await loadWeek();
+                  } catch (err2) { /* values preserved — panel stays open with the error shown */ }
+                },
+              }));
+            }
           }
           /* otherwise: values preserved — panel stays open with the error shown */
         }
@@ -654,6 +667,174 @@
       renderActions(); // shows the "Checking…" placeholder immediately
       discover();
       return section;
+    }
+
+    // ---------- AI-Powered Weekly Reconciliation UI ----------
+    // Reached only from buildChangeActivitySection's own
+    // "generationRequired" fallback above — a genuine, real call to the
+    // AI Programmer's dedicated reconcile_week mode
+    // (POST /api/ai-programmer/reconcile-week), never a deterministic
+    // regeneration relabeled as AI. Nothing is applied to the real week
+    // until the user explicitly approves AND commits it, mirroring the
+    // single-session AI proposal workflow's own explicit gate exactly.
+
+    function formatReconciliationActivity(activity) {
+      // The reconciliation output's own activity vocabulary calls a
+      // rest day "rest"; the rest of this page's DAILY_ACTIVITY_OPTIONS
+      // calls the same concept "unselected" — translated here rather
+      // than teaching formatDailyActivity a second vocabulary.
+      return formatDailyActivity(activity === 'rest' ? 'unselected' : activity);
+    }
+
+    /** Renders the read-only review content for a persisted week-
+     * reconciliation record (the shared response shape the reconcile-
+     * week/GET/approve/commit routes all return — see
+     * serializeWeekReconciliation in src/server/routes/aiProgrammer.ts).
+     * Never invents a field: every value shown here comes directly from
+     * that response. */
+    function buildWeekReconciliationReview(state) {
+      const wrap = el('div', { class: 'ai-proposal-panel' });
+      const output = state.output;
+
+      wrap.appendChild(el('div', { class: 'card-row' }, [
+        el('div', { class: 'card-subtitle', text: 'Proposed week changes' }),
+        createStatusBadge(state.status, formatAiProposalStatus(state.status)),
+      ]));
+      if (output.reconciliation && output.reconciliation.rationale) {
+        wrap.appendChild(el('p', { class: 'muted', text: output.reconciliation.rationale, style: 'margin-top:0.5rem' }));
+      }
+
+      const changedDays = output.days.filter((d) => d.changeType !== 'unchanged');
+      if (changedDays.length > 0) {
+        const list = el('div', { class: 'card', style: 'margin-top:0.5rem' });
+        list.appendChild(el('div', { class: 'card-title', text: 'Days affected' }));
+        for (const d of changedDays) {
+          list.appendChild(el('p', {
+            class: 'faint',
+            text: `${formatWeekday(d.weekday)} (${formatDate(d.date)}) — ${formatReconciliationActivity(d.activity)}`,
+            style: 'margin:0.2rem 0',
+          }));
+        }
+        wrap.appendChild(list);
+      }
+
+      const targetDay = output.days.find((d) => d.date === output.targetDate);
+      if (targetDay && targetDay.session && targetDay.session.exercises.length > 0) {
+        wrap.appendChild(el('div', { class: 'card-subtitle', text: `${formatWeekday(targetDay.weekday)}'s new workout`, style: 'margin-top:0.75rem' }));
+        const pendingReview = state.status === 'pending' || state.status === 'approved';
+        for (const ex of targetDay.session.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+      }
+
+      if (output.reconciliation && output.reconciliation.warnings && output.reconciliation.warnings.length > 0) {
+        const warnBlock = el('div', { class: 'card card-warning', role: 'status' });
+        for (const w of output.reconciliation.warnings) warnBlock.appendChild(el('p', { text: `Warning: ${w}`, style: 'margin:0.15rem 0' }));
+        wrap.appendChild(warnBlock);
+      }
+      return wrap;
+    }
+
+    /** The Ask AI -> Review -> Approve -> Apply workflow, scoped to one
+     * change-activity attempt — `day` is the day whose activity change
+     * triggered this (day.date is the reconciliation's targetDate).
+     * Deliberately no discovery/rehydration step (unlike
+     * buildAiProposalSection): this section only ever exists for the
+     * lifetime of one open modal, created fresh each time the
+     * generationRequired fallback fires, so there is nothing to
+     * rehydrate — closing and reopening the modal starts over, which is
+     * correct here since the underlying "nothing to reuse" condition is
+     * re-checked from scratch by buildChangeActivitySection anyway. */
+    function buildWeekReconciliationSection(day) {
+      const wrap = el('div', { class: 'ai-proposal-section' });
+      wrap.appendChild(el('h3', { text: 'AI Week Reorganization' }));
+      wrap.appendChild(el('p', { class: 'faint', text: 'Ask the AI Programmer to generate a workout for this day and reorganize the rest of the week around it. Nothing changes until you approve and apply it.' }));
+
+      let state = null;
+      let inFlight = false;
+      const reviewEl = el('div');
+      const actionsEl = el('div');
+      const statusEl = el('div');
+      wrap.append(reviewEl, actionsEl, statusEl);
+
+      function renderReview() {
+        reviewEl.innerHTML = '';
+        if (state) reviewEl.appendChild(buildWeekReconciliationReview(state));
+      }
+
+      function renderActions() {
+        actionsEl.innerHTML = '';
+        const actions = aiWeekReconciliationActionsFor(state ? state.status : null);
+        if (actions.canGenerate) {
+          actionsEl.appendChild(createButton({ label: inFlight ? 'Asking AI…' : 'Ask AI to reorganize this week', variant: 'secondary', disabled: inFlight, onClick: onGenerate }));
+          return;
+        }
+        if (actions.canApprove) {
+          actionsEl.appendChild(createButton({ label: inFlight ? 'Approving…' : 'Approve', variant: 'secondary', disabled: inFlight, onClick: onApprove }));
+          return;
+        }
+        if (actions.canCommit) {
+          actionsEl.appendChild(el('p', { class: 'muted', text: 'Approved — not yet applied to your week.' }));
+          actionsEl.appendChild(createButton({ label: inFlight ? 'Applying…' : 'Apply to this week', disabled: inFlight, onClick: onCommit }));
+          return;
+        }
+        if (actions.isCommitted) {
+          actionsEl.appendChild(el('p', { class: 'muted', text: 'Applied — your week has been updated.' }));
+        }
+      }
+
+      async function onGenerate() {
+        if (inFlight) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Asking the AI Programmer…');
+        renderActions();
+        try {
+          state = await aiApi('/api/ai-programmer/reconcile-week', { method: 'POST', body: { targetDate: day.date, requestedActivity: 'gym' } });
+          showInlineStatus(statusEl, null, null);
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+        } finally {
+          inFlight = false;
+          renderReview();
+          renderActions();
+        }
+      }
+
+      async function onApprove() {
+        if (inFlight || !state) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Approving…');
+        renderActions();
+        try {
+          state = await aiApi(`/api/ai-programmer/week-reconciliations/${state.reconciliationId}/approve`, { method: 'POST' });
+          showInlineStatus(statusEl, null, null);
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+        } finally {
+          inFlight = false;
+          renderReview();
+          renderActions();
+        }
+      }
+
+      async function onCommit() {
+        if (inFlight || !state) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Applying to your week…');
+        renderActions();
+        try {
+          state = await aiApi(`/api/ai-programmer/week-reconciliations/${state.reconciliationId}/commit`, { method: 'POST' });
+          showInlineStatus(statusEl, 'success', 'Week updated.');
+          closeDayModal();
+          await loadWeek();
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+          inFlight = false;
+          renderReview();
+          renderActions();
+        }
+      }
+
+      renderActions();
+      return wrap;
     }
 
     const GROUP_ORDER = ['Goal 1', 'Goal 2', 'Normal development', 'Maintenance'];

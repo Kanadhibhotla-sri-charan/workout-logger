@@ -416,3 +416,42 @@ CREATE TABLE IF NOT EXISTS ai_program_proposals (
 
 CREATE INDEX IF NOT EXISTS idx_ai_program_proposals_target_date ON ai_program_proposals(target_date);
 CREATE INDEX IF NOT EXISTS idx_ai_program_proposals_status ON ai_program_proposals(status);
+
+-- AI-Powered Weekly Reconciliation: a DISTINCT table from
+-- ai_program_proposals above — deliberately NOT reused, since that
+-- table is day-scoped (one target_date/weekday/committed_session_id per
+-- row) and cannot represent a whole-week, multi-day AI proposal without
+-- pretending a week object is a single session (explicitly the thing
+-- this feature must not do). Same lifecycle convention (pending ->
+-- approved -> committed, or -> rejected/expired), enforced entirely in
+-- application code (src/repositories/aiWeekReconciliationRepo.ts), same
+-- as ai_program_proposals. committed_session_id references the ONE new
+-- real workout_sessions row created for target_date on commit — see
+-- src/ai-programmer/service/weekReconciliationLifecycle.ts's own doc
+-- comment for why only the target date gets a real session (other days
+-- in the reconciled week get their program_sessions snapshot updated
+-- instead, never a new real session of their own).
+CREATE TABLE IF NOT EXISTS ai_week_reconciliation_proposals (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'committed', 'rejected', 'expired')),
+  target_date TEXT NOT NULL,
+  week_start TEXT NOT NULL,
+  requested_activity TEXT NOT NULL,
+  proposal_json TEXT NOT NULL,
+  context_hash TEXT NOT NULL,
+  blueprint_commit TEXT NOT NULL,
+  model_provider TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  committed_session_id TEXT REFERENCES workout_sessions(session_id) ON DELETE SET NULL,
+  failure_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  approved_at TEXT,
+  committed_at TEXT,
+  rejected_at TEXT,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_week_reconciliation_proposals_target_date ON ai_week_reconciliation_proposals(target_date);
+CREATE INDEX IF NOT EXISTS idx_ai_week_reconciliation_proposals_status ON ai_week_reconciliation_proposals(status);

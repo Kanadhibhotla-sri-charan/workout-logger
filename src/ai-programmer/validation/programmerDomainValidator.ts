@@ -31,8 +31,12 @@ export interface DomainValidationResult {
   errors: string[];
 }
 
+function findTargetIn(targets: readonly AIProgrammerTargetContext[], targetType: string, targetId: string): AIProgrammerTargetContext | undefined {
+  return targets.find((t) => t.targetType === targetType && t.targetId === targetId);
+}
+
 function findTarget(context: AIProgrammerContext, targetType: string, targetId: string): AIProgrammerTargetContext | undefined {
-  return context.targets.find((t) => t.targetType === targetType && t.targetId === targetId);
+  return findTargetIn(context.targets, targetType, targetId);
 }
 
 /** Correction pass §2: when an exercise has a Blueprint-authored
@@ -60,6 +64,70 @@ function validateAuthoredPrescription(
     if (received !== expected) {
       errors.push(`${path}.${proposalField} must equal Blueprint-authored value ${expected}; received ${received}`);
     }
+  }
+}
+
+/** Checks ONE exercise against the target/exercise catalogue supplied in
+ * context — the exact same rules `validateProposalDomain` always
+ * applied, extracted so weekReconciliationDomainValidator.ts can reuse
+ * this identical logic per-exercise, per-day, instead of a second,
+ * drifting copy (spec: "do not duplicate... domain logic"). `seen` is
+ * caller-owned (a single-session proposal uses one Set for its whole
+ * exercise list; a week reconciliation may scope it per-day or across
+ * the whole week — that choice belongs to the caller, not this
+ * function). Mutates `errors` in place; does not itself decide overall
+ * ok/not-ok. */
+export function validateExerciseAgainstTargets(
+  exercise: AIWorkoutExerciseProposal,
+  targets: readonly AIProgrammerTargetContext[],
+  seen: Set<string>,
+  path: string,
+  errors: string[]
+): void {
+  if (seen.has(exercise.exerciseId)) {
+    errors.push(`${path}: duplicate exerciseId within this proposal`);
+  }
+  seen.add(exercise.exerciseId);
+
+  if (!BlueprintAdapter.isKnownExercise(exercise.exerciseId)) {
+    errors.push(`${path}: "${exercise.exerciseId}" is not a known Blueprint exercise (outside-Blueprint exercises are not accepted in this milestone)`);
+    return;
+  }
+
+  const target = findTargetIn(targets, exercise.targetType, exercise.targetId);
+  if (!target) {
+    errors.push(`${path}: target ${exercise.targetType}:${exercise.targetId} was not among the targets supplied in context`);
+    return;
+  }
+
+  const catalogueEntry = target.validExercises.find((v) => v.exerciseId === exercise.exerciseId);
+  if (!catalogueEntry) {
+    errors.push(`${path}: this exercise does not train target ${exercise.targetType}:${exercise.targetId} (not in its valid exercise library)`);
+    return;
+  }
+
+  if ((exercise.role === 'primary' || exercise.role === 'secondary') && exercise.role !== catalogueEntry.role) {
+    errors.push(
+      `${path}: declared role "${exercise.role}" does not match Blueprint's own primary/secondary role ("${catalogueEntry.role}") for this exercise/target pair`
+    );
+  }
+
+  if (catalogueEntry.authoredPrescription) {
+    // Correction pass §2: every authored field is authoritative and
+    // must match exactly — not merely stay under a broad ceiling.
+    validateAuthoredPrescription(exercise, catalogueEntry.authoredPrescription, path, errors);
+  } else if (exercise.sets > MAX_SETS_WITHOUT_AUTHORED_CAP) {
+    errors.push(`${path}: sets (${exercise.sets}) exceed the application-configured cap of ${MAX_SETS_WITHOUT_AUTHORED_CAP} (no Blueprint-authored prescription exists for this exercise/target pair)`);
+  }
+
+  if (exercise.repsMax > MAX_REPS) {
+    errors.push(`${path}: repsMax (${exercise.repsMax}) exceeds the application safety ceiling of ${MAX_REPS}`);
+  }
+  if (exercise.rirMax > MAX_RIR) {
+    errors.push(`${path}: rirMax (${exercise.rirMax}) exceeds the application safety ceiling of ${MAX_RIR}`);
+  }
+  if (exercise.restSeconds !== undefined && exercise.restSeconds > MAX_REST_SECONDS) {
+    errors.push(`${path}: restSeconds (${exercise.restSeconds}) exceeds the application safety ceiling of ${MAX_REST_SECONDS}`);
   }
 }
 
@@ -92,53 +160,7 @@ export function validateProposalDomain(proposal: AIWorkoutSessionProposal, conte
 
   const seenExerciseIds = new Set<string>();
   for (const [index, exercise] of proposal.exercises.entries()) {
-    const path = `exercises[${index}] (${exercise.exerciseId})`;
-
-    if (seenExerciseIds.has(exercise.exerciseId)) {
-      errors.push(`${path}: duplicate exerciseId within this proposal`);
-    }
-    seenExerciseIds.add(exercise.exerciseId);
-
-    if (!BlueprintAdapter.isKnownExercise(exercise.exerciseId)) {
-      errors.push(`${path}: "${exercise.exerciseId}" is not a known Blueprint exercise (outside-Blueprint exercises are not accepted in this milestone)`);
-      continue;
-    }
-
-    const target = findTarget(context, exercise.targetType, exercise.targetId);
-    if (!target) {
-      errors.push(`${path}: target ${exercise.targetType}:${exercise.targetId} was not among the targets supplied in context`);
-      continue;
-    }
-
-    const catalogueEntry = target.validExercises.find((v) => v.exerciseId === exercise.exerciseId);
-    if (!catalogueEntry) {
-      errors.push(`${path}: this exercise does not train target ${exercise.targetType}:${exercise.targetId} (not in its valid exercise library)`);
-      continue;
-    }
-
-    if ((exercise.role === 'primary' || exercise.role === 'secondary') && exercise.role !== catalogueEntry.role) {
-      errors.push(
-        `${path}: declared role "${exercise.role}" does not match Blueprint's own primary/secondary role ("${catalogueEntry.role}") for this exercise/target pair`
-      );
-    }
-
-    if (catalogueEntry.authoredPrescription) {
-      // Correction pass §2: every authored field is authoritative and
-      // must match exactly — not merely stay under a broad ceiling.
-      validateAuthoredPrescription(exercise, catalogueEntry.authoredPrescription, path, errors);
-    } else if (exercise.sets > MAX_SETS_WITHOUT_AUTHORED_CAP) {
-      errors.push(`${path}: sets (${exercise.sets}) exceed the application-configured cap of ${MAX_SETS_WITHOUT_AUTHORED_CAP} (no Blueprint-authored prescription exists for this exercise/target pair)`);
-    }
-
-    if (exercise.repsMax > MAX_REPS) {
-      errors.push(`${path}: repsMax (${exercise.repsMax}) exceeds the application safety ceiling of ${MAX_REPS}`);
-    }
-    if (exercise.rirMax > MAX_RIR) {
-      errors.push(`${path}: rirMax (${exercise.rirMax}) exceeds the application safety ceiling of ${MAX_RIR}`);
-    }
-    if (exercise.restSeconds !== undefined && exercise.restSeconds > MAX_REST_SECONDS) {
-      errors.push(`${path}: restSeconds (${exercise.restSeconds}) exceeds the application safety ceiling of ${MAX_REST_SECONDS}`);
-    }
+    validateExerciseAgainstTargets(exercise, context.targets, seenExerciseIds, `exercises[${index}] (${exercise.exerciseId})`, errors);
   }
 
   if (errors.length > 0) {

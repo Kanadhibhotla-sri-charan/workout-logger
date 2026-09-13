@@ -27,7 +27,16 @@ export type AIProgrammerErrorCode =
   | 'AI_PROPOSAL_STALE'
   | 'AI_PROPOSAL_VALIDATION_FAILED'
   | 'AI_PROPOSAL_COMMIT_FAILED'
-  | 'AI_COMMIT_INTENT_MISMATCH';
+  | 'AI_COMMIT_INTENT_MISMATCH'
+  | 'AI_WEEK_RECONCILIATION_NOT_FOUND'
+  | 'AI_WEEK_RECONCILIATION_INVALID_STATE'
+  | 'AI_WEEK_RECONCILIATION_EXPIRED'
+  | 'AI_WEEK_RECONCILIATION_CONFLICT'
+  | 'AI_WEEK_RECONCILIATION_STALE'
+  | 'AI_WEEK_RECONCILIATION_VALIDATION_FAILED'
+  | 'AI_WEEK_RECONCILIATION_COMMIT_FAILED'
+  | 'AI_WEEK_RECONCILIATION_OUTPUT_SCHEMA_INVALID'
+  | 'AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID';
 
 /** Base class for every error this integration throws. `statusCode` is
  * the HTTP status the route layer maps it to; `publicMessage` is what a
@@ -228,5 +237,104 @@ export class AICommitIntentMismatchError extends AIProgrammerError {
       409,
       { proposalId, targetDate, intent, currentActivity }
     );
+  }
+}
+
+// AI-Powered Weekly Reconciliation: a distinct lifecycle for a
+// `reconcile_week` proposal (multiple days, not a single session), so a
+// week-reconciliation error is never confused with a single-session
+// AI_PROPOSAL_* one in logs/API responses — but each mirrors its
+// single-session counterpart's shape/statusCode exactly (same
+// convention, same pattern, deliberately not reinvented).
+
+export class AIWeekReconciliationNotFoundError extends AIProgrammerError {
+  constructor(reconciliationId: string) {
+    super('AI_WEEK_RECONCILIATION_NOT_FOUND', `No AI week-reconciliation proposal found with id "${reconciliationId}".`, 404);
+  }
+}
+
+export class AIWeekReconciliationInvalidStateError extends AIProgrammerError {
+  constructor(reconciliationId: string, currentStatus: string, action: string) {
+    super(
+      'AI_WEEK_RECONCILIATION_INVALID_STATE',
+      `Week-reconciliation proposal "${reconciliationId}" cannot be ${action} while in status "${currentStatus}".`,
+      409,
+      { reconciliationId, currentStatus, action }
+    );
+  }
+}
+
+export class AIWeekReconciliationExpiredError extends AIProgrammerError {
+  constructor(reconciliationId: string, expiresAt: string) {
+    super(
+      'AI_WEEK_RECONCILIATION_EXPIRED',
+      `Week-reconciliation proposal "${reconciliationId}" expired at ${expiresAt} and can no longer be approved or committed.`,
+      410,
+      { reconciliationId, expiresAt }
+    );
+  }
+}
+
+export class AIWeekReconciliationConflictError extends AIProgrammerError {
+  constructor(reconciliationId: string, date: string, conflictingSessionId: string, conflictingStatus: string) {
+    super(
+      'AI_WEEK_RECONCILIATION_CONFLICT',
+      `Week-reconciliation proposal "${reconciliationId}" cannot be committed: a workout session (${conflictingSessionId}, status "${conflictingStatus}") already exists for ${date}.`,
+      409,
+      { reconciliationId, date, conflictingSessionId, conflictingStatus }
+    );
+  }
+}
+
+export class AIWeekReconciliationStaleError extends AIProgrammerError {
+  constructor(reconciliationId: string, issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super(
+      'AI_WEEK_RECONCILIATION_STALE',
+      `Week-reconciliation proposal "${reconciliationId}" no longer matches current Blueprint/training state: ${bounded.join('; ')}`,
+      422,
+      { reconciliationId, issues: bounded }
+    );
+  }
+}
+
+export class AIWeekReconciliationValidationFailedError extends AIProgrammerError {
+  constructor(reconciliationId: string, issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super(
+      'AI_WEEK_RECONCILIATION_VALIDATION_FAILED',
+      `Week-reconciliation proposal "${reconciliationId}" failed revalidation at commit time: ${bounded.join('; ')}`,
+      422,
+      { reconciliationId, issues: bounded }
+    );
+  }
+}
+
+export class AIWeekReconciliationCommitFailedError extends AIProgrammerError {
+  constructor(reconciliationId: string) {
+    super(
+      'AI_WEEK_RECONCILIATION_COMMIT_FAILED',
+      `Week-reconciliation proposal "${reconciliationId}" could not be committed due to an internal error.`,
+      500,
+      { reconciliationId }
+    );
+  }
+}
+
+export class AIWeekReconciliationOutputSchemaInvalidError extends AIProgrammerError {
+  constructor(issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_WEEK_RECONCILIATION_OUTPUT_SCHEMA_INVALID', `AI week-reconciliation output failed structural schema validation: ${bounded.join('; ')}`, 502, {
+      issues: bounded,
+    });
+  }
+}
+
+export class AIWeekReconciliationOutputDomainInvalidError extends AIProgrammerError {
+  constructor(issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID', `AI week-reconciliation output failed domain validation: ${bounded.join('; ')}`, 502, {
+      issues: bounded,
+    });
   }
 }

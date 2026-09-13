@@ -441,6 +441,15 @@ const AI_ERROR_MESSAGES = {
   AI_PROPOSAL_STALE: 'This proposal is out of date and must be regenerated.',
   AI_PROPOSAL_VALIDATION_FAILED: 'The proposal could not be validated. Please try generating again.',
   AI_PROPOSAL_COMMIT_FAILED: 'This proposal could not be committed. Please try again.',
+  AI_WEEK_RECONCILIATION_NOT_FOUND: 'This week reconciliation could not be found. It may have expired or been removed.',
+  AI_WEEK_RECONCILIATION_INVALID_STATE: "This week reconciliation's status no longer allows that action.",
+  AI_WEEK_RECONCILIATION_EXPIRED: 'This week reconciliation expired. Please generate a new one.',
+  AI_WEEK_RECONCILIATION_CONFLICT: 'A planned workout already exists for the requested date.',
+  AI_WEEK_RECONCILIATION_STALE: 'This week reconciliation is out of date and must be regenerated.',
+  AI_WEEK_RECONCILIATION_VALIDATION_FAILED: 'The week reconciliation could not be validated. Please try generating again.',
+  AI_WEEK_RECONCILIATION_COMMIT_FAILED: 'This week reconciliation could not be committed. Please try again.',
+  AI_WEEK_RECONCILIATION_OUTPUT_SCHEMA_INVALID: 'The week reconciliation could not be validated. Please try generating again.',
+  AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID: 'The week reconciliation could not be validated. Please try generating again.',
 };
 
 function mapAiErrorCode(code) {
@@ -509,6 +518,16 @@ function aiProposalNoticeFor(status) {
     return 'The previous proposal is no longer active. You can generate a new one.';
   }
   return null;
+}
+
+/** AI-Powered Weekly Reconciliation: the exact same pending -> approved
+ * -> committed lifecycle as aiProposalActionsFor, applied to a week
+ * reconciliation's status — never a second, drifting policy. Kept as
+ * its own function (rather than reusing aiProposalActionsFor directly)
+ * only because "reconciliation" and "proposal" are different nouns in
+ * the UI copy the two callers use; the underlying rules are identical. */
+function aiWeekReconciliationActionsFor(status) {
+  return aiProposalActionsFor(status);
 }
 
 // ---------- Save-in-flight helper (spec §8) ----------

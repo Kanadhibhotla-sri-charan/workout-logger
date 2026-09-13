@@ -11,6 +11,7 @@ import type Database from 'better-sqlite3';
 import { isValidCalendarDate } from '../../engine/dateMath.js';
 import { AIProgrammerError, AIProgrammerDisabledError } from '../../ai-programmer/errors.js';
 import type { AIProposalRecord } from '../../repositories/aiProposalRepo.js';
+import type { AIWeekReconciliationRecord } from '../../repositories/aiWeekReconciliationRepo.js';
 import { createDefaultAIProgrammerService } from '../../ai-programmer/service/aiProgrammerService.js';
 import {
   approveProposal,
@@ -18,6 +19,12 @@ import {
   getLatestProposalForDate,
   getProposal,
 } from '../../ai-programmer/service/aiProposalLifecycle.js';
+import {
+  approveWeekReconciliation,
+  commitWeekReconciliation,
+  getLatestWeekReconciliationForDate,
+  getWeekReconciliation,
+} from '../../ai-programmer/service/weekReconciliationLifecycle.js';
 import { isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
 
 export const aiProgrammerRouter = Router();
@@ -37,6 +44,31 @@ function serializeProposal(record: AIProposalRecord) {
     targetDate: record.targetDate,
     weekday: record.weekday,
     proposal: record.proposal,
+    contextHash: record.contextHash,
+    provider: record.modelProvider,
+    model: record.modelName,
+    requestId: record.requestId,
+    committedSessionId: record.committedSessionId,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    approvedAt: record.approvedAt,
+    committedAt: record.committedAt,
+    rejectedAt: record.rejectedAt,
+    expiresAt: record.expiresAt,
+  };
+}
+
+/** Same safe, client-facing shape convention as serializeProposal —
+ * proposal content plus lifecycle/audit metadata only, never the raw
+ * provider response, an API key, or a raw SQL error/stack trace. */
+function serializeWeekReconciliation(record: AIWeekReconciliationRecord) {
+  return {
+    reconciliationId: record.id,
+    status: record.status,
+    targetDate: record.targetDate,
+    weekStart: record.weekStart,
+    requestedActivity: record.requestedActivity,
+    output: record.proposal,
     contextHash: record.contextHash,
     provider: record.modelProvider,
     model: record.modelName,
@@ -207,6 +239,131 @@ aiProgrammerRouter.post('/proposals/:proposalId/commit', (req, res, next) => {
     }
     const { proposal } = commitAIProposalToPlannedSession(db(req), req.params.proposalId, { intent });
     res.json({ ok: true, ...serializeProposal(proposal) });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+// AI-Powered Weekly Reconciliation: a distinct route family, mirroring
+// the single-session generate/proposals/approve/commit shape exactly
+// (spec §10) — reconcile-week never auto-commits (spec: "do not
+// silently auto-commit if the existing AI proposal policy requires
+// explicit approval"), same pending -> approved -> committed gate.
+
+aiProgrammerRouter.post('/reconcile-week', async (req, res, next) => {
+  const { targetDate, requestedActivity, reason, swapUnavailableReason } = req.body ?? {};
+  if (typeof targetDate !== 'string' || targetDate.trim() === '') {
+    return res.status(400).json({ ok: false, error: 'targetDate (string, YYYY-MM-DD) is required' });
+  }
+  if (!isValidCalendarDate(targetDate)) {
+    return res.status(400).json({ ok: false, error: `targetDate "${targetDate}" is not a real calendar date in YYYY-MM-DD format` });
+  }
+  // Spec §5: only requestedActivity "gym" is supported in this
+  // iteration — never broadened into arbitrary activity programming.
+  if (requestedActivity !== 'gym') {
+    return res.status(400).json({ ok: false, error: 'requestedActivity is required and must be "gym" (the only supported value in this iteration)' });
+  }
+  if (reason !== undefined && typeof reason !== 'string') {
+    return res.status(400).json({ ok: false, error: 'reason must be a string when present' });
+  }
+  if (swapUnavailableReason !== undefined && typeof swapUnavailableReason !== 'string') {
+    return res.status(400).json({ ok: false, error: 'swapUnavailableReason must be a string when present' });
+  }
+
+  try {
+    const service = createDefaultAIProgrammerService(db(req));
+    const result = await service.reconcileWeek({ targetDate, requestedActivity, reason, swapUnavailableReason });
+    res.json({
+      ok: true,
+      mode: 'reconcile_week',
+      output: result.output,
+      reconciliationId: result.reconciliationId,
+      status: result.status,
+      contextHash: result.contextHash,
+      provider: result.provider,
+      model: result.model,
+      requestId: result.requestId,
+      diagnostics: result.diagnostics,
+    });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+/** Same discovery/rehydration purpose as GET /proposals/latest, for the
+ * weekly reconciliation lifecycle. Registered before
+ * /week-reconciliations/:reconciliationId so the literal path segment
+ * `latest` is never captured as an id. */
+aiProgrammerRouter.get('/week-reconciliations/latest', (req, res, next) => {
+  try {
+    requireEnabled();
+    const { targetDate } = req.query;
+    if (typeof targetDate !== 'string' || targetDate.trim() === '') {
+      return res.status(400).json({ ok: false, error: 'targetDate (string, YYYY-MM-DD) query parameter is required' });
+    }
+    if (!isValidCalendarDate(targetDate)) {
+      return res.status(400).json({ ok: false, error: `targetDate "${targetDate}" is not a real calendar date in YYYY-MM-DD format` });
+    }
+    const record = getLatestWeekReconciliationForDate(db(req), targetDate);
+    if (!record) {
+      return res.json({ ok: true, found: false });
+    }
+    res.json({ ok: true, found: true, ...serializeWeekReconciliation(record) });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+aiProgrammerRouter.get('/week-reconciliations/:reconciliationId', (req, res, next) => {
+  try {
+    requireEnabled();
+    const record = getWeekReconciliation(db(req), req.params.reconciliationId);
+    res.json({ ok: true, ...serializeWeekReconciliation(record) });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+aiProgrammerRouter.post('/week-reconciliations/:reconciliationId/approve', (req, res, next) => {
+  try {
+    requireEnabled();
+    const record = approveWeekReconciliation(db(req), req.params.reconciliationId);
+    res.json({ ok: true, ...serializeWeekReconciliation(record) });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+/** The only route that persists a week-reconciliation proposal into the
+ * real workout_sessions/program_sessions/week_activity_overrides model,
+ * via commitWeekReconciliation() — never called automatically from
+ * reconcile-week/approve. No `intent` field here (unlike the single-
+ * session commit route): a week reconciliation always both fills the
+ * target day's actionable session AND aligns whichever days' activity
+ * representation the model's own output actually changed — there is no
+ * "fill vs replace" ambiguity to disambiguate, since the whole point of
+ * this request was always to replace the target date's activity with
+ * Gym. */
+aiProgrammerRouter.post('/week-reconciliations/:reconciliationId/commit', (req, res, next) => {
+  try {
+    requireEnabled();
+    const { reconciliation } = commitWeekReconciliation(db(req), req.params.reconciliationId);
+    res.json({ ok: true, ...serializeWeekReconciliation(reconciliation) });
   } catch (err) {
     if (err instanceof AIProgrammerError) {
       return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });

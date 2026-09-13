@@ -4,6 +4,8 @@
 **Status:** V1 implementation specification  
 **Purpose:** Define the exact context assembled by the application before calling the AI workout programmer.
 
+> **Addendum (AI-Powered Weekly Reconciliation):** this document's "Reconcile" concept (§1) has since been implemented for the specific "simple day-swap isn't appropriate" case as its own dedicated context type, `AIReconciliationContext` (`src/ai-programmer/context/reconciliationContextTypes.ts` / `reconciliationContextBuilder.ts`) — a sibling to `AIProgrammerContext` below, not a reuse of it, since a whole-week reconciliation needs a 7-day existing-program view this single-targetDate context has no room for. See `docs/AI_WEEKLY_RECONCILIATION_REPORT.md` for the full implementation.
+
 ---
 
 ## 1. Purpose

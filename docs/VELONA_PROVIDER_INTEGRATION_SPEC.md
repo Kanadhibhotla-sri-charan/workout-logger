@@ -4,6 +4,8 @@
 **Status:** V1 implementation specification  
 **Purpose:** Define the provider adapter that connects Workout Logger’s AI Programmer to Velona without coupling the application’s programming logic to a specific provider.
 
+> **Addendum (AI-Powered Weekly Reconciliation):** `AIProgrammerProviderRequest.mode` is now `'generate_session' | 'reconcile_week'` (`src/ai-programmer/contracts/providerTypes.ts`) — `VelonaProvider` itself required zero mode-specific changes, since its request/response wire format (§below) was already mode-agnostic; only the caller-supplied `systemInstruction`/`context`/`outputSchema` differ per mode. See `docs/AI_WEEKLY_RECONCILIATION_REPORT.md` for the full implementation.
+
 ---
 
 ## 1. Scope

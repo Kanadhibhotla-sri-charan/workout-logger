@@ -69,8 +69,99 @@ const FORBIDDEN_BEHAVIORS = [
   'Return only the requested JSON object — no prose outside it.',
 ];
 
-function activityTypesForDailyActivity(activity: 'gym' | 'badminton' | 'both' | 'unselected'): ActivityType[] {
+export function activityTypesForDailyActivity(activity: 'gym' | 'badminton' | 'both' | 'unselected'): ActivityType[] {
   return activity === 'badminton' || activity === 'both' ? ['badminton'] : [];
+}
+
+/** Shapes `assembleWeeklyPlanInput`'s per-target output into
+ * `AIProgrammerTargetContext[]` — the exact per-target exposure/
+ * history/recovery/valid-exercise shaping every AI context (single-
+ * session generation AND week reconciliation) needs, extracted so
+ * reconciliationContextBuilder.ts reuses this identical logic rather
+ * than a second, drifting copy (spec: "do not duplicate exposure,
+ * history, recovery, goal, or Blueprint calculations"). `evaluationDate`
+ * is the date recovery/days-since-last-trained is evaluated as of (the
+ * single session's targetDate, or a reconciliation's own targetDate);
+ * `otherActivityToday` is that same date's non-gym activity, if any;
+ * `missingData` is the caller's own diagnostics array, appended to in
+ * place exactly as buildProgrammerContext already did inline. */
+export function buildTargetContexts(
+  planInput: { targets: readonly TargetBuildContext[] },
+  evaluationDate: string,
+  otherActivityToday: ActivityType[],
+  missingData: string[]
+): AIProgrammerTargetContext[] {
+  return planInput.targets.map((t: TargetBuildContext) => {
+    const targetLabel = t.target_type === 'physique_target' ? BlueprintAdapter.getTarget(t.target_id) : BlueprintAdapter.getFunctionalGoal(t.target_id);
+    const displayName = targetLabel?.name ?? t.target_id;
+    const parentRegion = targetLabel && 'parent_region' in targetLabel ? targetLabel.parent_region : null;
+
+    const daysSinceLastTrainedAsOfTargetDate = t.last_trained_date ? daysBetween(t.last_trained_date, evaluationDate) : null;
+
+    const recovery = applyRecoveryConstraint({
+      target_type: t.target_type,
+      target_id: t.target_id,
+      weekly_exposure_units: t.weekly_exposure_units,
+      rolling_exposure_units: t.rolling_exposure_units,
+      rolling_window_days: t.rolling_window_days,
+      days_since_target_last_trained: daysSinceLastTrainedAsOfTargetDate,
+      recent_badminton: t.recent_badminton,
+      other_activity_today: otherActivityToday,
+    });
+
+    const exerciseHistory: Record<string, Array<{ date: string; completedSets: number }>> = {};
+    for (const [exerciseId, history] of Object.entries(t.exercise_history)) {
+      exerciseHistory[exerciseId] = history.slice(0, 3).map((h) => ({
+        date: h.date,
+        completedSets: h.sets.filter((s) => s.completed).length,
+      }));
+    }
+
+    const validExercises: AIProgrammerValidExerciseContext[] = exercisesTrainingTarget(t.target_type, t.target_id).map((exerciseId) => {
+      const exercise = BlueprintAdapter.getExercise(exerciseId);
+      const prescriptionEntry = lookupExercisePrescriptionAnyLevel(t.target_id, exerciseId);
+      let authoredPrescription: AIProgrammerValidExerciseContext['authoredPrescription'] = null;
+      if (prescriptionEntry) {
+        try {
+          const reps = parseRange(prescriptionEntry.reps);
+          const rir = parseRange(prescriptionEntry.rir);
+          authoredPrescription = { sets: prescriptionEntry.sets, repsMin: reps.min, repsMax: reps.max, rirMin: rir.min, rirMax: rir.max };
+        } catch {
+          missingData.push(`exercise ${exerciseId} for target ${t.target_id}: malformed authored reps/rir range — omitted, not guessed`);
+        }
+      }
+      return {
+        exerciseId,
+        name: exercise?.name ?? exerciseId,
+        role: roleFor(exerciseId, t.target_type, t.target_id) as 'primary' | 'secondary',
+        equipment: exercise?.equipment ?? [],
+        authoredPrescription,
+      };
+    });
+
+    if (validExercises.length === 0) {
+      missingData.push(`target ${t.target_type}:${t.target_id} has no known Blueprint exercises at all`);
+    }
+
+    return {
+      targetType: t.target_type,
+      targetId: t.target_id,
+      displayName,
+      parentRegion,
+      isSpecialization: t.is_specialization,
+      goalId: t.is_specialization ? t.goal_id : null,
+      currentWeeklyPrimarySets: t.current_weekly_primary_sets,
+      weeklySecondarySets: t.weekly_secondary_sets,
+      weeklyExposureUnits: t.weekly_exposure_units,
+      rollingExposureUnits: t.rolling_exposure_units,
+      rollingWindowDays: t.rolling_window_days,
+      lastTrainedDate: t.last_trained_date,
+      daysSinceLastTrainedAsOfTargetDate,
+      exerciseHistory,
+      recovery,
+      validExercises,
+    };
+  });
 }
 
 /** Correction pass §5 (Option A): the user's stored
@@ -167,78 +258,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const planInput = assembleWeeklyPlanInput(db, weekStart, budgetMinutes, currentDate);
   const otherActivityToday = activityTypesForDailyActivity(targetDateActivity);
 
-  const targets: AIProgrammerTargetContext[] = planInput.targets.map((t: TargetBuildContext) => {
-    const targetLabel =
-      t.target_type === 'physique_target' ? BlueprintAdapter.getTarget(t.target_id) : BlueprintAdapter.getFunctionalGoal(t.target_id);
-    const displayName = targetLabel?.name ?? t.target_id;
-    const parentRegion = targetLabel && 'parent_region' in targetLabel ? targetLabel.parent_region : null;
-
-    const daysSinceLastTrainedAsOfTargetDate = t.last_trained_date ? daysBetween(t.last_trained_date, input.targetDate) : null;
-
-    const recovery = applyRecoveryConstraint({
-      target_type: t.target_type,
-      target_id: t.target_id,
-      weekly_exposure_units: t.weekly_exposure_units,
-      rolling_exposure_units: t.rolling_exposure_units,
-      rolling_window_days: t.rolling_window_days,
-      days_since_target_last_trained: daysSinceLastTrainedAsOfTargetDate,
-      recent_badminton: t.recent_badminton,
-      other_activity_today: otherActivityToday,
-    });
-
-    const exerciseHistory: Record<string, Array<{ date: string; completedSets: number }>> = {};
-    for (const [exerciseId, history] of Object.entries(t.exercise_history)) {
-      exerciseHistory[exerciseId] = history.slice(0, 3).map((h) => ({
-        date: h.date,
-        completedSets: h.sets.filter((s) => s.completed).length,
-      }));
-    }
-
-    const validExercises: AIProgrammerValidExerciseContext[] = exercisesTrainingTarget(t.target_type, t.target_id).map((exerciseId) => {
-      const exercise = BlueprintAdapter.getExercise(exerciseId);
-      const prescriptionEntry = lookupExercisePrescriptionAnyLevel(t.target_id, exerciseId);
-      let authoredPrescription: AIProgrammerValidExerciseContext['authoredPrescription'] = null;
-      if (prescriptionEntry) {
-        try {
-          const reps = parseRange(prescriptionEntry.reps);
-          const rir = parseRange(prescriptionEntry.rir);
-          authoredPrescription = { sets: prescriptionEntry.sets, repsMin: reps.min, repsMax: reps.max, rirMin: rir.min, rirMax: rir.max };
-        } catch {
-          missingData.push(`exercise ${exerciseId} for target ${t.target_id}: malformed authored reps/rir range — omitted, not guessed`);
-        }
-      }
-      return {
-        exerciseId,
-        name: exercise?.name ?? exerciseId,
-        role: roleFor(exerciseId, t.target_type, t.target_id) as 'primary' | 'secondary',
-        equipment: exercise?.equipment ?? [],
-        authoredPrescription,
-      };
-    });
-
-    if (validExercises.length === 0) {
-      missingData.push(`target ${t.target_type}:${t.target_id} has no known Blueprint exercises at all`);
-    }
-
-    return {
-      targetType: t.target_type,
-      targetId: t.target_id,
-      displayName,
-      parentRegion,
-      isSpecialization: t.is_specialization,
-      goalId: t.is_specialization ? t.goal_id : null,
-      currentWeeklyPrimarySets: t.current_weekly_primary_sets,
-      weeklySecondarySets: t.weekly_secondary_sets,
-      weeklyExposureUnits: t.weekly_exposure_units,
-      rollingExposureUnits: t.rolling_exposure_units,
-      rollingWindowDays: t.rolling_window_days,
-      lastTrainedDate: t.last_trained_date,
-      daysSinceLastTrainedAsOfTargetDate,
-      exerciseHistory,
-      recovery,
-      validExercises,
-    };
-  });
+  const targets: AIProgrammerTargetContext[] = buildTargetContexts(planInput, input.targetDate, otherActivityToday, missingData);
 
   const weekProgramExists = new WeeklyProgramRepo(db).getByWeekStart(weekStart) !== undefined;
 
