@@ -397,6 +397,15 @@
 
       section.appendChild(el('p', { class: 'faint', text: 'Generate an AI-suggested session for this day. Nothing is added to your program until you explicitly approve and commit it.' }));
 
+      // AI Activity Alignment / Non-Regenerative Schedule Fixes Part 3:
+      // `day.activity` (Gym/Badminton/Both/Rest, from /week's own
+      // authoritative override-applied activity — never re-derived here)
+      // decides which commit intent this day's commit action uses.
+      // Captured once: this day's activity cannot change from underneath
+      // this modal while it's open (nothing else in this flow writes an
+      // activity override).
+      const isGymDay = day.activity === 'gym' || day.activity === 'both';
+
       let state = null;
       let inFlight = false;
       // Gates action rendering until discovery resolves — never shows
@@ -450,6 +459,11 @@
         }
         if (actions.canCommit) {
           actionsEl.appendChild(el('p', { class: 'muted', text: 'Approved — not yet added to your program.' }));
+          if (!isGymDay) {
+            actionsEl.appendChild(
+              el('p', { class: 'faint', text: `Committing will replace ${formatWeekday(day.weekday)}'s current activity (${formatDailyActivity(day.activity)}) with Gym for this week.` })
+            );
+          }
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
             createButton({ label: inFlight ? 'Committing…' : 'Commit to Planned Workout', disabled: inFlight, onClick: onCommit }),
           ]));
@@ -556,7 +570,10 @@
         showInlineStatus(statusEl, 'saving', 'Committing…');
         renderActions();
         try {
-          const committed = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/commit`, { method: 'POST' });
+          const committed = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/commit`, {
+            method: 'POST',
+            body: { intent: isGymDay ? 'fill_existing_gym_day' : 'replace_day_activity' },
+          });
           if (!isCurrent()) return;
           state = committed;
           showInlineStatus(statusEl, null, null);

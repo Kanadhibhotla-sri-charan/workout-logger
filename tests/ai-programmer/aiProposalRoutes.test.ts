@@ -15,6 +15,9 @@ import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../../src/repositories/outsideBlueprintExercisesRepo.js';
+import { WeekActivityOverridesRepo } from '../../src/repositories/weekActivityOverridesRepo.js';
+import { applyWeekOverrides, deriveDailyActivity } from '../../src/lib/dailyActivity.js';
+import { programmingWeekStart, weekdayOfDate } from '../../src/engine/workoutBuilder.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';
@@ -669,5 +672,139 @@ describe('GET /api/ai-programmer/proposals/latest', () => {
     expect(res.status).toBe(503);
     expect(res.body.error).toBe('AI_PROGRAMMER_DISABLED');
     void proposalId; // only asserting the flag short-circuits before any lookup
+  });
+});
+
+// AI Activity Alignment / Non-Regenerative Schedule Fixes
+// (docs/CLAUDE_TASK_AI_ACTIVITY_ALIGNMENT_AND_NON_REGENERATIVE_SCHEDULE_FIXES.md
+// Part 3): commit's `intent` field and its weekly-activity alignment
+// side effect. SUNDAY (2026-09-13) is NOT in this fixture's
+// training_days (['monday','tuesday','thursday','friday']) and has no
+// other_activity_schedule entry, so it is 'unselected' (Rest) by
+// default — exactly the "Rest day" case Part 3 describes. MONDAY
+// (2026-09-14) IS a training day, so it starts out already Gym.
+describe('POST /api/ai-programmer/proposals/:proposalId/commit — intent (Part 3)', () => {
+  const MONDAY = '2026-09-14';
+
+  async function generateProposalForDate(targetDate: string, weekday: string): Promise<string> {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        data: { output: JSON.stringify(validProposalJson({ targetDate, weekday })) },
+      })
+    );
+    const res = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate });
+    expect(res.status).toBe(200);
+    return res.body.proposalId as string;
+  }
+
+  function effectiveActivityFor(targetDate: string): string {
+    // Mirrors src/ai-programmer/service/aiProposalLifecycle.ts's own
+    // effectiveActivityForDate — re-derived here from the real repos
+    // rather than imported, so this test independently verifies the
+    // real persisted override state, not the same code path under test.
+    const user = new UsersRepo(db).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(db).get(user.id)!;
+    const weekStart = programmingWeekStart(targetDate);
+    const weekday = weekdayOfDate(targetDate);
+    const overrides = new WeekActivityOverridesRepo(db).get(profile.id, weekStart);
+    const effective = applyWeekOverrides(profile.training_days, profile.other_activity_schedule, overrides);
+    return deriveDailyActivity(weekday, effective.trainingDays, effective.otherActivitySchedule);
+  }
+
+  it('intent omitted (backward compatibility): commit succeeds exactly as before, and never touches the weekly activity override', async () => {
+    expect(effectiveActivityFor(SUNDAY)).toBe('unselected');
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`);
+    expect(res.status).toBe(200);
+    expect(effectiveActivityFor(SUNDAY)).toBe('unselected'); // unchanged — the pre-existing gap, deliberately preserved when intent is omitted
+  });
+
+  it('intent: "replace_day_activity" on a Rest day aligns the weekly override to Gym, in the same request', async () => {
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
+    expect(res.status).toBe(200);
+    expect(effectiveActivityFor(SUNDAY)).toBe('gym');
+  });
+
+  it('intent: "fill_existing_gym_day" on a Rest day is rejected (409 AI_COMMIT_INTENT_MISMATCH) — the caller\'s assumption about the day is wrong', async () => {
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'fill_existing_gym_day' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('AI_COMMIT_INTENT_MISMATCH');
+    // Rejected before writing anything.
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
+    expect(effectiveActivityFor(SUNDAY)).toBe('unselected');
+    const getRes = await request(app).get(`/api/ai-programmer/proposals/${proposalId}`);
+    expect(getRes.body.status).toBe('approved'); // never advanced to committed
+  });
+
+  it('intent: "fill_existing_gym_day" on an ALREADY-gym day succeeds and never writes an override', async () => {
+    expect(effectiveActivityFor(MONDAY)).toBe('gym');
+    const proposalId = await generateProposalForDate(MONDAY, 'monday');
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'fill_existing_gym_day' });
+    expect(res.status).toBe(200);
+    expect(effectiveActivityFor(MONDAY)).toBe('gym');
+  });
+
+  it('intent: "replace_day_activity" on an already-gym day is a harmless no-op for the override (still succeeds)', async () => {
+    const proposalId = await generateProposalForDate(MONDAY, 'monday');
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
+    expect(res.status).toBe(200);
+    expect(effectiveActivityFor(MONDAY)).toBe('gym');
+  });
+
+  it('rejects an unrecognized intent value with 400, before touching the database', async () => {
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'do_something_else' });
+    expect(res.status).toBe(400);
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
+  });
+
+  it('repeated commit with intent is still idempotent — the second call returns the same committed session without re-checking intent', async () => {
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const first = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
+    expect(first.status).toBe(200);
+    // A second call with a MISMATCHED intent must still succeed
+    // idempotently — the proposal is already committed, so intent
+    // validation (which only applies to the pending->committed
+    // transition) never runs again.
+    const second = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'fill_existing_gym_day' });
+    expect(second.status).toBe(200);
+    expect(second.body.committedSessionId).toBe(first.body.committedSessionId);
+  });
+
+  it('a persistence failure mid-commit rolls back the alignment override too — no orphaned override on a failed commit', async () => {
+    expect(effectiveActivityFor(SUNDAY)).toBe('unselected');
+    const proposalId = await generateProposal();
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+
+    const spy = vi.spyOn(WorkoutSessionsRepo.prototype, 'addExercisePerformance').mockImplementation(() => {
+      throw new Error('SQLITE_CONSTRAINT: simulated failure');
+    });
+
+    const res = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'replace_day_activity' });
+    expect(res.status).toBe(500);
+    spy.mockRestore();
+
+    // The override write happened INSIDE the same transaction as
+    // session creation — a mid-transaction failure must roll back both,
+    // never leaving the week's activity silently changed to Gym while
+    // no real session actually exists for that date.
+    expect(effectiveActivityFor(SUNDAY)).toBe('unselected');
+    expect(new WorkoutSessionsRepo(db).listSessionsByDate(SUNDAY)).toHaveLength(0);
   });
 });

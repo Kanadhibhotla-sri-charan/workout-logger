@@ -394,7 +394,8 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     expect(html).toMatch(/aiApi\('\/api\/ai-programmer\/generate-session', \{ method: 'POST', body: \{ targetDate: day\.date \} \}\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{generated\.proposalId\}`\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/approve`, \{ method: 'POST' \}\)/);
-    expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/commit`, \{ method: 'POST' \}\)/);
+    expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/commit`, \{/);
+    expect(html).toMatch(/method: 'POST',\s*\n\s*body: \{ intent: isGymDay \? 'fill_existing_gym_day' : 'replace_day_activity' \},/);
   });
 
   it('approve and commit are two distinct functions/actions, never combined into one', () => {
@@ -491,6 +492,22 @@ describe('program.html: AI Programmer proposal discovery/rehydration wiring', ()
     // renderNotice never itself decides canGenerate — that stays solely
     // aiProposalActionsFor's job (checked in the test above).
     expect(renderNoticeBody).not.toMatch(/canGenerate/);
+  });
+
+  it('AI Activity Alignment Part 3: commit intent is computed from day.activity, not invented or inferred elsewhere', () => {
+    expect(html).toMatch(/const isGymDay = day\.activity === 'gym' \|\| day\.activity === 'both';/);
+    // Computed exactly once per section build, from the real /week
+    // response field — never re-derived from day.type/day.status, which
+    // describe something different (the deterministic plan/session
+    // status, not the authoritative weekly activity).
+    const matches = html.match(/const isGymDay = day\.activity/g) || [];
+    expect(matches.length).toBe(1);
+  });
+
+  it('warns the user before committing onto a non-gym day that doing so replaces the day\'s activity', () => {
+    const sectionBody = html.slice(html.indexOf('function buildAiProposalSection('), html.indexOf('const GROUP_ORDER'));
+    expect(sectionBody).toMatch(/if \(!isGymDay\) \{/);
+    expect(sectionBody).toMatch(/Committing will replace \$\{formatWeekday\(day\.weekday\)\}'s current activity/);
   });
 
   it('every async continuation (discover/generate/approve/commit) checks isCurrent() before applying its result — the stale-response guard', () => {

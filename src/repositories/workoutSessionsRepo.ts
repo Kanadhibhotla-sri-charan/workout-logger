@@ -169,6 +169,18 @@ export class WorkoutSessionsRepo {
     return session;
   }
 
+  /** AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 2):
+   * reassigns which calendar date a session belongs to — used ONLY by
+   * src/engine/scheduleOperations.ts's swap operation, to move a still-
+   * `planned` AI-committed session along with its day during a schedule
+   * swap (the session's own exercises/sets are never touched, only
+   * `date`). Never called for a `completed`/`in_progress` session —
+   * callers check that before ever reaching here (a locked day's real
+   * history must never move). */
+  moveDate(id: string, newDate: string): void {
+    this.db.prepare('UPDATE workout_sessions SET date = @date WHERE session_id = @session_id').run({ session_id: id, date: newDate });
+  }
+
   updateSession(id: string, input: UpdateWorkoutSessionInput): WorkoutSession | undefined {
     const existing = this.getSession(id);
     if (!existing) return undefined;

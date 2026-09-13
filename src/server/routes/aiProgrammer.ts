@@ -179,15 +179,28 @@ aiProgrammerRouter.post('/proposals/:proposalId/approve', (req, res, next) => {
   }
 });
 
+const AI_COMMIT_INTENTS = ['fill_existing_gym_day', 'replace_day_activity'] as const;
+
 /** The only route that persists an AI proposal into the real
  * workout/session model (spec §8/§10), via
  * commitAIProposalToPlannedSession() — never called from
  * `generate-session` or `approve` automatically (spec §17: "no
- * automatic fallback from failed AI generation to automatic commit"). */
+ * automatic fallback from failed AI generation to automatic commit").
+ *
+ * AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 3):
+ * `intent` is an OPTIONAL body field (`'fill_existing_gym_day' |
+ * 'replace_day_activity'`) — see commitAIProposalToPlannedSession's own
+ * doc comment for why it is optional (backward compatibility) and what
+ * each value does. A present-but-invalid value is a 400; an absent
+ * value is passed straight through as `undefined`. */
 aiProgrammerRouter.post('/proposals/:proposalId/commit', (req, res, next) => {
   try {
     requireEnabled();
-    const { proposal } = commitAIProposalToPlannedSession(db(req), req.params.proposalId);
+    const { intent } = req.body ?? {};
+    if (intent !== undefined && !AI_COMMIT_INTENTS.includes(intent)) {
+      return res.status(400).json({ ok: false, error: `intent, if given, must be one of ${AI_COMMIT_INTENTS.join('|')}` });
+    }
+    const { proposal } = commitAIProposalToPlannedSession(db(req), req.params.proposalId, { intent });
     res.json({ ok: true, ...serializeProposal(proposal) });
   } catch (err) {
     if (err instanceof AIProgrammerError) {

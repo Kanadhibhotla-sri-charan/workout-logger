@@ -26,7 +26,8 @@ export type AIProgrammerErrorCode =
   | 'AI_PROPOSAL_CONFLICT'
   | 'AI_PROPOSAL_STALE'
   | 'AI_PROPOSAL_VALIDATION_FAILED'
-  | 'AI_PROPOSAL_COMMIT_FAILED';
+  | 'AI_PROPOSAL_COMMIT_FAILED'
+  | 'AI_COMMIT_INTENT_MISMATCH';
 
 /** Base class for every error this integration throws. `statusCode` is
  * the HTTP status the route layer maps it to; `publicMessage` is what a
@@ -204,5 +205,28 @@ export class AIProposalValidationFailedError extends AIProgrammerError {
 export class AIProposalCommitFailedError extends AIProgrammerError {
   constructor(proposalId: string) {
     super('AI_PROPOSAL_COMMIT_FAILED', `Proposal "${proposalId}" could not be committed due to an internal error.`, 500, { proposalId });
+  }
+}
+
+// AI Activity Alignment / Non-Regenerative Schedule Fixes (Part 3):
+// commit must explicitly know whether it is filling an already-Gym day
+// or replacing a non-Gym day's activity — never inferred from the mere
+// existence of a proposal (task's own Implementation Guidance §7).
+
+/** `intent: 'fill_existing_gym_day'` was passed, but the target date's
+ * CURRENT effective weekly activity (recurring TrainingProfile + this
+ * week's own overrides) is not Gym/Both — the caller's assumption about
+ * the day is stale or wrong. Never silently reinterpreted as a replace;
+ * the caller must re-check the day's real activity and either pass
+ * `replace_day_activity` (with the user's explicit confirmation) or
+ * target a different date. */
+export class AICommitIntentMismatchError extends AIProgrammerError {
+  constructor(proposalId: string, targetDate: string, intent: string, currentActivity: string) {
+    super(
+      'AI_COMMIT_INTENT_MISMATCH',
+      `Proposal "${proposalId}" cannot be committed with intent "${intent}": ${targetDate}'s current activity is "${currentActivity}", not Gym.`,
+      409,
+      { proposalId, targetDate, intent, currentActivity }
+    );
   }
 }
