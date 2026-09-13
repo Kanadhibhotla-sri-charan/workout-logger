@@ -10,7 +10,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
-import { ScheduleOperationError, swapDayActivities } from '../../src/engine/scheduleOperations.js';
+import { ScheduleOperationError, moveActivity, swapDayActivities } from '../../src/engine/scheduleOperations.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WeekActivityOverridesRepo } from '../../src/repositories/weekActivityOverridesRepo.js';
@@ -284,5 +284,154 @@ describe('swapDayActivities — validation', () => {
 
   it('rejects when no training profile exists yet', () => {
     expect(() => swapDayActivities(db, WEEK_START, 'wednesday', 'thursday')).toThrow(ScheduleOperationError);
+  });
+});
+
+// Final AI-Deterministic Precedence and Scheduling Fixes §4 (Option B):
+// low-level tests of moveActivity — true asymmetric move, mirroring
+// swapDayActivities' own coverage above.
+describe('moveActivity — the worked example (Gym Thursday -> Wednesday)', () => {
+  it('moves the persisted prescription and sets fromDay to Rest, never generating a new one', () => {
+    setupProfile(['thursday']);
+    const programRepo = new WeeklyProgramRepo(db);
+    const program = programRepo.create(WEEK_START, '2026-09-06');
+    const thursdaySnapshot = { plannedWork: [{ exercise_id: 'back-squat', target_id: 'quads', target_type: 'physique_target', sets: 3, reps_min: 8, reps_max: 12 }] };
+    programRepo.upsertSession(program.id, 3, 'Legs', 'gym', thursdaySnapshot);
+
+    moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+
+    expect(effectiveActivity('wednesday')).toBe('gym');
+    expect(effectiveActivity('thursday')).toBe('unselected');
+    const after = programRepo.getByWeekStart(WEEK_START)!;
+    expect(after.sessions.find((s) => s.day_index === 3)).toBeUndefined(); // Thursday's row is gone
+    expect(after.sessions.find((s) => s.day_index === 2)!.snapshot).toEqual(thursdaySnapshot);
+  });
+});
+
+describe('moveActivity — destination content is discarded, not swapped back', () => {
+  it('a Badminton destination is overwritten with Gym; source does NOT become Badminton', () => {
+    setupProfile(['thursday']);
+    const user = new UsersRepo(db).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(db).get(user.id)!;
+    new WeekActivityOverridesRepo(db).setOverride(profile.id, WEEK_START, 'wednesday', 'badminton');
+
+    moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+
+    expect(effectiveActivity('wednesday')).toBe('gym');
+    expect(effectiveActivity('thursday')).toBe('unselected'); // NOT 'badminton'
+  });
+
+  it('discards the destination\'s own persisted deterministic prescription when the source has real activity but no matching gym content to move in', () => {
+    // Thursday (source) has real content to move (Badminton — not
+    // Rest, so this is NOT the idempotency no-op case), but no gym
+    // prescription of its own. Wednesday (destination) starts as Gym
+    // with a persisted snapshot, which must be discarded, not kept,
+    // once Wednesday's activity becomes Badminton.
+    setupProfile([]);
+    const programRepo = new WeeklyProgramRepo(db);
+    const program = programRepo.create(WEEK_START, '2026-09-06');
+    const wednesdaySnapshot = { plannedWork: [{ exercise_id: 'bench-press', target_id: 'mid-pec', target_type: 'physique_target', sets: 3, reps_min: 6, reps_max: 12 }] };
+    programRepo.upsertSession(program.id, 2, 'Push', 'gym', wednesdaySnapshot);
+    const user = new UsersRepo(db).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(db).get(user.id)!;
+    new WeekActivityOverridesRepo(db).setOverride(profile.id, WEEK_START, 'wednesday', 'gym');
+    new WeekActivityOverridesRepo(db).setOverride(profile.id, WEEK_START, 'thursday', 'badminton');
+
+    moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+
+    expect(effectiveActivity('wednesday')).toBe('badminton'); // moved in from thursday
+    expect(effectiveActivity('thursday')).toBe('unselected');
+    const after = programRepo.getByWeekStart(WEEK_START)!;
+    expect(after.sessions.find((s) => s.day_index === 2)).toBeUndefined(); // discarded, not kept
+  });
+});
+
+describe('moveActivity — moves a real planned session on the source day', () => {
+  it('moves the session\'s date along with the move', () => {
+    setupProfile(['thursday']);
+    const thursdayDate = '2026-09-03';
+    const wednesdayDate = '2026-09-02';
+    const sessionsRepo = new WorkoutSessionsRepo(db);
+    const planned = sessionsRepo.createSession({ date: thursdayDate, session_type: 'gym', status: 'planned', source_type: 'ai' });
+
+    const result = moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+
+    expect(sessionsRepo.getSession(planned.session_id)!.date).toBe(wednesdayDate);
+    expect(result.movedPlannedSessionIds).toEqual([planned.session_id]);
+  });
+});
+
+describe('moveActivity — ownership/locking (§5)', () => {
+  it('rejects when the destination already has an active planned session (DESTINATION_OCCUPIED)', () => {
+    setupProfile(['thursday']);
+    const wednesdayDate = '2026-09-02';
+    new WorkoutSessionsRepo(db).createSession({ date: wednesdayDate, session_type: 'gym', status: 'planned', source_type: 'ai' });
+
+    try {
+      moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+      expect.unreachable('expected moveActivity to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ScheduleOperationError);
+      expect((err as ScheduleOperationError).code).toBe('DESTINATION_OCCUPIED');
+    }
+  });
+
+  it('rejects when the source has a completed session (DAY_LOCKED), writing nothing', () => {
+    setupProfile(['thursday']);
+    new WorkoutSessionsRepo(db).createSession({ date: '2026-09-03', session_type: 'gym', status: 'completed' });
+
+    expect(() => moveActivity(db, WEEK_START, 'thursday', 'wednesday')).toThrow(ScheduleOperationError);
+    expect(effectiveActivity('thursday')).toBe('gym'); // untouched
+  });
+
+  it('rejects when the destination has a completed session (DAY_LOCKED)', () => {
+    setupProfile(['thursday']);
+    new WorkoutSessionsRepo(db).createSession({ date: '2026-09-02', session_type: 'gym', status: 'completed' });
+
+    expect(() => moveActivity(db, WEEK_START, 'thursday', 'wednesday')).toThrow(ScheduleOperationError);
+  });
+
+  it('rejects same-day moves', () => {
+    setupProfile(['thursday']);
+    expect(() => moveActivity(db, WEEK_START, 'thursday', 'thursday')).toThrow(ScheduleOperationError);
+  });
+
+  it('rejects when no training profile exists yet', () => {
+    expect(() => moveActivity(db, WEEK_START, 'wednesday', 'thursday')).toThrow(ScheduleOperationError);
+  });
+});
+
+describe('moveActivity — reversibility and idempotency (§11.D)', () => {
+  it('moving back restores the original state', () => {
+    setupProfile(['thursday']);
+    const programRepo = new WeeklyProgramRepo(db);
+    const program = programRepo.create(WEEK_START, '2026-09-06');
+    const thursdaySnapshot = { plannedWork: [{ exercise_id: 'back-squat', target_id: 'quads', target_type: 'physique_target', sets: 3, reps_min: 8, reps_max: 12 }] };
+    programRepo.upsertSession(program.id, 3, 'Legs', 'gym', thursdaySnapshot);
+
+    moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+    moveActivity(db, WEEK_START, 'wednesday', 'thursday');
+
+    expect(effectiveActivity('thursday')).toBe('gym');
+    expect(effectiveActivity('wednesday')).toBe('unselected');
+    const after = programRepo.getByWeekStart(WEEK_START)!;
+    expect(after.sessions.find((s) => s.day_index === 3)!.snapshot).toEqual(thursdaySnapshot);
+  });
+
+  it('repeating the same move is a no-op the second time — never wipes what the first move produced', () => {
+    setupProfile(['thursday']);
+    const programRepo = new WeeklyProgramRepo(db);
+    const program = programRepo.create(WEEK_START, '2026-09-06');
+    const thursdaySnapshot = { plannedWork: [{ exercise_id: 'back-squat', target_id: 'quads', target_type: 'physique_target', sets: 3, reps_min: 8, reps_max: 12 }] };
+    programRepo.upsertSession(program.id, 3, 'Legs', 'gym', thursdaySnapshot);
+
+    const first = moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+    const second = moveActivity(db, WEEK_START, 'thursday', 'wednesday');
+
+    expect(second.movedPlannedSessionIds).toEqual([]);
+    expect(effectiveActivity('wednesday')).toBe('gym'); // still gym, not wiped
+    const after = programRepo.getByWeekStart(WEEK_START)!;
+    expect(after.sessions.find((s) => s.day_index === 2)!.snapshot).toEqual(thursdaySnapshot);
+    void first;
   });
 });

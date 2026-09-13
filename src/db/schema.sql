@@ -248,6 +248,23 @@ CREATE TABLE IF NOT EXISTS program_session_exercises (
   notes TEXT
 );
 
+-- Final AI-Deterministic Precedence and Scheduling Fixes §1/§2:
+-- `source_type` records WHO created this real session — 'deterministic'
+-- (the day's own generated program_sessions prescription, started by
+-- the user; the DEFAULT — this is the overwhelming common case and
+-- preserves every pre-existing caller's behavior unchanged), 'ai' (an
+-- AI proposal committed via aiProposalLifecycle.ts), or 'manual' (an ad
+-- hoc session logged outside the generated plan, e.g. today.html's "Log
+-- something else"). `supersedes_program_session_id` is set only when
+-- this session's own content REPLACES a deterministic prescription that
+-- already existed for this date (e.g. an AI commit with intent
+-- 'fill_existing_gym_day' on a day that already has a persisted
+-- program_sessions row) — the deterministic row itself is never
+-- deleted (it remains recoverable history), only display precedence
+-- changes (see programming.ts's renderWeekDays). Both columns are
+-- read by the single shared precedence rule every real-session-aware
+-- read path (GET /week, GET /today) uses — never re-derived
+-- independently per route.
 CREATE TABLE IF NOT EXISTS workout_sessions (
   session_id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
@@ -263,7 +280,9 @@ CREATE TABLE IF NOT EXISTS workout_sessions (
   program_phase TEXT,
   status TEXT NOT NULL CHECK (status IN ('planned', 'in_progress', 'completed', 'skipped')),
   notes TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'deterministic' CHECK (source_type IN ('ai', 'deterministic', 'manual')),
+  supersedes_program_session_id TEXT REFERENCES program_sessions(id) ON DELETE SET NULL
 );
 
 -- AI Programmer Phase 2 correction: target_sets/target_reps_min/

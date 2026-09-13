@@ -49,11 +49,13 @@ function currentWeekStart(): string {
   return programmingWeekStart(todayForUser(db));
 }
 
-// Fix 7 (Activity Scheduling and AI Alignment Fixes): prescriptionPolicy
-// is now required on this endpoint — 'regenerate' preserves every
+// Fix 7 / Final AI-Deterministic Precedence Fixes §6: prescriptionPolicy
+// is required and direction-dependent — 'regenerate' for a Gym/Both
+// target activity, 'schedule-only' for anything else — preserving every
 // pre-existing call site's original behavior in this file.
 function putActivity(day: string, activity: DailyActivity, extra: Record<string, unknown> = {}) {
-  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity, prescriptionPolicy: 'regenerate', ...extra });
+  const defaultPolicy = activity === 'gym' || activity === 'both' ? 'regenerate' : 'schedule-only';
+  return request(app).put(`/api/programming/week/days/${day}/activity`).send({ activity, prescriptionPolicy: defaultPolicy, ...extra });
 }
 
 function tableRowCount(table: 'programs' | 'program_sessions'): number {

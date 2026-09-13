@@ -793,6 +793,31 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit — intent (Part 
     expect(effectiveActivityFor(MONDAY)).toBe('gym');
   });
 
+  it('Final AI-Deterministic Precedence Fixes §1: fill_existing_gym_day on a day with an EXISTING deterministic prescription supersedes it and records provenance', async () => {
+    // Trigger real deterministic generation for Monday's week first, so
+    // a persisted program_sessions row genuinely exists to supersede —
+    // this is the exact "AI fills a day that already has a generated
+    // prescription" scenario the spec describes.
+    const weekRes = await request(app).get('/api/programming/week').query({ date: MONDAY });
+    const mondayBefore = weekRes.body.days.find((d: any) => d.weekday === 'monday');
+    expect(mondayBefore.plannedWork.length).toBeGreaterThan(0);
+    expect(mondayBefore.plannedSession).toBeNull();
+
+    const proposalId = await generateProposalForDate(MONDAY, 'monday');
+    await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
+    const commitRes = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'fill_existing_gym_day' });
+    expect(commitRes.status).toBe(200);
+
+    const weekAfter = await request(app).get('/api/programming/week').query({ date: MONDAY });
+    const mondayAfter = weekAfter.body.days.find((d: any) => d.weekday === 'monday');
+    expect(mondayAfter.plannedWork).toEqual([]); // deterministic plan no longer shown as current
+    expect(mondayAfter.plannedSession).toMatchObject({ id: commitRes.body.committedSessionId, source: 'ai', status: 'planned' });
+    expect(typeof mondayAfter.supersedesProgramSessionId).toBe('string');
+
+    const todayRes = await request(app).get('/api/programming/today').query({ date: MONDAY });
+    expect(todayRes.body.plannedSession).toMatchObject({ id: commitRes.body.committedSessionId, source: 'ai' });
+  });
+
   it('intent: "replace_day_activity" on an already-gym day is a harmless no-op for the override (still succeeds)', async () => {
     const proposalId = await generateProposalForDate(MONDAY, 'monday');
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);

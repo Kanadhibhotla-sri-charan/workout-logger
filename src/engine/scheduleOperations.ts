@@ -22,25 +22,21 @@ import { TrainingProfileRepo } from '../repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../repositories/usersRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../lib/dailyActivity.js';
 
-/** Illustrative only (task's own Part 1.1 caveat: "adapt to the
- * existing architecture") — this vertical slice implements `swap` as
- * the one general-purpose schedule-rearrangement primitive, exposed as
- * `POST /api/programming/week/swap`. Activity Scheduling and AI
- * Alignment Fixes, Fix 4 (Option A): there is deliberately no `move`
- * route — a prior release exposed `/week/move` as a thin alias for swap,
- * but swap (A<->B) and a true move (A->B, discarding B's own prior
- * activity) are not equivalent in general, so claiming a `move` name for
- * swap semantics was misleading and has been removed; `'move'` stays in
- * this union only as a documented, UNIMPLEMENTED future mode (Fix 4
- * Option B — explicit source/destination semantics), never routed to
- * anything today. `replace` is the existing single-day
+/** `swap` (A<->B, exchanges both days' content — `swapDayActivities`)
+ * and `move` (A->B, source becomes Rest and destination's own PRIOR
+ * content is discarded rather than swapped back — `moveActivity`) are
+ * two distinct primitives (Final AI-Deterministic Precedence and
+ * Scheduling Fixes §4, Option B — true move semantics; a prior release
+ * exposed `/week/move` as a thin, misleadingly-named alias for swap,
+ * which has been replaced by this real implementation). Neither ever
+ * calls the planner or the LLM. `replace` is the existing single-day
  * `PUT /week/days/:day/activity` endpoint (unchanged lifecycle, now with
  * lock/planned-session guards and an explicit `prescriptionPolicy` —
  * see programming.ts). `regenerate` is that same endpoint's explicit
  * planner-call path. */
 export type ScheduleChangeMode = 'swap' | 'move' | 'replace' | 'regenerate';
 
-export type ScheduleOperationErrorCode = 'SAME_DAY' | 'DAY_LOCKED' | 'NO_TRAINING_PROFILE';
+export type ScheduleOperationErrorCode = 'SAME_DAY' | 'DAY_LOCKED' | 'NO_TRAINING_PROFILE' | 'DESTINATION_OCCUPIED';
 
 export class ScheduleOperationError extends Error {
   constructor(
@@ -174,4 +170,130 @@ export function swapDayActivities(db: Database.Database, weekStart: string, dayA
   tx();
 
   return { weekStart, dayA, dayB, movedPlannedSessionIds };
+}
+
+export interface MoveResult {
+  weekStart: string;
+  fromDay: Weekday;
+  toDay: Weekday;
+  /** session_ids of any real `workout_sessions` rows with
+   * `status === 'planned'` that moved from `fromDay` to `toDay` — see
+   * swapDayActivities' own Fix 5 doc comment for the exact "which
+   * planned sessions move" rule; identical here. */
+  movedPlannedSessionIds: string[];
+}
+
+/** True, asymmetric move (Final AI-Deterministic Precedence and
+ * Scheduling Fixes §4, Option B) — `fromDay`'s activity/prescription is
+ * relocated onto `toDay`; `fromDay` itself becomes Rest
+ * ('unselected'); `toDay`'s own PRIOR activity/prescription is
+ * DISCARDED (not swapped back onto `fromDay` — that is what makes this
+ * a move rather than a swap; see scheduleOperations.ts's own
+ * ScheduleChangeMode doc comment for the worked Badminton/Gym example
+ * where the two diverge). Never calls the planner, never the LLM.
+ *
+ * Ownership/safety (§5):
+ *   - Rejects (`DAY_LOCKED`) if EITHER day already has a completed or
+ *     in-progress real session — a locked day's real history/current
+ *     workout must never be silently relocated or overwritten (rules
+ *     3/4/5).
+ *   - Rejects (`DESTINATION_OCCUPIED`) if `toDay` already has a real
+ *     `planned` session — discarding a real, still-active planned
+ *     workout (e.g. an AI-committed session) to make room would be
+ *     exactly the "orphaned/silently discarded" failure mode this whole
+ *     task line rejects elsewhere (Activity Scheduling and AI Alignment
+ *     Fixes' own Fix 3). The caller must resolve that conflict first —
+ *     this function never invents a way around it.
+ *   - `fromDay`'s own real `planned` session (if any) moves with it,
+ *     exactly like swap's own planned-session rule (Fix 5, Option A —
+ *     status alone decides, not origin).
+ *   - `toDay`'s own persisted deterministic `program_sessions` row (if
+ *     any, and if there was nothing to move in from `fromDay`) is
+ *     deleted — this is the explicit "destination's prior content is
+ *     discarded" behavior, safe because the DESTINATION_OCCUPIED guard
+ *     above already ruled out a real session existing there.
+ *
+ * Idempotency (Invariant 6 / spec §11.D "repeated move is idempotent"):
+ * once `fromDay` has nothing left to move (already Rest, no persisted
+ * deterministic snapshot, no real planned session — exactly the state
+ * this function itself leaves it in), calling this again with the same
+ * arguments is a NO-OP — it returns immediately without touching
+ * anything. Without this guard, a second identical call would compute
+ * `fromDay`'s now-Rest activity and silently overwrite whatever the
+ * first call had already placed onto `toDay`, which would make the
+ * operation destructive on repetition instead of idempotent.
+ */
+export function moveActivity(db: Database.Database, weekStart: string, fromDay: Weekday, toDay: Weekday): MoveResult {
+  if (fromDay === toDay) {
+    throw new ScheduleOperationError('SAME_DAY', 'fromDay and toDay must be different weekdays.');
+  }
+
+  const indexFrom = WEEKDAYS.indexOf(fromDay);
+  const indexTo = WEEKDAYS.indexOf(toDay);
+  const dateFrom = addDays(weekStart, indexFrom);
+  const dateTo = addDays(weekStart, indexTo);
+
+  const user = new UsersRepo(db).getOrCreateDefault();
+  const profile = new TrainingProfileRepo(db).get(user.id);
+  if (!profile) {
+    throw new ScheduleOperationError('NO_TRAINING_PROFILE', 'No training profile exists for this user yet — create one first (PUT /api/training-profile).');
+  }
+
+  const overridesRepo = new WeekActivityOverridesRepo(db);
+  const sessionsRepo = new WorkoutSessionsRepo(db);
+  const programRepo = new WeeklyProgramRepo(db);
+
+  const effectiveBefore = applyWeekOverrides(profile.training_days, profile.other_activity_schedule, overridesRepo.get(profile.id, weekStart));
+  const activityFromBefore = deriveDailyActivity(fromDay, effectiveBefore.trainingDays, effectiveBefore.otherActivitySchedule);
+  const programBefore = programRepo.getByWeekStart(weekStart);
+  const persistedFrom = programBefore ? programRepo.getSession(programBefore.id, indexFrom) : undefined;
+  const plannedOnFrom = sessionsRepo.listSessionsByDate(dateFrom).filter((x) => x.status === 'planned');
+  const nothingToMove = activityFromBefore === 'unselected' && !persistedFrom && plannedOnFrom.length === 0;
+  if (nothingToMove) {
+    return { weekStart, fromDay, toDay, movedPlannedSessionIds: [] };
+  }
+
+  for (const date of [dateFrom, dateTo]) {
+    if (isDayLocked(db, date)) {
+      throw new ScheduleOperationError('DAY_LOCKED', `${date} already has a completed or in-progress workout and cannot be part of a schedule move.`, { date });
+    }
+  }
+
+  const plannedOnTo = sessionsRepo.listSessionsByDate(dateTo).filter((x) => x.status === 'planned');
+  const conflictingOnTo = plannedOnTo[0];
+  if (conflictingOnTo) {
+    throw new ScheduleOperationError(
+      'DESTINATION_OCCUPIED',
+      `${dateTo} already has an active planned workout session (${conflictingOnTo.session_id}). Move or cancel that session before moving another workout onto this date.`,
+      { date: dateTo, conflictingSessionId: conflictingOnTo.session_id }
+    );
+  }
+
+  const movedPlannedSessionIds: string[] = [];
+
+  const tx = db.transaction(() => {
+    overridesRepo.setOverride(profile.id, weekStart, toDay, activityFromBefore);
+    overridesRepo.setOverride(profile.id, weekStart, fromDay, 'unselected');
+
+    if (programBefore) {
+      if (persistedFrom) {
+        programRepo.upsertSession(programBefore.id, indexTo, persistedFrom.name, persistedFrom.planned_session_type, persistedFrom.snapshot);
+      } else {
+        // Nothing to move in from the source — the destination's own
+        // prior deterministic prescription (if any) is discarded, per
+        // this function's own "move discards destination's prior
+        // content" contract.
+        programRepo.deleteSession(programBefore.id, indexTo);
+      }
+      programRepo.deleteSession(programBefore.id, indexFrom);
+    }
+
+    for (const s of plannedOnFrom) {
+      sessionsRepo.moveDate(s.session_id, dateTo);
+      movedPlannedSessionIds.push(s.session_id);
+    }
+  });
+  tx();
+
+  return { weekStart, fromDay, toDay, movedPlannedSessionIds };
 }

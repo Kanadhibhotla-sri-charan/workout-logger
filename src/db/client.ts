@@ -61,6 +61,17 @@ function migrate(db: Database.Database): void {
   addColumnIfMissing(db, 'workout_exercises', 'target_rir_max', 'REAL');
   addColumnIfMissing(db, 'workout_exercises', 'target_rest_seconds', 'INTEGER');
 
+  // Final AI-Deterministic Precedence and Scheduling Fixes §1: real
+  // session provenance, so the shared precedence rule (see
+  // programming.ts's renderWeekDays) can tell a deterministic day's own
+  // started session apart from a real session that SUPERSEDES it (AI or
+  // manual). Additive/nullable-safe on an existing database — the
+  // DEFAULT makes every pre-existing row (and every INSERT that omits
+  // the column) 'deterministic', exactly matching this codebase's own
+  // prior, only-ever-deterministic behavior before this fix.
+  addColumnIfMissing(db, 'workout_sessions', 'source_type', "TEXT NOT NULL DEFAULT 'deterministic'");
+  addColumnIfMissing(db, 'workout_sessions', 'supersedes_program_session_id', 'TEXT REFERENCES program_sessions(id) ON DELETE SET NULL');
+
   const row = db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('contract_version') as
     | { value: string }
     | undefined;

@@ -231,6 +231,11 @@ export interface GoalContext {
 }
 
 /** One actually-happened (or planned-and-not-yet-happened) training day. */
+/** Final AI-Deterministic Precedence and Scheduling Fixes §1: who
+ * created this real session — see workout_sessions' own schema.sql doc
+ * comment for the full precedence rationale. */
+export type WorkoutSessionSourceType = 'ai' | 'deterministic' | 'manual';
+
 export interface WorkoutSession {
   session_id: string;
   date: string;
@@ -244,6 +249,8 @@ export interface WorkoutSession {
   status: WorkoutSessionStatus;
   notes: string | null;
   created_at: string;
+  source_type: WorkoutSessionSourceType;
+  supersedes_program_session_id: string | null;
 }
 
 /** One set. Core fields are required; the rest is deliberately left open

@@ -7,6 +7,7 @@ import type {
   Set,
   SessionType,
   WorkoutSession,
+  WorkoutSessionSourceType,
   WorkoutSessionStatus,
 } from '../contracts/types.js';
 import { newId, nowIso } from './ids.js';
@@ -40,6 +41,8 @@ interface WorkoutSessionRow {
   status: WorkoutSessionStatus;
   notes: string | null;
   created_at: string;
+  source_type: WorkoutSessionSourceType;
+  supersedes_program_session_id: string | null;
 }
 
 function rowToSession(row: WorkoutSessionRow): WorkoutSession {
@@ -65,6 +68,8 @@ function rowToSession(row: WorkoutSessionRow): WorkoutSession {
     status: row.status,
     notes: row.notes,
     created_at: row.created_at,
+    source_type: row.source_type,
+    supersedes_program_session_id: row.supersedes_program_session_id,
   };
 }
 
@@ -79,6 +84,18 @@ export interface CreateWorkoutSessionInput {
   goal_context?: GoalContext | null;
   status?: WorkoutSessionStatus;
   notes?: string | null;
+  /** Final AI-Deterministic Precedence and Scheduling Fixes §1: which
+   * generator created this session — defaults to 'deterministic' (the
+   * pre-existing, only-ever-deterministic behavior every caller before
+   * this fix relied on). `aiProposalLifecycle.ts`'s commit is the only
+   * caller that passes `'ai'`; a "log something else outside the
+   * generated plan" flow should pass `'manual'`. */
+  source_type?: WorkoutSessionSourceType;
+  /** Set only when this session's content REPLACES a deterministic
+   * `program_sessions` prescription that already existed for this date
+   * — never set for a plain 'deterministic'-sourced session (which IS
+   * that prescription, not a replacement of it). */
+  supersedes_program_session_id?: string | null;
 }
 
 export interface AddExercisePerformanceInput {
@@ -135,6 +152,8 @@ export class WorkoutSessionsRepo {
       status: input.status ?? 'planned',
       notes: input.notes ?? null,
       created_at: nowIso(),
+      source_type: input.source_type ?? 'deterministic',
+      supersedes_program_session_id: input.supersedes_program_session_id ?? null,
     };
 
     this.db
@@ -142,11 +161,11 @@ export class WorkoutSessionsRepo {
         `INSERT INTO workout_sessions
            (session_id, date, start_time, end_time, duration_minutes, session_type,
             program_id, program_session_id, goal_type, goal_id, goal_priority, program_phase,
-            status, notes, created_at)
+            status, notes, created_at, source_type, supersedes_program_session_id)
          VALUES
            (@session_id, @date, @start_time, @end_time, @duration_minutes, @session_type,
             @program_id, @program_session_id, @goal_type, @goal_id, @goal_priority, @program_phase,
-            @status, @notes, @created_at)`
+            @status, @notes, @created_at, @source_type, @supersedes_program_session_id)`
       )
       .run({
         session_id: session.session_id,
@@ -161,6 +180,8 @@ export class WorkoutSessionsRepo {
         goal_id: session.goal_context?.goal_id ?? null,
         goal_priority: session.goal_context?.priority ?? null,
         program_phase: session.goal_context?.program_phase ?? null,
+        source_type: session.source_type,
+        supersedes_program_session_id: session.supersedes_program_session_id,
         status: session.status,
         notes: session.notes,
         created_at: session.created_at,

@@ -278,7 +278,12 @@
 
       const saveBtn = createButton({ label: 'Change activity (this week)', variant: 'secondary', onClick: async () => {
         try {
-          await changeActivity('reuse');
+          // Fix 6 (Final AI-Deterministic Precedence and Scheduling
+          // Fixes): prescriptionPolicy is direction-dependent —
+          // 'schedule-only' when leaving Gym (no prescription decision
+          // to make), 'reuse' first when moving TO Gym/Both.
+          const wantsGym = select.value === 'gym' || select.value === 'both';
+          await changeActivity(wantsGym ? 'reuse' : 'schedule-only');
           closeDayModal();
           await loadWeek();
         } catch (err) {

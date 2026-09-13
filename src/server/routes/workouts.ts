@@ -57,11 +57,21 @@ workoutsRouter.get('/today', (req, res) => {
   res.json(repo.listSessionsByDate(todayForUser(db(req))));
 });
 
+const SESSION_SOURCE_TYPES = ['ai', 'deterministic', 'manual'] as const;
+
 workoutsRouter.post('/', (req, res) => {
-  const { date, start_time, end_time, duration_minutes, session_type, program_id, program_session_id, goal_context, status, notes } =
+  const { date, start_time, end_time, duration_minutes, session_type, program_id, program_session_id, goal_context, status, notes, source_type } =
     req.body ?? {};
   if (typeof date !== 'string' || typeof session_type !== 'string') {
     return res.status(400).json({ error: 'date and session_type are required' });
+  }
+  // Final AI-Deterministic Precedence and Scheduling Fixes §1: optional
+  // — omitted defaults to 'deterministic' at the repo layer (this
+  // endpoint's own pre-existing, only-ever-deterministic behavior). A
+  // present-but-invalid value is rejected explicitly rather than
+  // silently coerced.
+  if (source_type !== undefined && !SESSION_SOURCE_TYPES.includes(source_type)) {
+    return res.status(400).json({ error: `source_type, if given, must be one of ${SESSION_SOURCE_TYPES.join('|')}` });
   }
 
   const repo = new WorkoutSessionsRepo(db(req));
@@ -76,6 +86,7 @@ workoutsRouter.post('/', (req, res) => {
     goal_context,
     status,
     notes,
+    source_type,
   });
   res.status(201).json(session);
 });

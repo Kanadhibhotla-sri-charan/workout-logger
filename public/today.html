@@ -172,6 +172,7 @@
             session_type: 'gym',
             status: 'in_progress',
             goal_context: goal ? { goal_type: goal.goal_type, goal_id: goal.goal_id, priority: goal.priority, program_phase: null } : null,
+            source_type: 'deterministic', // starting the day's own generated plan
           },
         });
         window.location.href = `/logger.html?session=${session.session_id}`;
@@ -195,6 +196,7 @@
               session_type: document.getElementById('other-session-type').value,
               status: 'in_progress',
               notes: document.getElementById('other-session-notes').value || null,
+              source_type: 'manual', // outside the generated plan
             },
           })
         );

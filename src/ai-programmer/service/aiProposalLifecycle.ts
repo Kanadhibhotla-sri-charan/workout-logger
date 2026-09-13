@@ -13,7 +13,9 @@ import { UnknownExerciseError, WorkoutSessionsRepo } from '../../repositories/wo
 import { TrainingProfileRepo } from '../../repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
+import { WeeklyProgramRepo } from '../../repositories/weeklyProgramRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
+import { WEEKDAYS } from '../../contracts/types.js';
 import { programmingWeekStart, weekdayOfDate } from '../../engine/workoutBuilder.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
 import {
@@ -299,6 +301,22 @@ export function commitAIProposalToPlannedSession(
     throw new AICommitIntentMismatchError(proposalId, proposal.targetDate, options.intent, currentActivity);
   }
 
+  // Final AI-Deterministic Precedence and Scheduling Fixes §1: if a
+  // deterministic prescription already exists for this exact date (this
+  // week's own `program_sessions` row at the date's day_index — the
+  // "fill_existing_gym_day" scenario is exactly this case), the AI
+  // session about to be created SUPERSEDES it for display purposes
+  // (Option 1, "AI replacement/supersession" — the deterministic row is
+  // never deleted, only display precedence changes; see
+  // programming.ts's renderWeekDays for the shared read-side rule).
+  // Read here (outside the write transaction — this is a pure lookup)
+  // so both the override write and the session's own supersession
+  // pointer are decided from the exact same pre-commit snapshot of
+  // state.
+  const targetWeekStart = programmingWeekStart(proposal.targetDate);
+  const targetDayIndex = WEEKDAYS.indexOf(weekdayOfDate(proposal.targetDate));
+  const supersededProgramSession = new WeeklyProgramRepo(db).getByWeekStart(targetWeekStart)?.sessions.find((s) => s.day_index === targetDayIndex);
+
   let sessionId: string;
   try {
     const tx = db.transaction(() => {
@@ -313,6 +331,8 @@ export function commitAIProposalToPlannedSession(
         date: proposal.targetDate,
         session_type: 'gym',
         status: 'planned',
+        source_type: 'ai',
+        supersedes_program_session_id: supersededProgramSession?.id ?? null,
         // Cleanup pass §3: `record.id` (the loaded, persisted
         // ai_program_proposals row id) is the authoritative identity —
         // `proposal.proposalId` is the same value today (AIProposalRepo.
