@@ -137,6 +137,12 @@ $ npx vitest run tests/ai-programmer tests/repositories/aiProposalRepo.test.ts t
 ## Final state
 
 ```
-$ git status / git rev-parse HEAD / git log -1 --oneline
+$ git status
+working tree clean at commit 0cbefd8 (this report's own commit)
+
+$ git rev-parse HEAD
+0cbefd8072eae76c527e557165df6b59d2f8f337
+
+$ git log -1 --oneline
+0cbefd8 AI Programmer Phase 2 cleanup pass: sanitize failure_reason, atomic expiry guard, note uses record.id
 ```
-filled in immediately below, in the commit this report ships with.
