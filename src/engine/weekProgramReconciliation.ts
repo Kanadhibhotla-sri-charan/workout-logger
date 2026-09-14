@@ -31,6 +31,7 @@ import type Database from 'better-sqlite3';
 import { addDays } from './dateMath.js';
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 import { WeeklyProgramRepo, type PersistedWeekProgram } from '../repositories/weeklyProgramRepo.js';
+import { rebuildTargetAllocationsFromFinalSessions, type PlannedWorkItem, type TargetClassification, type WeeklyPlanTargetAllocation } from './workoutBuilder.js';
 
 /** One day's freshly-computed state, as the caller (programming.ts,
  * which owns display-enrichment) has already shaped it. `snapshot` is
@@ -176,7 +177,62 @@ export function reconcileWeekProgram(
     repo.upsertSession(program.id, day.dayIndex, day.sessionPurpose ?? 'gym', 'gym', snapshotToWrite);
   }
 
-  repo.updateAggregates(program.id, aggregates.activeGoals, aggregates.targetAllocations);
+  // Aggregate-Integrity Fix: `aggregates.targetAllocations` (the caller's
+  // `computeFresh()` result) was computed by `buildWeeklyProgrammingPlan`
+  // from its OWN blind, in-memory `sessions[]` — built as if every gym
+  // day this week were being freshly generated right now, with zero
+  // awareness of which days the loop above just decided to preserve
+  // untouched (locked, or unlocked-but-unchanged). Once any day in the
+  // week is locked, that in-memory plan can describe completely
+  // different (or simply absent) work for it than what is actually
+  // sitting in `program_sessions` — and persisting it verbatim, as this
+  // function used to do, silently detaches `target_allocations_json`
+  // (and therefore `unmetDirectSets`, which the cross-week carryover
+  // fix now reads as ground truth) from the real, displayed plan. Real,
+  // observed production impact: a week where every gym day became
+  // locked showed `deliveredDirectSets: 0` for the large majority of
+  // targets despite their real persisted sessions clearly containing
+  // that work — see docs/CROSS_WEEK_AGGREGATE_INTEGRITY_FIX_REPORT.md.
+  //
+  // The fix: re-derive `targetAllocations` a second time, using the
+  // SAME rebuild function, but against the week's real FINAL persisted
+  // sessions (re-read after every write/skip/delete above has already
+  // happened) instead of the discarded hypothetical run. `requiredDirect
+  // SetsByTarget`/`classificationByTarget` are still taken from the
+  // fresh computation — those two figures describe what the target
+  // itself needs this week (a property of the target/goal and this
+  // week's own desiredWeekly+carryover, not of which specific day ends
+  // up delivering it), so reusing them here is correct, not a second
+  // re-derivation of a different fact.
+  const finalProgram = repo.getByWeekStart(weekStart)!;
+  const finalSessionsForAggregate = finalProgram.sessions.map((s) => ({
+    date: addDays(weekStart, s.day_index),
+    plannedWork: (s.snapshot as { plannedWork?: PlannedWorkItem[] }).plannedWork ?? [],
+  }));
+  const freshAllocations = aggregates.targetAllocations as WeeklyPlanTargetAllocation[] | null | undefined;
+  const requiredDirectSetsByTarget = new Map<string, number>();
+  const classificationByTarget = new Map<string, TargetClassification>();
+  // programming.ts's own computeFreshWeek enriches each fresh allocation
+  // with display-only fields (`target_name`/`goal_id`/`goal_label`) this
+  // module knows nothing about and has no goals/labels context to
+  // re-derive. Those fields describe the target/goal itself, never which
+  // day delivered its work, so they're identical whether sourced from
+  // the hypothetical run or the real one — carried over by key onto the
+  // corrected allocation below rather than lost.
+  const freshExtrasByKey = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(freshAllocations)) {
+    for (const a of freshAllocations as unknown as Record<string, unknown>[]) {
+      const key = `${a.target_type}:${a.target_id}`;
+      requiredDirectSetsByTarget.set(key, a.requiredDirectSets as number);
+      classificationByTarget.set(key, a.layer as TargetClassification);
+      freshExtrasByKey.set(key, a);
+    }
+  }
+  const correctedTargetAllocations = rebuildTargetAllocationsFromFinalSessions(finalSessionsForAggregate, requiredDirectSetsByTarget, classificationByTarget).map(
+    (a) => ({ ...freshExtrasByKey.get(`${a.target_type}:${a.target_id}`), ...a })
+  );
+
+  repo.updateAggregates(program.id, aggregates.activeGoals, correctedTargetAllocations);
   return repo.getByWeekStart(weekStart)!;
 }
 

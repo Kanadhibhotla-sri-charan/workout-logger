@@ -215,13 +215,79 @@ spec-mandated or Blueprint-given number — see `src/engine/config.ts`'s
       empirically-observed busy real session (16 exercises — see
       `tests/engine/crossWeekPlanningHorizon.test.ts`).
 
+## New from the program-generation history-lookback audit (production incident investigation, 2026-09-14)
+
+24. **History-window policy across the programming pipeline.** [OPEN —
+    recorded, not redesigned] A full read-only audit (cited exact
+    functions/files, not documentation) found four genuinely different
+    history windows in active use, none of them coordinated by a single
+    policy:
+    1. Normal completed-history visibility (`last_trained_date`,
+       `exercise_history`, exercise-rotation/Gate-5 continuity, recovery
+       spike detection) uses a **fixed 14-day rolling window**
+       (`trainingState.ts`'s `buildTrainingState`,
+       `rollingWindowDays ?? 14`) — identical for initial generation,
+       regeneration, AI reorganize, and reconcile-after-training (all
+       four funnel through the same one function, confirmed by grep: it
+       has exactly one call site).
+    2. **Current-week volume exposure** (`current_weekly_primary_sets`,
+       the actual input to `decideVolume`/`desiredWeekly`) uses only the
+       **current calendar week** (`exposureEngine.ts`'s
+       `aggregateWeeklyExposure`) — a *different, shorter* window than
+       #1, and the one genuinely volume-determining number in the whole
+       pipeline.
+    3. AI context (`generate-session`/`reconcile-week`) receives the
+       same 14-day window as #1, then **further truncates to the 3 most
+       recent uses per exercise** (`programmerContextBuilder.ts`'s
+       `buildTargetContexts`) — a restriction that applies only to what
+       the model sees, never to the deterministic engine's own
+       reasoning.
+    4. Cross-week carryover (the Cross-Week Programming Intelligence
+       Fix) reads only the **immediately preceding week's own persisted
+       aggregate** (`addDays(weekStart, -7)`) — a hard one-week bound
+       entirely independent of the 14-day rolling constant, and never a
+       raw re-read of that week's session history.
+    Two observations worth revisiting later, not acted on now: the
+    current-week-only volume window (#2) can be as short as 0-6 days
+    right after a fresh Monday; the 14-day window (#1) can make Gate-5
+    continuity blind to exposure that's still practically relevant (a
+    completed session 15-17 days back was directly observed going in
+    and out of visibility while building this session's own regression
+    fixtures). No lookback number changes as part of the aggregate-
+    integrity fix (item 25) — this item exists purely so a future pass
+    has the real, cited-from-code baseline rather than re-deriving it.
+
+25. **`programs.target_allocations_json` aggregate-integrity fix.**
+    [IMPLEMENTED] `reconcileWeekProgram` (`weekProgramReconciliation.ts`)
+    used to persist `target_allocations_json` straight from
+    `buildWeeklyProgrammingPlan`'s own blind, in-memory `sessions[]` —
+    built with zero awareness of which days the SAME call's own
+    locked-day-preservation loop actually kept untouched. Once any real
+    day in a week became locked (a completed/in-progress workout
+    exists), that in-memory "aggregate" described a discarded
+    hypothetical plan, not the real displayed one — production showed a
+    fully-locked week reporting `deliveredDirectSets: 0` for the large
+    majority of targets despite their real persisted sessions clearly
+    containing that work, which the cross-week carryover fix then read
+    as genuine backlog. Fixed by re-deriving `targetAllocations` a
+    second time, via the same `rebuildTargetAllocationsFromFinalSessions`
+    function (now exported), against the week's real final persisted
+    sessions (re-read after the reconciliation loop finishes) rather
+    than the discarded hypothetical run — `requiredDirectSets`/`layer`
+    per target are still taken from the fresh computation (a property of
+    the target/goal, not of which day delivers it); display-only
+    enrichment fields (`target_name`/`goal_id`/`goal_label`) are carried
+    over by key since they don't depend on delivery either. See
+    `docs/CROSS_WEEK_AGGREGATE_INTEGRITY_FIX_REPORT.md`.
+
 None of the still-open items above block anything currently built —
 every real engine module accommodates any reasonable future answer
 without a breaking schema change (`CONTRACT_VERSION` at 1.4.0,
 nullable/open fields throughout). What remains genuinely open is
 infrastructure/deployment (items 1-4), the goal/program hierarchy
 shape question (item 5), exposure-level RIR/RPE weighting (item 9,
-narrowed), and calibrating the still-provisional numbers
-(time-per-exercise estimation, item 16; AI proposal adequacy
-thresholds, item 21; AI provider timeout/token tunables, item 23)
-against real data as it becomes available.
+narrowed), the uncoordinated multi-window history-lookback policy
+(item 24, recorded not redesigned), and calibrating the still-
+provisional numbers (time-per-exercise estimation, item 16; AI proposal
+adequacy thresholds, item 21; AI provider timeout/token tunables, item
+23) against real data as it becomes available.

@@ -1819,9 +1819,21 @@ function assertNoContradictoryProgramState(sessions: readonly WeeklyPlanSession[
  * one real number the final sessions alone can't recover (what
  * programming decided was desirable before fitting ever ran);
  * everything else is summed straight from the survived work itself.
+ *
+ * Aggregate-Integrity Fix: exported (was module-private) and narrowed to
+ * only the two fields it actually reads (`date`/`plannedWork`) so
+ * weekProgramReconciliation.ts can call it a SECOND time, after its own
+ * locked-day-preservation loop, against the week's real FINAL persisted
+ * sessions — never against this function's own first, blind call (made
+ * from `buildWeeklyProgrammingPlan`'s in-memory `sessions[]` below,
+ * which has no notion of which days are locked and can therefore
+ * describe candidate work for a day whose real persisted content ends
+ * up completely different, or unchanged, once locking is applied). See
+ * that second call site's own doc comment for the full defect this
+ * closes.
  */
-function rebuildTargetAllocationsFromFinalSessions(
-  sessions: readonly WeeklyPlanSession[],
+export function rebuildTargetAllocationsFromFinalSessions(
+  sessions: readonly Pick<WeeklyPlanSession, 'date' | 'plannedWork'>[],
   requiredDirectSetsByTarget: ReadonlyMap<string, number>,
   classificationByTarget: ReadonlyMap<string, TargetClassification>
 ): WeeklyPlanTargetAllocation[] {
