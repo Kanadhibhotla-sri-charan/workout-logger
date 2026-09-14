@@ -10,12 +10,23 @@ import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
 import { createApp } from '../../src/server/app.js';
 import { AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION } from '../../src/ai-programmer/contracts/programmerTypes.js';
+import { weekdayOfDate } from '../../src/engine/workoutBuilder.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';
+
+// Computed relative to the real clock, unlike SUNDAY above (a fixed
+// calendar date that goes stale/past-dated once real time passes it),
+// so this test never rots into a false failure.
+function futureDate(): { date: string; weekday: string } {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 61);
+  const date = d.toISOString().slice(0, 10);
+  return { date, weekday: weekdayOfDate(date) };
+}
 
 let db: Database.Database;
 let app: ReturnType<typeof createApp>;
@@ -153,6 +164,22 @@ describe('POST /api/ai-programmer/generate-session', () => {
     const before = new WorkoutSessionsRepo(db).listSessions().length;
     await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: SUNDAY });
     expect(new WorkoutSessionsRepo(db).listSessions().length).toBe(before);
+  });
+
+  it('rejects a second generate-session call for a date with an existing pending proposal, without a second provider call', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date, weekday } = futureDate();
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: JSON.stringify(validProposalJson({ targetDate: date, weekday })) } }));
+
+    const first = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(first.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const second = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(second.status).toBe(409);
+    expect(second.body.ok).toBe(false);
+    expect(second.body.error).toBe('AI_PROPOSAL_ALREADY_PENDING');
+    expect(fetchMock).toHaveBeenCalledTimes(1); // never called Velona a second time
   });
 
   it('never mutates completed/locked sessions elsewhere in the database on a successful generation', async () => {

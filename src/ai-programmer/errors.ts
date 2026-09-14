@@ -21,6 +21,7 @@ export type AIProgrammerErrorCode =
   | 'AI_TARGET_NOT_EDITABLE'
   | 'AI_CONTEXT_INCOMPLETE'
   | 'AI_PROPOSAL_NOT_FOUND'
+  | 'AI_PROPOSAL_ALREADY_PENDING'
   | 'AI_PROPOSAL_INVALID_STATE'
   | 'AI_PROPOSAL_EXPIRED'
   | 'AI_PROPOSAL_CONFLICT'
@@ -136,6 +137,25 @@ export class AIContextIncompleteError extends AIProgrammerError {
 export class AIProposalNotFoundError extends AIProgrammerError {
   constructor(proposalId: string) {
     super('AI_PROPOSAL_NOT_FOUND', `No AI proposal found with id "${proposalId}".`, 404);
+  }
+}
+
+/** Duplicate-generation guard: `POST /generate-session` was called for
+ * a `targetDate` that already has a `pending` proposal (its effective
+ * status, i.e. not yet lazily expired). A second call would waste a
+ * real Velona request and create two competing pending proposals for
+ * the same date, which the review UI (only ever showing one row per
+ * date) is not built to reconcile. The caller must approve/let-expire
+ * the existing proposal (see GET /proposals/latest) before generating
+ * a fresh one for this date — never silently superseded here. */
+export class AIProposalAlreadyPendingError extends AIProgrammerError {
+  constructor(targetDate: string, existingProposalId: string) {
+    super(
+      'AI_PROPOSAL_ALREADY_PENDING',
+      `A pending AI proposal (${existingProposalId}) already exists for ${targetDate}. Approve, commit, or let it expire before generating a new one.`,
+      409,
+      { targetDate, existingProposalId }
+    );
   }
 }
 

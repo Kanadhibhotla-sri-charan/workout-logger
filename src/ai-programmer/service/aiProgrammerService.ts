@@ -8,8 +8,9 @@ import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
-import { AIProposalRepo, type AIProposalStatus } from '../../repositories/aiProposalRepo.js';
+import { AIProposalRepo, effectiveStatus, type AIProposalStatus } from '../../repositories/aiProposalRepo.js';
 import { AIWeekReconciliationRepo, type AIWeekReconciliationStatus } from '../../repositories/aiWeekReconciliationRepo.js';
+import { nowIso } from '../../repositories/ids.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
 import type { AIProgrammerContext } from '../context/programmerContextTypes.js';
 import { buildReconciliationContext } from '../context/reconciliationContextBuilder.js';
@@ -19,7 +20,7 @@ import type { AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerProvider, AIProgrammerProviderRequest } from '../contracts/providerTypes.js';
 import { getWeekReconciliationOutputSchema } from '../contracts/weekReconciliationOutputSchema.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
-import { AIOutputSchemaInvalidError, AIOutputDomainInvalidError, AIProgrammerDisabledError, AIWeekReconciliationOutputDomainInvalidError, AIWeekReconciliationOutputSchemaInvalidError } from '../errors.js';
+import { AIOutputSchemaInvalidError, AIOutputDomainInvalidError, AIProgrammerDisabledError, AIProposalAlreadyPendingError, AIWeekReconciliationOutputDomainInvalidError, AIWeekReconciliationOutputSchemaInvalidError } from '../errors.js';
 import { isAiProgrammerEnabled, loadVelonaConfig } from '../provider/config.js';
 import { VelonaProvider } from '../provider/velonaProvider.js';
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
@@ -142,6 +143,15 @@ export class AIProgrammerService {
   async generateSession(input: GenerateSessionInput): Promise<GenerateSessionResult> {
     if (!isAiProgrammerEnabled()) {
       throw new AIProgrammerDisabledError();
+    }
+
+    // Duplicate-generation guard: reject before ever calling the
+    // provider if this targetDate already has a `pending` proposal
+    // (effective status, i.e. not lazily expired) — see
+    // AIProposalAlreadyPendingError's own doc comment for why.
+    const existing = new AIProposalRepo(this.db).findLatestForTargetDate(input.targetDate);
+    if (existing && effectiveStatus(existing, nowIso()) === 'pending') {
+      throw new AIProposalAlreadyPendingError(input.targetDate, existing.id);
     }
 
     const context: AIProgrammerContext = buildProgrammerContext(this.db, { targetDate: input.targetDate });
