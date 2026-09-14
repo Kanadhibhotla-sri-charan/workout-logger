@@ -179,12 +179,25 @@ spec-mandated or Blueprint-given number — see `src/engine/config.ts`'s
     genuinely weaker signal — Blueprint has no phrasings field for
     them). See `docs/GOAL_MATCHING.md`.
 
+## New from the AI Programmer development-reference repair (see `docs/AI_PROGRAMMER_DEVELOPMENT_REFERENCE_REPAIR_REPORT.md`)
+
+21. **AI proposal programming-adequacy thresholds.** [IMPLEMENTED —
+    PROVISIONAL] `programmerAdequacyValidator.ts`'s five tunable
+    constants (`MEANINGFUL_COVERAGE_MIN_SETS=2`,
+    `MIN_EXPECTED_COVERAGE_TARGETS=2`, `MAX_SINGLE_TARGET_SHARE=0.6`,
+    `MAX_TOTAL_SETS_BUDGET_MULTIPLIER=2`,
+    `UNDER_PRESCRIPTION_TOLERANCE=0.5`) are this app's own `[DEFAULT]`
+    operational choices, not Blueprint-given or spec-mandated numbers —
+    same tagging convention as item 16. Not yet calibrated against a
+    real corpus of AI-generated proposals (only two live attempts exist
+    so far, both rejected). Revisit once more real generations exist.
+
 None of the still-open items above block anything currently built —
 every real engine module accommodates any reasonable future answer
 without a breaking schema change (`CONTRACT_VERSION` at 1.4.0,
 nullable/open fields throughout). What remains genuinely open is
 infrastructure/deployment (items 1-4), the goal/program hierarchy
 shape question (item 5), exposure-level RIR/RPE weighting (item 9,
-narrowed), and calibrating the one still-provisional number
-(time-per-exercise estimation, item 16) against real data if it ever
-becomes available.
+narrowed), and calibrating the two still-provisional numbers
+(time-per-exercise estimation, item 16; AI proposal adequacy
+thresholds, item 21) against real data as it becomes available.

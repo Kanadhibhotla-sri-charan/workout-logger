@@ -124,7 +124,7 @@ describe('validateProposalAdequacy', () => {
     expect(result.errors.some((e) => e.includes('triceps-long-head') && e.includes('no direct work'))).toBe(true);
   });
 
-  it('rejects clearly inadequate (under-prescribed) volume on a covered priority target relative to its own deterministic floor', () => {
+  it('rejects clearly inadequate (under-prescribed) volume on a covered priority target relative to its own deterministic floor — same case the live Tuesday test actually hit', () => {
     const brief: AIProgrammerProgrammingBrief = {
       session: { purpose: 'push', expectedCoverageTargetIds: ['upper-pec', 'side-delt', 'triceps-long-head'] },
       muscles: [
@@ -146,6 +146,35 @@ describe('validateProposalAdequacy', () => {
     const result = validateProposalAdequacy(p, contextWith(brief));
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes('upper-pec') && e.includes('inadequate'))).toBe(true);
+  });
+
+  it('accepts a valid Push proposal that allocates sets within the brief\'s ranges for every eligible target (fixture using real production numbers)', () => {
+    // Real numbers from the live production brief for Tuesday 2026-09-15
+    // (Push): upper-pec efficient 8-8, side-delt efficient 7-7,
+    // triceps-long-head complete (active goal) 8-12.
+    const brief: AIProgrammerProgrammingBrief = {
+      session: { purpose: 'push', expectedCoverageTargetIds: ['upper-pec', 'side-delt', 'triceps-long-head', 'rectus-abdominis'] },
+      muscles: [
+        guidance({ targetId: 'upper-pec', recommendedSessionSets: { min: 8, max: 8 } }),
+        guidance({ targetId: 'side-delt', recommendedSessionSets: { min: 7, max: 7 } }),
+        guidance({ targetId: 'triceps-long-head', isGoalOriented: true, developmentLevel: 'complete', directSetsPerExposureCap: 12, recommendedSessionSets: { min: 8, max: 12 } }),
+      ],
+      approxSessionSetBudget: 26,
+    };
+    // Deliberately split across exercises not lifted verbatim from any
+    // one Blueprint package list, to prove exercise-selection choice
+    // stays free while the ALLOCATION lands correctly within range.
+    const p = proposal([
+      exercise({ exerciseId: 'incline-dumbbell-press', targetId: 'upper-pec', sets: 5 }),
+      exercise({ exerciseId: 'incline-barbell-press', targetId: 'upper-pec', sets: 3 }), // 5+3 = 8, exactly the min/max
+      exercise({ exerciseId: 'cable-lateral-raise', targetId: 'side-delt', sets: 4 }),
+      exercise({ exerciseId: 'dumbbell-lateral-raise', targetId: 'side-delt', sets: 3 }), // 4+3 = 7
+      exercise({ exerciseId: 'overhead-triceps-extension', targetId: 'triceps-long-head', sets: 8 }), // within 8-12
+    ]);
+
+    const result = validateProposalAdequacy(p, contextWith(brief));
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 
   it('rejects total session sets that exceed the Blueprint per-exposure cap for one target', () => {
