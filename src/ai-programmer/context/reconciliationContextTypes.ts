@@ -8,7 +8,7 @@
 // AIProgrammerRoutineDayContext) rather than re-declaring them.
 
 import type { Weekday } from '../../contracts/types.js';
-import type { AIProgrammerActiveGoalContext, AIProgrammerRoutineDayContext, AIProgrammerTargetContext } from './programmerContextTypes.js';
+import type { AICrossWeekContext, AIProgrammerActiveGoalContext, AIProgrammerRoutineDayContext, AIProgrammerTargetContext } from './programmerContextTypes.js';
 
 export const AI_RECONCILIATION_CONTEXT_SCHEMA_VERSION = 'ai-reconciliation-context.v1' as const;
 
@@ -104,6 +104,10 @@ export interface AIReconciliationContext {
   existingProgram: readonly AIReconciliationExistingDayContext[];
 
   targets: readonly AIProgrammerTargetContext[];
+
+  /** Cross-Week Programming Intelligence Fix — see AICrossWeekContext's
+   * own doc comment (programmerContextTypes.ts). */
+  crossWeek: AICrossWeekContext;
 
   /** Convenience flat list of every date in `existingProgram` with
    * `locked: true` — the model must return `changeType: "unchanged"`

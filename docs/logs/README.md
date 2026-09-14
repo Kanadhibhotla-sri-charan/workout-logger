@@ -59,3 +59,4 @@ story of how the app got to its current state.
 - [2026-09-14-51-ai-programmer-live-test-and-allocation-contract-correction.md](2026-09-14-51-ai-programmer-live-test-and-allocation-contract-correction.md)
 - [2026-09-14-52-two-day-schedule-swap-ui.md](2026-09-14-52-two-day-schedule-swap-ui.md)
 - [2026-09-14-53-two-day-schedule-swap-deploy-and-smoke-test.md](2026-09-14-53-two-day-schedule-swap-deploy-and-smoke-test.md)
+- [2026-09-14-54-cross-week-planning-horizon-and-ai-timeout-fixes.md](2026-09-14-54-cross-week-planning-horizon-and-ai-timeout-fixes.md)

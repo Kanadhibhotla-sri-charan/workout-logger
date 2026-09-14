@@ -197,6 +197,81 @@ export interface AIProgrammerProgrammingBrief {
   approxSessionSetBudget: number;
 }
 
+/** Cross-Week Programming Intelligence Fix: the bounded, read-only
+ * cross-week picture every AI-driven flow needs so it can make the same
+ * kind of distribute-vs-defer trade-off the deterministic engine itself
+ * now makes (see workoutBuilder.ts's WeeklyPlanInput doc comment) —
+ * never further than one week in either direction, and never implying
+ * this request creates, generates, or modifies anything outside its own
+ * real week. Every field here is read from data the deterministic engine
+ * already computes for its own generation (assembleWeeklyPlanInput's
+ * nextWeekOrderedGymDays/nextWeekSessionPurposes/carryoverByTarget, and
+ * WeeklyProgramRepo) — never a second, independently-derived cross-week
+ * calculation. */
+export interface AICrossWeekCarryoverContext {
+  targetType: TargetType;
+  targetId: BlueprintId;
+  /** The immediately preceding real week's own persisted
+   * `unmetDirectSets` for this target (read-only lookback, exactly one
+   * week) — the exact figure workoutBuilder.ts's WeeklyPlanInput.
+   * carryoverByTarget already folded into THIS week's own desiredWeekly
+   * before this context was built. Explains why a target's current-week
+   * requirement in `targets`/`programmingBrief` may be larger than its
+   * plain weekly reference alone would suggest. */
+  unmetDirectSetsFromPriorWeek: number;
+}
+
+export interface AICrossWeekNextWeekDayContext {
+  date: string;
+  weekday: Weekday;
+  /** Whether this date is a real gym day NEXT week under the effective
+   * (override-applied) schedule that would apply if next week were
+   * generated today. */
+  isGymDay: boolean;
+  /** The PPL+Upper purpose this date already has (if next week's own
+   * program already exists) or would rotate to (if generated today) —
+   * null on a non-gym day. */
+  sessionPurpose: 'push' | 'pull' | 'legs' | 'upper' | null;
+}
+
+/** This week's own already-persisted per-target allocation outcome
+ * (WeeklyPlanTargetAllocation, verbatim) — present only when a
+ * deterministic program already exists for the SAME week this context
+ * is for. Lets the AI see that any volume it chooses not to deliver this
+ * week becomes real, genuinely-consumed carryover into next week's own
+ * generation (the same mechanism `carryoverFromPriorWeek` above
+ * describes from the other side) — never a reason to invent extra
+ * volume now out of a fear of "losing" it. */
+export interface AICrossWeekCurrentWeekAllocationContext {
+  targetType: TargetType;
+  targetId: BlueprintId;
+  requiredDirectSets: number;
+  deliveredDirectSets: number;
+  unmetDirectSets: number;
+}
+
+export interface AICrossWeekContext {
+  /** Read-only lookback, exactly one real week. Empty when no target has
+   * any unmet volume from the prior week (the overwhelming common
+   * case). */
+  carryoverFromPriorWeek: readonly AICrossWeekCarryoverContext[];
+  /** This week's own persisted target allocations, if a deterministic
+   * program already exists for it — null when it does not (e.g. this is
+   * the very first request touching this week). */
+  currentWeekAllocations: readonly AICrossWeekCurrentWeekAllocationContext[] | null;
+  /** Read-only lookahead, exactly one real week — never further. */
+  nextWeek: {
+    weekStart: string;
+    days: readonly AICrossWeekNextWeekDayContext[];
+    /** True when next week already has its own persisted deterministic
+     * program — a signal that any of its sessions described here are
+     * real, already-committed content, never a proposal this request
+     * may change (this request's own week is the only one it may
+     * describe changes for). */
+    programAlreadyExists: boolean;
+  };
+}
+
 export interface AIProgrammerCurrentProgramContext {
   /** Whether a persisted week program row exists at all for the week
    * containing `targetDate` — informational only; this milestone never
@@ -267,6 +342,10 @@ export interface AIProgrammerContext {
    * AI must follow this, not independently invent muscle allocation or
    * set counts from the raw exposure facts in `targets` above. */
   programmingBrief: AIProgrammerProgrammingBrief;
+
+  /** Cross-Week Programming Intelligence Fix — see AICrossWeekContext's
+   * own doc comment. */
+  crossWeek: AICrossWeekContext;
 
   currentProgram: AIProgrammerCurrentProgramContext;
 

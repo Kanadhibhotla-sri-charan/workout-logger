@@ -192,12 +192,36 @@ spec-mandated or Blueprint-given number — see `src/engine/config.ts`'s
     real corpus of AI-generated proposals (only two live attempts exist
     so far, both rejected). Revisit once more real generations exist.
 
+## New from the Cross-Week Programming Intelligence Fix (see `docs/logs/2026-09-14-54-*.md`)
+
+22. **Cross-week planning horizon bound.** [IMPLEMENTED] The horizon is
+    exactly one real week in each direction (never further) —
+    `workoutBuilder.ts`'s `WeeklyPlanInput.nextWeekOrderedGymDays`/
+    `nextWeekSessionPurposes`/`carryoverByTarget`. Not a tunable number;
+    a hard architectural bound.
+
+23. **AI provider timeout/token tunables.** [IMPLEMENTED — PROVISIONAL]
+    Two new `[DEFAULT]` operational choices, each sized from an explicit
+    worst-case analysis rather than a spec-given number, revisit if real
+    production timing/output data ever contradicts them:
+    - `ops/nginx/workout-logger.conf`'s `proxy_read_timeout 150s` —
+      sized to safely exceed the app's own worst-case Velona round trip,
+      `(VELONA_MAX_RETRIES + 1) * VELONA_TIMEOUT_MS` plus retry delay
+      (~120.3s with the documented defaults).
+    - `velonaProvider.ts`'s `RECONCILE_WEEK_MIN_MAX_TOKENS = 6144` — a
+      `reconcile_week`-only floor on top of the shared `VELONA_MAX_TOKENS`
+      config (`generate_session` is unaffected), sized from the real
+      7-day output schema (`weekReconciliationTypes.ts`) against an
+      empirically-observed busy real session (16 exercises — see
+      `tests/engine/crossWeekPlanningHorizon.test.ts`).
+
 None of the still-open items above block anything currently built —
 every real engine module accommodates any reasonable future answer
 without a breaking schema change (`CONTRACT_VERSION` at 1.4.0,
 nullable/open fields throughout). What remains genuinely open is
 infrastructure/deployment (items 1-4), the goal/program hierarchy
 shape question (item 5), exposure-level RIR/RPE weighting (item 9,
-narrowed), and calibrating the two still-provisional numbers
+narrowed), and calibrating the still-provisional numbers
 (time-per-exercise estimation, item 16; AI proposal adequacy
-thresholds, item 21) against real data as it becomes available.
+thresholds, item 21; AI provider timeout/token tunables, item 23)
+against real data as it becomes available.

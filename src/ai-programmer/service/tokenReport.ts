@@ -289,6 +289,11 @@ export function buildTokenReport(db: Database.Database, input: TokenReportInput)
   // second, hand-approximated payload.
   const providerRequest: AIProgrammerProviderRequest = { mode: input.mode, systemInstruction, context, outputSchema, requestId };
   const { body, userTurnContent, outputSchemaJson } = buildVelonaRequestBody(providerRequest, config);
+  // The real effective max_tokens THIS request would actually be sent
+  // with — read back from the built body (never re-derived) so this
+  // report can never disagree with what buildVelonaRequestBody itself
+  // decided (see effectiveMaxTokensForMode's own doc comment).
+  const effectiveMaxTokens = body.config.max_tokens;
 
   const contextJson = JSON.stringify(context);
   const wireBodyJson = JSON.stringify(body);
@@ -298,12 +303,12 @@ export function buildTokenReport(db: Database.Database, input: TokenReportInput)
   const estimatedInputTokens = estimateTokensFromChars(modelInputChars);
 
   const recommended = RECOMMENDED_TYPICAL_OUTPUT_TOKENS[input.mode];
-  const estimatedTypicalOutputTokens = recommended <= config.maxTokens ? recommended : null;
+  const estimatedTypicalOutputTokens = recommended <= effectiveMaxTokens ? recommended : null;
   const estimatedTotalTokens = estimatedTypicalOutputTokens !== null ? estimatedInputTokens + estimatedTypicalOutputTokens : null;
   const outputNote =
     estimatedTypicalOutputTokens !== null
-      ? `Planning value for ${input.mode} (fits under the configured max_tokens of ${config.maxTokens}). Actual completion length is only known after a live request.`
-      : `The recommended planning value (${recommended}) exceeds the configured max_tokens of ${config.maxTokens} — no defensible typical-output estimate is reported. Actual completion usage requires a live request.`;
+      ? `Planning value for ${input.mode} (fits under the configured max_tokens of ${effectiveMaxTokens}). Actual completion length is only known after a live request.`
+      : `The recommended planning value (${recommended}) exceeds the configured max_tokens of ${effectiveMaxTokens} — no defensible typical-output estimate is reported. Actual completion usage requires a live request.`;
 
   const pricingEntry = input.pricing?.models[config.model];
   const inputPrice = pricingEntry?.inputUsdPerMillionTokens ?? null;
@@ -313,7 +318,7 @@ export function buildTokenReport(db: Database.Database, input: TokenReportInput)
   const inputCost = inputPrice !== null ? (estimatedInputTokens / 1_000_000) * inputPrice : null;
   const typicalOutputCost = outputPrice !== null && estimatedTypicalOutputTokens !== null ? (estimatedTypicalOutputTokens / 1_000_000) * outputPrice : null;
   const typicalTotalCost = inputCost !== null && typicalOutputCost !== null ? inputCost + typicalOutputCost : null;
-  const maximumOutputCost = outputPrice !== null ? (config.maxTokens / 1_000_000) * outputPrice : null;
+  const maximumOutputCost = outputPrice !== null ? (effectiveMaxTokens / 1_000_000) * outputPrice : null;
   const maximumTotalCost = inputCost !== null && maximumOutputCost !== null ? inputCost + maximumOutputCost : null;
 
   return {
@@ -342,7 +347,7 @@ export function buildTokenReport(db: Database.Database, input: TokenReportInput)
       tokenEstimateMethod: 'chars_div_4_estimate',
       estimatedInputTokens,
       estimatedTypicalOutputTokens,
-      configuredMaxOutputTokens: config.maxTokens,
+      configuredMaxOutputTokens: effectiveMaxTokens,
       estimatedTotalTokens,
       note: outputNote,
     },

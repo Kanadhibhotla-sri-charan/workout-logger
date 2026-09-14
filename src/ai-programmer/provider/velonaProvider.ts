@@ -11,7 +11,7 @@
 // 408/429/5xx) — never for authentication failures or malformed
 // requests (spec §10).
 
-import type { AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../contracts/providerTypes.js';
+import type { AIProgrammerMode, AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../contracts/providerTypes.js';
 import {
   AIProviderAuthenticationError,
   AIProviderInvalidResponseError,
@@ -131,6 +131,31 @@ export interface VelonaPayloadBuildResult {
   outputSchemaJson: string;
 }
 
+// Cross-Week Programming Intelligence Fix — token-limit review:
+// `reconcile_week`'s real output is structurally much larger than
+// `generate_session`'s (up to 7 days' worth of sessions instead of one,
+// each day's exercises carrying their own `rationale[]` array — see
+// weekReconciliationTypes.ts). A real, busy week (4 real gym days, each
+// with a full development-reference-driven exercise list — this
+// repo's own cross-week regression fixture, tests/engine/
+// crossWeekPlanningHorizon.test.ts, exercises a real 16-exercise
+// session) can plausibly approach the shared 4096-token default on the
+// documented chars/4 heuristic alone, leaving no real safety margin.
+// Rather than raising the shared default for both modes (inflating
+// generate_session's own much smaller real need, and its cost ceiling,
+// for no reason), this is a targeted, mode-specific floor — an
+// operator's own explicit VELONA_MAX_TOKENS still wins whenever it is
+// already configured higher than this floor.
+const RECONCILE_WEEK_MIN_MAX_TOKENS = 6144;
+
+/** The actual `max_tokens` value a given request mode should use — the
+ * ONE place this decision is made, so `buildVelonaRequestBody` (the
+ * real wire body) and tokenReport.ts (diagnostics, which reads the
+ * built body back) can never disagree about it. */
+export function effectiveMaxTokensForMode(config: VelonaConfig, mode: AIProgrammerMode): number {
+  return mode === 'reconcile_week' ? Math.max(config.maxTokens, RECONCILE_WEEK_MIN_MAX_TOKENS) : config.maxTokens;
+}
+
 /** Fix AI Weekly Reconciliation Review, Finding 2 / Real Dry-Run Token
  * Report spec §3: the ONE place this exact request body is constructed —
  * used both by the real fetch path (`generate()` below, which reads
@@ -146,7 +171,7 @@ export function buildVelonaRequestBody(request: AIProgrammerProviderRequest, con
       { role: 'user', content: userTurnContent },
     ],
     stream: false,
-    config: { temperature: config.temperature, max_tokens: config.maxTokens },
+    config: { temperature: config.temperature, max_tokens: effectiveMaxTokensForMode(config, request.mode) },
     output: { format: 'json' },
   };
   return {
@@ -181,7 +206,7 @@ export class VelonaProvider implements AIProgrammerProvider {
             systemInstructionChars: systemInstruction.length,
             userTurnChars: userTurnContent.length,
             wirePayloadChars: JSON.stringify(body).length,
-            configuredMaxOutputTokens: this.config.maxTokens,
+            configuredMaxOutputTokens: body.config.max_tokens,
           },
         };
       } catch (err) {

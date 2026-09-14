@@ -36,6 +36,7 @@ import {
   programmingWeekStart,
   weekdayOfDate,
   type TargetBuildContext,
+  type WeeklyPlanTargetAllocation,
 } from '../../engine/workoutBuilder.js';
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
 import { classifyAestheticTrend, decideVolume } from '../../engine/volumeEngine.js';
@@ -53,6 +54,7 @@ import { AIContextIncompleteError, AITargetNotEditableError } from '../errors.js
 import { hashContext } from './programmerContextDiagnostics.js';
 import {
   AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
+  type AICrossWeekContext,
   type AIProgrammerActiveGoalContext,
   type AIProgrammerContext,
   type AIProgrammerMuscleGuidance,
@@ -73,6 +75,7 @@ const NON_NEGOTIABLE_PRIORITY_HIERARCHY = [
   'Athletic capability/endurance supports aesthetics unless the user explicitly prioritizes it otherwise.',
   "Active growth goals receive extra emphasis, with the user's own ranking preserved exactly as given.",
   'Maintenance of the rest of the physique remains part of every program — a goal target is never the only thing trained.',
+  "When a target's realistic volume for THIS session would make the session unrealistically long, prefer distributing/deferring the lower-priority remainder to that target's own next real compatible exposure (this week's other compatible day, or next week's — see crossWeek) over cramming everything into this one session. Any real, meaningful deferral is safe: unmet volume from this week is genuinely picked up as next week's own carryover, never silently lost.",
 ];
 
 const FORBIDDEN_BEHAVIORS = [
@@ -81,9 +84,11 @@ const FORBIDDEN_BEHAVIORS = [
   'Do not inflate authored set counts beyond an exercise\'s authoredPrescription.sets when one is present.',
   'Do not filter exercise selection by available equipment or session time — those are informational only in this milestone.',
   'Do not target a date other than the exact requested targetDate.',
+  'Do not describe, propose, or imply any change to a session in crossWeek.nextWeek — it is read-only context for this request, exactly one week ahead, never something this request creates, generates, or modifies.',
   'Do not claim to modify historical/completed performance.',
   'Do not return raw HTML, executable code, SQL, or any database instruction.',
   'Do not rely on any information from a prior request — this context is fully self-contained.',
+  "Keep each exercise's rationale to one short phrase (a few words), not a sentence or paragraph, and do not repeat information already implied by its other fields (targetId, classification, sets/reps/rir).",
   'Return only the requested JSON object — no prose outside it.',
 ];
 
@@ -296,6 +301,68 @@ export function buildProgrammingBrief(
   };
 }
 
+/** Cross-Week Programming Intelligence Fix: shapes the bounded, read-
+ * only cross-week picture both `generate-session` and `reconcile-week`
+ * need — see AICrossWeekContext's own doc comment for why each field
+ * exists. Reuses `planInput.nextWeekOrderedGymDays`/
+ * `nextWeekSessionPurposes`/`carryoverByTarget` (assembleWeeklyPlanInput
+ * already computes these for the deterministic engine's own generation
+ * — never a second, independently-derived cross-week calculation here),
+ * plus a single extra read-only `WeeklyProgramRepo` lookup each for next
+ * week (lookahead) and this week's own already-persisted allocations
+ * (forward-looking "what becomes next week's carryover"). `weekStart` is
+ * THIS context's own week (never next week's), so this function derives
+ * next week's date exactly as assembleWeeklyPlanInput itself does. */
+export function buildCrossWeekContext(
+  db: Database.Database,
+  weekStart: string,
+  planInput: {
+    nextWeekOrderedGymDays?: readonly Weekday[];
+    nextWeekSessionPurposes?: ReadonlyMap<Weekday, SessionPurpose>;
+    carryoverByTarget?: ReadonlyMap<string, number>;
+  },
+  currentWeekProgram: { target_allocations: unknown } | undefined
+): AICrossWeekContext {
+  const nextWeekStart = addDays(weekStart, 7);
+  const nextWeekOrderedGymDays = planInput.nextWeekOrderedGymDays ?? [];
+  const nextWeekSessionPurposes = planInput.nextWeekSessionPurposes ?? new Map<Weekday, SessionPurpose>();
+  const nextWeekProgram = new WeeklyProgramRepo(db).getByWeekStart(nextWeekStart);
+
+  const days = WEEKDAYS.map((weekday, i) => {
+    const date = addDays(nextWeekStart, i);
+    const isGymDay = nextWeekOrderedGymDays.includes(weekday);
+    const persistedPurpose = nextWeekProgram?.sessions.find((s) => s.day_index === i)?.name;
+    const purpose = persistedPurpose && isSessionPurpose(persistedPurpose) ? persistedPurpose : isGymDay ? (nextWeekSessionPurposes.get(weekday) ?? null) : null;
+    return { date, weekday, isGymDay, sessionPurpose: purpose };
+  });
+
+  const carryoverFromPriorWeek = Array.from(planInput.carryoverByTarget ?? new Map<string, number>(), ([key, unmet]) => {
+    const separatorIndex = key.indexOf(':');
+    return {
+      targetType: key.slice(0, separatorIndex) as TargetType,
+      targetId: key.slice(separatorIndex + 1) as BlueprintId,
+      unmetDirectSetsFromPriorWeek: unmet,
+    };
+  });
+
+  const currentWeekAllocationsRaw = currentWeekProgram?.target_allocations as WeeklyPlanTargetAllocation[] | null | undefined;
+  const currentWeekAllocations = Array.isArray(currentWeekAllocationsRaw)
+    ? currentWeekAllocationsRaw.map((a) => ({
+        targetType: a.target_type,
+        targetId: a.target_id,
+        requiredDirectSets: a.requiredDirectSets,
+        deliveredDirectSets: a.deliveredDirectSets,
+        unmetDirectSets: a.unmetDirectSets,
+      }))
+    : null;
+
+  return {
+    carryoverFromPriorWeek,
+    currentWeekAllocations,
+    nextWeek: { weekStart: nextWeekStart, days, programAlreadyExists: nextWeekProgram !== undefined },
+  };
+}
+
 /** Correction pass §5 (Option A): the user's stored
  * `TrainingProfile.timezone` is the single authoritative timezone for
  * every date-sensitive operation in a request — current-date
@@ -406,6 +473,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const sessionPurpose = targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null;
 
   const programmingBrief = buildProgrammingBrief(targets, activeGoals, sessionPurpose, weeklyProgram?.sessions ?? [], currentDate, budgetMinutes);
+  const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
 
   const contextWithoutVolatileFields = {
     schemaVersion: AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
@@ -431,6 +499,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     routine: { targetDateActivity, week },
     targets,
     programmingBrief,
+    crossWeek,
     currentProgram: { weekProgramExists, targetDateLocked: false, lockReason: null },
     executionContext: {
       programmingFilteringAllowed: false as const,

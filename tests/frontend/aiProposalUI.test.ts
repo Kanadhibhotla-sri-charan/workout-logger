@@ -197,16 +197,30 @@ describe('aiApi: never surfaces raw backend message/details/stack text, always t
     await expect(aiApi('/x')).rejects.toMatchObject({ message: expect.stringMatching(/expired/i) });
   });
 
-  it('a non-JSON/malformed response body never throws a raw parse error — falls back to the generic safe message', async () => {
+  it('a non-JSON/malformed response body with no recognizable gateway status never throws a raw parse error — falls back to the generic safe message', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => { throw new SyntaxError('Unexpected token < in JSON'); } });
     const { aiApi } = makeAiHelpers(fetchMock);
-    await expect(aiApi('/x')).rejects.toMatchObject({ message: 'Something went wrong. Please try again.' });
+    await expect(aiApi('/x')).rejects.toMatchObject({ message: 'Something went wrong. Please try again.', code: 'AI_CLIENT_UNEXPECTED_RESPONSE' });
   });
 
-  it('a network-level fetch failure never surfaces the raw browser/network error text', async () => {
+  it('a non-JSON body on a 502/503/504 status (nginx winning the race against the app\'s own timeout) gets its own distinguishable message and code', async () => {
+    for (const status of [502, 503, 504]) {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false, status, json: async () => { throw new SyntaxError('Unexpected token < in JSON'); } });
+      const { aiApi } = makeAiHelpers(fetchMock);
+      await expect(aiApi('/x')).rejects.toMatchObject({
+        message: expect.stringMatching(/taking longer than expected/i),
+        code: 'AI_CLIENT_UPSTREAM_TIMEOUT',
+      });
+    }
+  });
+
+  it('a network-level fetch failure never surfaces the raw browser/network error text, and is distinguishable from a server-side failure', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch: net::ERR_CONNECTION_REFUSED'));
     const { aiApi } = makeAiHelpers(fetchMock);
-    await expect(aiApi('/x')).rejects.toMatchObject({ message: 'Something went wrong. Please try again.' });
+    await expect(aiApi('/x')).rejects.toMatchObject({
+      message: expect.stringMatching(/could not reach the server/i),
+      code: 'AI_CLIENT_NETWORK_ERROR',
+    });
   });
 });
 

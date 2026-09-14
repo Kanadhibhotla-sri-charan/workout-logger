@@ -34,7 +34,7 @@ import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverri
 import { WeeklyProgramRepo } from '../../repositories/weeklyProgramRepo.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { AIContextIncompleteError, AITargetNotEditableError } from '../errors.js';
-import { activityTypesForDailyActivity, buildTargetContexts } from './programmerContextBuilder.js';
+import { activityTypesForDailyActivity, buildCrossWeekContext, buildTargetContexts } from './programmerContextBuilder.js';
 import { hashContext } from './programmerContextDiagnostics.js';
 import type { AIProgrammerActiveGoalContext, AIProgrammerRoutineDayContext } from './programmerContextTypes.js';
 import {
@@ -51,6 +51,7 @@ const NON_NEGOTIABLE_PRIORITY_HIERARCHY = [
   'Athletic capability/endurance supports aesthetics unless the user explicitly prioritizes it otherwise.',
   "Active growth goals receive extra emphasis, with the user's own ranking preserved exactly as given.",
   'Maintenance of the rest of the physique remains part of every program — a goal target is never the only thing trained.',
+  "When a target's realistic weekly volume across THIS week's own compatible sessions would make one or more sessions unrealistically long, prefer distributing/deferring the lower-priority remainder across this week's own other compatible sessions, or genuinely to next week (see crossWeek), over cramming everything into one session. Any real, meaningful deferral is safe: unmet volume left in currentWeekAllocations is genuinely picked up as next week's own carryover, never silently lost.",
 ];
 
 const FORBIDDEN_BEHAVIORS = [
@@ -59,11 +60,12 @@ const FORBIDDEN_BEHAVIORS = [
   "Do not inflate authored set counts beyond an exercise's authoredPrescription.sets when one is present.",
   'Do not filter exercise selection by available equipment or session time — those are informational only in this milestone.',
   'Do not change the activity, session content, or classification of any date in lockedDates — return it with changeType "unchanged" and identical content to existingProgram.',
-  'Do not change any date outside the returned week (the 7 dates in existingProgram are the only ones you may describe).',
+  'Do not change any date outside the returned week (the 7 dates in existingProgram are the only ones you may describe) — this includes crossWeek.nextWeek, which is read-only context, never something this request creates, generates, or modifies.',
   'Do not claim to modify historical/completed performance.',
   'Do not create future training debt from missed/skipped sets.',
   'Do not return raw HTML, executable code, SQL, or any database instruction.',
   'Do not rely on any information from a prior request — this context is fully self-contained.',
+  "Keep each exercise's rationale to one short phrase (a few words), not a sentence or paragraph, and do not repeat information already implied by its other fields (targetId, classification, sets/reps/rir) — a full week's worth of exercises makes verbose rationale the single largest driver of output size.",
   'Return only the requested JSON object — no prose outside it.',
 ];
 
@@ -213,6 +215,8 @@ export function buildReconciliationContext(db: Database.Database, input: BuildRe
     diagnosticsWarnings.push('no persisted week program exists yet for this week — existingProgram reflects only real workout_sessions rows, not a deterministic plan');
   }
 
+  const crossWeek = buildCrossWeekContext(db, weekStart, planInput, persistedProgram);
+
   const contextWithoutVolatileFields = {
     schemaVersion: AI_RECONCILIATION_CONTEXT_SCHEMA_VERSION,
     mode: 'reconcile_week' as const,
@@ -245,6 +249,7 @@ export function buildReconciliationContext(db: Database.Database, input: BuildRe
     },
     existingProgram,
     targets,
+    crossWeek,
     lockedDates,
     executionContext: {
       programmingFilteringAllowed: false as const,

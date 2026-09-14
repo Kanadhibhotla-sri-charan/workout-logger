@@ -476,9 +476,36 @@ async function aiApi(path, options = {}) {
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
   } catch {
-    throw new Error('Something went wrong. Please try again.');
+    // A fetch-level failure (no HTTP response at all) is always a
+    // client-side/network problem, distinct from anything the server
+    // itself returned — see the two branches below.
+    const err = new Error('Could not reach the server. Check your connection and try again.');
+    err.code = 'AI_CLIENT_NETWORK_ERROR';
+    throw err;
   }
-  const body = await res.json().catch(() => ({}));
+
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    // A response body that isn't JSON at all almost always means an
+    // intermediary (e.g. nginx) returned its own error page before the
+    // app's own structured JSON error ever had a chance to be written —
+    // most reliably signaled by one of the classic gateway-timeout/
+    // upstream-failure HTTP statuses. Distinguished (via both message
+    // and `err.code`) from a genuinely unrecognized non-JSON response,
+    // which keeps the same safe generic fallback `mapAiErrorCode` itself
+    // already uses for an unmapped/absent error code below.
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      const err = new Error('The AI provider is taking longer than expected to respond. Please try again in a moment.');
+      err.code = 'AI_CLIENT_UPSTREAM_TIMEOUT';
+      throw err;
+    }
+    const err = new Error('Something went wrong. Please try again.');
+    err.code = 'AI_CLIENT_UNEXPECTED_RESPONSE';
+    throw err;
+  }
+
   if (!res.ok || body.ok === false) {
     const err = new Error(mapAiErrorCode(body.error));
     err.code = body.error || null;

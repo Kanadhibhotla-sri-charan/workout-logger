@@ -62,6 +62,7 @@ import { BadmintonSessionDetailsRepo } from '../repositories/badmintonSessionDet
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../repositories/outsideBlueprintExercisesRepo.js';
 import { WeekActivityOverridesRepo } from '../repositories/weekActivityOverridesRepo.js';
+import { WeeklyProgramRepo } from '../repositories/weeklyProgramRepo.js';
 import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import type { ExerciseTargetRole } from './exerciseSelector.js';
 
@@ -510,6 +511,31 @@ export interface WeeklyPlanInput {
    * these input values themselves. */
   targets: readonly TargetBuildContext[];
   recurring_badminton_days?: readonly Weekday[];
+  /** Cross-Week Planning Horizon (Consolidated Fix §7 remains intact —
+   * this is NOT time-based candidate elimination; see this module's own
+   * `assertNoContradictoryProgramState`-adjacent notes and
+   * docs/AI_PROGRAMMER_DEVELOPMENT_REFERENCE_REPAIR_REPORT.md-style
+   * repair docs for the full rationale). Read-only, next-calendar-week
+   * gym-day/session-purpose facts — the SAME shape `orderedGymDays`/
+   * `sessionPurposes` already are for the current week, just one week
+   * ahead. Used ONLY to widen a target's real exposure-count DIVISOR
+   * when the current week alone falls short of that target's own
+   * frequency reference (never to inflate an already-sufficient week,
+   * never to write anything into next week's own program). Optional —
+   * every existing caller/test that omits these keeps today's exact
+   * single-week behavior. */
+  nextWeekOrderedGymDays?: readonly Weekday[];
+  nextWeekSessionPurposes?: ReadonlyMap<Weekday, SessionPurpose>;
+  /** This target's own `unmetDirectSets` from the PREVIOUS real week's
+   * already-persisted `WeeklyPlanTargetAllocation` (programs.
+   * target_allocations_json) — i.e. how much of last week's real
+   * weekly objective did not fit into last week's own real sessions.
+   * Added to this week's own desired weekly volume so a deferred amount
+   * is genuinely consumed by the very next real week's generation,
+   * never silently forgotten. Keyed by `${target_type}:${target_id}`,
+   * matching `targetKey()`. Optional — omitted (or empty) reproduces
+   * today's exact behavior (no carryover). */
+  carryoverByTarget?: ReadonlyMap<string, number>;
 }
 
 /** One real exercise placed into one real session by the weekly
@@ -1010,7 +1036,16 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     });
     log.push(`${target.target_type} "${target.target_id}": ${volumeDecision.reasoning}`);
 
-    const desiredWeekly = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : target.current_weekly_primary_sets;
+    // Cross-Week Planning Horizon: last week's own genuinely-unmet
+    // portion of THIS target's weekly objective (real, persisted
+    // WeeklyPlanTargetAllocation.unmetDirectSets — see WeeklyPlanInput's
+    // own doc comment) is added here so it is actually consumed by this
+    // week's real generation, never merely noted and forgotten. Zero for
+    // every target with no carryover (the overwhelming common case) or
+    // when the caller passed no carryover map at all (full backward
+    // compatibility with every existing call site/test).
+    const carryoverFromPriorWeek = input.carryoverByTarget?.get(tKey) ?? 0;
+    const desiredWeekly = (volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : target.current_weekly_primary_sets) + carryoverFromPriorWeek;
 
     // Strict Surgical Fix Pass §7/§8: "if a muscle already has adequate
     // exposure through compounds, do not add redundant direct work
@@ -1413,7 +1448,28 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           return purpose !== null && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purpose);
         }).length
       : orderedGymDays.length;
-    const realExposureCountThisRun = Math.max(1, Math.min(compatibleDaysThisRun, Math.ceil(sessionsPerWeekForInterval)));
+    const targetFrequencyReference = Math.ceil(sessionsPerWeekForInterval);
+    // Cross-Week Planning Horizon: ONLY when this week's OWN real
+    // compatible days genuinely fall short of this target's own
+    // frequency reference do we look at next week's already-decided
+    // (read-only) session-purpose rotation to make up the shortfall —
+    // never when this week alone already satisfies the reference, so a
+    // normal, unaffected week's behavior is provably unchanged (see
+    // WeeklyPlanInput's own doc comment: this is not time-based
+    // candidate elimination, and it never inflates an already-sufficient
+    // week). The combined count is still capped at the SAME frequency
+    // reference — borrowing a day from next week brings a short week
+    // back up to normal, it never grants extra exposures beyond what the
+    // target actually needs.
+    let realExposureCountThisRun = Math.max(1, Math.min(compatibleDaysThisRun, targetFrequencyReference));
+    if (isPhysique && compatibleDaysThisRun < targetFrequencyReference) {
+      const nextWeekCompatibleDays = (input.nextWeekOrderedGymDays ?? []).filter((day) => {
+        const purpose = input.nextWeekSessionPurposes?.get(day) ?? null;
+        return purpose !== null && isTargetCompatibleWithPurpose(target.target_type, target.target_id, purpose);
+      }).length;
+      const shortfall = targetFrequencyReference - compatibleDaysThisRun;
+      realExposureCountThisRun = Math.max(1, Math.min(compatibleDaysThisRun + Math.min(nextWeekCompatibleDays, shortfall), targetFrequencyReference));
+    }
 
     // `fairShareWeekly` is this target's real weekly OBJECTIVE (already
     // correctly derived — decideVolume's own recommendation, capped by
@@ -2206,6 +2262,39 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     .filter((a) => a.activity_type === 'badminton')
     .map((a) => a.day);
 
+  // Cross-Week Planning Horizon — read-only, exactly one week ahead
+  // (never further; see WeeklyPlanInput's own doc comment). Next week's
+  // effective (override-applied) schedule is computed the SAME way this
+  // week's was above; nothing about next week's own program row is
+  // created, read, or required to exist for this to work.
+  const nextWeekStart = addDays(weekStart, 7);
+  const nextWeekOverrides = state.training_profile ? new WeekActivityOverridesRepo(db).get(state.training_profile.id, nextWeekStart) : new Map();
+  const nextWeekEffective = applyWeekOverrides(
+    state.training_profile?.training_days ?? [],
+    state.training_profile?.other_activity_schedule ?? [],
+    nextWeekOverrides
+  );
+  const nextWeekOrderedGymDays = WEEKDAYS.filter((d) => nextWeekEffective.trainingDays.includes(d));
+  const nextWeekRecurringBadmintonDays = nextWeekEffective.otherActivitySchedule.filter((a) => a.activity_type === 'badminton').map((a) => a.day);
+  const { purposes: nextWeekSessionPurposes } = assignSessionPurposes(nextWeekOrderedGymDays, nextWeekRecurringBadmintonDays);
+
+  // The immediately preceding real week's own already-persisted
+  // WeeklyPlanTargetAllocation[] (programs.target_allocations_json) —
+  // read-only. `unmetDirectSets` (0 for the overwhelming common case —
+  // see that field's own doc comment) is what genuinely carries a
+  // deferred amount into THIS week's own real generation, once below.
+  const previousWeekStart = addDays(weekStart, -7);
+  const previousWeekProgram = new WeeklyProgramRepo(db).getByWeekStart(previousWeekStart);
+  const carryoverByTarget = new Map<string, number>();
+  const previousAllocations = previousWeekProgram?.target_allocations as WeeklyPlanTargetAllocation[] | null | undefined;
+  if (Array.isArray(previousAllocations)) {
+    for (const allocation of previousAllocations) {
+      if (allocation.unmetDirectSets > 0) {
+        carryoverByTarget.set(`${allocation.target_type}:${allocation.target_id}`, allocation.unmetDirectSets);
+      }
+    }
+  }
+
   return {
     weekStart,
     today: historyAsOfDate,
@@ -2220,6 +2309,9 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     available_training_days: effective.trainingDays,
     targets,
     recurring_badminton_days: recurringBadmintonDays,
+    nextWeekOrderedGymDays,
+    nextWeekSessionPurposes,
+    carryoverByTarget,
   };
 }
 
