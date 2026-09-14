@@ -9,6 +9,7 @@ import { openDb } from '../../src/db/client.js';
 import { AIProgrammerService } from '../../src/ai-programmer/service/aiProgrammerService.js';
 import { AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION } from '../../src/ai-programmer/contracts/programmerTypes.js';
 import {
+  AIOutputAdequacyInvalidError,
   AIOutputDomainInvalidError,
   AIOutputSchemaInvalidError,
   AIProgrammerDisabledError,
@@ -18,6 +19,7 @@ import {
 import { approveProposal, commitAIProposalToPlannedSession } from '../../src/ai-programmer/service/aiProposalLifecycle.js';
 import { weekdayOfDate } from '../../src/engine/workoutBuilder.js';
 import type { AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../../src/ai-programmer/contracts/providerTypes.js';
+import { AIProposalRepo } from '../../src/repositories/aiProposalRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
@@ -192,6 +194,62 @@ describe('AIProgrammerService', () => {
 
     const second = await service.generateSession({ targetDate: date });
     expect(second.proposalId).not.toBe(first.proposalId);
+  });
+
+  it('rejects a structurally/domain-valid but programmatically INADEQUATE proposal (exceeds the target\'s deterministic volume cap), and persists nothing', async () => {
+    const { date, weekday } = futureDate();
+    // incline-dumbbell-press has no Blueprint-authored prescription for
+    // upper-pec (freely settable, capped only by the generic 6-set
+    // ceiling), while incline-barbell-press does (exactly 3 sets/6-12
+    // reps/1-3 RIR in the real Efficient chest package) — together they
+    // sum to 9 direct sets for upper-pec, one more than that muscle's
+    // real Efficient per-exposure cap of 8 (src/blueprint/snapshot/
+    // programming.json: chest efficient package = 8 sets/session).
+    // Structurally/domain-valid (every individual rule still holds);
+    // only the NEW adequacy check should catch the aggregate.
+    const provider = new FakeProvider(() =>
+      fakeResponse(
+        validProposalJson({
+          targetDate: date,
+          weekday,
+          exercises: [
+            {
+              exerciseId: 'incline-dumbbell-press',
+              role: 'primary',
+              targetType: 'physique_target',
+              targetId: 'upper-pec',
+              sets: 6,
+              repsMin: 8,
+              repsMax: 12,
+              rirMin: 1,
+              rirMax: 3,
+              rationale: ['x'],
+              source: 'blueprint',
+            },
+            {
+              exerciseId: 'incline-barbell-press',
+              role: 'primary',
+              targetType: 'physique_target',
+              targetId: 'upper-pec',
+              sets: 3,
+              repsMin: 6,
+              repsMax: 12,
+              rirMin: 1,
+              rirMax: 3,
+              rationale: ['x'],
+              source: 'blueprint',
+            },
+          ],
+        })
+      )
+    );
+    const service = new AIProgrammerService(db, provider);
+    const before = new AIProposalRepo(db).findLatestForTargetDate(date);
+    expect(before).toBeUndefined();
+
+    await expect(service.generateSession({ targetDate: date })).rejects.toBeInstanceOf(AIOutputAdequacyInvalidError);
+
+    expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeUndefined(); // nothing persisted
   });
 
   it('rejects invalid (schema-level) provider output and never returns a proposal', async () => {

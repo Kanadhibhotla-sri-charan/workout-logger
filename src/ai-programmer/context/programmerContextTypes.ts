@@ -99,6 +99,104 @@ export interface AIProgrammerRoutineDayContext {
   activity: 'gym' | 'badminton' | 'both' | 'unselected';
 }
 
+/** Repair: AI generation path was independently inventing muscle
+ * allocation and set counts from raw exposure data, never reusing the
+ * deterministic engine's own "how much" logic
+ * (developmentReferenceEngine.ts / volumeEngine.ts) or its session-
+ * identity assignment (sessionPurpose.ts). This is the deterministic
+ * pre-AI programming brief that closes that gap — every field here is
+ * computed by calling the EXISTING deterministic functions (never a
+ * second, independently-derived volume system), and is authoritative
+ * guidance the AI must follow, not merely descriptive context. See
+ * programmerContextBuilder.ts's buildProgrammingBrief(). */
+export interface AIProgrammerMuscleGuidance {
+  targetType: TargetType;
+  targetId: BlueprintId;
+  /** 'complete' for an active-goal (specialization) target, 'efficient'
+   * for a non-goal target — developmentReferenceEngine.ts's
+   * developmentPackageLevelFor(isSpecialization), verbatim. null only
+   * when this target has no Blueprint development package at all (e.g.
+   * every functional_goal). */
+  developmentLevel: 'complete' | 'efficient' | null;
+  isGoalOriented: boolean;
+  /** getDevelopmentReference().weekly_direct_set_reference — this
+   * target's own Blueprint package weekly objective at its assigned
+   * level. null when no package exists (see developmentLevel). */
+  weeklyDevelopmentReference: number | null;
+  /** getDevelopmentReference().direct_sets_per_exposure — a HARD
+   * per-session ceiling when present (Blueprint-authored, never
+   * invented); null when no package exists. */
+  directSetsPerExposureCap: number | null;
+  currentWeeklyDirectSets: number;
+  /** Meaningful indirect/secondary exposure already contributed by
+   * compound work this week — current_weekly_primary_sets's sibling
+   * figure, never omitted (exposureEngine.ts, reused via
+   * assembleWeeklyPlanInput/TargetBuildContext, never re-derived). */
+  currentWeeklySecondarySets: number;
+  /** volumeEngine.decideVolume()'s own recommendation — 'increase' to
+   * this many weekly sets, or 'maintain' at current, or
+   * 'introspect_needed' (never authorizes an increase from stagnation
+   * alone). */
+  volumeAction: 'maintain' | 'increase' | 'introspect_needed';
+  recommendedWeeklyPrimarySets: number;
+  /** This session's own share of the weekly recommendation — a RANGE
+   * (floor = a conservative fraction, ceiling = directSetsPerExposureCap
+   * when present, else the recommended weekly figure itself), never a
+   * single rigid number and never requiring an exact match (spec:
+   * "Efficient/Complete are volume/reference guidance, not fixed
+   * exercise lists" — the same non-rigidity applies to the derived
+   * session number). */
+  recommendedSessionSets: { min: number; max: number };
+  /** recoveryEngine.applyRecoveryConstraint's own priority_adjustment
+   * for this target, evaluated as of targetDate — reused verbatim,
+   * never re-derived. */
+  recoveryAdjustment: 'none' | 'reduce' | 'avoid';
+  /** Whether this target is compatible with the session's own purpose
+   * (sessionPurpose.isTargetCompatibleWithPurpose) — false means this
+   * target should not receive dedicated direct work THIS session
+   * (e.g. an arm goal on a Push day), regardless of how large its
+   * exposure gap looks; it is still listed here (never hidden) so the
+   * AI understands why it's excluded rather than inventing its own
+   * inclusion. Always true when the session has no identity
+   * (badminton/rest/unselected days, or a functional_goal target). */
+  eligibleForThisSession: boolean;
+  /** decideVolume().reasoning, verbatim — full traceability from a
+   * recommendation back to the deterministic decision that produced
+   * it. */
+  reasoning: string;
+}
+
+export interface AIProgrammerSessionIdentityContext {
+  /** The session's own already-decided purpose for targetDate, read
+   * from the persisted WeeklyProgramRepo program_sessions row (the
+   * exact sessionPurpose value weekProgramReconciliation.ts already
+   * wrote — never recomputed independently here). null on a
+   * badminton/rest/unselected day, or when no program row exists yet
+   * for this week. */
+  purpose: 'push' | 'pull' | 'legs' | 'upper' | null;
+  /** SESSION_PURPOSE_TARGETS[purpose] plus the universal targets
+   * (abs/neck) — the Blueprint-defined physique_target ids this
+   * session's identity expects meaningful direct coverage of. Empty
+   * when purpose is null. */
+  expectedCoverageTargetIds: readonly BlueprintId[];
+}
+
+export interface AIProgrammerProgrammingBrief {
+  session: AIProgrammerSessionIdentityContext;
+  /** One entry per target in `targets` — same order, same targetId/
+   * targetType keys, so a consumer can zip the two arrays positionally
+   * or join by (targetType,targetId). */
+  muscles: readonly AIProgrammerMuscleGuidance[];
+  /** A rough total-session set ceiling derived from
+   * profile.defaultSessionDurationMinutes via workoutBuilder.ts's own
+   * estimateMinutes(sets) — reused, never re-derived — the same
+   * per-set time cost the deterministic engine itself budgets against.
+   * Guidance, not a hard cap: the AI may reasonably exceed it only when
+   * every eligible priority target's own floor still requires more
+   * time than this budget suggests. */
+  approxSessionSetBudget: number;
+}
+
 export interface AIProgrammerCurrentProgramContext {
   /** Whether a persisted week program row exists at all for the week
    * containing `targetDate` — informational only; this milestone never
@@ -163,6 +261,12 @@ export interface AIProgrammerContext {
   };
 
   targets: readonly AIProgrammerTargetContext[];
+
+  /** Deterministic pre-AI programming guidance — see
+   * AIProgrammerProgrammingBrief's own doc comment. Authoritative: the
+   * AI must follow this, not independently invent muscle allocation or
+   * set counts from the raw exposure facts in `targets` above. */
+  programmingBrief: AIProgrammerProgrammingBrief;
 
   currentProgram: AIProgrammerCurrentProgramContext;
 

@@ -136,6 +136,42 @@ describe('POST /api/ai-programmer/generate-session', () => {
     expect(res.body.error).toBe('AI_OUTPUT_SCHEMA_INVALID');
   });
 
+  it('a structurally/domain-valid but programmatically INADEQUATE proposal (exceeds a target\'s deterministic volume cap) returns 502 AI_OUTPUT_ADEQUACY_INVALID, persisting nothing', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date, weekday } = futureDate();
+    // Same real-Blueprint-numbers scenario as the service-level test:
+    // incline-dumbbell-press (no authored cap, freely up to 6) +
+    // incline-barbell-press (authored exactly 3 sets) sum to 9 direct
+    // sets for upper-pec, 1 over that muscle's real Efficient
+    // per-exposure cap of 8.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        data: {
+          output: JSON.stringify(
+            validProposalJson({
+              targetDate: date,
+              weekday,
+              exercises: [
+                { exerciseId: 'incline-dumbbell-press', role: 'primary', targetType: 'physique_target', targetId: 'upper-pec', sets: 6, repsMin: 8, repsMax: 12, rirMin: 1, rirMax: 3, rationale: ['x'], source: 'blueprint' },
+                { exerciseId: 'incline-barbell-press', role: 'primary', targetType: 'physique_target', targetId: 'upper-pec', sets: 3, repsMin: 6, repsMax: 12, rirMin: 1, rirMax: 3, rationale: ['x'], source: 'blueprint' },
+              ],
+            })
+          ),
+        },
+      })
+    );
+
+    const before = new WorkoutSessionsRepo(db).listSessions().length;
+    const res = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(res.status).toBe(502);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toBe('AI_OUTPUT_ADEQUACY_INVALID');
+    expect(new WorkoutSessionsRepo(db).listSessions().length).toBe(before);
+
+    const latest = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: date });
+    expect(latest.body.found).toBe(false); // no proposal persisted
+  });
+
   it('provider failure (5xx exhausting retries) is handled safely with a typed error, no crash', async () => {
     process.env.AI_PROGRAMMER_ENABLED = 'true';
     fetchMock.mockResolvedValue(jsonResponse(503, {}));

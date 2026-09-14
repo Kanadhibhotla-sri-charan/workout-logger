@@ -736,10 +736,10 @@ describe('GET /api/ai-programmer/proposals/latest', () => {
 describe('POST /api/ai-programmer/proposals/:proposalId/commit — intent (Part 3)', () => {
   const MONDAY = '2026-09-14';
 
-  async function generateProposalForDate(targetDate: string, weekday: string): Promise<string> {
+  async function generateProposalForDate(targetDate: string, weekday: string, exercises?: unknown[]): Promise<string> {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, {
-        data: { output: JSON.stringify(validProposalJson({ targetDate, weekday })) },
+        data: { output: JSON.stringify(validProposalJson(exercises ? { targetDate, weekday, exercises } : { targetDate, weekday })) },
       })
     );
     const res = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate });
@@ -852,7 +852,16 @@ describe('POST /api/ai-programmer/proposals/:proposalId/commit — intent (Part 
     expect(mondayBefore.plannedWork.length).toBeGreaterThan(0);
     expect(mondayBefore.plannedSession).toBeNull();
 
-    const proposalId = await generateProposalForDate(MONDAY, 'monday');
+    // A richer, Push-adequate proposal (Monday's persisted deterministic
+    // session is 'push' by this point, so the new programming-adequacy
+    // validation — see programmerAdequacyValidator.ts — now applies;
+    // the single-exercise default fixture used elsewhere in this file
+    // is deliberately NOT adequate for a real Push session).
+    const proposalId = await generateProposalForDate(MONDAY, 'monday', [
+      { exerciseId: 'incline-dumbbell-press', role: 'primary', targetType: 'physique_target', targetId: 'upper-pec', sets: 3, repsMin: 8, repsMax: 12, rirMin: 1, rirMax: 2, rationale: ['Upper pec coverage.'], source: 'blueprint' },
+      { exerciseId: 'overhead-triceps-extension', role: 'primary', targetType: 'physique_target', targetId: 'triceps-long-head', sets: 2, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3, rationale: ['Triceps long-head coverage.'], source: 'blueprint' },
+      { exerciseId: 'cable-lateral-raise', role: 'primary', targetType: 'physique_target', targetId: 'side-delt', sets: 2, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3, rationale: ['Side-delt coverage.'], source: 'blueprint' },
+    ]);
     await request(app).post(`/api/ai-programmer/proposals/${proposalId}/approve`);
     const commitRes = await request(app).post(`/api/ai-programmer/proposals/${proposalId}/commit`).send({ intent: 'fill_existing_gym_day' });
     expect(commitRes.status).toBe(200);

@@ -18,6 +18,7 @@ export type AIProgrammerErrorCode =
   | 'AI_PROVIDER_INVALID_RESPONSE'
   | 'AI_OUTPUT_SCHEMA_INVALID'
   | 'AI_OUTPUT_DOMAIN_INVALID'
+  | 'AI_OUTPUT_ADEQUACY_INVALID'
   | 'AI_TARGET_NOT_EDITABLE'
   | 'AI_CONTEXT_INCOMPLETE'
   | 'AI_PROPOSAL_NOT_FOUND'
@@ -114,6 +115,23 @@ export class AIOutputDomainInvalidError extends AIProgrammerError {
   constructor(issues: string[]) {
     const bounded = boundDiagnosticIssues(issues);
     super('AI_OUTPUT_DOMAIN_INVALID', `AI output failed domain validation: ${bounded.join('; ')}`, 502, { issues: bounded });
+  }
+}
+
+/** Repair: the AI generation path previously validated only structural/
+ * domain correctness (real exercise/target IDs, authored-prescription
+ * exact match, safety ceilings) — never whether the resulting session
+ * is a programmatically ADEQUATE workout (session-identity coverage,
+ * priority/goal-muscle coverage, per-muscle and total-session volume
+ * bounds against context.programmingBrief). This error is thrown when
+ * a structurally/domain-valid proposal still fails that adequacy check
+ * — never silently accepted (spec: "never silently accept an inadequate
+ * proposal"). Same safe-error convention as AIOutputDomainInvalidError:
+ * no raw provider payload, no prompt, no stack trace. */
+export class AIOutputAdequacyInvalidError extends AIProgrammerError {
+  constructor(issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_OUTPUT_ADEQUACY_INVALID', `AI output failed programming-adequacy validation: ${bounded.join('; ')}`, 502, { issues: bounded });
   }
 }
 

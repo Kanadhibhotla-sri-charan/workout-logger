@@ -629,7 +629,7 @@ export interface WeeklyProgrammingPlan {
   decisions: string[];
 }
 
-function estimateMinutes(sets: number): number {
+export function estimateMinutes(sets: number): number {
   const workMinutes = (sets * (TIME_ESTIMATION.secondsPerWorkingSet + TIME_ESTIMATION.restSecondsBetweenSets)) / 60;
   return Math.round((workMinutes + TIME_ESTIMATION.setupMinutesPerExercise) * 10) / 10;
 }

@@ -24,19 +24,30 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../../blueprint/developmentPackages.js';
-import { WEEKDAYS, type ActivityType, type Weekday } from '../../contracts/types.js';
+import { WEEKDAYS, type ActivityType, type BlueprintId, type Weekday } from '../../contracts/types.js';
+import type { TargetType } from '../../engine/goalResolver.js';
 import { addDays, daysBetween, isValidCalendarDate } from '../../engine/dateMath.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import { applyRecoveryConstraint } from '../../engine/recoveryEngine.js';
 import { exercisesTrainingTarget, roleFor } from '../../engine/exerciseSelector.js';
-import { assembleWeeklyPlanInput, programmingWeekStart, weekdayOfDate, type TargetBuildContext } from '../../engine/workoutBuilder.js';
+import {
+  assembleWeeklyPlanInput,
+  estimateMinutes,
+  programmingWeekStart,
+  weekdayOfDate,
+  type TargetBuildContext,
+} from '../../engine/workoutBuilder.js';
+import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
+import { classifyAestheticTrend, decideVolume } from '../../engine/volumeEngine.js';
+import { SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
+import { isTargetCompatibleWithPurpose, type SessionPurpose } from '../../engine/sessionPurpose.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { AestheticAssessmentsRepo } from '../../repositories/aestheticAssessmentsRepo.js';
 import { GoalsRepo } from '../../repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
-import { WeeklyProgramRepo } from '../../repositories/weeklyProgramRepo.js';
+import { WeeklyProgramRepo, type PersistedWeekSession } from '../../repositories/weeklyProgramRepo.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { AIContextIncompleteError, AITargetNotEditableError } from '../errors.js';
 import { hashContext } from './programmerContextDiagnostics.js';
@@ -44,11 +55,18 @@ import {
   AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
   type AIProgrammerActiveGoalContext,
   type AIProgrammerContext,
+  type AIProgrammerMuscleGuidance,
+  type AIProgrammerProgrammingBrief,
   type AIProgrammerRoutineDayContext,
   type AIProgrammerTargetContext,
   type AIProgrammerValidExerciseContext,
 } from './programmerContextTypes.js';
 import { newId } from '../../repositories/ids.js';
+
+const SESSION_PURPOSES: readonly SessionPurpose[] = ['push', 'pull', 'legs', 'upper'];
+function isSessionPurpose(value: string): value is SessionPurpose {
+  return (SESSION_PURPOSES as readonly string[]).includes(value);
+}
 
 const NON_NEGOTIABLE_PRIORITY_HIERARCHY = [
   'Aesthetics/physique development is the primary programming objective.',
@@ -164,6 +182,120 @@ export function buildTargetContexts(
   });
 }
 
+/** Repair: closes the gap where AI generation independently invented
+ * muscle allocation/set counts from raw exposure data instead of
+ * reusing the deterministic engine's own "how much" logic. Every
+ * number here comes from calling the EXISTING deterministic functions
+ * (developmentReferenceEngine.ts, volumeEngine.ts, sessionPurpose.ts,
+ * workoutBuilder.ts's estimateMinutes) with the exact same per-target
+ * facts buildTargetContexts already gathered — never a second,
+ * independently-derived volume system, and never re-deriving session
+ * purpose (that's read from the already-persisted WeeklyProgramRepo
+ * row, not recomputed).
+ *
+ * `weeklyProgramSessions` is every gym day's OWN persisted session for
+ * this week (name = sessionPurpose, written verbatim by
+ * weekProgramReconciliation.ts) — used only to count how many of this
+ * week's REAL gym days are compatible with a given physique target
+ * (via the same isTargetCompatibleWithPurpose the deterministic engine
+ * itself uses), so a target's weekly recommendation can be divided into
+ * a sensible per-session range rather than assigned wholesale to every
+ * session. This mirrors, at reduced fidelity, workoutBuilder.ts's own
+ * per-exposure derivation (its `compatibleDaysThisRun`/`fairShareWeekly`
+ * — see docs from the read-only investigation) without duplicating that
+ * function's cross-target running-state bookkeeping, which a single
+ * one-session generation does not need. */
+export function buildProgrammingBrief(
+  targets: readonly AIProgrammerTargetContext[],
+  activeGoals: readonly AIProgrammerActiveGoalContext[],
+  sessionPurpose: SessionPurpose | null,
+  weeklyProgramSessions: readonly Pick<PersistedWeekSession, 'name'>[],
+  asOfDate: string,
+  budgetMinutes: number
+): AIProgrammerProgrammingBrief {
+  const expectedCoverageTargetIds: readonly BlueprintId[] = sessionPurpose
+    ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS]
+    : [];
+
+  const compatibleGymDaysThisWeek = (targetType: TargetType, targetId: BlueprintId): number => {
+    if (targetType !== 'physique_target') return Math.max(1, weeklyProgramSessions.length);
+    const count = weeklyProgramSessions.filter((s) => isSessionPurpose(s.name) && isTargetCompatibleWithPurpose(targetType, targetId, s.name)).length;
+    return Math.max(1, count);
+  };
+
+  const muscles: AIProgrammerMuscleGuidance[] = targets.map((t) => {
+    const level = t.targetType === 'physique_target' ? developmentPackageLevelFor(t.isSpecialization) : 'efficient';
+    const developmentReference = getDevelopmentReference(t.targetType, t.targetId, level);
+
+    const goal = t.goalId ? activeGoals.find((g) => g.goalId === t.goalId) ?? null : null;
+    const trend = classifyAestheticTrend(goal?.mostRecentAssessment ?? null, asOfDate, goal?.reviewCadenceDays ?? 30);
+
+    const volumeDecision = decideVolume({
+      target_type: t.targetType,
+      target_id: t.targetId,
+      goal_priority: goal?.priority ?? Number.MAX_SAFE_INTEGER,
+      current_weekly_primary_sets: t.currentWeeklyPrimarySets,
+      aesthetic_progress_trend: trend,
+      recovery_ok: t.recovery.priority_adjustment !== 'reduce',
+      // Same honest limitation workoutBuilder.ts itself accepts — this
+      // pipeline cannot verify the §11 introspection checklist either.
+      introspection_confirmed_no_other_explanation: false,
+      development_reference: developmentReference,
+    });
+
+    const recommendedWeeklyPrimarySets = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : t.currentWeeklyPrimarySets;
+
+    const daysThisWeek = compatibleGymDaysThisWeek(t.targetType, t.targetId);
+    const perExposureFloor = Math.max(0, Math.ceil(recommendedWeeklyPrimarySets / daysThisWeek));
+    const cap = developmentReference.direct_sets_per_exposure;
+    const max = cap ?? Math.max(perExposureFloor, recommendedWeeklyPrimarySets);
+    const min = Math.min(perExposureFloor, max);
+
+    const eligibleForThisSession =
+      sessionPurpose === null || t.targetType !== 'physique_target' || isTargetCompatibleWithPurpose(t.targetType, t.targetId, sessionPurpose);
+
+    return {
+      targetType: t.targetType,
+      targetId: t.targetId,
+      developmentLevel: developmentReference.package_id ? developmentReference.level : null,
+      isGoalOriented: t.isSpecialization,
+      weeklyDevelopmentReference: developmentReference.weekly_direct_set_reference,
+      directSetsPerExposureCap: developmentReference.direct_sets_per_exposure,
+      currentWeeklyDirectSets: t.currentWeeklyPrimarySets,
+      currentWeeklySecondarySets: t.weeklySecondarySets,
+      volumeAction: volumeDecision.action,
+      recommendedWeeklyPrimarySets,
+      recommendedSessionSets: { min, max },
+      recoveryAdjustment: t.recovery.priority_adjustment,
+      eligibleForThisSession,
+      reasoning: volumeDecision.reasoning,
+    };
+  });
+
+  // estimateMinutes(sets) is workoutBuilder.ts's own real per-set time
+  // model — reused, never re-derived, to check whether the sum of every
+  // eligible target's own MINIMUM guidance actually fits the session's
+  // real time budget. Guidance only: when it doesn't fit, this reports
+  // the largest total that does (via simple proportional scaling, never
+  // an invented per-target reallocation — the adequacy validator and/or
+  // the AI decide which targets absorb the reduction), rather than
+  // silently asking for more time than the user actually has.
+  const totalRecommendedSessionSets = muscles.filter((m) => m.eligibleForThisSession).reduce((sum, m) => sum + m.recommendedSessionSets.min, 0);
+  const idealMinutes = estimateMinutes(totalRecommendedSessionSets);
+  const approxSessionSetBudget =
+    totalRecommendedSessionSets === 0
+      ? muscles.length
+      : idealMinutes <= budgetMinutes
+        ? totalRecommendedSessionSets
+        : Math.max(1, Math.floor(totalRecommendedSessionSets * (budgetMinutes / idealMinutes)));
+
+  return {
+    session: { purpose: sessionPurpose, expectedCoverageTargetIds },
+    muscles,
+    approxSessionSetBudget,
+  };
+}
+
 /** Correction pass §5 (Option A): the user's stored
  * `TrainingProfile.timezone` is the single authoritative timezone for
  * every date-sensitive operation in a request — current-date
@@ -260,7 +392,20 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
 
   const targets: AIProgrammerTargetContext[] = buildTargetContexts(planInput, input.targetDate, otherActivityToday, missingData);
 
-  const weekProgramExists = new WeeklyProgramRepo(db).getByWeekStart(weekStart) !== undefined;
+  // Session identity (repair): read the day's ALREADY-DECIDED purpose
+  // from the persisted WeeklyProgramRepo row — `name` is exactly the
+  // sessionPurpose value weekProgramReconciliation.ts wrote — rather
+  // than recomputing session-purpose assignment here. null for a
+  // badminton/rest/unselected day, or before any program row exists yet
+  // for this week (targetDateActivity !== 'gym'/'both' in that case
+  // anyway).
+  const weeklyProgram = new WeeklyProgramRepo(db).getByWeekStart(weekStart);
+  const weekProgramExists = weeklyProgram !== undefined;
+  const targetDayIndex = WEEKDAYS.indexOf(targetWeekday);
+  const targetDaySessionName = weeklyProgram?.sessions.find((s) => s.day_index === targetDayIndex)?.name;
+  const sessionPurpose = targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null;
+
+  const programmingBrief = buildProgrammingBrief(targets, activeGoals, sessionPurpose, weeklyProgram?.sessions ?? [], currentDate, budgetMinutes);
 
   const contextWithoutVolatileFields = {
     schemaVersion: AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
@@ -285,6 +430,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     activeGoals,
     routine: { targetDateActivity, week },
     targets,
+    programmingBrief,
     currentProgram: { weekProgramExists, targetDateLocked: false, lockReason: null },
     executionContext: {
       programmingFilteringAllowed: false as const,
