@@ -58,3 +58,4 @@ story of how the app got to its current state.
 - [2026-09-14-50-ai-programmer-development-reference-repair.md](2026-09-14-50-ai-programmer-development-reference-repair.md)
 - [2026-09-14-51-ai-programmer-live-test-and-allocation-contract-correction.md](2026-09-14-51-ai-programmer-live-test-and-allocation-contract-correction.md)
 - [2026-09-14-52-two-day-schedule-swap-ui.md](2026-09-14-52-two-day-schedule-swap-ui.md)
+- [2026-09-14-53-two-day-schedule-swap-deploy-and-smoke-test.md](2026-09-14-53-two-day-schedule-swap-deploy-and-smoke-test.md)
