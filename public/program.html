@@ -131,10 +131,95 @@
         return;
       }
 
+      container.appendChild(buildSwapControl());
+
       const grid = el('div', { class: 'week-grid' });
       for (const day of weekData.days) grid.appendChild(buildDayCard(day));
       container.appendChild(grid);
       renderGoalSummary();
+    }
+
+    /** Two-day schedule swap — a purely deterministic scheduling
+     * operation (POST /api/programming/week/swap), independent of AI
+     * generation/reconciliation: it exchanges two dates' complete
+     * planned-day assignment (activity, program/session assignment,
+     * planned session identity, day-specific schedule metadata) without
+     * ever calling the planner or the LLM, and never creates workout
+     * sessions/exercises — see src/engine/scheduleOperations.ts's
+     * swapDayActivities for the full contract this control exposes.
+     * Rebuilt fresh every renderWeek() call so its two day pickers
+     * always reflect the current week's real days/activities. */
+    function buildSwapControl() {
+      const section = el('div', { class: 'change-activity', style: 'margin-bottom:1rem' });
+      const statusEl = el('div');
+      let open = false;
+
+      function dayLabel(day) {
+        const purpose = day.type === 'gym' ? (day.sessionPurpose ? formatSessionType(day.sessionPurpose) : 'Gym') : formatSessionType(day.type);
+        return `${formatWeekday(day.weekday)} (${formatDate(day.date)}) — ${purpose}`;
+      }
+
+      function buildPanel() {
+        const daySelectA = el('select', { 'aria-label': 'First day to swap' },
+          weekData.days.map((d) => el('option', { value: d.weekday, text: dayLabel(d) }))
+        );
+        const daySelectB = el('select', { 'aria-label': 'Second day to swap' },
+          weekData.days.map((d, i) => el('option', { value: d.weekday, text: dayLabel(d), ...(i === 1 ? { selected: 'selected' } : {}) }))
+        );
+
+        const confirmBtn = createButton({
+          label: 'Confirm swap',
+          variant: 'secondary',
+          onClick: async () => {
+            if (daySelectA.value === daySelectB.value) {
+              showInlineStatus(statusEl, 'error', 'Choose two different days to swap.');
+              return;
+            }
+            try {
+              await withSaving(
+                confirmBtn,
+                statusEl,
+                () => api('/api/programming/week/swap', { method: 'POST', body: { dayA: daySelectA.value, dayB: daySelectB.value } }),
+                `Swapped ${formatWeekday(daySelectA.value)} and ${formatWeekday(daySelectB.value)}.`
+              );
+              await loadWeek();
+            } catch (err) {
+              /* error already shown inline by withSaving; panel stays open, nothing else re-fetched */
+            }
+          },
+        });
+        const cancelBtn = createButton({
+          label: 'Cancel',
+          variant: 'secondary',
+          onClick: () => {
+            open = false;
+            renderSection();
+          },
+        });
+
+        section.innerHTML = '';
+        section.appendChild(el('p', { class: 'faint', text: 'Swap the complete schedule between any two days this week — activity, planned session, and program assignment all move together. Completed or in-progress workouts are never moved.', style: 'margin:0 0 0.6rem' }));
+        section.append(el('div', { class: 'btn-row' }, [daySelectA, el('span', { text: '↔' }), daySelectB, confirmBtn, cancelBtn]), statusEl);
+      }
+
+      function renderSection() {
+        section.innerHTML = '';
+        if (!open) {
+          section.appendChild(createButton({
+            label: 'Swap two days',
+            variant: 'secondary',
+            onClick: () => {
+              open = true;
+              renderSection();
+            },
+          }));
+          return;
+        }
+        buildPanel();
+      }
+
+      renderSection();
+      return section;
     }
 
     function buildDayCard(day) {
