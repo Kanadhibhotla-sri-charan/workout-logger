@@ -280,6 +280,25 @@ spec-mandated or Blueprint-given number — see `src/engine/config.ts`'s
     over by key since they don't depend on delivery either. See
     `docs/CROSS_WEEK_AGGREGATE_INTEGRITY_FIX_REPORT.md`.
 
+26. **Session Realism Cap.** [IMPLEMENTED — PROVISIONAL, user-chosen
+    numbers] `SESSION_REALISM_CAP` (`config.ts`): a hard ceiling of 4
+    distinct targets and 9 total exercises per session — a deliberate,
+    explicit, user-requested reversal of the Consolidated Fix's own
+    "session size is never limited" default, scoped ONLY to raw
+    exercise/muscle count (never time or equipment, which remain fully
+    unrestricted per Consolidated Fix §7/§8, unchanged). Enforced
+    identically for the deterministic engine (`workoutBuilder.ts`) and
+    AI output (`programmerAdequacyValidator.ts`/
+    `weekReconciliationDomainValidator.ts`); AI system instructions also
+    carry an explicit coaching-philosophy directive (reason like a real
+    coach, not a slot-filling bot; look back 14 real days; volume
+    numbers are fixed, exercise selection is the model's own judgment).
+    Deferred targets become real `unmetDirectSets`, consumed by the
+    existing carryover mechanism (items 22/25) with no new bookkeeping.
+    See `docs/SESSION_REALISM_CAP_AND_AI_COACHING_FIX_REPORT.md`. The
+    two numbers themselves (4/9) are the user's own choice, not derived
+    from Blueprint or a spec — revisit if real usage suggests otherwise.
+
 None of the still-open items above block anything currently built —
 every real engine module accommodates any reasonable future answer
 without a breaking schema change (`CONTRACT_VERSION` at 1.4.0,

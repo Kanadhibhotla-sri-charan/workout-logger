@@ -97,10 +97,12 @@ describe('fixture: a realistic week (Mon/Tue gym, Wed rest, Thu/Fri gym, Sat/Sun
     // (push/upper-compatible), ranked #1.
     const outcome = BlueprintAdapter.getAestheticGoals().find((o) => o.primary_targets.includes('mid-pec'))!;
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: outcome.id, priority: 1 });
-    // arm-side-thickness -> primary_targets: ['brachialis-arm-thickness']
-    // (pull-compatible — a genuinely different PPL session than goal 1),
-    // ranked #2.
-    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'arm-side-thickness', priority: 2 });
+    // biceps-front-peak -> primary_targets: ['biceps'] (pull-compatible
+    // — a genuinely different PPL session than goal 1), ranked #2.
+    // (Goal Same-Day Conflict Fix, 2026-09-14: 'arm-side-thickness'
+    // spans BOTH push and pull simultaneously and can no longer pair
+    // with any other active goal.)
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'biceps-front-peak', priority: 2 });
 
     // Real gym sessions Monday/Tuesday/Thursday/Friday of week 1 — the
     // same compound press each time, so its secondary contribution
@@ -193,11 +195,11 @@ describe('fixture: a realistic week (Mon/Tue gym, Wed rest, Thu/Fri gym, Sat/Sun
     expect(midPecSeenThisWeek).toBe(true);
     expect(mondayRest.length).toBeGreaterThan(0);
 
-    // Tuesday (pull) is goal 2's own day — brachialis-arm-thickness must
-    // be there too, proving the #2-ranked goal isn't starved merely
-    // because goal 1 exists and outranks it (Final Pass §3 Step 2).
+    // Tuesday (pull) is goal 2's own day — biceps must be there too,
+    // proving the #2-ranked goal isn't starved merely because goal 1
+    // exists and outranks it (Final Pass §3 Step 2).
     const tuesday2 = assembleAndBuildWorkout(db, TUE2, 90);
-    expect(tuesday2.exercises.some((e) => e.target_id === 'brachialis-arm-thickness' && e.classification === 'specialization')).toBe(true);
+    expect(tuesday2.exercises.some((e) => e.target_id === 'biceps' && e.classification === 'specialization')).toBe(true);
     expect(tuesday2.active_goals.length).toBe(2);
     expect(tuesday2.active_goals.map((g) => g.priority).sort()).toEqual([1, 2]);
   });

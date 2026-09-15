@@ -69,7 +69,12 @@ describe('Test D — a single assessment is insufficient data', () => {
 describe('Test E — an assessment recorded for a different, unrelated goal is excluded', () => {
   it("another goal's own assessment history never contributes to this goal's trend", () => {
     const { goal, phase } = setup();
-    const otherGoal = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'triceps-back-depth', priority: 2 });
+    // Goal Same-Day Conflict Fix (2026-09-14): the first goal
+    // ('chest-front-width') is push, so the other goal here must be a
+    // different category — 'back-width-v-taper' (pull) — since this
+    // test's own substance is assessment-history isolation between two
+    // goals, never their push/pull/legs category.
+    const otherGoal = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'back-width-v-taper', priority: 2 });
 
     // This goal has only ONE real assessment of its own — insufficient
     // on its own — while the OTHER goal has a real, comparable

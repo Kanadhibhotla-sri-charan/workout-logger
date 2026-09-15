@@ -77,15 +77,24 @@ describe('local Goal vs Blueprint goal reference', () => {
 });
 
 describe('active-aesthetic-goal cap — spec §1.2 (required test 6)', () => {
+  // Goal Same-Day Conflict Fix (2026-09-14): positional "first three
+  // Blueprint goals" indexing is no longer safe — Blueprint's own
+  // ordering has no guaranteed push/pull/legs spread, and these tests'
+  // actual intent (the max-2-active-goals cap, not category conflict)
+  // needs three explicit, verified non-conflicting real goals: one push,
+  // one pull, one legs.
+  const firstRef = 'chest-front-width'; // push -> mid-pec
+  const secondRef = 'back-width-v-taper'; // pull -> lat-width
+  const thirdRef = 'glute-roundness'; // legs -> gluteus-maximus
+
   it('rejects a third simultaneously active aesthetic goal', () => {
     const repo = new GoalsRepo(db);
-    const [firstRef, secondRef, thirdRef] = BlueprintAdapter.getAestheticGoals();
     expect(MAX_ACTIVE_AESTHETIC_GOALS).toBe(2);
 
-    repo.create({ goal_type: 'aesthetic', blueprint_ref: firstRef!.id, priority: 1 });
-    repo.create({ goal_type: 'aesthetic', blueprint_ref: secondRef!.id, priority: 2 });
+    repo.create({ goal_type: 'aesthetic', blueprint_ref: firstRef, priority: 1 });
+    repo.create({ goal_type: 'aesthetic', blueprint_ref: secondRef, priority: 2 });
 
-    expect(() => repo.create({ goal_type: 'aesthetic', blueprint_ref: thirdRef!.id, priority: 3 })).toThrow(
+    expect(() => repo.create({ goal_type: 'aesthetic', blueprint_ref: thirdRef, priority: 3 })).toThrow(
       TooManyActiveAestheticGoalsError
     );
     expect(repo.list({ active: true, goal_type: 'aesthetic' })).toHaveLength(2);
@@ -93,13 +102,12 @@ describe('active-aesthetic-goal cap — spec §1.2 (required test 6)', () => {
 
   it('allows a third aesthetic goal once one of the first two is deactivated', () => {
     const repo = new GoalsRepo(db);
-    const [firstRef, secondRef, thirdRef] = BlueprintAdapter.getAestheticGoals();
 
-    const first = repo.create({ goal_type: 'aesthetic', blueprint_ref: firstRef!.id, priority: 1 });
-    repo.create({ goal_type: 'aesthetic', blueprint_ref: secondRef!.id, priority: 2 });
+    const first = repo.create({ goal_type: 'aesthetic', blueprint_ref: firstRef, priority: 1 });
+    repo.create({ goal_type: 'aesthetic', blueprint_ref: secondRef, priority: 2 });
     repo.deactivate(first.id);
 
-    const third = repo.create({ goal_type: 'aesthetic', blueprint_ref: thirdRef!.id, priority: 3 });
+    const third = repo.create({ goal_type: 'aesthetic', blueprint_ref: thirdRef, priority: 3 });
     expect(third.active).toBe(true);
     expect(repo.list({ active: true, goal_type: 'aesthetic' })).toHaveLength(2);
   });

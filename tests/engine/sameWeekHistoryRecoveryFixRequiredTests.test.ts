@@ -62,6 +62,7 @@ import { openDb } from '../../src/db/client.js';
 import { createApp } from '../../src/server/app.js';
 import { assembleWeeklyPlanInput, programmingWeekStart } from '../../src/engine/workoutBuilder.js';
 import { buildTrainingState } from '../../src/engine/trainingState.js';
+import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
@@ -287,8 +288,18 @@ describe('Same-Week History & Day-Specific Recovery Fix — Test Group B (§10-�
 describe('Same-Week History & Day-Specific Recovery Fix — Test Group C (§9/§11, items 13-14): truthful target/variation-level explanations', () => {
   async function fridayPlannedWork() {
     setupProfile();
+    // Session Realism Cap (Programming Advisor Fix): Friday's own
+    // session now caps at 4 distinct targets. Giving a plain normal-
+    // development target real Tuesday history REDUCES that same
+    // target's own need, which can push it below 4 OTHER, never-
+    // touched targets in the priority ranking — the exact opposite of
+    // what this test needs to observe. A real active goal on mid-pec
+    // keeps it structurally prioritized regardless of that reduced
+    // need (confirmed empirically against this exact fixture), so the
+    // continuity check below has something stable to depend on.
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
     completedSession(TUESDAY, [
-      { exercise_id: 'lat-pulldown-wide-pronated', sets: reps(3) },
+      { exercise_id: 'flat-barbell-bench-press', sets: reps(3) },
       { exercise_id: 'hammer-curl', sets: reps(2) },
       { exercise_id: 'wrist-curl', sets: [{ weight: 20, reps: 15, completed: true }, { weight: 20, reps: 15, completed: false }] },
     ]);
@@ -299,7 +310,7 @@ describe('Same-Week History & Day-Specific Recovery Fix — Test Group C (§9/§
 
   it('item 13 — no false "first time" explanation for an exercise with genuine same-week history, when the same variation is reused', async () => {
     const work = await fridayPlannedWork();
-    const sameVariation = work.find((w: any) => w.exercise_id === 'lat-pulldown-wide-pronated' || w.exercise_id === 'hammer-curl' || w.exercise_id === 'wrist-curl');
+    const sameVariation = work.find((w: any) => w.exercise_id === 'flat-barbell-bench-press' || w.exercise_id === 'hammer-curl' || w.exercise_id === 'wrist-curl');
     // At least one of these targets' progression-continuity logic
     // reuses the exact same real Tuesday exercise — proving the
     // programmer does not fabricate a "first time" state merely because
@@ -310,8 +321,12 @@ describe('Same-Week History & Day-Specific Recovery Fix — Test Group C (§9/§
 
   it('item 14 — no false "haven\'t trained this target yet this week" explanation when real exposure exists, even for a target whose Friday exercise happens to be a different (also-legitimate) variation', async () => {
     const work = await fridayPlannedWork();
+    // lat-width is deliberately no longer part of this fixture's real
+    // Tuesday history (see fridayPlannedWork's own doc comment) — only
+    // brachialis-arm-thickness (hammer-curl) and forearm-flexors
+    // (wrist-curl) still carry it.
     for (const item of work) {
-      if (['lat-width', 'brachialis-arm-thickness', 'forearm-flexors'].includes(item.target_id)) {
+      if (['brachialis-arm-thickness', 'forearm-flexors'].includes(item.target_id)) {
         expect(item.friendly_reasoning).not.toContain("haven't trained this target yet this week");
         expect(item.friendly_reasoning).toMatch(/You had \d+ sets? for this target so far this week/);
       }

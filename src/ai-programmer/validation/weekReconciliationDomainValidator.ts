@@ -6,6 +6,7 @@
 // already has) rather than a second, drifting copy.
 
 import type Database from 'better-sqlite3';
+import { SESSION_REALISM_CAP } from '../../engine/config.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
@@ -96,6 +97,19 @@ export function validateWeekReconciliationDomain(
       const seen = new Set<string>();
       for (const [exIndex, exercise] of day.session.exercises.entries()) {
         validateExerciseAgainstTargets(exercise, context.targets, seen, `${path}.session.exercises[${exIndex}] (${exercise.exerciseId})`, errors);
+      }
+
+      // Session Realism Cap (Programming Advisor Fix, 2026-09-14): the
+      // same hard exercise/muscle-count ceiling the deterministic engine
+      // and the single-session validator enforce — checked here per
+      // real (unlocked) day, since a week reconciliation can rewrite
+      // several days at once.
+      const distinctTargets = new Set(day.session.exercises.map((ex) => `${ex.targetType}:${ex.targetId}`));
+      if (distinctTargets.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
+        errors.push(`${path}.session: ${distinctTargets.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
+      }
+      if (day.session.exercises.length > SESSION_REALISM_CAP.maxExercisesPerSession) {
+        errors.push(`${path}.session: ${day.session.exercises.length} total exercises — exceeds the hard cap of ${SESSION_REALISM_CAP.maxExercisesPerSession} exercises per session`);
       }
     }
   }

@@ -80,6 +80,30 @@ export const RECOVERY_THRESHOLDS = {
   recentHighExposureMultiplier: 1.5,
 } as const;
 
+/** [DEFAULT] Session Realism Cap — Programming Advisor Fix (2026-09-14),
+ * revised (2026-09-14, muscle cap raised 4 -> 7 after the pre-deployment
+ * validation report found the 4-muscle cap could starve a legitimate
+ * top-priority muscle purely on exercise-slot exhaustion, e.g. on an
+ * Upper day where up to 18 real targets are eligible at once): an
+ * explicit, user-requested override of the Consolidated Fix's own
+ * "session size is never limited" default — deliberately, and only for
+ * raw exercise/muscle COUNT, never for time or equipment (those remain
+ * fully unrestricted, per Consolidated Fix §7/§8, unchanged). A real
+ * session must never exceed these two limits, regardless of how much
+ * real weekly volume remains to place — any volume that doesn't fit is
+ * genuinely deferred (it becomes real `unmetDirectSets`, picked up by
+ * the next real exposure this week if one exists, or by the Cross-Week
+ * Programming Intelligence Fix's own carryover into next week — never
+ * silently dropped, and never crammed in regardless). Applied by
+ * `workoutBuilder.ts` for deterministic generation, and enforced as a
+ * validation ceiling on AI output by `programmerAdequacyValidator.ts`/
+ * `weekReconciliationDomainValidator.ts` — the same two numbers, one
+ * source of truth. */
+export const SESSION_REALISM_CAP = {
+  maxTargetsPerSession: 7,
+  maxExercisesPerSession: 9,
+} as const;
+
 /** [SPEC] §16: default weekly schedule. Explicitly documented as
  * shiftable (Wednesday's rest may move to Tuesday/Thursday; Saturday or
  * Sunday may become rest) — this is a seed default for a new

@@ -62,35 +62,48 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
   it('Test 1 — goal priority: Consolidated Fix §7 — a scarce session time budget no longer decides which goal is served; both Goal 1 and Goal 2 get their own real work', () => {
     setupProfile(FULL_EQUIPMENT, ['monday', 'tuesday', 'thursday', 'friday']);
     const goalsRepo = new GoalsRepo(db);
-    // chest-front-width (mid-pec) and chest-upper-shelf (upper-pec) are
-    // both push/upper compatible, so under the old time-budget-
-    // competition model they'd have fought over the same Monday (push)
-    // session's minutes. Session time now has zero effect on generation
-    // (spec §7/§15.C) — a scarce nominal budget (7 minutes) must not
-    // eliminate either goal's own real work; each goal's own priority
-    // still governs ordinary programming decisions (selection, exposure,
-    // recovery), never a time-budget elimination.
+    // Goal Same-Day Conflict Fix (2026-09-14): two aesthetic goals in the
+    // SAME push/pull/legs category can no longer both be active at once
+    // (they would otherwise compete for the same real session every week
+    // forever) — chest-front-width (mid-pec, push/Monday) and
+    // chest-upper-shelf (upper-pec, ALSO push) can no longer be paired.
+    // This test's real point — a scarce nominal time budget never
+    // eliminates a goal's own real work (spec §7/§15.C) — is preserved by
+    // checking one push goal on its own Monday session and one pull goal
+    // (back-width-v-taper -> lat-width) on its own Tuesday session, each
+    // against the same scarce budget.
     goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
-    goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: 'chest-upper-shelf', priority: 2 });
+    goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: 'back-width-v-taper', priority: 2 });
 
-    const result = assembleAndBuildWorkout(db, MONDAY, 7);
-    expect(result.exercises.find((e) => e.target_id === 'mid-pec')).toBeDefined();
-    expect(result.exercises.find((e) => e.target_id === 'upper-pec')).toBeDefined();
+    const mondayResult = assembleAndBuildWorkout(db, MONDAY, 7);
+    expect(mondayResult.exercises.find((e) => e.target_id === 'mid-pec')).toBeDefined();
     // The nominal 7-minute budget is echoed back purely as informational
     // display data — it never filtered the above.
-    expect(result.estimated_minutes).toBeGreaterThan(7);
+    expect(mondayResult.estimated_minutes).toBeGreaterThan(7);
+
+    const tuesdayResult = assembleAndBuildWorkout(db, TUESDAY, 7);
+    expect(tuesdayResult.exercises.find((e) => e.target_id === 'lat-width')).toBeDefined();
+    expect(tuesdayResult.estimated_minutes).toBeGreaterThan(7);
   });
 
   it('Test 2 — third goal: activating a third aesthetic specialization goal is rejected unless one is first deactivated', () => {
     const goalsRepo = new GoalsRepo(db);
-    const [first, second, third] = BlueprintAdapter.getAestheticGoals();
-    const g1 = goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: first!.id, priority: 1 });
-    goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: second!.id, priority: 2 });
+    // Goal Same-Day Conflict Fix (2026-09-14): positional "first three
+    // Blueprint goals" indexing is no longer safe — Blueprint's own
+    // ordering has no guaranteed push/pull/legs spread, and this test's
+    // actual intent (the max-2-active-goals cap, not category conflict)
+    // needs three explicit, verified non-conflicting real goals: one
+    // push, one pull, one legs.
+    const first = 'chest-front-width'; // push -> mid-pec
+    const second = 'back-width-v-taper'; // pull -> lat-width
+    const third = 'glute-roundness'; // legs -> gluteus-maximus
+    const g1 = goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: first, priority: 1 });
+    goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: second, priority: 2 });
 
-    expect(() => goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: third!.id, priority: 3 })).toThrow(TooManyActiveAestheticGoalsError);
+    expect(() => goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: third, priority: 3 })).toThrow(TooManyActiveAestheticGoalsError);
 
     goalsRepo.deactivate(g1.id);
-    expect(() => goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: third!.id, priority: 1 })).not.toThrow();
+    expect(() => goalsRepo.create({ goal_type: 'aesthetic', blueprint_ref: third, priority: 1 })).not.toThrow();
   });
 
   it('Test 3 — compound exposure: 4 bench sets give chest 4.00, triceps 1.32, front delts 1.32', () => {

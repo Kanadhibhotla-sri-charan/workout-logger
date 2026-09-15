@@ -18,6 +18,7 @@
 // remains fully eligible, and nothing here inspects WHICH exercise was
 // chosen, only how much total volume landed on which target.
 
+import { SESSION_REALISM_CAP } from '../../engine/config.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
 
@@ -165,6 +166,20 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
         `session identity "${brief.session.purpose}" expects meaningful coverage of at least ${required} of [${brief.session.expectedCoverageTargetIds.join(', ')}]; only ${coveredExpected.length} received >= ${MEANINGFUL_COVERAGE_MIN_SETS} sets ([${coveredExpected.join(', ')}])`
       );
     }
+  }
+
+  // --- Session Realism Cap (Programming Advisor Fix, 2026-09-14): a
+  // hard, user-requested ceiling on raw exercise/muscle COUNT — never
+  // time or equipment, which stay unrestricted (rule 11). The same two
+  // numbers are also what the deterministic engine enforces
+  // (workoutBuilder.ts) and what the system instruction itself already
+  // told the model (rule 26) — this is the check that actually holds
+  // the model to it, exactly like every other adequacy check here. ---
+  if (totals.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
+    errors.push(`session has ${totals.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
+  }
+  if (proposal.exercises.length > SESSION_REALISM_CAP.maxExercisesPerSession) {
+    errors.push(`session has ${proposal.exercises.length} total exercises — exceeds the hard cap of ${SESSION_REALISM_CAP.maxExercisesPerSession} exercises per session`);
   }
 
   // --- No single target dominating the whole session. ---

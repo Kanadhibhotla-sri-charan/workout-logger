@@ -55,7 +55,12 @@ describe('Surgical Fix Pass §16: the real weekly plan itself (assembleWeeklyPro
   beforeEach(() => {
     setupProfile(['monday', 'tuesday', 'thursday', 'friday']);
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 }); // mid-pec, push/upper
-    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'arm-side-thickness', priority: 2 }); // brachialis, pull
+    // Goal Same-Day Conflict Fix (2026-09-14): 'arm-side-thickness' spans
+    // BOTH push (triceps) and pull (brachialis), so it can no longer be
+    // paired with any other active goal — 'biceps-front-peak' (pull-only,
+    // real Blueprint primary_targets: ['biceps']) preserves this test's
+    // real intent (two goals on genuinely different PPL days) instead.
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'biceps-front-peak', priority: 2 }); // biceps, pull
   });
 
   it('one real weekly plan contains every real gym session (Monday/Tuesday/Thursday/Friday) with the real PPL+Upper purpose, from a single production call', () => {
@@ -70,7 +75,7 @@ describe('Surgical Fix Pass §16: the real weekly plan itself (assembleWeeklyPro
     // weekly plan object, on their own real PPL day — not four
     // separately re-derived allocations.
     expect(byDate.get(MON)?.plannedWork.some((w) => w.target_id === 'mid-pec')).toBe(true);
-    expect(byDate.get(TUE)?.plannedWork.some((w) => w.target_id === 'brachialis-arm-thickness')).toBe(true);
+    expect(byDate.get(TUE)?.plannedWork.some((w) => w.target_id === 'biceps')).toBe(true);
   });
 
   it('targetAllocations summarizes each real target\'s WHOLE-week outcome, independent of any single day\'s slice', () => {

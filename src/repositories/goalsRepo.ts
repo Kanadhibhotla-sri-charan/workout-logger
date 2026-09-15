@@ -1,7 +1,13 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter, type BlueprintAestheticOutcome, type BlueprintFunctionalGoal } from '../blueprint/adapter.js';
 import type { Goal, GoalType } from '../contracts/types.js';
-import { MAX_ACTIVE_AESTHETIC_GOALS, REVIEW_CADENCE_DEFAULT_DAYS } from '../engine/config.js';
+import {
+  MAX_ACTIVE_AESTHETIC_GOALS,
+  PULL_PHYSIQUE_TARGETS,
+  PUSH_PHYSIQUE_TARGETS,
+  LEGS_PHYSIQUE_TARGETS,
+  REVIEW_CADENCE_DEFAULT_DAYS,
+} from '../engine/config.js';
 import { addDays } from '../engine/dateMath.js';
 import { todayForUser } from '../lib/userTimezone.js';
 import { GoalEventsRepo } from './goalEventsRepo.js';
@@ -21,6 +27,74 @@ export class TooManyActiveAestheticGoalsError extends Error {
   constructor(public limit: number) {
     super(`Cannot activate another aesthetic goal — the limit of ${limit} active aesthetic goals is already reached. Deactivate one first.`);
     this.name = 'TooManyActiveAestheticGoalsError';
+  }
+}
+
+/** Goal Same-Day Conflict Fix (2026-09-14): two active aesthetic goals
+ * whose own Blueprint targets both fall in the same push/pull/legs
+ * category (e.g. a chest goal and a triceps goal, both push) previously
+ * had no reason to ever land on different real sessions — the
+ * deterministic engine schedules by session-purpose compatibility, not
+ * by goal identity, so two same-category goals always compete for the
+ * SAME session's limited capacity every single week, rather than each
+ * getting a session of its own. Verified against every real Blueprint
+ * aesthetic outcome (26 total, `programming.json`): 25 are single-
+ * category; exactly one (`arm-side-thickness`) spans two (push:
+ * triceps + pull: brachialis) — by explicit product decision, a goal
+ * that itself spans more than one category counts as occupying BOTH,
+ * so it can never be paired with any other active aesthetic goal, not
+ * just ones sharing one of its two categories. */
+export class ConflictingGoalCategoryError extends Error {
+  constructor(public newBlueprintRef: string, public conflictingBlueprintRef: string) {
+    super(
+      `Cannot activate "${newBlueprintRef}" alongside "${conflictingBlueprintRef}" — both would compete for the same push/pull/legs session every week instead of each getting a real session of its own. Deactivate "${conflictingBlueprintRef}" first, or choose a goal in a different category.`
+    );
+    this.name = 'ConflictingGoalCategoryError';
+  }
+}
+
+type PplCategory = 'push' | 'pull' | 'legs';
+
+/** The real push/pull/legs categories a Blueprint aesthetic outcome's
+ * own targets fall into — reuses the exact same PUSH_PHYSIQUE_TARGETS/
+ * PULL_PHYSIQUE_TARGETS/LEGS_PHYSIQUE_TARGETS lists the deterministic
+ * engine's own session-purpose eligibility already uses (config.ts),
+ * never a second, independently-maintained classification. A universal
+ * target (abs, neck — eligible on every session) contributes no
+ * category and can never itself cause a conflict. `primary_targets` and
+ * `supporting_targets` (optional in the raw Blueprint data — see
+ * BlueprintAestheticOutcome's own doc comment) are both considered:
+ * either can genuinely land the goal's real work on a given day. */
+function ppiCategoriesForGoal(outcome: BlueprintAestheticOutcome): Set<PplCategory> {
+  const targets = [...outcome.primary_targets, ...(outcome.supporting_targets ?? [])];
+  const categories = new Set<PplCategory>();
+  for (const targetId of targets) {
+    if (PUSH_PHYSIQUE_TARGETS.includes(targetId)) categories.add('push');
+    else if (PULL_PHYSIQUE_TARGETS.includes(targetId)) categories.add('pull');
+    else if (LEGS_PHYSIQUE_TARGETS.includes(targetId)) categories.add('legs');
+  }
+  return categories;
+}
+
+/** Throws ConflictingGoalCategoryError if `newOutcome` cannot be
+ * activated alongside `existingActiveGoals` — either it shares a real
+ * push/pull/legs category with one of them, or either side spans more
+ * than one category itself (which by definition always overlaps
+ * whatever the other side occupies). Only ever called for aesthetic
+ * goals — functional goals have no Blueprint push/pull/legs
+ * classification and are exempt from this rule entirely. */
+function assertNoGoalCategoryConflict(newOutcome: BlueprintAestheticOutcome, existingActiveGoals: readonly Goal[]): void {
+  const newCategories = ppiCategoriesForGoal(newOutcome);
+  for (const existing of existingActiveGoals) {
+    if (existing.goal_type !== 'aesthetic' || existing.blueprint_ref === newOutcome.id) continue;
+    const existingOutcome = BlueprintAdapter.getAestheticGoal(existing.blueprint_ref);
+    if (!existingOutcome) continue; // an already-invalid stored reference is a separate, pre-existing failure mode
+    const existingCategories = ppiCategoriesForGoal(existingOutcome);
+    const spansMultiple = newCategories.size > 1 || existingCategories.size > 1;
+    const overlaps = [...newCategories].some((c) => existingCategories.has(c));
+    if (spansMultiple || overlaps) {
+      throw new ConflictingGoalCategoryError(newOutcome.id, existingOutcome.id);
+    }
   }
 }
 
@@ -98,14 +172,15 @@ export class GoalsRepo {
    * blueprint_ref (Blueprint's identifier for the underlying outcome/
    * goal) — see the Goal type doc comment. */
   create(input: CreateGoalInput): Goal {
-    resolveBlueprintRef(input);
+    const resolved = resolveBlueprintRef(input);
 
     const active = input.active ?? true;
     if (active && input.goal_type === 'aesthetic') {
-      const activeCount = this.list({ active: true, goal_type: 'aesthetic' }).length;
-      if (activeCount >= MAX_ACTIVE_AESTHETIC_GOALS) {
+      const activeAestheticGoals = this.list({ active: true, goal_type: 'aesthetic' });
+      if (activeAestheticGoals.length >= MAX_ACTIVE_AESTHETIC_GOALS) {
         throw new TooManyActiveAestheticGoalsError(MAX_ACTIVE_AESTHETIC_GOALS);
       }
+      assertNoGoalCategoryConflict(resolved as BlueprintAestheticOutcome, activeAestheticGoals);
     }
 
     const goal: Goal = {
@@ -189,10 +264,12 @@ export class GoalsRepo {
     if (!goal || goal.active) return goal;
 
     if (goal.goal_type === 'aesthetic') {
-      const activeCount = this.list({ active: true, goal_type: 'aesthetic' }).length;
-      if (activeCount >= MAX_ACTIVE_AESTHETIC_GOALS) {
+      const activeAestheticGoals = this.list({ active: true, goal_type: 'aesthetic' });
+      if (activeAestheticGoals.length >= MAX_ACTIVE_AESTHETIC_GOALS) {
         throw new TooManyActiveAestheticGoalsError(MAX_ACTIVE_AESTHETIC_GOALS);
       }
+      const outcome = resolveBlueprintRef(goal) as BlueprintAestheticOutcome;
+      assertNoGoalCategoryConflict(outcome, activeAestheticGoals);
     }
 
     this.db.prepare('UPDATE goals SET active = 1 WHERE id = ?').run(id);

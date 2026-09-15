@@ -44,7 +44,7 @@ import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
+import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
@@ -426,8 +426,15 @@ export interface SkippedTarget {
    *     "valid but not selected today" categories above. It must never
    *     mean "not in the current package" or "lost a ranking gate" (spec
    *     §18) — both of those are already handled upstream as ordinary
-   *     candidate narrowing, never a skip. */
-  reason_code: 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity';
+   *     candidate narrowing, never a skip.
+   *   - `session_realism_cap`: valid target with a real, already-placed
+   *     candidate for this exact date, deferred solely because
+   *     SESSION_REALISM_CAP (config.ts) was reached for THIS session —
+   *     scope 'session', since it is genuinely day-specific (the same
+   *     target may still be placed on another real day this week). The
+   *     one real, deliberate exception to `'session'` scope's own "no
+   *     current mechanism produces one" note above. */
+  reason_code: 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity' | 'session_realism_cap';
   reason: string;
   /** As much of the same machine-readable explanation as had actually
    * been computed before this target was skipped — e.g. a target
@@ -1695,24 +1702,98 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     }
   }
 
-  // Consolidated Fix §7/§15.C: session time availability has ZERO effect
-  // on normal program generation. A prior architecture ("Remediation §17
-  // / Surgical Fix Pass §11") had goals literally compete for each
-  // session's own estimated time budget via allocateResource +
-  // fitToTimeBudget, dropping whichever candidates didn't fit and
-  // recording a "dropped by time-fitting" skip — exactly the candidate
-  // elimination the consolidated fix spec forbids. Every candidate this
-  // pipeline already decided to place for a given date is now placed,
-  // full stop; `estimated_minutes`/`availableMinutes` remain on the
-  // response purely as informational display data (spec §7: "estimated
-  // time may remain informational in the UI, but it must not alter
-  // candidate eligibility/allocation/selection/count/generated program
-  // contents").
+  // Consolidated Fix §7/§15.C: session TIME/EQUIPMENT availability still
+  // has ZERO effect on normal program generation — that part of the
+  // consolidated fix stands. `estimated_minutes`/`availableMinutes`
+  // remain purely informational display data. Session Realism Cap
+  // (below) is a narrower, later, explicitly user-requested exception
+  // that ONLY limits raw exercise/muscle COUNT — never time, never
+  // equipment — see SESSION_REALISM_CAP's own doc comment in config.ts.
   const candidatesByDate = new Map<string, typeof candidates>();
   for (const c of candidates) {
     const list = candidatesByDate.get(c.date) ?? [];
     list.push(c);
     candidatesByDate.set(c.date, list);
+  }
+
+  /** Session Realism Cap: `dayCandidates` arrives already in
+   * compareRankings priority order (the main per-target loop above
+   * processes `rankedTargets` in that order and pushes each target's
+   * own candidates as it goes — never reordered since), so a single
+   * pass keeping the first `maxTargetsPerSession` distinct targets
+   * encountered, then the first `maxExercisesPerSession` entries among
+   * those, is exactly "keep the highest-priority muscles/exercises,
+   * defer the rest" — never a second, independent ranking. Deferred
+   * candidates are excluded from this session's own `plannedWork`
+   * (their real sets are therefore automatically absent from
+   * `deliveredDirectSets` once `rebuildTargetAllocationsFromFinalSessions`
+   * sums this session's actual, trimmed `plannedWork` — becoming real,
+   * traceable `unmetDirectSets`, picked up by this target's own next
+   * real exposure this week if one exists, or by the Cross-Week
+   * Programming Intelligence Fix's carryover otherwise, no new
+   * bookkeeping required there) — but ARE returned separately here so
+   * the caller can record a real `session_realism_cap` skip for each
+   * deferred target, never silently dropping it from both
+   * `plannedWork` and `skipped` at once. */
+  function applySessionRealismCap(dayCandidates: typeof candidates): { kept: typeof candidates; deferred: typeof candidates } {
+    // Group by target first (order preserved — dayCandidates already
+    // arrives priority-ordered) so a target's own multiple exercise
+    // entries (e.g. its volume split across 2 exercises) are always
+    // decided TOGETHER — never split between kept and deferred, which
+    // would contradict assertNoContradictoryProgramState's own real
+    // invariant (a target cannot be both programmed and skipped).
+    const order: string[] = [];
+    const byTarget = new Map<string, typeof candidates>();
+    for (const c of dayCandidates) {
+      const key = targetKey(c.planned);
+      let group = byTarget.get(key);
+      if (!group) {
+        group = [];
+        byTarget.set(key, group);
+        order.push(key);
+      }
+      group.push(c);
+    }
+
+    const kept: typeof candidates = [];
+    const deferred: typeof candidates = [];
+    let keptTargetCount = 0;
+    for (const key of order) {
+      const group = byTarget.get(key)!;
+      const wouldExceedTargets = keptTargetCount >= SESSION_REALISM_CAP.maxTargetsPerSession;
+      const wouldExceedExercises = kept.length + group.length > SESSION_REALISM_CAP.maxExercisesPerSession;
+      if (wouldExceedTargets || wouldExceedExercises) {
+        deferred.push(...group);
+        continue;
+      }
+      kept.push(...group);
+      keptTargetCount++;
+    }
+    return { kept, deferred };
+  }
+
+  /** One `SkippedTarget` per distinct target deferred by the cap for
+   * this session — reuses that target's own already-fully-computed
+   * `decision` (identical to what its now-cut `plannedWork` entry would
+   * have carried), never a second, re-derived decision object. */
+  function sessionRealismSkipsFor(deferred: typeof candidates): SkippedTarget[] {
+    const seen = new Set<string>();
+    const skips: SkippedTarget[] = [];
+    for (const c of deferred) {
+      const key = targetKey(c.planned);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      skips.push({
+        target_type: c.planned.target_type,
+        target_id: c.planned.target_id,
+        classification: c.planned.classification,
+        scope: 'session',
+        reason_code: 'session_realism_cap',
+        reason: `This session already reached the ${SESSION_REALISM_CAP.maxTargetsPerSession}-target/${SESSION_REALISM_CAP.maxExercisesPerSession}-exercise session realism cap before this target's own turn — deferred, not dropped; it remains available for this target's next real exposure.`,
+        decision: c.planned.decision,
+      });
+    }
+    return skips;
   }
 
   // Remediation §16's "active goals, rankings" — every distinct real
@@ -1734,13 +1815,14 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   for (const day of orderedGymDays) {
     const date = dateForWeekday.get(day)!;
     const availableMinutes = date === input.today ? input.todayBudgetMinutes : input.defaultSessionMinutes;
-    const dayCandidates = candidatesByDate.get(date) ?? [];
+    const { kept: dayCandidates, deferred } = applySessionRealismCap(candidatesByDate.get(date) ?? []);
 
     // Consolidated Fix §7: every real candidate already constructed for
     // this date is placed unconditionally — no goal-vs-goal time
     // competition, no time-based drop. `estimatedMinutes` below is
     // computed straight from the full, unfiltered set for informational
-    // display only.
+    // display only. Session Realism Cap (above) is the one explicit,
+    // user-requested exception — count-only, never time/equipment.
     const sessionWork: PlannedWorkItem[] = dayCandidates.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes }));
     const sessionMinutes = dayCandidates.reduce((sum, c) => sum + c.estimated_minutes, 0);
 
@@ -1758,9 +1840,12 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // every session because each real day legitimately needs to know
       // "this target isn't getting worked this week, and here's why,"
       // never because it was freshly, independently discovered today.
-      // Time/equipment no longer produce any day-specific ('session'
-      // scope) skip at all now that neither filters generation (§7/§8).
-      skipped: weekLevelSkips,
+      // Time/equipment still produce no day-specific skip (§7/§8
+      // stands) — `sessionRealismSkipsFor` below is the one deliberate,
+      // user-requested exception: a real, genuinely day-specific
+      // 'session'-scope skip for a target the count-only realism cap
+      // deferred from THIS session specifically.
+      skipped: [...weekLevelSkips, ...sessionRealismSkipsFor(deferred)],
       activeGoals,
       resourceAllocation: [],
     });

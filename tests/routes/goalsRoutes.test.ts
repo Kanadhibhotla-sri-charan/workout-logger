@@ -81,8 +81,15 @@ describe('goal priority/deactivate/reactivate/events routes', () => {
   });
 
   it('rejects a third active aesthetic goal via the real backend restriction, surfaced as an error the UI must show verbatim', async () => {
+    // Goal Same-Day Conflict Fix (2026-09-14): 'arm-side-thickness' spans
+    // both push and pull, conflicting with 'chest-front-width' (push) —
+    // this test is about the max-2-active-goals CAP, not category
+    // conflict, so goal 2 is swapped to a genuinely different category
+    // ('back-width-v-taper', pull) to isolate that. The max-count check
+    // runs before the category check, so the 3rd goal is still rejected
+    // purely on count regardless of its own category.
     await request(app).post('/api/goals').send({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 }).expect(201);
-    await request(app).post('/api/goals').send({ goal_type: 'aesthetic', blueprint_ref: 'arm-side-thickness', priority: 2 }).expect(201);
+    await request(app).post('/api/goals').send({ goal_type: 'aesthetic', blueprint_ref: 'back-width-v-taper', priority: 2 }).expect(201);
     const rejected = await request(app).post('/api/goals').send({ goal_type: 'aesthetic', blueprint_ref: 'shoulder-width-front', priority: 3 }).expect(400);
     expect(rejected.body.error).toBeTruthy();
   });

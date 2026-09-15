@@ -125,7 +125,7 @@ export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalNa
  * `workoutBuilder.ts`'s `SkippedTarget.reason_code` already assigns at
  * the exact site that decided it. Mirrors that type exactly so this
  * function can switch on it directly. */
-type SkipReasonCode = 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity';
+type SkipReasonCode = 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity' | 'session_realism_cap';
 
 interface FriendlySkipInput {
   target_type: TargetType;
@@ -244,6 +244,14 @@ export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
       // imply this target/exercise itself is wrong rather than the
       // underlying data being incomplete.
       return `The Blueprint data for ${skip.target_name} is incomplete, so the programmer cannot safely use it until that data is fixed — this is a data gap to fix, not a normal training decision.`;
+    }
+    case 'session_realism_cap': {
+      // Programming Advisor Fix (2026-09-14): a real, valid target with
+      // a real, already-placed candidate for this exact session,
+      // deferred only because the session already reached its
+      // count-only realism limit — never a time/equipment reason (§7/§8
+      // still forbid those), and never a permanent exclusion.
+      return `${skip.target_name} was deferred from this session once it reached its exercise/muscle limit — this target remains available for its next real session.`;
     }
   }
 }

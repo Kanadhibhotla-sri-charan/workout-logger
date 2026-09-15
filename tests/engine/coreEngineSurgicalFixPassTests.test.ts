@@ -425,7 +425,10 @@ describe('Test 10 — the whole real weekly plan, with today a real slice of it 
       ],
     });
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 }); // Goal 1 -> mid-pec
-    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'arm-side-thickness', priority: 2 }); // Goal 2 -> brachialis
+    // Goal Same-Day Conflict Fix (2026-09-14): 'arm-side-thickness' spans
+    // both push and pull and can no longer pair with any other active
+    // goal — 'biceps-front-peak' (pull-only, primary_targets: ['biceps']) instead.
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'biceps-front-peak', priority: 2 }); // Goal 2 -> biceps
     const sessionsRepo = new WorkoutSessionsRepo(db);
     const satSession = sessionsRepo.createSession({ date: '2026-08-29', session_type: 'badminton', status: 'completed' }); // real high-intensity Saturday before this week
     new BadmintonSessionDetailsRepo(db).record({ workout_session_id: satSession.session_id, intensity: 'high', format: 'singles', games_count: 3, post_session_fatigue: 5 });
@@ -444,8 +447,8 @@ describe('Test 10 — the whole real weekly plan, with today a real slice of it 
     expect(byDate.has(SUN)).toBe(false);
 
     expect(plan.sessions.some((s) => s.plannedWork.some((w) => w.target_id === 'mid-pec'))).toBe(true); // Goal 1
-    expect(plan.sessions.some((s) => s.plannedWork.some((w) => w.target_id === 'brachialis-arm-thickness'))).toBe(true); // Goal 2
-    const goalTargetIds = new Set(['mid-pec', 'brachialis-arm-thickness']);
+    expect(plan.sessions.some((s) => s.plannedWork.some((w) => w.target_id === 'biceps'))).toBe(true); // Goal 2
+    const goalTargetIds = new Set(['mid-pec', 'biceps']);
     expect(plan.sessions.some((s) => s.plannedWork.some((w) => !goalTargetIds.has(w.target_id)))).toBe(true); // normal-dev/maintenance, the whole physique
     expect(byDate.get(FRI)?.badmintonContext).not.toBeNull(); // real badminton programming effect
   });

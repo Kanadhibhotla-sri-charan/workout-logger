@@ -140,10 +140,14 @@ describe('Strict Bug-Fix §32: the required full-week fixture, through the real 
     });
 
     // Two real, ranked aesthetic goals — one push/upper-compatible
-    // (mid-pec), one pull-compatible (brachialis arm thickness) — on
-    // genuinely different PPL sessions, so each gets its own real day.
+    // (mid-pec), one pull-compatible (biceps) — on genuinely different
+    // PPL sessions, so each gets its own real day. (Goal Same-Day
+    // Conflict Fix, 2026-09-14: 'arm-side-thickness' spans BOTH push and
+    // pull simultaneously and can no longer pair with any other active
+    // goal, so 'biceps-front-peak' — real Blueprint primary_targets:
+    // ['biceps'], pull-only — is used here instead.)
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
-    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'arm-side-thickness', priority: 2 });
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'biceps-front-peak', priority: 2 });
 
     // Week 1 real history: compound pressing Monday + Friday (real
     // compound exposure/progression source), heavy quads Thursday
@@ -173,7 +177,7 @@ describe('Strict Bug-Fix §32: the required full-week fixture, through the real 
     const result = assembleAndBuildWorkout(db, TUE2, 75);
     // The nominal session length never shrinks a real due exposure.
     expect(result.skipped_targets.some((s) => s.reason.includes('time-fitting'))).toBe(false);
-    expect(result.exercises.some((e) => e.target_id === 'brachialis-arm-thickness')).toBe(true);
+    expect(result.exercises.some((e) => e.target_id === 'biceps')).toBe(true);
     expect(result.active_goals.length).toBe(2);
   });
 
