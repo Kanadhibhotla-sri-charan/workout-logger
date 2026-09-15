@@ -223,6 +223,26 @@ export const TIME_ESTIMATION = {
   setupMinutesPerExercise: 2,
 } as const;
 
+
+/** [DEFAULT] Session-realism cap: the maximum number of distinct targets
+ * (muscles/muscle groups) and exercises that may be programmed into a
+ * single gym session. Blueprint Efficient/Complete numbers determine HOW
+ * MUCH volume a target needs across the week; this cap determines HOW
+ * MANY distinct targets and exercises can realistically fit into one
+ * session without becoming unfocused or unrealistically long.
+ *
+ * When a target cannot fit under the per-day cap, its required volume is
+ * still recorded as `requiredDirectSets` — the resulting `unmetDirectSets`
+ * flows through the existing cross-week carryover mechanism.
+ *
+ * [DEFAULT] values chosen for realism; can be tuned without touching engine logic. */
+export const SESSION_REALISM_CAP = {
+  /** Maximum distinct targets (physique_target or functional_goal) that
+   * may receive programmed work in a single gym session. */
+  maxTargetsPerSession: 7,
+  /** Maximum total exercises that may appear in a single gym session. */
+  maxExercisesPerSession: 9,
+} as const;
 export const ENGINE_CONFIG = {
   exposureCoefficients: EXPOSURE_COEFFICIENTS,
   maxActiveAestheticGoals: MAX_ACTIVE_AESTHETIC_GOALS,
@@ -238,4 +258,5 @@ export const ENGINE_CONFIG = {
   universalPhysiqueTargets: UNIVERSAL_PHYSIQUE_TARGETS,
   goalMatch: GOAL_MATCH,
   timeEstimation: TIME_ESTIMATION,
+  sessionRealismCap: SESSION_REALISM_CAP,
 } as const;

@@ -44,7 +44,7 @@ import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, TIME_ESTIMATION } from './config.js';
+import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
@@ -427,7 +427,7 @@ export interface SkippedTarget {
    *     mean "not in the current package" or "lost a ranking gate" (spec
    *     §18) — both of those are already handled upstream as ordinary
    *     candidate narrowing, never a skip. */
-  reason_code: 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity';
+  reason_code: 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity' | 'session_realism_cap';
   reason: string;
   /** As much of the same machine-readable explanation as had actually
    * been computed before this target was skipped — e.g. a target
@@ -814,6 +814,11 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   // NON_SPECIALIZATION_PRIORITY sentinel) so it's never confused with
   // this per-target rank.
   const plannedExerciseIdsByDate = new Map<string, BlueprintId[]>();
+  // Session-realism cap tracking: how many distinct targets have already
+  // been placed on each date this run. Keyed by ISO date string (same key
+  // as plannedExerciseIdsByDate). Incremented once per target per day,
+  // AFTER the first finalizePlacement for that target on that day fires.
+  const placedTargetCountByDate = new Map<string, number>();
   // §7: real primary/secondary exposure_units every already-processed
   // (higher-priority) target's own placed work has contributed to EVERY
   // target it touches (itself included) — the mechanism that makes
@@ -1569,6 +1574,32 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       const dayCandidatePool = isPhysique && !isBodyFocusAllowedOnDay(target.target_id, day) ? [] : candidateExerciseIds;
       if (dayCandidatePool.length === 0) continue;
 
+      // Session-Realism Cap: a single session must not exceed
+      // SESSION_REALISM_CAP.maxTargetsPerSession distinct targets or
+      // SESSION_REALISM_CAP.maxExercisesPerSession total exercises.
+      // The cap fires before placing any exercise for a new target on this day
+      // -- a target is never split between programmed and deferred states.
+      // Deferred volume flows through the existing unmetDirectSets / carryover
+      // mechanism: requiredDirectSetsByTarget already records the full
+      // weekly objective; the resulting gap becomes unmetDirectSets.
+      const placedTargetsToday = placedTargetCountByDate.get(date) ?? 0;
+      const placedExercisesToday = plannedExerciseIdsByDate.get(date)?.length ?? 0;
+      if (
+        placedTargetsToday >= SESSION_REALISM_CAP.maxTargetsPerSession ||
+        placedExercisesToday >= SESSION_REALISM_CAP.maxExercisesPerSession
+      ) {
+        weekLevelSkips.push({
+          target_type: target.target_type,
+          scope: 'session' as const,
+          reason_code: 'session_realism_cap',
+          target_id: target.target_id,
+          classification,
+          reason: `Session-realism cap reached for ${date}: already ${placedTargetsToday}/${SESSION_REALISM_CAP.maxTargetsPerSession} targets and ${placedExercisesToday}/${SESSION_REALISM_CAP.maxExercisesPerSession} exercises in this session. This target's required volume (${fairShareWeekly} sets) is deferred to the next eligible session via the cross-week carryover mechanism.`,
+          decision: makeSkipDecision({ volume_decision: volumeDecision, exposure_decision: exposureDecision }),
+        });
+        continue;
+      }
+
       const plannedTodayIds = plannedExerciseIdsByDate.get(date) ?? [];
 
       // Post-v2 Corrective Fix §9.2/§13: every DUE real exposure gets
@@ -1648,6 +1679,9 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       if (placedAnyToday) {
         simulatedLastExposureDate = date;
         exposureDatesThisRun.push(date);
+        // Increment the per-day target count now that at least one exercise
+        // was successfully placed for this target on this day.
+        placedTargetCountByDate.set(date, (placedTargetCountByDate.get(date) ?? 0) + 1);
       }
     }
 
