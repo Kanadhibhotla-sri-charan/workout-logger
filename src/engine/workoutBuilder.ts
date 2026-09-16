@@ -44,7 +44,7 @@ import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/developmentPackages.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { EXPOSURE_COEFFICIENTS, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
+import { EXPOSURE_COEFFICIENTS, LEGS_SESSION_MAX_EXERCISES, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
@@ -1846,8 +1846,17 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * never gets a skip entry (it already has real `plannedWork`) —
    * `sessionRealismSkipsFor` below excludes it explicitly, which is
    * also what keeps `assertNoContradictoryProgramState` satisfied (a
-   * target cannot be both programmed and marked skipped). */
-  function applySessionRealismCap(dayCandidates: typeof candidates): { kept: typeof candidates; deferred: typeof candidates } {
+   * target cannot be both programmed and marked skipped).
+   *
+   * Legs-Session Exercise Cap (2026-09-16): `maxExercisesForThisSession`
+   * is `LEGS_SESSION_MAX_EXERCISES` (5) on a 'legs'-purpose day, the
+   * general `SESSION_REALISM_CAP.maxExercisesPerSession` (9) otherwise —
+   * explicit user request. The muscle-count ceiling
+   * (`maxTargetsPerSession`) is unchanged for every purpose, legs
+   * included. */
+  function applySessionRealismCap(dayCandidates: typeof candidates, sessionPurpose: SessionPurpose | null): { kept: typeof candidates; deferred: typeof candidates } {
+    const maxExercisesForThisSession = sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
+
     // Group by target first (order preserved — dayCandidates already
     // arrives priority-ordered) so a target's own multiple exercise
     // entries (e.g. its volume split across 2 exercises) are always
@@ -1877,7 +1886,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         deferred.push(...group);
         continue;
       }
-      const remainingExerciseSlots = SESSION_REALISM_CAP.maxExercisesPerSession - kept.length;
+      const remainingExerciseSlots = maxExercisesForThisSession - kept.length;
       if (remainingExerciseSlots <= 0) {
         deferred.push(...group);
         continue;
@@ -1908,7 +1917,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * volume becomes real `unmetDirectSets` automatically, with no
    * separate skip needed, exactly like any other under-delivered
    * target. */
-  function sessionRealismSkipsFor(deferred: typeof candidates, kept: typeof candidates): SkippedTarget[] {
+  function sessionRealismSkipsFor(deferred: typeof candidates, kept: typeof candidates, sessionPurpose: SessionPurpose | null): SkippedTarget[] {
+    const maxExercisesForThisSession = sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
     const keptKeys = new Set(kept.map((c) => targetKey(c.planned)));
     const seen = new Set<string>();
     const skips: SkippedTarget[] = [];
@@ -1923,7 +1933,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         classification: c.planned.classification,
         scope: 'session',
         reason_code: 'session_realism_cap',
-        reason: `This session already reached the ${SESSION_REALISM_CAP.maxTargetsPerSession}-target/${SESSION_REALISM_CAP.maxExercisesPerSession}-exercise session realism cap before this target's own turn — deferred, not dropped; it remains available for this target's next real exposure.`,
+        reason: `This session already reached the ${SESSION_REALISM_CAP.maxTargetsPerSession}-target/${maxExercisesForThisSession}-exercise session realism cap before this target's own turn — deferred, not dropped; it remains available for this target's next real exposure.`,
         decision: c.planned.decision,
       });
     }
@@ -1949,7 +1959,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   for (const day of orderedGymDays) {
     const date = dateForWeekday.get(day)!;
     const availableMinutes = date === input.today ? input.todayBudgetMinutes : input.defaultSessionMinutes;
-    const { kept: dayCandidates, deferred } = applySessionRealismCap(candidatesByDate.get(date) ?? []);
+    const thisSessionPurpose = sessionPurposes.get(day) ?? null;
+    const { kept: dayCandidates, deferred } = applySessionRealismCap(candidatesByDate.get(date) ?? [], thisSessionPurpose);
 
     // Consolidated Fix §7: every real candidate already constructed for
     // this date is placed unconditionally — no goal-vs-goal time
@@ -1963,7 +1974,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     sessions.push({
       date,
       weekday: day,
-      sessionPurpose: sessionPurposes.get(day) ?? null,
+      sessionPurpose: thisSessionPurpose,
       availableMinutes,
       availableEquipment: input.available_equipment,
       plannedWork: sessionWork,
@@ -1979,7 +1990,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // user-requested exception: a real, genuinely day-specific
       // 'session'-scope skip for a target the count-only realism cap
       // deferred from THIS session specifically.
-      skipped: [...weekLevelSkips, ...sessionRealismSkipsFor(deferred, dayCandidates)],
+      skipped: [...weekLevelSkips, ...sessionRealismSkipsFor(deferred, dayCandidates, thisSessionPurpose)],
       activeGoals,
       resourceAllocation: [],
     });

@@ -18,7 +18,7 @@
 // remains fully eligible, and nothing here inspects WHICH exercise was
 // chosen, only how much total volume landed on which target.
 
-import { SESSION_REALISM_CAP } from '../../engine/config.js';
+import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../engine/config.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
 
@@ -178,8 +178,13 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
   if (totals.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
     errors.push(`session has ${totals.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
   }
-  if (proposal.exercises.length > SESSION_REALISM_CAP.maxExercisesPerSession) {
-    errors.push(`session has ${proposal.exercises.length} total exercises — exceeds the hard cap of ${SESSION_REALISM_CAP.maxExercisesPerSession} exercises per session`);
+  // Legs-Session Exercise Cap (2026-09-16), explicit user request: a
+  // 'legs'-purpose session's own exercise ceiling is tighter (5) than
+  // the general cap (9) — same LEGS_SESSION_MAX_EXERCISES constant the
+  // deterministic engine (workoutBuilder.ts) enforces.
+  const maxExercisesForThisSession = brief.session.purpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
+  if (proposal.exercises.length > maxExercisesForThisSession) {
+    errors.push(`session has ${proposal.exercises.length} total exercises — exceeds the hard cap of ${maxExercisesForThisSession} exercises per session`);
   }
 
   // --- No single target dominating the whole session. ---

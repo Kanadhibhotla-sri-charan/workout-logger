@@ -252,4 +252,51 @@ describe('validateProposalAdequacy', () => {
     const result = validateProposalAdequacy(p, contextWith(brief2));
     expect(result.ok).toBe(true);
   });
+
+  it('Legs-Session Exercise Cap (2026-09-16): rejects a legs-purpose proposal with more than 5 exercises, even though 5 is well under the general 9-exercise ceiling', () => {
+    const brief: AIProgrammerProgrammingBrief = {
+      session: { purpose: 'legs', expectedCoverageTargetIds: ['quads', 'hamstrings', 'gluteus-maximus'] },
+      muscles: [
+        guidance({ targetId: 'quads', recommendedSessionSets: { min: 6, max: 8 } }),
+        guidance({ targetId: 'hamstrings', recommendedSessionSets: { min: 6, max: 8 } }),
+        guidance({ targetId: 'gluteus-maximus', recommendedSessionSets: { min: 6, max: 8 } }),
+      ],
+      approxSessionSetBudget: 24,
+    };
+    const p = proposal([
+      exercise({ exerciseId: 'back-squat', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'leg-press', targetId: 'quads', sets: 2 }),
+      exercise({ exerciseId: 'lying-leg-curl', targetId: 'hamstrings', sets: 3 }),
+      exercise({ exerciseId: 'romanian-deadlift', targetId: 'hamstrings', sets: 2 }),
+      exercise({ exerciseId: 'hip-thrust', targetId: 'gluteus-maximus', sets: 3 }),
+      exercise({ exerciseId: 'cable-kickback-glute', targetId: 'gluteus-maximus', sets: 2 }), // 6th exercise — over the legs-only cap of 5
+    ]);
+
+    const result = validateProposalAdequacy(p, contextWith(brief));
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('6 total exercises') && e.includes('cap of 5'))).toBe(true);
+  });
+
+  it('Legs-Session Exercise Cap (2026-09-16): a PUSH-purpose proposal is unaffected — 6 exercises stays within the general 9-exercise ceiling', () => {
+    const brief: AIProgrammerProgrammingBrief = {
+      session: { purpose: 'push', expectedCoverageTargetIds: ['upper-pec', 'side-delt', 'triceps'] },
+      muscles: [
+        guidance({ targetId: 'upper-pec', recommendedSessionSets: { min: 6, max: 8 } }),
+        guidance({ targetId: 'side-delt', recommendedSessionSets: { min: 6, max: 8 } }),
+        guidance({ targetId: 'triceps', recommendedSessionSets: { min: 6, max: 8 } }),
+      ],
+      approxSessionSetBudget: 24,
+    };
+    const p = proposal([
+      exercise({ exerciseId: 'incline-dumbbell-press', targetId: 'upper-pec', sets: 3 }),
+      exercise({ exerciseId: 'flat-barbell-bench-press', targetId: 'upper-pec', sets: 2 }),
+      exercise({ exerciseId: 'cable-lateral-raise', targetId: 'side-delt', sets: 3 }),
+      exercise({ exerciseId: 'dumbbell-lateral-raise', targetId: 'side-delt', sets: 2 }),
+      exercise({ exerciseId: 'cable-pushdown', targetId: 'triceps', sets: 3 }),
+      exercise({ exerciseId: 'close-grip-bench-press', targetId: 'triceps', sets: 2 }),
+    ]);
+
+    const result = validateProposalAdequacy(p, contextWith(brief));
+    expect(result.errors.some((e) => e.includes('exceeds the hard cap'))).toBe(false);
+  });
 });

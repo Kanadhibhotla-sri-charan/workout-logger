@@ -104,6 +104,19 @@ export const SESSION_REALISM_CAP = {
   maxExercisesPerSession: 9,
 } as const;
 
+/** [DEFAULT] Legs-Session Exercise Cap (2026-09-16), explicit user
+ * request: a leg session's own exercise ceiling is tighter than the
+ * general SESSION_REALISM_CAP.maxExercisesPerSession (9) — 5 instead.
+ * The muscle-count ceiling (maxTargetsPerSession, 7) is unchanged for
+ * legs; only the exercise-count ceiling is lower. Applied everywhere
+ * SESSION_REALISM_CAP itself is: `workoutBuilder.ts` for deterministic
+ * generation, and as a validation ceiling on AI output by
+ * `programmerAdequacyValidator.ts`/`weekReconciliationDomainValidator.ts`
+ * — all three read this same constant, one source of truth. Every OTHER
+ * session purpose (push/pull/upper) keeps the general 9-exercise cap
+ * unchanged. */
+export const LEGS_SESSION_MAX_EXERCISES = 5;
+
 /** [SPEC] §16: default weekly schedule. Explicitly documented as
  * shiftable (Wednesday's rest may move to Tuesday/Thursday; Saturday or
  * Sunday may become rest) — this is a seed default for a new

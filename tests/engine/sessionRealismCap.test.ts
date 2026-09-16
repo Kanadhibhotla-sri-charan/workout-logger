@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildWeeklyProgrammingPlan, type TargetBuildContext, type WeeklyPlanInput } from '../../src/engine/workoutBuilder.js';
-import { SESSION_REALISM_CAP } from '../../src/engine/config.js';
+import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../src/engine/config.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 
@@ -223,6 +223,52 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
       // Never both, never neither.
       expect(inSession !== skipped).toBe(true);
     }
+    expect(monday.plannedWork.length).toBeLessThanOrEqual(SESSION_REALISM_CAP.maxExercisesPerSession);
+  });
+
+  it('Legs-Session Exercise Cap (2026-09-16): a real legs-purpose session never exceeds 5 exercises, even with all 7 real leg-region targets eligible and a huge time budget', () => {
+    // available_training_days here deliberately spans push/pull/legs
+    // (Monday/Tuesday/Thursday, matching this app's own PPL+Upper
+    // rotation) so Thursday is genuinely assigned session purpose
+    // 'legs' by the real assignSessionPurposes logic — never hardcoded.
+    const SEVEN_LEG_TARGET_IDS = ['quads', 'hamstrings', 'gluteus-maximus', 'gluteus-medius-minimus', 'adductors', 'gastrocnemius', 'soleus'];
+    const targets = SEVEN_LEG_TARGET_IDS.map((id) => normalDevTarget({ target_id: id }));
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({
+        targets,
+        available_training_days: ['monday', 'tuesday', 'thursday'],
+      })
+    );
+    const thursday = plan.sessions.find((s) => s.date === '2026-09-03')!;
+    expect(thursday.sessionPurpose).toBe('legs');
+
+    // The whole point of this fix: strictly tighter than the general
+    // 9-exercise ceiling, even though the muscle-count ceiling (7) alone
+    // would allow every one of these 7 targets a real slot.
+    expect(thursday.plannedWork.length).toBeLessThanOrEqual(LEGS_SESSION_MAX_EXERCISES);
+    expect(LEGS_SESSION_MAX_EXERCISES).toBeLessThan(SESSION_REALISM_CAP.maxExercisesPerSession);
+
+    // The cap genuinely engaged in this fixture (otherwise this test
+    // would prove nothing) — at least one real leg target was deferred.
+    const capSkips = thursday.skipped.filter((s) => s.reason_code === 'session_realism_cap');
+    expect(capSkips.length).toBeGreaterThan(0);
+    const distinctTargetsInSession = new Set(thursday.plannedWork.map((w) => w.target_id));
+    for (const skip of capSkips) {
+      expect(distinctTargetsInSession.has(skip.target_id)).toBe(false);
+    }
+  });
+
+  it('Legs-Session Exercise Cap (2026-09-16): a push-purpose session on the SAME week keeps the general 9-exercise ceiling, unaffected by the tighter legs-only cap', () => {
+    const targets = SIX_PUSH_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 0 }));
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({
+        targets,
+        available_training_days: ['monday', 'tuesday', 'thursday'],
+      })
+    );
+    const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
+    expect(monday.sessionPurpose).toBe('push');
+    expect(monday.plannedWork.length).toBeGreaterThan(LEGS_SESSION_MAX_EXERCISES);
     expect(monday.plannedWork.length).toBeLessThanOrEqual(SESSION_REALISM_CAP.maxExercisesPerSession);
   });
 });

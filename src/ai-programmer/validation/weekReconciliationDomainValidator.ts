@@ -6,7 +6,7 @@
 // already has) rather than a second, drifting copy.
 
 import type Database from 'better-sqlite3';
-import { SESSION_REALISM_CAP } from '../../engine/config.js';
+import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../engine/config.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
@@ -108,8 +108,13 @@ export function validateWeekReconciliationDomain(
       if (distinctTargets.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
         errors.push(`${path}.session: ${distinctTargets.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
       }
-      if (day.session.exercises.length > SESSION_REALISM_CAP.maxExercisesPerSession) {
-        errors.push(`${path}.session: ${day.session.exercises.length} total exercises — exceeds the hard cap of ${SESSION_REALISM_CAP.maxExercisesPerSession} exercises per session`);
+      // Legs-Session Exercise Cap (2026-09-16), explicit user request: a
+      // 'legs'-purpose day's own exercise ceiling is tighter (5) than the
+      // general cap (9) — same LEGS_SESSION_MAX_EXERCISES constant the
+      // deterministic engine (workoutBuilder.ts) enforces.
+      const maxExercisesForThisSession = day.session.sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
+      if (day.session.exercises.length > maxExercisesForThisSession) {
+        errors.push(`${path}.session: ${day.session.exercises.length} total exercises — exceeds the hard cap of ${maxExercisesForThisSession} exercises per session`);
       }
     }
   }

@@ -278,6 +278,27 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
     // No goal at all — quads has zero exposure of any kind, so it must
     // be classified normal_development wherever it's actually eligible
     // this week (Thursday — the legs day).
+    //
+    // Legs-Session Exercise Cap (2026-09-16): with no goal at all,
+    // several real leg-region targets (gluteus-maximus, gluteus-medius-
+    // minimus, adductors, quads, etc.) are all genuinely tied and
+    // compete for the new 5-exercise legs cap — reducing gluteus-
+    // maximus's own need via a clean, quad-isolated exercise (cable-
+    // kickback-glute has zero secondary_targets, so this never touches
+    // quads' own exposure/last-trained date) frees a real slot for
+    // quads without changing this test's own actual subject.
+    const sessionsRepo = new WorkoutSessionsRepo(db);
+    const gluteSession = sessionsRepo.createSession({ date: TUESDAY, session_type: 'gym', status: 'completed' });
+    sessionsRepo.addExercisePerformance(gluteSession.session_id, {
+      exercise_id: 'cable-kickback-glute',
+      order: 1,
+      role: 'primary',
+      sets: [
+        { set_number: 1, weight: 20, reps: 12, completed: true },
+        { set_number: 2, weight: 20, reps: 12, completed: true },
+        { set_number: 3, weight: 20, reps: 12, completed: true },
+      ],
+    });
     const result = assembleAndBuildWorkout(db, THURSDAY, 240);
     const plan = result.exercises.find((e) => e.target_id === 'quads');
     expect(plan).toBeDefined();

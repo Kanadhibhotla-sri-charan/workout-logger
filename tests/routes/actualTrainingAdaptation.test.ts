@@ -86,6 +86,30 @@ async function logCompletedQuadsSession(date: string, setCount: number) {
   return completed.body;
 }
 
+/** Legs-Session Exercise Cap (2026-09-16): reduces gluteus-maximus's own
+ * need via a clean, quad-isolated exercise — cable-kickback-glute has
+ * zero secondary_targets, so this never touches quads' own exposure or
+ * last-trained date — so quads reliably wins a real slot under the new
+ * 5-exercise legs cap in a fresh, no-goal fixture where several real
+ * leg-region targets would otherwise all tie for it. */
+async function logGluteIsolationSession(date: string) {
+  const created = await request(app).post('/api/workouts').send({ date, session_type: 'gym', status: 'in_progress' }).expect(201);
+  await request(app)
+    .post(`/api/workouts/${created.body.session_id}/exercises`)
+    .send({
+      exercise_id: 'cable-kickback-glute',
+      order: 1,
+      role: 'primary',
+      sets: [
+        { set_number: 1, weight: 20, reps: 12, completed: true },
+        { set_number: 2, weight: 20, reps: 12, completed: true },
+        { set_number: 3, weight: 20, reps: 12, completed: true },
+      ],
+    })
+    .expect(201);
+  await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
+}
+
 beforeEach(() => {
   db = openDb(':memory:');
   app = createApp(db);
@@ -257,6 +281,12 @@ describe('Phase 7 — remaining-week adaptation from real completed training (sp
 describe('Step 12 Remediation §7 (P1): strengthened remaining-week adaptation regression scenarios', () => {
   it('Scenario 1 — completing a session exactly as planned triggers no unnecessary reallocation of a later, unlocked day', async () => {
     setupProfile(['monday', 'tuesday', 'thursday', 'friday']);
+    // Legs-Session Exercise Cap (2026-09-16): a fresh, no-goal fixture
+    // has several real leg-region targets tied for the 5-exercise legs
+    // cap — freeing one competing target's own slot (without touching
+    // quads' own exposure) so this test's real subject (quads) reliably
+    // gets real work to check reallocation stability against.
+    await logGluteIsolationSession(currentWeekStart());
     const before = await getWeek();
     const gymDays = before.days.filter((d: any) => d.type === 'gym').sort((a: any, b: any) => a.date.localeCompare(b.date));
     // Find whichever real gym day this real week actually planned quads
