@@ -33,6 +33,7 @@ import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../../repositories/outsideBlueprintExercisesRepo.js';
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
 import { WeeklyProgramRepo, type PersistedWeekProgram, type PersistedWeekSession } from '../../repositories/weeklyProgramRepo.js';
+import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } from '../../engine/weekProgramReconciliation.js';
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
 import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
@@ -325,6 +326,27 @@ export function computeFreshWeek(
 ): { days: FreshDayInput[]; aggregates: { activeGoals: unknown; targetAllocations: unknown } } {
   const input = assembleWeeklyPlanInput(database, weekStart, budgetMinutes, historyAsOfDate);
   const plan = buildWeeklyProgrammingPlan(input);
+
+  // Non-Goal Muscle Rotation Fix (2026-09-16): record this generation
+  // ONLY the first time `weekStart` is ever generated — NonGoalRotationRepo's
+  // own stored `week_start` says whether this call is that first
+  // generation (no row yet, or the row's week_start is a genuinely
+  // different, earlier week) or a regeneration of a week already
+  // recorded. A regeneration must NEVER call recordGeneration again: the
+  // whole point is that `assembleWeeklyPlanInput`'s read above already
+  // returned the SAME `cursorUsed` this week was first generated with
+  // (via `cursorFor`), so re-recording it would be a no-op at best and,
+  // if this same call happened to race ahead of another in-flight
+  // regeneration, could corrupt `cursor_after` for the NEXT real week.
+  // See NonGoalRotationRepo's own doc comment for the full "why not a
+  // single rolling counter" rationale — a plain counter breaks the
+  // future-plan-stability guarantee reconcileWeekProgram's own
+  // corePrescriptionEqual check exists to protect.
+  const rotationRepo = new NonGoalRotationRepo(database);
+  const rotationUserId = new UsersRepo(database).getOrCreateDefault().id;
+  if (rotationRepo.get(rotationUserId).weekStart !== weekStart) {
+    rotationRepo.recordGeneration(rotationUserId, weekStart, input.nonGoalRotationCursor ?? 0, plan.nonGoalRotationCursorAfter);
+  }
 
   const targetGoalMap = new Map<string, { goal_id: string; is_specialization: boolean }>(
     input.targets.map((t: TargetBuildContext) => [targetKey(t), { goal_id: t.goal_id, is_specialization: t.is_specialization }])

@@ -69,13 +69,9 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
   it('the raised muscle ceiling (7, was 4) actually lets more than 4 real muscles share a session, while both hard caps still hold', () => {
     // A modest current_weekly_primary_sets (already-near-adequate, so
     // each target needs only 1-2 exercises rather than 3) isolates the
-    // muscle-count dimension from the exercise-count one — with a
-    // larger per-target volume (e.g. the engine's own package-derived
-    // starting point at current_weekly_primary_sets=0), individual
-    // targets can need 3 exercises each, and the pre-existing 9-
-    // exercise ceiling becomes the binding constraint well before the
-    // muscle ceiling does regardless of its own value — a real,
-    // separate limitation documented in this fix's own report.
+    // muscle-count dimension from the exercise-count one, independent of
+    // the Exercise-Slot-Consumption Starvation Fix covered by the next
+    // test below.
     const targets = NINE_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 3 }));
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets }));
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
@@ -96,6 +92,65 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
     expect(capSkips.length).toBeGreaterThan(0);
     for (const skip of capSkips) {
       expect(distinctTargetsInSession.has(skip.target_id)).toBe(false);
+    }
+  });
+
+  it('Exercise-Slot-Consumption Starvation Fix: a legitimate top-N muscle whose own full exercise count no longer fits the remaining budget still gets SOME real work, never zero', () => {
+    // current_weekly_primary_sets: 0 is deliberately the "untouched,
+    // needs real volume" case that previously made several targets each
+    // need multiple exercises, exhausting the 9-exercise budget before
+    // every offered target got its turn — the exact scenario that,
+    // before this fix, could exclude a legitimate, correctly-ranked
+    // muscle (like the real triceps-long-head starvation case this fix
+    // was diagnosed from) ENTIRELY, rather than giving it a fair,
+    // reduced share. Empirically (verified via direct instrumentation
+    // against this exact fixture), 'rectus-abdominis' is the target
+    // whose own full need doesn't fit what's left of the 9-exercise
+    // budget once 'lower-pec', 'mid-pec', and 'obliques' are placed
+    // ahead of it.
+    const targets = NINE_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 0 }));
+    const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets }));
+    const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
+
+    const distinctTargetsInSession = new Set(monday.plannedWork.map((w) => w.target_id));
+    const capSkips = monday.skipped.filter((s) => s.reason_code === 'session_realism_cap');
+
+    // The exercise cap still genuinely binds in this fixture (otherwise
+    // this test would prove nothing).
+    expect(monday.plannedWork.length).toBe(SESSION_REALISM_CAP.maxExercisesPerSession);
+
+    // The real proof: 'rectus-abdominis' got SOME real work here...
+    const rectusExercisesInCappedSession = monday.plannedWork.filter((w) => w.target_id === 'rectus-abdominis').length;
+    expect(rectusExercisesInCappedSession).toBeGreaterThan(0);
+
+    // ...strictly fewer than its own natural, uncapped need (proving
+    // this is a genuine partial trim, not a coincidence of it only ever
+    // needing one exercise) — checked by building the exact same target
+    // alone, with the full 9-exercise budget entirely to itself.
+    const isolatedPlan = buildWeeklyProgrammingPlan(
+      weeklyInput({ targets: [normalDevTarget({ target_id: 'rectus-abdominis', current_weekly_primary_sets: 0 })] })
+    );
+    const rectusExercisesUncapped = isolatedPlan.sessions.find((s) => s.date === '2026-08-31')!.plannedWork.length;
+    expect(rectusExercisesUncapped).toBeGreaterThan(rectusExercisesInCappedSession);
+
+    // A partially-trimmed target must never ALSO carry a
+    // session_realism_cap skip (assertNoContradictoryProgramState's own
+    // invariant) — it already has real plannedWork.
+    expect(capSkips.some((s) => s.target_id === 'rectus-abdominis')).toBe(false);
+
+    // Its reduced (not zero, not full) delivered volume is real and
+    // traceable, exactly like any other under-delivered target.
+    const rectusAllocation = plan.targetAllocations.find((a) => a.target_id === 'rectus-abdominis')!;
+    expect(rectusAllocation.deliveredDirectSets).toBeGreaterThan(0);
+    expect(rectusAllocation.unmetDirectSets).toBeGreaterThan(0);
+
+    // Every target that DOES have real plannedWork also has real,
+    // non-zero delivered volume, and is never simultaneously reported
+    // as cap-skipped.
+    for (const id of distinctTargetsInSession) {
+      const allocation = plan.targetAllocations.find((a) => a.target_id === id)!;
+      expect(allocation.deliveredDirectSets).toBeGreaterThan(0);
+      expect(capSkips.some((s) => s.target_id === id)).toBe(false);
     }
   });
 

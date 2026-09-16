@@ -455,3 +455,25 @@ CREATE TABLE IF NOT EXISTS ai_week_reconciliation_proposals (
 
 CREATE INDEX IF NOT EXISTS idx_ai_week_reconciliation_proposals_target_date ON ai_week_reconciliation_proposals(target_date);
 CREATE INDEX IF NOT EXISTS idx_ai_week_reconciliation_proposals_status ON ai_week_reconciliation_proposals(status);
+
+-- Non-Goal Muscle Rotation Fix (2026-09-16): persisted state for the
+-- global rotation ring of every non-goal physique target (see
+-- src/repositories/nonGoalRotationRepo.ts and workoutBuilder.ts's
+-- rotation tie-break, above `compareRankings`). One row per user,
+-- matching training_profiles' own keying. `week_start` + `cursor_used`
+-- record which week was most recently generated and what cursor value
+-- IT used — read back verbatim by every regeneration of that SAME week
+-- (activity-override reconciliation, actual-training adaptation, etc.)
+-- so an unaffected day's own composition never silently shifts just
+-- because a different day in the same week changed. `cursor_after` is
+-- the value handed to the NEXT, genuinely different week. Written ONLY
+-- by computeFreshWeek's first-ever generation of a given week — every
+-- other read of the planner (GET /week, GET /today, AI-context
+-- building) reads this table but never writes it.
+CREATE TABLE IF NOT EXISTS non_goal_rotation_state (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  week_start TEXT,
+  cursor_used INTEGER NOT NULL DEFAULT 0,
+  cursor_after INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);

@@ -63,6 +63,8 @@ import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 import { OutsideBlueprintExercisesRepo } from '../repositories/outsideBlueprintExercisesRepo.js';
 import { WeekActivityOverridesRepo } from '../repositories/weekActivityOverridesRepo.js';
 import { WeeklyProgramRepo } from '../repositories/weeklyProgramRepo.js';
+import { UsersRepo } from '../repositories/usersRepo.js';
+import { NonGoalRotationRepo } from '../repositories/nonGoalRotationRepo.js';
 import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import type { ExerciseTargetRole } from './exerciseSelector.js';
 
@@ -543,6 +545,21 @@ export interface WeeklyPlanInput {
    * matching `targetKey()`. Optional — omitted (or empty) reproduces
    * today's exact behavior (no carryover). */
   carryoverByTarget?: ReadonlyMap<string, number>;
+  /** Non-Goal Muscle Rotation Fix (2026-09-16): the CURRENT persisted
+   * position in the global non-goal-physique-target rotation ring (see
+   * `NonGoalRotationRepo` and this module's own rotation tie-break doc
+   * comment above `compareRankings`). Read-only here — this input never
+   * advances it; only `computeFreshWeek` (the real "a new week program
+   * was generated" boundary) persists `WeeklyProgrammingPlan
+   * .nonGoalRotationCursorAfter` back. Every caller reads the SAME
+   * current value so a plain re-derivation (e.g. `assembleAndBuildWorkout`
+   * or an AI-context build) never disagrees with the last real
+   * regeneration's own rotation ordering. Optional — omitted (or 0)
+   * reproduces the ring's own natural starting position, and every
+   * existing fixture/test that never heard of rotation keeps behaving
+   * exactly as it always has aside from the ONE alphabetical-tie-break
+   * case this fix specifically targets (see below). */
+  nonGoalRotationCursor?: number;
 }
 
 /** One real exercise placed into one real session by the weekly
@@ -660,6 +677,15 @@ export interface WeeklyProgrammingPlan {
    * decision any session/target reasoning string was built from,
    * chronological in the order it was actually made. */
   decisions: string[];
+  /** Non-Goal Muscle Rotation Fix (2026-09-16): the rotation cursor
+   * value to persist for the NEXT real week regeneration — this run's
+   * `nonGoalRotationCursor` input advanced by however many distinct
+   * non-goal physique targets actually received real `plannedWork` this
+   * run (never by how many were merely ranked/considered), wrapped
+   * against the current non-goal ring size. Only `computeFreshWeek`
+   * (the real regeneration boundary) ever persists this value — every
+   * other caller of this function may simply discard it. */
+  nonGoalRotationCursorAfter: number;
 }
 
 export function estimateMinutes(sets: number): number {
@@ -691,6 +717,18 @@ interface TargetRanking {
    * (see compareRankings) so it never overrides the primary
    * need/recency signal already driving each tier. */
   recoveryNeed: number;
+  /** Non-Goal Muscle Rotation Fix (2026-09-16): this non-goal target's
+   * current position in the persisted rotation ring, relative to the
+   * current cursor (0 = the ring slot the cursor currently points at,
+   * increasing going forward, wrapping) — replaces `target_id`
+   * alphabetical ordering as the FINAL tie-break for two non-goal
+   * targets only (see compareRankings step 5), so the same handful of
+   * early-alphabet muscles cannot win an exact needDeficit/recoveryNeed
+   * tie every single week forever. Always 0 for a specialization target
+   * (goal muscles keep their existing, unmodified alphabetical
+   * tie-break — this fix is scoped to non-goal muscles only, per
+   * explicit design). */
+  rotationTieBreak: number;
 }
 
 /** Final Pass §6/§7/§12/§14, Strict Bug-Fix §3.3: classifies one target
@@ -712,12 +750,18 @@ interface TargetRanking {
  * Falls back to `startingPointMin` when no package reference exists for
  * this target (e.g. a functional_goal, which Blueprint's development
  * packages don't cover). */
-function rankTarget(target: TargetBuildContext, startingPointMin: number, recovery: RecoveryConstraintResult, developmentReference: DevelopmentReference | null): TargetRanking {
+function rankTarget(
+  target: TargetBuildContext,
+  startingPointMin: number,
+  recovery: RecoveryConstraintResult,
+  developmentReference: DevelopmentReference | null,
+  rotationTieBreak: number
+): TargetRanking {
   const recoveryNeed = recovery.priority_adjustment === 'avoid' ? 2 : recovery.priority_adjustment === 'reduce' ? 1 : 0;
-  if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0, recoveryNeed };
+  if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0, recoveryNeed, rotationTieBreak: 0 };
   const threshold = developmentReference?.weekly_direct_set_reference ?? startingPointMin;
   const needDeficit = Math.max(0, threshold - target.weekly_exposure_units);
-  return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit, recoveryNeed };
+  return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit, recoveryNeed, rotationTieBreak };
 }
 
 /**
@@ -745,8 +789,20 @@ function rankTarget(target: TargetBuildContext, startingPointMin: number, recove
  *   4. recoveryNeed — a target with a live recovery-caution flag sorts
  *      after an otherwise-equal target with none (§3.3's required
  *      recoveryNeed dimension; see TargetRanking's doc comment);
- *   5. ONLY once 1-4 are genuinely tied does target_id break the tie —
- *      a stable fallback, never the deciding criterion.
+ *   5. ONLY once 1-4 are genuinely tied: for two GOAL (specialization)
+ *      targets, target_id still breaks the tie exactly as before — goal
+ *      muscles keep the pre-existing priority-based selection unchanged,
+ *      per explicit design. For two NON-goal targets, the persisted
+ *      rotation ring (`rotationTieBreak`, see TargetRanking and the
+ *      Non-Goal Muscle Rotation Fix, 2026-09-16) breaks the tie instead
+ *      — this is the ONE thing this fix changes: a repeated exact tie
+ *      (most commonly several untouched 'maintenance' targets, all at
+ *      `days_since_target_last_trained: null`) no longer lets the same
+ *      early-alphabet muscles win forever while another eligible
+ *      non-goal muscle sits permanently ignored. A mixed comparison
+ *      (one specialization, one not) still falls back to target_id —
+ *      tier already separates these in practice, so this branch is only
+ *      a defensive fallback, never actually exercised.
  */
 function compareRankings(a: TargetRanking, b: TargetRanking): number {
   const tierOf = (r: TargetRanking) => (r.target.is_specialization ? r.target.goal_priority : r.classification === 'normal_development' ? 3 : 4);
@@ -763,6 +819,10 @@ function compareRankings(a: TargetRanking, b: TargetRanking): number {
   }
 
   if (a.recoveryNeed !== b.recoveryNeed) return a.recoveryNeed - b.recoveryNeed;
+
+  if (!a.target.is_specialization && !b.target.is_specialization) {
+    if (a.rotationTieBreak !== b.rotationTieBreak) return a.rotationTieBreak - b.rotationTieBreak;
+  }
 
   return a.target.target_id.localeCompare(b.target.target_id);
 }
@@ -904,12 +964,41 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     ])
   );
 
+  // Non-Goal Muscle Rotation Fix (2026-09-16): the fixed, alphabetically
+  // sorted ring of every non-goal physique_target present this run —
+  // `input.targets` already includes every real Blueprint physique
+  // target not currently claimed by an active goal (see
+  // assembleWeeklyPlanInput), so this ring is effectively "the whole
+  // physique minus whatever a goal owns this run." A target's
+  // `rotationTieBreak` is its ring position relative to the CURRENT
+  // cursor (0 = the slot the cursor currently points at), so sorting by
+  // it starting from the cursor reproduces exactly the "A,B -> C,A ->
+  // B,C -> repeat" rotation example the fix was specified with. Goal
+  // (specialization) targets never consult this map — see rankTarget.
+  const nonGoalRing = [...new Set(input.targets.filter((t) => !t.is_specialization && t.target_type === 'physique_target').map((t) => t.target_id))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const rotationCursor = nonGoalRing.length > 0 ? (((input.nonGoalRotationCursor ?? 0) % nonGoalRing.length) + nonGoalRing.length) % nonGoalRing.length : 0;
+  const rotationTieBreakByTargetId = new Map<string, number>(
+    nonGoalRing.map((id, ringIndex) => [id, ((ringIndex - rotationCursor) % nonGoalRing.length + nonGoalRing.length) % nonGoalRing.length])
+  );
+
   // Fixed processing order — Goal 1's own targets, then Goal 2's, then
   // every normal_development target, then every maintenance target,
   // using this week's real BASELINE exposure (never re-sorted mid-run:
   // §7's dynamic exposure update changes how MUCH work a later target
   // gets, never WHEN it's considered — a stable, non-cascading design).
-  const rankedTargets = input.targets.map((t) => rankTarget(t, starting_point_sets[0], recoveryByKey.get(targetKey(t))!, developmentReferenceByKey.get(targetKey(t)) ?? null)).sort(compareRankings);
+  const rankedTargets = input.targets
+    .map((t) =>
+      rankTarget(
+        t,
+        starting_point_sets[0],
+        recoveryByKey.get(targetKey(t))!,
+        developmentReferenceByKey.get(targetKey(t)) ?? null,
+        rotationTieBreakByTargetId.get(t.target_id) ?? 0
+      )
+    )
+    .sort(compareRankings);
   const targetRankIndex = new Map<string, number>(rankedTargets.map((r, i) => [targetKey(r.target), i]));
   // Real per-target exercise count never gets anywhere near this many
   // (bounded by the target's own real candidate pool — Blueprint
@@ -1721,11 +1810,30 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * processes `rankedTargets` in that order and pushes each target's
    * own candidates as it goes — never reordered since), so a single
    * pass keeping the first `maxTargetsPerSession` distinct targets
-   * encountered, then the first `maxExercisesPerSession` entries among
-   * those, is exactly "keep the highest-priority muscles/exercises,
-   * defer the rest" — never a second, independent ranking. Deferred
-   * candidates are excluded from this session's own `plannedWork`
-   * (their real sets are therefore automatically absent from
+   * encountered, then as many of the first `maxExercisesPerSession`
+   * entries among those as actually fit, is exactly "keep the
+   * highest-priority muscles/exercises, defer the rest" — never a
+   * second, independent ranking.
+   *
+   * Exercise-Slot-Consumption Starvation Fix (2026-09-16): the original
+   * version deferred a target's ENTIRE exercise group the instant it
+   * wouldn't fit whole in the remaining exercise budget — so a
+   * legitimate top-N muscle (still within `maxTargetsPerSession`) could
+   * be excluded ENTIRELY just because muscles ranked ahead of it
+   * happened to need 2-3 exercises each and exhausted the 9-exercise
+   * budget first, even though 1-2 of that muscle's own exercises would
+   * have fit. This is the real root cause traced (via direct debug
+   * instrumentation against real generated weeks) behind
+   * `triceps-long-head` being silently excluded from its own push
+   * session — confirmed NOT the muscle-tier tie-break, which was
+   * ranking it correctly. Fixed by trimming a target's own group to
+   * however many of its own exercises fit in the REMAINING budget,
+   * rather than all-or-nothing: a target only gets zero exercises (and
+   * a real `session_realism_cap` skip) when literally no budget is left
+   * for it, or the muscle-count ceiling itself is already reached.
+   * Deferred candidates — whether from a fully- or partially-excluded
+   * target — are excluded from this session's own `plannedWork` (their
+   * real sets are therefore automatically absent from
    * `deliveredDirectSets` once `rebuildTargetAllocationsFromFinalSessions`
    * sums this session's actual, trimmed `plannedWork` — becoming real,
    * traceable `unmetDirectSets`, picked up by this target's own next
@@ -1733,15 +1841,17 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * Programming Intelligence Fix's carryover otherwise, no new
    * bookkeeping required there) — but ARE returned separately here so
    * the caller can record a real `session_realism_cap` skip for each
-   * deferred target, never silently dropping it from both
-   * `plannedWork` and `skipped` at once. */
+   * FULLY deferred target, never silently dropping it from both
+   * `plannedWork` and `skipped` at once. A partially-trimmed target
+   * never gets a skip entry (it already has real `plannedWork`) —
+   * `sessionRealismSkipsFor` below excludes it explicitly, which is
+   * also what keeps `assertNoContradictoryProgramState` satisfied (a
+   * target cannot be both programmed and marked skipped). */
   function applySessionRealismCap(dayCandidates: typeof candidates): { kept: typeof candidates; deferred: typeof candidates } {
     // Group by target first (order preserved — dayCandidates already
     // arrives priority-ordered) so a target's own multiple exercise
     // entries (e.g. its volume split across 2 exercises) are always
-    // decided TOGETHER — never split between kept and deferred, which
-    // would contradict assertNoContradictoryProgramState's own real
-    // invariant (a target cannot be both programmed and skipped).
+    // decided together as one group, from which as many as fit are kept.
     const order: string[] = [];
     const byTarget = new Map<string, typeof candidates>();
     for (const c of dayCandidates) {
@@ -1760,27 +1870,51 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     let keptTargetCount = 0;
     for (const key of order) {
       const group = byTarget.get(key)!;
-      const wouldExceedTargets = keptTargetCount >= SESSION_REALISM_CAP.maxTargetsPerSession;
-      const wouldExceedExercises = kept.length + group.length > SESSION_REALISM_CAP.maxExercisesPerSession;
-      if (wouldExceedTargets || wouldExceedExercises) {
+      if (keptTargetCount >= SESSION_REALISM_CAP.maxTargetsPerSession) {
+        // Muscle-count ceiling already reached — a wholly new target
+        // cannot claim a slot no matter how much exercise budget
+        // remains; fully deferred.
         deferred.push(...group);
         continue;
       }
-      kept.push(...group);
-      keptTargetCount++;
+      const remainingExerciseSlots = SESSION_REALISM_CAP.maxExercisesPerSession - kept.length;
+      if (remainingExerciseSlots <= 0) {
+        deferred.push(...group);
+        continue;
+      }
+      if (group.length <= remainingExerciseSlots) {
+        kept.push(...group);
+        keptTargetCount++;
+      } else {
+        // The starvation fix itself: this target's own full exercise
+        // count doesn't fit what's left, but SOME of it does — keep
+        // that much rather than excluding the target entirely.
+        kept.push(...group.slice(0, remainingExerciseSlots));
+        deferred.push(...group.slice(remainingExerciseSlots));
+        keptTargetCount++;
+      }
     }
     return { kept, deferred };
   }
 
-  /** One `SkippedTarget` per distinct target deferred by the cap for
-   * this session — reuses that target's own already-fully-computed
+  /** One `SkippedTarget` per distinct target FULLY deferred by the cap
+   * for this session — reuses that target's own already-fully-computed
    * `decision` (identical to what its now-cut `plannedWork` entry would
-   * have carried), never a second, re-derived decision object. */
-  function sessionRealismSkipsFor(deferred: typeof candidates): SkippedTarget[] {
+   * have carried), never a second, re-derived decision object. A target
+   * that received even one real kept exercise (the proportional-
+   * trimming case) is deliberately excluded here — it already has real
+   * `plannedWork`, so a skip entry for it would violate
+   * `assertNoContradictoryProgramState`'s own invariant; its reduced
+   * volume becomes real `unmetDirectSets` automatically, with no
+   * separate skip needed, exactly like any other under-delivered
+   * target. */
+  function sessionRealismSkipsFor(deferred: typeof candidates, kept: typeof candidates): SkippedTarget[] {
+    const keptKeys = new Set(kept.map((c) => targetKey(c.planned)));
     const seen = new Set<string>();
     const skips: SkippedTarget[] = [];
     for (const c of deferred) {
       const key = targetKey(c.planned);
+      if (keptKeys.has(key)) continue;
       if (seen.has(key)) continue;
       seen.add(key);
       skips.push({
@@ -1845,7 +1979,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // user-requested exception: a real, genuinely day-specific
       // 'session'-scope skip for a target the count-only realism cap
       // deferred from THIS session specifically.
-      skipped: [...weekLevelSkips, ...sessionRealismSkipsFor(deferred)],
+      skipped: [...weekLevelSkips, ...sessionRealismSkipsFor(deferred, dayCandidates)],
       activeGoals,
       resourceAllocation: [],
     });
@@ -1853,11 +1987,29 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
 
   assertNoContradictoryProgramState(sessions);
 
+  // Non-Goal Muscle Rotation Fix (2026-09-16): advance the cursor by
+  // however many DISTINCT non-goal physique targets actually received
+  // real plannedWork this run — never by how many were merely ranked —
+  // so a target that was ranked but skipped/deferred never spends a
+  // rotation turn it didn't actually win. `computeFreshWeek` is the only
+  // caller that persists this value.
+  const nonGoalTargetIdsWithRealWorkThisRun = new Set<string>();
+  for (const session of sessions) {
+    for (const work of session.plannedWork) {
+      if (work.classification !== 'specialization' && work.target_type === 'physique_target') {
+        nonGoalTargetIdsWithRealWorkThisRun.add(work.target_id);
+      }
+    }
+  }
+  const nonGoalRotationCursorAfter =
+    nonGoalRing.length > 0 ? (rotationCursor + nonGoalTargetIdsWithRealWorkThisRun.size) % nonGoalRing.length : rotationCursor;
+
   return {
     weekStart: input.weekStart,
     sessions,
     targetAllocations: rebuildTargetAllocationsFromFinalSessions(sessions, requiredDirectSetsByTarget, classificationByTarget),
     decisions: log,
+    nonGoalRotationCursorAfter,
   };
 }
 
@@ -2392,6 +2544,16 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     }
   }
 
+  // Non-Goal Muscle Rotation Fix (2026-09-16): read-only here — the
+  // cursor THIS specific week should be ranked with (see
+  // NonGoalRotationRepo.cursorFor's own doc comment: the same value
+  // every regeneration of this exact week keeps seeing, so an
+  // unaffected day's composition never shifts just because a different
+  // day in the same week changed). Consulted by every caller (a plain
+  // GET, an AI-context build, or a real regeneration alike); only
+  // computeFreshWeek ever writes anything back.
+  const nonGoalRotationCursor = new NonGoalRotationRepo(db).cursorFor(new UsersRepo(db).getOrCreateDefault().id, weekStart);
+
   return {
     weekStart,
     today: historyAsOfDate,
@@ -2409,6 +2571,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     nextWeekOrderedGymDays,
     nextWeekSessionPurposes,
     carryoverByTarget,
+    nonGoalRotationCursor,
   };
 }
 
