@@ -151,4 +151,61 @@ describe('Non-Goal Muscle Rotation — the A,B -> C,A -> B,C -> repeat design', 
     const explicitZero = buildWeeklyProgrammingPlan(weeklyInput({ targets, nonGoalRotationCursor: 0 }));
     expect(withoutCursor.sessions).toEqual(explicitZero.sessions);
   });
+
+  it('a leg-day-style session with ZERO goal targets and many tied non-goal candidates rotates a window well above 2, never getting stuck reproducing the same pair', () => {
+    // The window is never hardcoded anywhere in the implementation — it
+    // is whatever SESSION_REALISM_CAP and each target's own real
+    // exercise count naturally allow, exactly like a real leg day where
+    // no goal claims any of the muscles competing for the session. This
+    // uses 8 real, genuinely-tied (all 'maintenance', sets: 50) push/
+    // universal targets — deliberately more than the 3-member controlled
+    // ring above — with NO goal targets at all.
+    const EIGHT_TIED_IDS = ['mid-pec', 'upper-pec', 'lower-pec', 'obliques', 'rectus-abdominis', 'side-delt', 'triceps', 'triceps-long-head'];
+    const targets = EIGHT_TIED_IDS.map(ringTarget);
+
+    const gen1 = buildWeeklyProgrammingPlan(weeklyInput({ targets, nonGoalRotationCursor: 0 }));
+    const monday1 = gen1.sessions.find((s) => s.date === '2026-08-31')!;
+    const distinct1 = new Set(monday1.plannedWork.map((w) => w.target_id));
+
+    // Strictly more than a 2-member window actually receives real work
+    // — the whole point of this test.
+    expect(distinct1.size).toBeGreaterThan(2);
+    // No goal-linked work exists in this fixture at all — every real
+    // exercise here is genuinely non-goal.
+    expect(monday1.plannedWork.every((w) => w.classification !== 'specialization')).toBe(true);
+    // The cursor advances by however many were ACTUALLY achieved (never
+    // hardcoded to 2, or to any other fixed number).
+    expect(gen1.nonGoalRotationCursorAfter).toBe(distinct1.size % EIGHT_TIED_IDS.length);
+
+    // A second generation, continuing from where the first left off,
+    // gets a genuinely DIFFERENT composition — never silently stuck
+    // reproducing the exact same pair (or the exact same larger set)
+    // forever, which is the entire real-world problem this fix exists
+    // to solve.
+    const gen2 = buildWeeklyProgrammingPlan(weeklyInput({ targets, nonGoalRotationCursor: gen1.nonGoalRotationCursorAfter }));
+    const monday2 = gen2.sessions.find((s) => s.date === '2026-08-31')!;
+    const distinct2 = new Set(monday2.plannedWork.map((w) => w.target_id));
+    expect(distinct2.size).toBeGreaterThan(2);
+    expect(distinct2).not.toEqual(distinct1);
+
+    // Across enough generations, MORE than the original window's worth
+    // of candidates eventually gets real work — some of these 8 real
+    // push muscles also share secondary exposure with each other (e.g.
+    // a pressing movement's secondary credit to triceps/side-delt), so
+    // not every one of the 8 is guaranteed a turn by rotation alone in
+    // this particular mixed fixture (a separate, pre-existing, correct
+    // exposure-adequacy mechanism, not a rotation fairness gap) — but
+    // strictly more than any single generation's own window keeps
+    // rotating in over time, proving this is real movement, not a
+    // permanently stuck pair.
+    const everSeen = new Set<string>();
+    let cursor = 0;
+    for (let i = 0; i < EIGHT_TIED_IDS.length; i++) {
+      const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets, nonGoalRotationCursor: cursor }));
+      const session = plan.sessions.find((s) => s.date === '2026-08-31')!;
+      for (const w of session.plannedWork) everSeen.add(w.target_id);
+      cursor = plan.nonGoalRotationCursorAfter;
+    }
+    expect(everSeen.size).toBeGreaterThan(distinct1.size);
+  });
 });
