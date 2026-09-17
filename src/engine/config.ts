@@ -260,6 +260,64 @@ export const TIME_ESTIMATION = {
   setupMinutesPerExercise: 2,
 } as const;
 
+/** [DEFAULT] Coaching Depth Batch 3 spec §7: centralized, single-source
+ * deload modifier — the ONLY place a deload's numeric reduction is
+ * defined (never scattered literal multipliers across the planner). Set-
+ * volume reduction is a fraction of the prescribed weekly sets; rep-range
+ * bias reuses Batch 1's own `applyRepRangeBias('lower', ...)` rather than
+ * inventing a second range-narrowing mechanism — a deload never invents a
+ * rep number outside Blueprint's own authored range. */
+/** [DEFAULT] Coaching Depth Batch 1's own original default (previously
+ * duplicated as a local constant in foundationContext.ts) — the block
+ * length used the first time a program's periodization state is ever
+ * initialized, AND (Batch 3) the length the automatic calendar rollover
+ * falls back to after a manually-declared whole-block deload
+ * (`block_kind = 'deload'`) ends, since that block's own length was a
+ * deliberate, transient choice that must never become the new normal
+ * going forward (see programStateService.ts's `advanceToNextBlockIfDue`).
+ * One shared constant, never two competing defaults. */
+export const DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS = 4;
+
+export const DELOAD_POLICY = {
+  /** Fraction of the normal (non-deload) recommended weekly sets a deload
+   * week keeps — e.g. 0.5 halves the working volume. */
+  setVolumeMultiplier: 0.5,
+  /** Reuses `MuscleProgrammingProfile['repRangeBias']` — a deload always
+   * biases toward the low-fatigue end of Blueprint's own authored range. */
+  repRangeBias: 'lower' as const,
+  /** §10: a reactive deload cannot run indefinitely without a separate
+   * explicit rule — this caps it. */
+  maxReactiveDeloadDurationWeeks: 1,
+} as const;
+
+/** [DEFAULT] Coaching Depth Batch 3 spec §8-§10: the reactive-deload
+ * trend evaluator's own tunable thresholds — one location, never
+ * duplicated inline. None of these are training-methodology constants
+ * from Blueprint; they are this app's own conservative, documented
+ * operational defaults for "how much evidence is enough." */
+export const REACTIVE_TRIGGER = {
+  /** §8.2: how many real calendar days of history the evaluator looks
+   * back over. */
+  lookbackDays: 21,
+  /** §9.2.1: minimum real completed exposures (across all evaluated
+   * targets combined) in the lookback window before evaluation can even
+   * run — below this, the evaluator reports insufficient data rather
+   * than guessing. */
+  minimumSessionsForEvaluation: 6,
+  /** §8.3/§9.2.3: minimum number of DIFFERENT targets that must each
+   * independently show a genuine decline signal — one target's decline
+   * (let alone one session's) is never sufficient on its own. */
+  minimumDecliningTargets: 2,
+  /** §10: minimum real days after a reactive deload ends before
+   * evaluation may trigger a new one — set once, at trigger time, as
+   * `reactiveDeloadEndDate + cooldownDays`, never recomputed later. */
+  cooldownDays: 14,
+  /** §10: only re-run the (potentially expensive) evaluation once per
+   * real calendar day — a plain re-read of the same day's context must
+   * never re-evaluate or double-log. */
+  minimumDaysBetweenEvaluations: 1,
+} as const;
+
 export const ENGINE_CONFIG = {
   exposureCoefficients: EXPOSURE_COEFFICIENTS,
   maxActiveAestheticGoals: MAX_ACTIVE_AESTHETIC_GOALS,
@@ -275,4 +333,7 @@ export const ENGINE_CONFIG = {
   universalPhysiqueTargets: UNIVERSAL_PHYSIQUE_TARGETS,
   goalMatch: GOAL_MATCH,
   timeEstimation: TIME_ESTIMATION,
+  deloadPolicy: DELOAD_POLICY,
+  reactiveTrigger: REACTIVE_TRIGGER,
+  defaultProgramBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
 } as const;

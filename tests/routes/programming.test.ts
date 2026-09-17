@@ -268,3 +268,28 @@ describe('GET /api/programming/substitutes', () => {
     await request(app).get('/api/programming/substitutes').expect(400);
   });
 });
+
+describe('GET /api/programming/periodization — Coaching Depth Batch 3', () => {
+  beforeEach(() => setupProfile());
+
+  it('reports ACTIVE/no deload for a brand-new program on its first accumulation week', async () => {
+    const res = await request(app).get(`/api/programming/periodization?date=${MON}`).expect(200);
+    expect(res.body.periodizationState).toBe('ACTIVE');
+    expect(res.body.deloadActive).toBe(false);
+    expect(res.body.deloadReason).toBeNull();
+    expect(res.body.blockNumber).toBe(1);
+    expect(res.body.currentWeek).toBe(1);
+    expect(typeof res.body.explanation).toBe('string');
+    expect(res.body.explanation.length).toBeGreaterThan(0);
+  });
+
+  it('reports SCHEDULED_DELOAD on the block\'s own scheduled deload week', async () => {
+    // Establish the block at MON first (its own block-start reference).
+    await request(app).get(`/api/programming/periodization?date=${MON}`).expect(200);
+    const scheduledDeloadDate = '2026-09-21'; // week 4 of the resulting 4-week block starting 2026-08-31
+    const res = await request(app).get(`/api/programming/periodization?date=${scheduledDeloadDate}`).expect(200);
+    expect(res.body.periodizationState).toBe('SCHEDULED_DELOAD');
+    expect(res.body.deloadActive).toBe(true);
+    expect(res.body.deloadReason).toBe('calendar');
+  });
+});

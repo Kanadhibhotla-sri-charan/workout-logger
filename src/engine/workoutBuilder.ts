@@ -45,7 +45,7 @@ import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/dev
 import { getProfile, applyRepRangeBias } from '../coaching/profiles/muscleProfileService.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { EXPOSURE_COEFFICIENTS, LEGS_SESSION_MAX_EXERCISES, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
+import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_SESSION_MAX_EXERCISES, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
@@ -67,6 +67,8 @@ import { WeeklyProgramRepo } from '../repositories/weeklyProgramRepo.js';
 import { UsersRepo } from '../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../repositories/nonGoalRotationRepo.js';
 import { applyWeekOverrides } from '../lib/dailyActivity.js';
+import { applyDeloadSetVolumeReduction } from '../coaching/periodization/deloadPolicy.js';
+import { getPeriodizationContext } from '../coaching/periodization/periodizationService.js';
 import type { ExerciseTargetRole } from './exerciseSelector.js';
 
 /** Post-v2 Corrective Fix v2 §3/§7: the rolling window (in real calendar
@@ -211,6 +213,14 @@ export interface BuildWorkoutInput {
    * itself, matching this function's pre-existing single-day-only
    * behavior exactly for a caller with no other real value to supply. */
   default_session_minutes?: number;
+  /** Coaching Depth Batch 3: forwarded straight through to the internal
+   * `WeeklyPlanInput` — see that interface's own doc comment. Optional,
+   * defaulting to "no deload," for full backward compatibility. */
+  periodizationContext?: {
+    deloadActive: boolean;
+    setVolumeMultiplier: number;
+    deloadRepRangeBias: 'lower' | 'standard' | 'higher' | null;
+  };
 }
 
 /**
@@ -561,6 +571,20 @@ export interface WeeklyPlanInput {
    * exactly as it always has aside from the ONE alphabetical-tie-break
    * case this fix specifically targets (see below). */
   nonGoalRotationCursor?: number;
+  /** Coaching Depth Batch 3 (Periodization System): the current
+   * periodization context (calendar/reactive deload state, if any) for
+   * this program — see `periodizationService.getPeriodizationContext`.
+   * Optional and defaulting to "no deload" — every existing
+   * caller/fixture/test that never heard of periodization keeps
+   * behaving exactly as it always has. When present and
+   * `deloadActive` is true, applied exactly once, at the single
+   * `desiredWeekly` computation site below (never re-applied at any
+   * downstream step) — see this function's own comment there. */
+  periodizationContext?: {
+    deloadActive: boolean;
+    setVolumeMultiplier: number;
+    deloadRepRangeBias: 'lower' | 'standard' | 'higher' | null;
+  };
 }
 
 /** One real exercise placed into one real session by the weekly
@@ -1142,7 +1166,14 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // when the caller passed no carryover map at all (full backward
     // compatibility with every existing call site/test).
     const carryoverFromPriorWeek = input.carryoverByTarget?.get(tKey) ?? 0;
-    const desiredWeekly = (volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : target.current_weekly_primary_sets) + carryoverFromPriorWeek;
+    const desiredWeeklyBeforeDeload = (volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : target.current_weekly_primary_sets) + carryoverFromPriorWeek;
+    // Coaching Depth Batch 3 §7: the ONE place a deload's set-volume
+    // reduction is applied — exactly once, before any downstream
+    // skip-threshold/placement logic ever reads `desiredWeekly` (spec:
+    // "avoid applying deload reduction twice"). volumeDecision's own
+    // methodology (§8-13) is completely untouched — this reduces the
+    // OUTCOME of that decision, never the decision logic itself.
+    const desiredWeekly = input.periodizationContext?.deloadActive ? applyDeloadSetVolumeReduction(desiredWeeklyBeforeDeload) : desiredWeeklyBeforeDeload;
 
     // Strict Surgical Fix Pass §7/§8: "if a muscle already has adequate
     // exposure through compounds, do not add redundant direct work
@@ -1358,9 +1389,16 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // OTHER target never inherits this target's own bias. Applied only
       // to a real Blueprint-authored range — an approved outside-
       // Blueprint exercise keeps its own human-approved range untouched.
+      //
+      // Coaching Depth Batch 3 §7: an active deload OVERRIDES whatever
+      // bias the target's own curated profile specifies with the
+      // deload's own low-fatigue bias — a deload's reduced-fatigue
+      // intent applies regardless of the muscle's normal programming
+      // preference. Still the same `applyRepRangeBias` call, never a
+      // second range-narrowing implementation.
       if (blueprintPrescription) {
         const authored = parseRange(blueprintPrescription.reps);
-        const bias = getProfile(target.target_id).repRangeBias ?? 'standard';
+        const bias = input.periodizationContext?.deloadActive ? (input.periodizationContext.deloadRepRangeBias ?? 'lower') : getProfile(target.target_id).repRangeBias ?? 'standard';
         const biased = applyRepRangeBias(authored.min, authored.max, bias);
         prescription = { ...prescription, reps: `${biased.min}-${biased.max}` };
       }
@@ -2191,6 +2229,7 @@ export function buildWorkout(input: BuildWorkoutInput): WorkoutBuildResult {
     available_training_days: input.available_training_days,
     targets: input.targets,
     recurring_badminton_days: input.recurring_badminton_days,
+    periodizationContext: input.periodizationContext,
   });
 
   const today = plan.sessions.find((s) => s.date === input.date);
@@ -2581,7 +2620,22 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
   // day in the same week changed). Consulted by every caller (a plain
   // GET, an AI-context build, or a real regeneration alike); only
   // computeFreshWeek ever writes anything back.
-  const nonGoalRotationCursor = new NonGoalRotationRepo(db).cursorFor(new UsersRepo(db).getOrCreateDefault().id, weekStart);
+  const programId = new UsersRepo(db).getOrCreateDefault().id;
+  const nonGoalRotationCursor = new NonGoalRotationRepo(db).cursorFor(programId, weekStart);
+
+  // Coaching Depth Batch 3 (Periodization System): the single real read
+  // (and, at most once per real calendar day, the single reactive-
+  // evaluation write) every deterministic generation call goes through —
+  // see periodizationService.ts. `historyAsOfDate` is used as the
+  // reference date (never `date`/`weekStart`, matching the Same-Week
+  // History Fix's own historyAsOfDate-is-the-real-"today" convention
+  // elsewhere in this function).
+  const periodization = getPeriodizationContext(db, {
+    programId,
+    referenceDate: historyAsOfDate,
+    weekBoundary: state.training_profile?.week_start_day ?? 'monday',
+    defaultBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
+  });
 
   return {
     weekStart,
@@ -2601,6 +2655,11 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     nextWeekSessionPurposes,
     carryoverByTarget,
     nonGoalRotationCursor,
+    periodizationContext: {
+      deloadActive: periodization.deloadActive,
+      setVolumeMultiplier: periodization.setVolumeMultiplier,
+      deloadRepRangeBias: periodization.deloadRepRangeBias,
+    },
   };
 }
 

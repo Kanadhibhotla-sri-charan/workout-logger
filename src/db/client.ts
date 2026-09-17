@@ -72,6 +72,22 @@ function migrate(db: Database.Database): void {
   addColumnIfMissing(db, 'workout_sessions', 'source_type', "TEXT NOT NULL DEFAULT 'deterministic'");
   addColumnIfMissing(db, 'workout_sessions', 'supersedes_program_session_id', 'TEXT REFERENCES program_sessions(id) ON DELETE SET NULL');
 
+  // Coaching Depth Batch 3 (Periodization System): extends the existing
+  // coaching_program_state row (never a second table) with reactive-deload
+  // evidence fields — see schema.sql's own comment on this table for why
+  // periodization_state/deload_reason are deliberately NOT columns here
+  // (both are computed, like week_index already is). All additive/
+  // nullable-or-defaulted, safe on an existing database.
+  addColumnIfMissing(db, 'coaching_program_state', 'block_number', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing(db, 'coaching_program_state', 'reactive_trigger_status', "TEXT NOT NULL DEFAULT 'not_evaluated'");
+  addColumnIfMissing(db, 'coaching_program_state', 'reactive_triggered_at', 'TEXT');
+  addColumnIfMissing(db, 'coaching_program_state', 'reactive_deload_start_date', 'TEXT');
+  addColumnIfMissing(db, 'coaching_program_state', 'reactive_deload_end_date', 'TEXT');
+  addColumnIfMissing(db, 'coaching_program_state', 'cooldown_until', 'TEXT');
+  addColumnIfMissing(db, 'coaching_program_state', 'last_evaluated_at', 'TEXT');
+  addColumnIfMissing(db, 'coaching_program_state', 'specialization_target_id', 'TEXT');
+  addColumnIfMissing(db, 'coaching_program_state', 'specialization_goal_id', 'TEXT REFERENCES goals(id) ON DELETE SET NULL');
+
   const row = db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('contract_version') as
     | { value: string }
     | undefined;

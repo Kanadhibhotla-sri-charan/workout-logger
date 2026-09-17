@@ -10,6 +10,7 @@
 // value here is server-computed and server-authoritative.
 
 import type Database from 'better-sqlite3';
+import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS } from '../engine/config.js';
 import { addDays, rollingRangeEnding } from '../engine/dateMath.js';
 import type { Weekday } from '../contracts/types.js';
 import type { PersistedWeekSession } from '../repositories/weeklyProgramRepo.js';
@@ -28,14 +29,6 @@ export interface CoachingFoundationContext {
   scheduledFrequency: Record<string, number>;
   historicalSummaries: Record<string, TargetHistoricalSummary>;
 }
-
-/** No block-length preference exists anywhere in this app yet (Batch 1
- * introduces no periodization UI) — 4 weeks is a documented, adjustable
- * default used only the first time a program's state is ever
- * initialized; it never changes on its own once a block exists, and
- * nothing in this batch acts on it (spec §12: no ramping/periodization
- * cycles implemented). */
-const DEFAULT_BLOCK_LENGTH_WEEKS = 4;
 
 /** How far back `historicalSummaries` looks by default — matches the
  * default block length above only coincidentally; this is a separate,
@@ -104,7 +97,7 @@ export function buildCoachingFoundationContext(db: Database.Database, input: Bui
     input.programId,
     input.referenceDate,
     input.weekBoundary,
-    input.defaultBlockLengthWeeks ?? DEFAULT_BLOCK_LENGTH_WEEKS
+    input.defaultBlockLengthWeeks ?? DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS
   );
 
   const targetProfiles: Record<string, MuscleProgrammingProfile> = {};

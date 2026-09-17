@@ -494,14 +494,62 @@ CREATE TABLE IF NOT EXISTS non_goal_rotation_state (
 -- block's own real start date and can never be advanced by mere
 -- app-open time. One row per user, matching non_goal_rotation_state's
 -- own keying convention.
+-- Batch 3 (Periodization System) extends this same row — never a second
+-- competing block-state table — with the fields a reactive deload needs:
+-- `reactive_trigger_status`/`reactive_triggered_at`/
+-- `reactive_deload_start_date`/`reactive_deload_end_date`/`cooldown_until`/
+-- `last_evaluated_at` are genuine evidence-based state that cannot be
+-- recomputed from calendar dates alone, so (unlike `week_index`) they ARE
+-- stored. Deliberately NOT stored: a `periodization_state` enum or a
+-- `deload_reason` column — both are pure functions of
+-- (block_start_date, block_length_weeks, the reactive window above,
+-- reference date), computed by
+-- src/coaching/periodization/periodizationService.ts exactly the same way
+-- `week_index` itself is computed rather than stored (see
+-- calculateWeekIndex's own doc comment) — one derivation, never a second
+-- stored value that could drift out of sync with it.
+-- `specialization_target_id`/`specialization_goal_id` are explicit-only
+-- (Batch 3 spec §11): nothing in this codebase ever sets these
+-- automatically from trend data.
 CREATE TABLE IF NOT EXISTS coaching_program_state (
   program_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   block_id TEXT NOT NULL,
+  block_number INTEGER NOT NULL DEFAULT 1,
   block_kind TEXT NOT NULL CHECK (block_kind IN ('base', 'development', 'deload')),
   block_start_date TEXT NOT NULL,
   block_length_weeks INTEGER NOT NULL,
   is_deload INTEGER NOT NULL DEFAULT 0,
+  reactive_trigger_status TEXT NOT NULL DEFAULT 'not_evaluated' CHECK (reactive_trigger_status IN ('not_evaluated', 'clear', 'watch', 'triggered', 'cooldown')),
+  reactive_triggered_at TEXT,
+  reactive_deload_start_date TEXT,
+  reactive_deload_end_date TEXT,
+  cooldown_until TEXT,
+  last_evaluated_at TEXT,
+  specialization_target_id TEXT,
+  specialization_goal_id TEXT REFERENCES goals(id) ON DELETE SET NULL,
   state_version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- Batch 3 §16: append-only observability log — one row per periodization
+-- transition or reactive evaluation (including a non-trigger, so "why did
+-- it not trigger" is always answerable). Mirrors goal_events' own
+-- append-only event-log convention (see GoalEventsRepo) rather than
+-- inventing a second logging shape.
+CREATE TABLE IF NOT EXISTS coaching_periodization_events (
+  id TEXT PRIMARY KEY,
+  program_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  occurred_at TEXT NOT NULL,
+  previous_state TEXT NOT NULL,
+  new_state TEXT NOT NULL,
+  trigger_type TEXT NOT NULL CHECK (trigger_type IN ('calendar', 'reactive_triggered', 'reactive_suppressed', 'manual', 'block_transition')),
+  block_id TEXT NOT NULL,
+  block_number INTEGER NOT NULL,
+  week_index INTEGER NOT NULL,
+  -- JSON text — shape varies by trigger_type (evidence signals for a
+  -- reactive evaluation, null for a plain calendar transition).
+  evidence_json TEXT,
+  applied_policy_json TEXT,
+  reason TEXT NOT NULL
 );

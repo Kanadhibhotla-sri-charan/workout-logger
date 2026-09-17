@@ -38,6 +38,8 @@ import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } 
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
 import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { todayForUser } from '../../lib/userTimezone.js';
+import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS } from '../../engine/config.js';
+import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
 import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning } from '../friendlyExplanation.js';
 import type { SkippedTarget } from '../../engine/workoutBuilder.js';
 
@@ -923,4 +925,54 @@ programmingRouter.get('/substitutes', (req, res) => {
   const outsideCandidates = filterEquipmentFeasible(outsideApproved, availableEquipment).map((e) => ({ id: e.id, name: e.name, equipment: e.equipment }));
 
   res.json({ blueprint: blueprintCandidates, outsideBlueprint: outsideCandidates });
+});
+
+// GET /api/programming/periodization — Coaching Depth Batch 3 spec §13:
+// read-only periodization status, using the exact same
+// `getPeriodizationContext` every deterministic generation call already
+// reads through (never a second, re-derived status computation). A
+// human-readable `explanation` is built here rather than exposing raw
+// internal evidence scores directly (spec §13: "avoid exposing raw
+// internal scores without explanation").
+programmingRouter.get('/periodization', (req, res) => {
+  const database = db(req);
+  const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const profile = new TrainingProfileRepo(database).get(user.id);
+
+  const context = getPeriodizationContext(database, {
+    programId: user.id,
+    referenceDate: date,
+    weekBoundary: profile?.week_start_day ?? 'monday',
+    defaultBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
+  });
+
+  const { programState } = context;
+  let explanation: string;
+  if (programState.deloadReason === 'reactive' || programState.deloadReason === 'combined') {
+    explanation =
+      `A recovery deload is active because performance has declined across multiple recent comparable sessions. ` +
+      `This is a temporary reduction in training stress (through ${programState.reactiveDeloadEndDate}), not a change to your long-term goals.`;
+  } else if (programState.deloadReason === 'calendar') {
+    explanation = `Week ${programState.weekIndex} of block ${programState.blockNumber} is this block's own scheduled deload week — a planned reduction in training stress before the next block begins.`;
+  } else if (programState.deloadReason === 'manual') {
+    explanation = `This block was explicitly configured as a deload block.`;
+  } else {
+    explanation = `Week ${programState.weekIndex} of ${programState.blockLengthWeeks} in block ${programState.blockNumber} — normal training, no deload active.`;
+  }
+
+  res.json({
+    blockNumber: programState.blockNumber,
+    blockKind: programState.blockKind,
+    currentWeek: programState.weekIndex,
+    blockLengthWeeks: programState.blockLengthWeeks,
+    scheduledDeloadWeek: programState.scheduledDeloadWeek,
+    periodizationState: programState.periodizationState,
+    deloadReason: programState.deloadReason,
+    deloadActive: context.deloadActive,
+    deloadEndDate: programState.reactiveDeloadEndDate,
+    reactiveTriggerStatus: programState.reactiveTriggerStatus,
+    specializationTargetId: programState.specializationTargetId,
+    explanation,
+  });
 });
