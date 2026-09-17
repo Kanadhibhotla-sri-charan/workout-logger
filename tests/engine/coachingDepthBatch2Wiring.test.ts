@@ -44,6 +44,9 @@ const MONDAY = '2026-08-31'; // a real Monday
 // Monday itself is also hard-forbidden for lower-body work regardless
 // (constraintEngine.ts's isBodyFocusAllowedOnDay, spec §16).
 const LEGS_DAY = '2026-09-03'; // the same week's Thursday
+// Forearms are pull-compatible (config.ts's PULL_PHYSIQUE_TARGETS), not
+// universal — with the same rotation, 'pull' lands on Tuesday.
+const PULL_DAY = '2026-09-01'; // the same week's Tuesday
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 
 function baseTarget(overrides: Partial<TargetBuildContext> & Pick<TargetBuildContext, 'target_id'>): TargetBuildContext {
@@ -135,6 +138,27 @@ describe('Coaching Depth Batch 2 — rep-range bias wired into the actual prescr
     }
   });
 
+  it('forearm-flexors and forearm-extensors (curated repRangeBias: \'higher\') both have their generated prescription shifted toward the high end of their own authored Blueprint range', () => {
+    for (const targetId of ['forearm-flexors', 'forearm-extensors']) {
+      const target = baseTarget({ target_id: targetId });
+      const result = buildWorkout(weeklyInput({ date: PULL_DAY, weekday: 'tuesday', targets: [target] }));
+      const placed = result.exercises.filter((e) => e.target_id === targetId);
+      expect(placed.length).toBeGreaterThan(0);
+      for (const item of placed) {
+        const authoredPrescription = lookupExercisePrescriptionAnyLevel(targetId, item.exercise_id)!;
+        expect(authoredPrescription).toBeDefined();
+        const authored = parseRange(authoredPrescription.reps);
+        const expectedBiased = applyRepRangeBias(authored.min, authored.max, 'higher');
+        expect(item.target_reps_min).toBe(expectedBiased.min);
+        expect(item.target_reps_max).toBe(expectedBiased.max);
+        expect(item.target_reps_max).toBe(authored.max);
+        if (authored.max - authored.min >= 2) {
+          expect(item.target_reps_min).toBeGreaterThan(authored.min);
+        }
+      }
+    }
+  });
+
   it('a lower-biased physique target\'s generated prescription is shifted toward the low end of its own authored Blueprint range', () => {
     // No curated profile in the real Batch 1/2 data uses 'lower' bias yet
     // (rectus-abdominis/obliques/gastrocnemius/soleus/forearm-flexors/
@@ -163,10 +187,14 @@ describe('Coaching Depth Batch 2 — rep-range bias wired into the actual prescr
 
   it('the resulting range never exceeds Blueprint\'s own authored range, for every curated non-standard-bias target', () => {
     const lowerBodyTargets = new Set(['gastrocnemius', 'soleus']);
-    for (const targetId of ['gastrocnemius', 'soleus', 'rectus-abdominis', 'obliques']) {
+    const pullTargets = new Set(['forearm-flexors', 'forearm-extensors']);
+    for (const targetId of ['gastrocnemius', 'soleus', 'rectus-abdominis', 'obliques', 'forearm-flexors', 'forearm-extensors']) {
       const target = baseTarget({ target_id: targetId });
       const onLowerBodyDay = lowerBodyTargets.has(targetId);
-      const result = buildWorkout(weeklyInput({ date: onLowerBodyDay ? LEGS_DAY : MONDAY, weekday: onLowerBodyDay ? 'thursday' : 'monday', targets: [target] }));
+      const onPullDay = pullTargets.has(targetId);
+      const date = onLowerBodyDay ? LEGS_DAY : onPullDay ? PULL_DAY : MONDAY;
+      const weekday = onLowerBodyDay ? 'thursday' : onPullDay ? 'tuesday' : 'monday';
+      const result = buildWorkout(weeklyInput({ date, weekday, targets: [target] }));
       const placed = result.exercises.filter((e) => e.target_id === targetId);
       expect(placed.length).toBeGreaterThan(0);
       for (const item of placed) {

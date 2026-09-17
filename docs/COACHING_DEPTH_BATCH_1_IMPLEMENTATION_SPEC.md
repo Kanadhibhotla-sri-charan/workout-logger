@@ -83,7 +83,7 @@ Map these names to existing canonical target IDs:
 | Obliques | 4 | 2 | 5 | higher |
 | Gastrocnemius | 4 | 2 | 5 | higher |
 | Soleus | 4 | 2 | 5 | higher |
-| Forearms | 3 | 2 | 4 | standard |
+| Forearms | 3 | 2 | 4 | higher |
 
 If a canonical target cannot be found, report the mapping gap. Do not create a duplicate target.
 

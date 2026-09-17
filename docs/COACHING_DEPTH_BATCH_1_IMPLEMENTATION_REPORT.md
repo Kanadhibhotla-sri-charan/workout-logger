@@ -50,7 +50,7 @@ No other files were touched. No existing engine file (`developmentReferenceEngin
 | Obliques | `obliques` | 4 | 2 | 5 | higher |
 | Gastrocnemius | `gastrocnemius` | 4 | 2 | 5 | higher |
 | Soleus | `soleus` | 4 | 2 | 5 | higher |
-| Forearms | `forearm-flexors` **and** `forearm-extensors` | 3 | 2 | 4 | standard |
+| Forearms | `forearm-flexors` **and** `forearm-extensors` | 3 | 2 | 4 | higher |
 
 "Forearms" is not itself a single canonical Blueprint target — Blueprint splits it into two real, separately-trainable targets (`forearm-flexors`, `forearm-extensors`), each with its own exercise pool. Per spec §4.2's own instruction ("do not create a duplicate target"), this batch applies the spec's one "Forearms" row to **both** real targets rather than inventing a combined id. This is a documented mapping choice, not a gap — `MUSCLE_PROFILE_MAPPING_GAPS` is empty (verified: all six target ids exist in the current Blueprint snapshot).
 
