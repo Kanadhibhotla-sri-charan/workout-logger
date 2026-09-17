@@ -5,6 +5,15 @@ Background context: `docs/COACHING_DEPTH_PROGRAMMING_ROADMAP.md` (this batch imp
 
 **Update:** Batch 1's own spec deliberately deferred wiring the profile module's preferred frequency and rep-range bias into live generation, exposing them only as read-only structured context. A subsequent **Coaching Depth Batch 2** pass implemented exactly that wiring — `developmentReferenceEngine.ts` and `workoutBuilder.ts` are now modified, matching the roadmap's own original design. This report has been updated to describe the current, cumulative state; see §11 for the exact Batch 2 changes and test coverage.
 
+## 0. Cumulative delivery status
+
+| Batch | Scope | Status in this repository |
+|---|---|---|
+| **Batch 1 — Foundation** | The five curated muscle-programming profiles, program-state persistence, historical trend calculation, and the read-only `CoachingFoundationContext` integration point (§1-§10 below). | **Complete.** Every file listed in §1's "New" lists is present and unmodified since delivery; all 76 Batch 1 tests in `tests/coaching/` pass. |
+| **Batch 2 — Live-generation wiring** | Consuming the profile module's `preferredFrequencyPerWeek` in `developmentReferenceEngine.ts` and its `repRangeBias` in `workoutBuilder.ts`'s prescription path (§11 below). | **Complete.** Both engine files carry the Batch 2 changes; the forearm-profile bias correction is applied; all 11 Batch 2 tests in `tests/engine/coachingDepthBatch2Wiring.test.ts` pass. |
+
+Together, Batch 1 and Batch 2 constitute the full, currently-wired implementation described by this report. The only items not delivered by either batch — trend-driven decisions and automatic periodization/deload — are called out explicitly in §10 and in "What remains deferred/unimplemented" below; they are out of scope for both batches, not an incomplete part of either.
+
 ## 1. Every file added/modified
 
 **New — `src/coaching/` (all three modules, per spec §3's exact directory layout):**
