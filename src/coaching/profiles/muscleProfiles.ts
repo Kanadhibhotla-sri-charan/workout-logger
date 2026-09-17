@@ -33,8 +33,8 @@ const CURATED_PROFILE_INPUTS: readonly CuratedProfileInput[] = [
   { label: 'Obliques', targetId: 'obliques', preferredFrequencyPerWeek: 4, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 5, repRangeBias: 'higher' },
   { label: 'Gastrocnemius', targetId: 'gastrocnemius', preferredFrequencyPerWeek: 4, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 5, repRangeBias: 'higher' },
   { label: 'Soleus', targetId: 'soleus', preferredFrequencyPerWeek: 4, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 5, repRangeBias: 'higher' },
-  { label: 'Forearms (forearm-flexors)', targetId: 'forearm-flexors', preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'standard' },
-  { label: 'Forearms (forearm-extensors)', targetId: 'forearm-extensors', preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'standard' },
+  { label: 'Forearms (forearm-flexors)', targetId: 'forearm-flexors', preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'higher' },
+  { label: 'Forearms (forearm-extensors)', targetId: 'forearm-extensors', preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'higher' },
 ];
 
 export interface MuscleProfileMappingGap {

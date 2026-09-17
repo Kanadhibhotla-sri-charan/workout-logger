@@ -50,8 +50,8 @@ describe('getProfile — unknown vs known targets', () => {
   });
 
   it('forearm-flexors and forearm-extensors both get the spec\'s single "Forearms" row', () => {
-    expect(getProfile('forearm-flexors')).toMatchObject({ preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'standard' });
-    expect(getProfile('forearm-extensors')).toMatchObject({ preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'standard' });
+    expect(getProfile('forearm-flexors')).toMatchObject({ preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'higher' });
+    expect(getProfile('forearm-extensors')).toMatchObject({ preferredFrequencyPerWeek: 3, minimumFrequencyPerWeek: 2, maximumFrequencyPerWeek: 4, repRangeBias: 'higher' });
   });
 });
 

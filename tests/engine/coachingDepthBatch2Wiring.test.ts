@@ -136,10 +136,11 @@ describe('Coaching Depth Batch 2 — rep-range bias wired into the actual prescr
   });
 
   it('a lower-biased physique target\'s generated prescription is shifted toward the low end of its own authored Blueprint range', () => {
-    // No curated profile in the real Batch 1 data uses 'lower' bias yet
-    // (rectus-abdominis/obliques/gastrocnemius/soleus are all 'higher';
-    // forearms are 'standard') — applyRepRangeBias's own 'lower' branch
-    // is already unit-tested directly (tests/coaching/muscleProfiles.test.ts).
+    // No curated profile in the real Batch 1/2 data uses 'lower' bias yet
+    // (rectus-abdominis/obliques/gastrocnemius/soleus/forearm-flexors/
+    // forearm-extensors are all 'higher') — applyRepRangeBias's own
+    // 'lower' branch is already unit-tested directly
+    // (tests/coaching/muscleProfiles.test.ts).
     // This test instead proves the real WIRING carries a 'lower' bias
     // through to the generated workout, via the file-level mock above
     // that gives the real 'mid-pec' target a synthetic 'lower' profile.
