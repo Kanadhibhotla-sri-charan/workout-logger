@@ -1,8 +1,30 @@
 # Beyond Sets & Reps: Coaching-Depth Programming Roadmap
 
-**Status: proposed, not yet approved for implementation.** This document
-records the phased plan discussed with the user; nothing in it has been
-built. Do not start any phase below without explicit go-ahead.
+**Status: fully implemented.** Every phase below has shipped, across five
+implementation batches (Batch 1/2 pre-dating the consolidation below; Batch
+3/4/5 delivering the remaining phases per
+`docs/COACHING_DEPTH_REMAINING_BATCHES.md`). This document is kept as the
+original design record — phase numbering and scope descriptions below are
+historical (as originally proposed) and are not re-edited to match final
+shipped shape; see each batch's own implementation report for exactly what
+was built, including any documented, deliberate scope reductions.
+
+| Phase | Status | Delivered by |
+|---|---|---|
+| 1 — Muscle-Specific Training Profiles | Complete | Batch 1 (profiles) + Batch 2 (frequency reference + rep-range bias wired live) |
+| 2 — Periodization Waves & Block Structure | Complete | Batch 3 |
+| 3 — Historical Trend Engine | Complete | Batch 1 (later consumed by Batch 3's reactive-trend evaluator) |
+| 4 — Reactive Deloads & Specialization Blocks | Complete | Batch 3 |
+| 5 — Intensity Techniques | Complete | Batch 5 |
+| 6a — Exercise Rotation | Complete | Batch 4 |
+| 6b — Exercise Pairing / Supersets | Complete | Batch 4 |
+| 7 — Structural Balance Advisories | Complete | Batch 5 |
+| 8 — Individual Profile Factors | Complete (one factor wired; see Batch 5 report §8 known limitations) | Batch 5 |
+| 9 (optional) — Adherence / Preference Weighting | Complete | Batch 4 (folded in alongside 6a — see `COACHING_DEPTH_BATCH_4_EXERCISE_VARIETY_AND_PREFERENCE_REPORT.md`) |
+
+See `docs/COACHING_DEPTH_REMAINING_BATCHES.md` for the batch-consolidation
+rationale and each batch's own `..._REPORT.md` for files changed, exact
+rules implemented, tests run, and known limitations.
 
 ## Context
 

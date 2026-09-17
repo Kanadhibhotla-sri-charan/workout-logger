@@ -1,5 +1,27 @@
 # Coaching Depth — Remaining Batches (Batch 3 onward)
 
+## §0 — Delivery status (cumulative)
+
+| Batch | Phases | Status | Report |
+|---|---|---|---|
+| Batch 3 — Periodization System | 2 + 4 | **Complete** | `COACHING_DEPTH_BATCH_3_PERIODIZATION_SYSTEM_REPORT.md` |
+| Batch 4 — Exercise Variety & Preference | 6a + 6b + 9 | **Complete** | `COACHING_DEPTH_BATCH_4_EXERCISE_VARIETY_AND_PREFERENCE_REPORT.md` |
+| Batch 5 — Programming Enrichment | 5 + 7 + 8 | **Complete** | `COACHING_DEPTH_BATCH_5_PROGRAMMING_ENRICHMENT_REPORT.md` |
+
+All three batches described below have shipped, in the `3 → 4 → 5` order
+this document originally suggested. Combined with Batch 1/2 (delivered
+before this document existed), every phase in
+`docs/COACHING_DEPTH_PROGRAMMING_ROADMAP.md` is now implemented — see that
+document's own status table for the phase-by-phase mapping. A post-delivery
+audit (full clean-install verification, canonical-mechanism check for Batch
+3, known-limitations integrity check for Batch 4, and planner-wiring proof
+for Batch 5) confirmed all three batches' own implementation reports
+accurately describe what was actually shipped, with zero regressions
+against the established test baseline. Everything below this point is the
+original pre-implementation planning content and is kept as a historical
+record — it is not updated to match final shipped shape; read each batch's
+own `..._REPORT.md` for that.
+
 Source of truth for scope: `docs/COACHING_DEPTH_PROGRAMMING_ROADMAP.md` (the
 original 9-phase proposal). This document does not redefine any phase's
 design — it groups the phases **not yet shipped** into a small number of
