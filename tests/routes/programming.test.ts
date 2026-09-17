@@ -352,6 +352,26 @@ describe('Coaching Depth Batch 5 — /api/programming/structural-advisories', ()
     const res = await request(app).get(`/api/programming/structural-advisories?date=${MON}`).expect(200);
     expect(Array.isArray(res.body.advisories)).toBe(true);
   });
+
+  // Coaching Depth UI data contract §5 point 1: the presentation-only
+  // `affected_target_names` addition — a fresh specialization goal with
+  // zero logged history has zero rolling exposure on its own target,
+  // which real advisory-generation logic (structuralAdvisoryService.ts's
+  // coverageGapAdvisories) already flags as a persistent_target_coverage_gap
+  // advisory with no further setup needed.
+  it('GET resolves affected_targets ids to real display names via affected_target_names, parallel to affected_targets', async () => {
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 }); // Goal 1 -> mid-pec specialization
+    const res = await request(app).get(`/api/programming/structural-advisories?date=${MON}`).expect(200);
+    const gapAdvisory = res.body.advisories.find((a: any) => a.category === 'persistent_target_coverage_gap');
+    expect(gapAdvisory).toBeTruthy();
+    expect(Array.isArray(gapAdvisory.affected_target_names)).toBe(true);
+    expect(gapAdvisory.affected_target_names).toHaveLength(gapAdvisory.affected_targets.length);
+    expect(gapAdvisory.affected_targets).toEqual(['mid-pec']);
+    // A real resolved display name, never the raw id or a blank string.
+    expect(gapAdvisory.affected_target_names[0]).not.toBe('mid-pec');
+    expect(typeof gapAdvisory.affected_target_names[0]).toBe('string');
+    expect(gapAdvisory.affected_target_names[0].length).toBeGreaterThan(0);
+  });
 });
 
 describe('Coaching Depth Batch 5 — /api/programming/profile-factors', () => {

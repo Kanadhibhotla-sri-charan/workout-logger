@@ -218,6 +218,7 @@ button:disabled, .btn[aria-disabled='true'] { opacity: 0.55; cursor: not-allowed
 .badge-warning { background: var(--warning-bg); color: var(--warning); }
 .badge-rest { background: var(--surface-muted); color: var(--text-faint); border-style: dashed; }
 .badge-activity { background: #efe7fb; color: #5a2ea6; }
+.badge-danger { background: var(--danger-bg); color: var(--danger); }
 
 /* ---------- Loading / empty / error states ---------- */
 
@@ -301,6 +302,15 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transf
   color: var(--text-muted);
 }
 .exercise-explanation summary { cursor: pointer; font-weight: 600; color: var(--text); }
+.exercise-pairing-note { margin-top: 0.4rem; }
+.intensity-technique-note {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent-bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+.intensity-technique-note.is-empty { background: transparent; padding: 0.4rem 0 0; }
 .planned-vs-actual { display: flex; gap: var(--space-4); margin-top: var(--space-2); font-size: 0.85rem; }
 .planned-vs-actual .pva-label { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; display: block; }
 
@@ -322,6 +332,11 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transf
   background: var(--surface);
   color: var(--text);
 }
+
+/* ---------- Weekly training-state banner ---------- */
+
+.state-banner { border-left: 4px solid var(--accent); }
+.state-banner .card-title { color: var(--accent-strong); }
 
 /* ---------- Program week grid ---------- */
 

@@ -12,6 +12,7 @@
 
   <main class="wide" id="main-content">
     <h1>Weekly program</h1>
+    <div id="state-banner"></div>
     <div id="week-container"></div>
 
     <section>
@@ -28,6 +29,14 @@
 
     let weekData = null;
     let lastFocusedEl = null;
+
+    // Coaching Depth data contract §1: the periodization fetch is
+    // INDEPENDENT of the week fetch — its own try/catch, never awaited by
+    // loadWeek(), so a periodization failure/404 can never block the
+    // weekly plan itself from rendering (spec §8). `periodizationData`
+    // stays `null` (the state banner's own fallback) whenever it hasn't
+    // loaded yet or the fetch failed.
+    let periodizationData = null;
 
     // AI Programmer Discovery/Rehydration spec §5: incremented every
     // time a day's modal opens or closes, so an in-flight AI proposal
@@ -104,9 +113,13 @@
       return (DAILY_ACTIVITY_OPTIONS.find((o) => o.value === activity) || {}).text || activity;
     }
 
+    const NORMAL_STATE_FALLBACK = 'You are currently in a normal training state.';
+
     async function loadWeek() {
       const container = document.getElementById('week-container');
       showLoading(container, 'Loading weekly program…');
+      showLoading(document.getElementById('state-banner'), 'Loading training state…');
+      loadPeriodization(); // fire-and-forget here — its own try/catch below, never blocks the week fetch
       try {
         weekData = await api('/api/programming/week');
         renderWeek();
@@ -114,6 +127,48 @@
         showError(container, "We couldn't load your weekly program.", loadWeek);
         showEmpty(document.getElementById('goal-summary'), 'Not enough information yet.');
       }
+    }
+
+    /** Coaching Depth data contract §1: loads GET /periodization
+     * independently of loadWeek's own /week fetch and renders the state
+     * banner as soon as it resolves (success or failure) — a failure
+     * degrades `periodizationData` to null (the banner's normal-state
+     * fallback) rather than surfacing an error or blocking anything
+     * else on the page (spec §8). */
+    async function loadPeriodization() {
+      try {
+        periodizationData = await api('/api/programming/periodization');
+      } catch {
+        periodizationData = null;
+      }
+      renderStateBanner();
+    }
+
+    /** The plain-language training-state banner (spec §4.2.A/§6): always
+     * renders SOMETHING — the backend's own verbatim `explanation`
+     * string when periodization data is available, or the exact
+     * required fallback sentence when it isn't — never a blank area and
+     * never `blockKind`/`reactiveTriggerStatus`/`specializationTargetId`
+     * (spec §4.2.A "never expose in the default view"). */
+    function buildStateBanner() {
+      const wrap = el('div', { class: 'card state-banner' });
+      if (!periodizationData) {
+        wrap.appendChild(el('div', { class: 'card-title', text: 'Normal training' }));
+        wrap.appendChild(el('p', { class: 'muted', text: NORMAL_STATE_FALLBACK, style: 'margin:0' }));
+        return wrap;
+      }
+      wrap.appendChild(el('div', { class: 'card-title', text: formatDeloadReason(periodizationData.deloadReason) }));
+      wrap.appendChild(el('p', { class: 'muted', text: periodizationData.explanation || NORMAL_STATE_FALLBACK, style: 'margin:0 0 0.2rem' }));
+      if (periodizationData.deloadEndDate) {
+        wrap.appendChild(el('p', { class: 'faint', text: `Expected through ${formatDate(periodizationData.deloadEndDate)}`, style: 'margin:0' }));
+      }
+      return wrap;
+    }
+
+    function renderStateBanner() {
+      const container = document.getElementById('state-banner');
+      container.innerHTML = '';
+      container.appendChild(buildStateBanner());
     }
 
     function renderWeek() {
@@ -431,6 +486,12 @@
       return section;
     }
 
+    /** Coaching Depth data contract §2: extended with the pairing badge,
+     * the "alternative considered" note, and the per-exercise intensity-
+     * technique block — every value read directly from fields already on
+     * `item` (never re-derived), following the exact fallback strings
+     * the data contract requires. The pre-existing "Why included"
+     * details block is unchanged. */
     function buildExerciseDetailCard(item) {
       const card = createCard();
       card.classList.add('exercise-card');
@@ -442,13 +503,44 @@
       header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(item.sets, item.reps_min, item.reps_max) }));
       card.appendChild(header);
 
+      if (item.paired_with_exercise_name) {
+        card.appendChild(el('div', { class: 'badge badge-neutral exercise-pairing-note', text: `Paired with ${item.paired_with_exercise_name}` }));
+      }
+
+      if (wasAlternativeConsidered(item.decision)) {
+        card.appendChild(el('p', { class: 'faint', text: 'An alternative was considered based on your preferences.', style: 'margin:0.4rem 0 0' }));
+      }
+
       const explain = el('details', { class: 'exercise-explanation' });
       explain.appendChild(el('summary', { text: 'Why included' }));
       explain.appendChild(el('p', { text: describeWork(item), style: 'margin:0.4rem 0' }));
       explain.appendChild(el('p', { class: 'faint', text: item.friendly_reasoning || item.reasoning, style: 'margin:0' }));
       card.appendChild(explain);
 
+      card.appendChild(buildIntensityTechniqueNote(item.applied_intensity_technique));
+
       return card;
+    }
+
+    /** `applied_intensity_technique` (or null) -> the component-level
+     * intensity-technique block (data contract §2) — name, instruction,
+     * extra fatigue note and which working set, or the exact required
+     * empty-state sentence when none is prescribed for this exercise.
+     * Deliberately a DIFFERENT sentence than the session-level empty
+     * state Coaching Insights uses for a whole day with none. */
+    function buildIntensityTechniqueNote(technique) {
+      const wrap = el('div', { class: technique ? 'intensity-technique-note' : 'intensity-technique-note is-empty' });
+      if (!technique) {
+        wrap.appendChild(el('p', { class: 'faint', text: 'No intensity technique is prescribed for this exercise.', style: 'margin:0' }));
+        return wrap;
+      }
+      wrap.appendChild(el('div', { class: 'card-title', text: technique.name, style: 'font-size:0.9rem;margin-top:0.4rem' }));
+      wrap.appendChild(el('p', { class: 'muted', text: technique.instruction, style: 'margin:0.2rem 0' }));
+      if (technique.extra_fatigue_note) {
+        wrap.appendChild(el('p', { class: 'faint', text: technique.extra_fatigue_note, style: 'margin:0' }));
+      }
+      wrap.appendChild(el('p', { class: 'faint', text: `Applied to working set ${technique.applied_to_working_set_number}.`, style: 'margin:0.2rem 0 0' }));
+      return wrap;
     }
 
     // ---------- AI Programmer Proposal Review UI ----------

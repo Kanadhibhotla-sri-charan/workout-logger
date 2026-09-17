@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coaching Insights - Workout Programmer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header id="app-header" class="app-header"></header>
+
+  <main id="main-content">
+    <h1>Coaching insights</h1>
+    <p class="muted">A plain-language look at what the program is prioritizing right now — never a medical or diagnostic assessment.</p>
+
+    <section>
+      <h2>Recovery and training state</h2>
+      <div id="state-section"></div>
+    </section>
+
+    <section>
+      <h2>Structural balance advisories</h2>
+      <div id="advisories-section"></div>
+    </section>
+
+    <section>
+      <h2>Techniques prescribed this week</h2>
+      <div id="techniques-section"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+  <script>
+    renderAppHeader('/coaching-insights.html');
+
+    // ---------- Recovery / training state (data contract §1, reused) ----------
+
+    async function loadState() {
+      const container = document.getElementById('state-section');
+      showLoading(container, 'Loading training state…');
+      try {
+        const data = await api('/api/programming/periodization');
+        renderState(data);
+      } catch (err) {
+        // Graceful degradation (spec §8) — periodization is optional
+        // context here too; the normal-state fallback is always safe to
+        // show rather than blocking this section.
+        renderState(null);
+      }
+    }
+
+    function renderState(data) {
+      const container = document.getElementById('state-section');
+      container.innerHTML = '';
+      const card = createCard();
+      card.classList.add('state-banner');
+      if (!data) {
+        card.appendChild(el('div', { class: 'card-title', text: 'Normal training' }));
+        card.appendChild(el('p', { class: 'muted', text: 'You are currently in a normal training state.', style: 'margin:0' }));
+        container.appendChild(card);
+        return;
+      }
+      card.appendChild(el('div', { class: 'card-title', text: formatDeloadReason(data.deloadReason) }));
+      card.appendChild(el('p', { class: 'muted', text: data.explanation || 'You are currently in a normal training state.', style: 'margin:0 0 0.2rem' }));
+      if (data.deloadEndDate) {
+        card.appendChild(el('p', { class: 'faint', text: `Expected through ${formatDate(data.deloadEndDate)}`, style: 'margin:0' }));
+      }
+      container.appendChild(card);
+    }
+
+    // ---------- Structural balance advisories (data contract §4) ----------
+
+    const ADVISORY_CATEGORY_LABEL = {
+      push_pull_imbalance: 'Push/pull balance',
+      persistent_target_coverage_gap: 'Coverage gap',
+    };
+
+    /** An advisory's `category` -> a plain-language title. An
+     * unrecognized/legacy category degrades to a humanized label rather
+     * than blank (spec §6's "unknown enum value" rule). */
+    function formatAdvisoryCategory(category) {
+      return ADVISORY_CATEGORY_LABEL[category] || capitalize(String(category || '').replace(/_/g, ' '));
+    }
+
+    async function loadAdvisories() {
+      const container = document.getElementById('advisories-section');
+      showLoading(container, 'Loading structural advisories…');
+      try {
+        const data = await api('/api/programming/structural-advisories');
+        renderAdvisories(data.advisories);
+      } catch (err) {
+        showError(container, "We couldn't load structural advisories.", loadAdvisories);
+      }
+    }
+
+    function renderAdvisories(advisories) {
+      const container = document.getElementById('advisories-section');
+      container.innerHTML = '';
+      if (!advisories || advisories.length === 0) {
+        showEmpty(container, 'No structural advisories are active for this plan.');
+        return;
+      }
+      for (const advisory of advisories) container.appendChild(buildAdvisoryCard(advisory));
+    }
+
+    /** Never presents an advisory as a diagnosis (spec §4E) — category,
+     * a severity label ALWAYS paired with its badge (never color-only,
+     * spec §6.4), the real evidence/explanation/suggested action, and
+     * the affected target's resolved name. `affected_target_names`
+     * (this page's own small backend addition — see
+     * docs/COACHING_DEPTH_UI_DATA_CONTRACT.md §5 point 1) is preferred;
+     * the raw id is shown only if that field is ever absent (an older
+     * backend). */
+    function buildAdvisoryCard(advisory) {
+      const card = createCard();
+      const row = el('div', { class: 'card-row' });
+      row.appendChild(el('div', { class: 'card-title', text: formatAdvisoryCategory(advisory.category) }));
+      row.appendChild(createStatusBadge(advisory.severity, formatAdvisorySeverity(advisory.severity)));
+      card.appendChild(row);
+      const names = advisory.affected_target_names && advisory.affected_target_names.length > 0 ? advisory.affected_target_names : advisory.affected_targets;
+      if (names && names.length > 0) {
+        card.appendChild(el('div', { class: 'card-subtitle', text: names.join(', ') }));
+      }
+      card.appendChild(el('p', { text: advisory.explanation, style: 'margin:0.5rem 0 0.3rem' }));
+      card.appendChild(el('p', { class: 'faint', text: `Evidence: ${advisory.evidence}`, style: 'margin:0 0 0.3rem' }));
+      card.appendChild(el('p', { class: 'muted', text: advisory.suggested_review_action, style: 'margin:0' }));
+      return card;
+    }
+
+    // ---------- Techniques prescribed this week (data contract §5 point 2) ----------
+
+    async function loadTechniques() {
+      const container = document.getElementById('techniques-section');
+      showLoading(container, 'Loading this week’s plan…');
+      try {
+        const week = await api('/api/programming/week');
+        renderTechniques(collectWeekAppliedTechniques(week.days));
+      } catch (err) {
+        showError(container, "We couldn't load this week's plan.", loadTechniques);
+      }
+    }
+
+    function renderTechniques(entries) {
+      const container = document.getElementById('techniques-section');
+      container.innerHTML = '';
+      if (!entries || entries.length === 0) {
+        showEmpty(container, 'No intensity techniques are prescribed this week.');
+        return;
+      }
+      for (const entry of entries) container.appendChild(buildTechniqueCard(entry));
+    }
+
+    /** One `applied_intensity_technique` actually scheduled this week,
+     * scanned straight from the already-loaded /week response (never
+     * asked of the separate reference catalog — see
+     * collectWeekAppliedTechniques in app.js). Presents the technique as
+     * a deliberate programming choice, not a universally "better"
+     * option (spec §4F). */
+    function buildTechniqueCard(entry) {
+      const card = createCard();
+      const row = el('div', { class: 'card-row' });
+      row.appendChild(el('div', { class: 'card-title', text: entry.technique.name }));
+      row.appendChild(el('div', { class: 'card-subtitle', text: `${formatWeekday(entry.weekday)} · ${entry.exercise_name}` }));
+      card.appendChild(row);
+      card.appendChild(el('p', { text: entry.technique.instruction, style: 'margin:0.4rem 0' }));
+      if (entry.technique.extra_fatigue_note) {
+        card.appendChild(el('p', { class: 'faint', text: entry.technique.extra_fatigue_note, style: 'margin:0' }));
+      }
+      card.appendChild(el('p', { class: 'faint', text: `Applied to working set ${entry.technique.applied_to_working_set_number}.`, style: 'margin:0.2rem 0 0' }));
+      return card;
+    }
+
+    loadState();
+    loadAdvisories();
+    loadTechniques();
+  </script>
+</body>
+</html>

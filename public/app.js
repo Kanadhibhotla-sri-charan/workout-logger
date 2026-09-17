@@ -54,6 +54,8 @@ function todayIso() {
 const NAV_ITEMS = [
   { href: '/today.html', label: 'Today' },
   { href: '/program.html', label: 'Program' },
+  { href: '/coaching-insights.html', label: 'Insights' },
+  { href: '/coaching-settings.html', label: 'Coaching' },
   { href: '/index.html', label: 'Goals' },
   { href: '/history.html', label: 'History' },
   { href: '/profile.html', label: 'Profile' },
@@ -303,6 +305,12 @@ const BADGE_VARIANT = {
   committed: 'badge-success',
   expired: 'badge-neutral',
   rejected: 'badge-neutral',
+  // Coaching Insights: structural-advisory severities (data contract §4)
+  // — always paired with formatAdvisorySeverity's text label, never
+  // color alone (spec §6.4).
+  INFO: 'badge-neutral',
+  WATCH: 'badge-warning',
+  REVIEW: 'badge-danger',
 };
 
 /** A status word ('planned'|'in_progress'|'completed'|'rest'|'skipped'|
@@ -555,6 +563,95 @@ function aiProposalNoticeFor(status) {
  * the UI copy the two callers use; the underlying rules are identical. */
 function aiWeekReconciliationActionsFor(status) {
   return aiProposalActionsFor(status);
+}
+
+// ---------- Coaching Depth UI (Workstream B) ----------
+// docs/COACHING_DEPTH_UI_DATA_CONTRACT.md: pure, DOM-free mapping helpers
+// shared by program.html, coaching-settings.html and
+// coaching-insights.html. Every one of these only formats/derives a
+// PRESENTATION value from a field the backend already decided — never a
+// second computation of a deload/selection/advisory/technique decision
+// (spec §2.2). Kept here (not duplicated per-page) so all three surfaces
+// use the exact same wording/derivation rules.
+
+const DELOAD_REASON_LABEL = {
+  calendar: 'Planned recovery week',
+  reactive: 'Reactive deload',
+  combined: 'Reactive deload',
+  manual: 'Manual deload',
+};
+
+/** A periodization response's `deloadReason`
+ * ('calendar'|'reactive'|'combined'|'manual'|null) -> one of the fixed
+ * plain-language state labels the weekly-plan state banner and Coaching
+ * Insights show (data contract §1) — never the raw enum value. An
+ * unrecognized/legacy value degrades to a humanized label rather than
+ * throwing or rendering blank (spec §6 "unknown enum value" rule). */
+function formatDeloadReason(deloadReason) {
+  if (!deloadReason) return 'Normal training';
+  return DELOAD_REASON_LABEL[deloadReason] || `${capitalize(String(deloadReason).replace(/_/g, ' '))} deload`;
+}
+
+/** A `plannedWork[]` item's `decision` (or null/undefined, for an item
+ * that never reached the selection stage) -> whether an alternative
+ * exercise was considered/substituted for a preference/avoidance reason
+ * — a BOOLEAN ONLY, per data contract §2: never surfaces the raw
+ * `rejected_candidates` id list or `decisive_gate` (spec §2.3/§4B "never
+ * expose internal scoring/gate names by default"). Tolerant of a missing
+ * `decision`/`selection` (an exercise skipped before selection ran) —
+ * reports false rather than throwing. */
+function wasAlternativeConsidered(decision) {
+  const selection = decision && decision.selection;
+  if (!selection) return false;
+  const hasRejected = Array.isArray(selection.rejected_candidates) && selection.rejected_candidates.length > 0;
+  const wasSubstituted = selection.substituted_from !== null && selection.substituted_from !== undefined;
+  return hasRejected || wasSubstituted;
+}
+
+const PREFERENCE_KIND_COPY = {
+  preferred: { label: 'Preferred', description: 'The program may favor this exercise when a candidate is otherwise equally suitable.' },
+  disliked: { label: 'Disliked', description: 'The program may deprioritize this exercise in favor of another candidate.' },
+  avoided: { label: 'Avoided', description: 'The program will not prescribe this exercise unless you remove this rule.' },
+};
+
+/** A preference row's `preference` value -> its display label plus the
+ * exact wording distinction data contract §3 requires: "preferred"/
+ * "disliked" are phrased as the program MAY favor/deprioritize the
+ * exercise, while "avoided" is phrased as the program WILL NOT prescribe
+ * it unless the rule is removed — never the same wording for both. An
+ * unrecognized value degrades to a humanized label with a generic
+ * description. */
+function formatPreferenceKind(preference) {
+  return PREFERENCE_KIND_COPY[preference] || { label: capitalize(String(preference || '')), description: 'This preference influences exercise selection.' };
+}
+
+const ADVISORY_SEVERITY_LABEL = { INFO: 'Informational', WATCH: 'Worth watching', REVIEW: 'Worth reviewing' };
+
+/** A structural advisory's `severity` -> its plain-language text label —
+ * spec §6.4/data contract §4: severity must never be color-only, so
+ * every caller pairs whatever color/badge it renders with this text. An
+ * unrecognized value degrades to a humanized label rather than blank. */
+function formatAdvisorySeverity(severity) {
+  return ADVISORY_SEVERITY_LABEL[severity] || capitalize(String(severity || '').toLowerCase());
+}
+
+/** GET /week's own `days[]` -> the flat list of every intensity
+ * technique actually prescribed this week, scanned from each day's
+ * already-decided `plannedWork[].applied_intensity_technique` (data
+ * contract §5 point 2) — deliberately NEVER asks the separate
+ * `/intensity-techniques` reference catalog, which carries no scheduling
+ * information of its own. Each entry names the real day/exercise it
+ * applies to, never a bare technique name detached from context. */
+function collectWeekAppliedTechniques(days) {
+  const out = [];
+  for (const day of days || []) {
+    for (const item of day.plannedWork || []) {
+      if (item.applied_intensity_technique) {
+        out.push({ weekday: day.weekday, date: day.date, exercise_name: item.exercise_name, technique: item.applied_intensity_technique });
+      }
+    }
+  }
+  return out;
 }
 
 // ---------- Save-in-flight helper (spec §8) ----------

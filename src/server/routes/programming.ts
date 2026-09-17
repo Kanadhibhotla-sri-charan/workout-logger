@@ -1080,7 +1080,23 @@ programmingRouter.get('/structural-advisories', (req, res) => {
   const database = db(req);
   const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
   const input = assembleWeeklyPlanInput(database, date, defaultBudgetMinutes(database));
-  res.json({ advisories: evaluateStructuralAdvisories(input.targets, input.today) });
+  const advisories = evaluateStructuralAdvisories(input.targets, input.today);
+  // Coaching Depth UI data contract §5 point 1: a small, presentation-
+  // only addition — every `affected_targets` id both real advisory
+  // categories ever produce (push_pull_imbalance,
+  // persistent_target_coverage_gap — see structuralAdvisoryService.ts)
+  // is always a physique_target id, so resolving it through the exact
+  // same `resolveTargetName` helper every other route in this file
+  // already calls is copying a one-line lookup to a second route, never
+  // a new mechanism. Kept as a parallel array (never mutating
+  // `affected_targets` itself) so a caller that only needs the raw ids
+  // is unaffected.
+  res.json({
+    advisories: advisories.map((advisory) => ({
+      ...advisory,
+      affected_target_names: advisory.affected_targets.map((id) => resolveTargetName('physique_target', id)),
+    })),
+  });
 });
 
 // Coaching Depth Batch 5 spec §6.2: the only profile factor this batch
