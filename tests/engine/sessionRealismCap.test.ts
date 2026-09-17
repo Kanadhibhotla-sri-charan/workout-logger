@@ -103,12 +103,24 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
     // before this fix, could exclude a legitimate, correctly-ranked
     // muscle (like the real triceps-long-head starvation case this fix
     // was diagnosed from) ENTIRELY, rather than giving it a fair,
-    // reduced share. Empirically (verified via direct instrumentation
-    // against this exact fixture), 'rectus-abdominis' is the target
-    // whose own full need doesn't fit what's left of the 9-exercise
-    // budget once 'lower-pec', 'mid-pec', and 'obliques' are placed
+    // reduced share.
+    //
+    // Coaching Depth Batch 2 wires obliques'/rectus-abdominis' own
+    // curated preferred frequency into their weekly reference, which
+    // shifted this exact fixture's boundary so 'rectus-abdominis' at
+    // current_weekly_primary_sets: 0 now lands on an exact multiple of
+    // the 9-exercise budget (no partial trim at all). Giving
+    // rectus-abdominis a small non-zero starting volume (4, still a
+    // real, large deficit against its own 32-set weekly reference)
+    // shifts its own exercise count enough to genuinely misalign the
+    // boundary again — empirically (verified via direct instrumentation
+    // against this exact fixture), 'mid-pec' is now the target whose
+    // own full need doesn't fit what's left of the 9-exercise budget
+    // once 'obliques', 'rectus-abdominis', and 'lower-pec' are placed
     // ahead of it.
-    const targets = NINE_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 0 }));
+    const targets = NINE_TARGET_IDS.map((id) =>
+      normalDevTarget({ target_id: id, current_weekly_primary_sets: id === 'rectus-abdominis' ? 4 : 0 })
+    );
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets }));
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
 
@@ -119,30 +131,28 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
     // this test would prove nothing).
     expect(monday.plannedWork.length).toBe(SESSION_REALISM_CAP.maxExercisesPerSession);
 
-    // The real proof: 'rectus-abdominis' got SOME real work here...
-    const rectusExercisesInCappedSession = monday.plannedWork.filter((w) => w.target_id === 'rectus-abdominis').length;
-    expect(rectusExercisesInCappedSession).toBeGreaterThan(0);
+    // The real proof: 'mid-pec' got SOME real work here...
+    const midPecExercisesInCappedSession = monday.plannedWork.filter((w) => w.target_id === 'mid-pec').length;
+    expect(midPecExercisesInCappedSession).toBeGreaterThan(0);
 
     // ...strictly fewer than its own natural, uncapped need (proving
     // this is a genuine partial trim, not a coincidence of it only ever
     // needing one exercise) — checked by building the exact same target
     // alone, with the full 9-exercise budget entirely to itself.
-    const isolatedPlan = buildWeeklyProgrammingPlan(
-      weeklyInput({ targets: [normalDevTarget({ target_id: 'rectus-abdominis', current_weekly_primary_sets: 0 })] })
-    );
-    const rectusExercisesUncapped = isolatedPlan.sessions.find((s) => s.date === '2026-08-31')!.plannedWork.length;
-    expect(rectusExercisesUncapped).toBeGreaterThan(rectusExercisesInCappedSession);
+    const isolatedPlan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [normalDevTarget({ target_id: 'mid-pec', current_weekly_primary_sets: 0 })] }));
+    const midPecExercisesUncapped = isolatedPlan.sessions.find((s) => s.date === '2026-08-31')!.plannedWork.length;
+    expect(midPecExercisesUncapped).toBeGreaterThan(midPecExercisesInCappedSession);
 
     // A partially-trimmed target must never ALSO carry a
     // session_realism_cap skip (assertNoContradictoryProgramState's own
     // invariant) — it already has real plannedWork.
-    expect(capSkips.some((s) => s.target_id === 'rectus-abdominis')).toBe(false);
+    expect(capSkips.some((s) => s.target_id === 'mid-pec')).toBe(false);
 
     // Its reduced (not zero, not full) delivered volume is real and
     // traceable, exactly like any other under-delivered target.
-    const rectusAllocation = plan.targetAllocations.find((a) => a.target_id === 'rectus-abdominis')!;
-    expect(rectusAllocation.deliveredDirectSets).toBeGreaterThan(0);
-    expect(rectusAllocation.unmetDirectSets).toBeGreaterThan(0);
+    const midPecAllocation = plan.targetAllocations.find((a) => a.target_id === 'mid-pec')!;
+    expect(midPecAllocation.deliveredDirectSets).toBeGreaterThan(0);
+    expect(midPecAllocation.unmetDirectSets).toBeGreaterThan(0);
 
     // Every target that DOES have real plannedWork also has real,
     // non-zero delivered volume, and is never simultaneously reported

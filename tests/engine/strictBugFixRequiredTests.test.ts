@@ -166,21 +166,30 @@ describe('Post-v2 Corrective Fix §5/§9: a target compatible with many days is 
   it('a universal target (compatible with every PPL+Upper session purpose) receives real exposures spaced by its own expected interval, never one on every compatible day', () => {
     // obliques (config.ts's UNIVERSAL_PHYSIQUE_TARGETS) is compatible
     // with push, pull, legs, AND upper — a real scenario where every
-    // one of the week's 4 gym days is compatible. Under the corrected
+    // one of the week's gym days is compatible. Under the corrected
     // model, real due-ness (not a "how many compatible days exist, up
-    // to a cap" count) decides which of those 4 days actually receive
+    // to a cap" count) decides which of those days actually receive
     // direct work.
+    //
+    // Coaching Depth Batch 2 wires obliques' own curated preferred
+    // frequency (Batch 1: 4/week) into this reference, giving it a
+    // 1-day expected interval — short enough to fill every one of only
+    // 4 real days in a week. Using 5 real training days (Monday-Friday)
+    // instead keeps this test's real point intact: even at a 1-day
+    // interval, the separate rolling-window frequency gate (never more
+    // than 4 real exposures per trailing 7-day window) still stops the
+    // 5th day from also receiving direct work.
     const plan = buildWeeklyProgrammingPlan(
       weeklyInput({
-        available_training_days: ['monday', 'tuesday', 'thursday', 'friday'],
+        available_training_days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
         targets: [normalDevTarget({ target_id: 'obliques', weekly_exposure_units: 0 })],
       })
     );
     const daysWithObliques = plan.sessions.filter((s) => s.plannedWork.some((w) => w.target_id === 'obliques'));
-    // Never all 4 compatible days — real due-ness genuinely spaces real
+    // Never all 5 compatible days — real due-ness genuinely spaces real
     // exposures apart rather than filling every compatible day.
     expect(daysWithObliques.length).toBeGreaterThan(0);
-    expect(daysWithObliques.length).toBeLessThan(4);
+    expect(daysWithObliques.length).toBeLessThan(5);
     // Every exercise placed still respects its own authored cap — real
     // due-based spacing never licenses inflating an exercise.
     for (const session of daysWithObliques) {

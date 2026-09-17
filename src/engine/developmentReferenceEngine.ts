@@ -34,6 +34,7 @@
 // model, §6, §25).
 
 import { getPackageForTarget } from '../blueprint/developmentPackages.js';
+import { getPreferredFrequencyReference } from '../coaching/profiles/muscleProfileService.js';
 import type { BlueprintId } from '../contracts/types.js';
 import type { TargetType } from './goalResolver.js';
 
@@ -116,14 +117,23 @@ export function getDevelopmentReference(targetType: TargetType, targetId: Bluepr
   }
 
   const totalSetsPerSession = pkg.exercises.reduce((sum, e) => sum + e.sets, 0);
+  // Coaching Depth Batch 2: this target's own curated muscle programming
+  // profile (src/coaching/profiles/) may override Blueprint's package
+  // frequency with a preferred weekly frequency reference — the profile
+  // module is the single source of truth for this number, never
+  // duplicated here. A target with no curated profile (or no preference
+  // field on its profile) falls through to Blueprint's own package
+  // frequency exactly as before this wiring.
+  const preferredFrequency = getPreferredFrequencyReference(targetId);
+  const sessionsPerWeek = preferredFrequency ?? pkg.frequency.sessions_per_week;
   return {
     target_type: targetType,
     target_id: targetId,
     level,
     package_id: pkg.id,
-    weekly_direct_set_reference: totalSetsPerSession * pkg.frequency.sessions_per_week,
+    weekly_direct_set_reference: totalSetsPerSession * sessionsPerWeek,
     direct_sets_per_exposure: totalSetsPerSession,
-    sessions_per_week_reference: pkg.frequency.sessions_per_week,
+    sessions_per_week_reference: sessionsPerWeek,
     coverage: { muscle_group_id: pkg.muscle_group, exercise_count: pkg.exercises.length },
   };
 }

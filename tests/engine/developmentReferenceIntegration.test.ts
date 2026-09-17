@@ -136,25 +136,29 @@ describe('buildWorkout classification uses per-muscle Efficient reference, not a
   it('two different non-goal muscles with the identical raw exposure can classify differently once each muscle\'s own reference is applied', () => {
     // Pick two real muscle groups with genuinely different Efficient
     // references (established directly from real Blueprint data).
-    const calves = getDevelopmentReference('physique_target', 'gastrocnemius', 'efficient');
+    // 'biceps', not 'gastrocnemius' — gastrocnemius now has a Coaching
+    // Depth curated preferred-frequency profile (Batch 2) that raises
+    // its weekly reference, so it's no longer reliably the lower of the
+    // two; 'biceps' has no curated profile.
+    const biceps = getDevelopmentReference('physique_target', 'biceps', 'efficient');
     const chest = getDevelopmentReference('physique_target', 'mid-pec', 'efficient');
-    expect(calves.weekly_direct_set_reference).not.toBe(chest.weekly_direct_set_reference);
+    expect(biceps.weekly_direct_set_reference).not.toBe(chest.weekly_direct_set_reference);
 
-    // An exposure level between the two references: at/above calves'
+    // An exposure level between the two references: at/above biceps'
     // (lower) reference -> maintenance; below chest's (higher)
     // reference -> normal_development.
-    const midpoint = Math.round(((calves.weekly_direct_set_reference ?? 0) + (chest.weekly_direct_set_reference ?? 0)) / 2);
-    expect(midpoint).toBeGreaterThanOrEqual(calves.weekly_direct_set_reference!);
+    const midpoint = Math.round(((biceps.weekly_direct_set_reference ?? 0) + (chest.weekly_direct_set_reference ?? 0)) / 2);
+    expect(midpoint).toBeGreaterThanOrEqual(biceps.weekly_direct_set_reference!);
     expect(midpoint).toBeLessThan(chest.weekly_direct_set_reference!);
 
-    const calvesTarget = baseTarget({ target_id: 'gastrocnemius', weekly_exposure_units: midpoint });
+    const bicepsTarget = baseTarget({ target_id: 'biceps', weekly_exposure_units: midpoint });
     const chestTarget = baseTarget({ target_id: 'mid-pec', weekly_exposure_units: midpoint });
-    const result = buildWorkout(weeklyInput({ targets: [calvesTarget, chestTarget] }));
+    const result = buildWorkout(weeklyInput({ targets: [bicepsTarget, chestTarget] }));
 
     const allDecisions = [...result.exercises, ...result.skipped_targets];
-    const calvesDecision = allDecisions.find((d) => d.target_id === 'gastrocnemius');
+    const bicepsDecision = allDecisions.find((d) => d.target_id === 'biceps');
     const chestDecision = allDecisions.find((d) => d.target_id === 'mid-pec');
-    expect(calvesDecision?.classification).toBe('maintenance');
+    expect(bicepsDecision?.classification).toBe('maintenance');
     expect(chestDecision?.classification).toBe('normal_development');
   });
 });

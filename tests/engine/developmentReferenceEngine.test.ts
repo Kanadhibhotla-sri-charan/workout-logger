@@ -45,11 +45,16 @@ describe('getDevelopmentReference', () => {
   });
 
   it('different muscle groups have genuinely different weekly references — no universal hardcoded number', () => {
+    // 'biceps', not 'gastrocnemius' — gastrocnemius now has a Coaching
+    // Depth curated preferred-frequency profile (Batch 2), so its
+    // weekly_direct_set_reference is intentionally no longer Blueprint's
+    // raw package frequency alone; 'biceps' has no curated profile, so
+    // this stays a pure test of the raw Blueprint calculation.
     const chest = getDevelopmentReference('physique_target', 'mid-pec', 'complete');
-    const calves = getDevelopmentReference('physique_target', 'gastrocnemius', 'complete');
-    expect(chest.weekly_direct_set_reference).not.toBe(calves.weekly_direct_set_reference);
+    const biceps = getDevelopmentReference('physique_target', 'biceps', 'complete');
+    expect(chest.weekly_direct_set_reference).not.toBe(biceps.weekly_direct_set_reference);
     expect(chest.weekly_direct_set_reference).toBe(realWeeklyReference('chest', 'complete'));
-    expect(calves.weekly_direct_set_reference).toBe(realWeeklyReference('calves', 'complete'));
+    expect(biceps.weekly_direct_set_reference).toBe(realWeeklyReference('biceps', 'complete'));
   });
 
   it('missing package behaviour is explicit: a functional_goal target returns null, never a guessed number', () => {

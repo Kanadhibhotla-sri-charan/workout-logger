@@ -54,19 +54,23 @@ function weeklyInput(overrides: Partial<WeeklyPlanInput> = {}): WeeklyPlanInput 
   };
 }
 
-// Three real, push/universal-compatible targets, all pushed into a
-// genuine 'maintenance'-tier tie: current_weekly_primary_sets: 50 sits
-// comfortably above every real Blueprint target's own weekly
-// development-package threshold, so needDeficit = 0 for all three;
+// Three real, push-compatible targets sharing the exact same
+// muscle_group package (chest) — so their weekly development-package
+// threshold is identically 16 for all three, tying needDeficit at the
+// same positive value regardless of `current_weekly_primary_sets`/
+// `weekly_exposure_units` (both left at this fixture's defaults);
 // days_since_target_last_trained: null (never trained) ties the
 // maintenance comparator too; no recovery caution ties recoveryNeed at
 // 0. This is the exact condition that let the OLD alphabetical
 // tie-break pick the same early-alphabet subset forever — several
-// genuinely-tied maintenance targets. Alphabetically: 'mid-pec' <
-// 'obliques' < 'rectus-abdominis', i.e. ring order [A, B, C].
-const RING_A = 'mid-pec';
-const RING_B = 'obliques';
-const RING_C = 'rectus-abdominis';
+// genuinely-tied targets. Deliberately three DIFFERENT chest sub-targets
+// (never 'obliques'/'rectus-abdominis' — Coaching Depth Batch 2 gave
+// those two their own curated preferred-frequency profile, which is now
+// wired into their weekly reference and would break this tie). Alphabetically:
+// 'lower-pec' < 'mid-pec' < 'upper-pec', i.e. ring order [A, B, C].
+const RING_A = 'lower-pec';
+const RING_B = 'mid-pec';
+const RING_C = 'upper-pec';
 
 function orderOfRingTargets(targets: string[]): string[] {
   const seen: string[] = [];

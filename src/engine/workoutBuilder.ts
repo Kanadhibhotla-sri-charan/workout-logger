@@ -42,6 +42,7 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/developmentPackages.js';
+import { getProfile, applyRepRangeBias } from '../coaching/profiles/muscleProfileService.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
 import { EXPOSURE_COEFFICIENTS, LEGS_SESSION_MAX_EXERCISES, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
@@ -1344,8 +1345,25 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // against it.
       const outsidePrescription = outsideSelection ? { reps: outsideSelection.reps_range, rir: outsideSelection.rir_range, sets: null as number | null } : null;
       const blueprintPrescription = !outsideSelection && target.target_type === 'physique_target' ? lookupExercisePrescriptionAnyLevel(target.target_id, selection.exercise_id) : null;
-      const prescription = outsidePrescription ?? (blueprintPrescription ? { reps: blueprintPrescription.reps, rir: blueprintPrescription.rir, sets: blueprintPrescription.sets } : null);
+      let prescription = outsidePrescription ?? (blueprintPrescription ? { reps: blueprintPrescription.reps, rir: blueprintPrescription.rir, sets: blueprintPrescription.sets } : null);
       if (!prescription) return { selection, prescription: null as null };
+
+      // Coaching Depth Batch 2: this target's own curated muscle
+      // programming profile may bias which end of the chosen exercise's
+      // real Blueprint-authored rep range this prescription leans
+      // toward — applyRepRangeBias only ever narrows the authored
+      // [min, max], never extends past it (see muscleProfileService.ts).
+      // Resolved from `target.target_id` (the target actually being
+      // prescribed here), so an exercise's secondary exposure to some
+      // OTHER target never inherits this target's own bias. Applied only
+      // to a real Blueprint-authored range — an approved outside-
+      // Blueprint exercise keeps its own human-approved range untouched.
+      if (blueprintPrescription) {
+        const authored = parseRange(blueprintPrescription.reps);
+        const bias = getProfile(target.target_id).repRangeBias ?? 'standard';
+        const biased = applyRepRangeBias(authored.min, authored.max, bias);
+        prescription = { ...prescription, reps: `${biased.min}-${biased.max}` };
+      }
 
       const exerciseHistory = target.exercise_history[selection.exercise_id] ?? [];
       let progressionDecision: ProgressionResult | null = null;

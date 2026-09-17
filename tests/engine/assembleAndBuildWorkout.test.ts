@@ -300,6 +300,34 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     // dropped for time. Equipment is scoped tight enough that quads'
     // own candidates (back-squat/leg-press/leg-extension) are close to
     // the only equipment-feasible, Blueprint-prescribed work available.
+    //
+    // Coaching Depth Batch 2 gave rectus-abdominis/obliques/
+    // gastrocnemius/soleus curated preferred frequencies (Batch 1) that
+    // are now actually wired into their own weekly volume references
+    // (Batch 2) — these small, universal/legs-day muscles would
+    // otherwise out-rank quads for this session's fixed 5-exercise
+    // realism cap on a fresh, never-trained DB. Seeding them with heavy
+    // real completed volume on Tuesday makes them genuinely
+    // adequately-covered for the week by Thursday — a realistic
+    // "already trained these earlier this week" scenario — so quads
+    // (this test's real subject) reliably gets its own session slot,
+    // exactly like it did before those two muscles had any curated
+    // profile at all.
+    const seedSessionsRepo = new WorkoutSessionsRepo(db);
+    function seedHeavyVolume(exerciseId: string) {
+      const s = seedSessionsRepo.createSession({ date: TUESDAY, session_type: 'gym', status: 'completed' });
+      seedSessionsRepo.addExercisePerformance(s.session_id, {
+        exercise_id: exerciseId,
+        order: 1,
+        role: 'primary',
+        sets: Array.from({ length: 30 }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 12, completed: true })),
+      });
+    }
+    seedHeavyVolume('cable-crunch');
+    seedHeavyVolume('cable-woodchop');
+    seedHeavyVolume('standing-calf-raise');
+    seedHeavyVolume('seated-calf-raise');
+
     const withoutBadminton = assembleAndBuildWorkout(db, THURSDAY, 240);
     const planWithout = withoutBadminton.exercises.find((e) => e.target_id === 'quads');
     expect(planWithout).toBeDefined();

@@ -81,7 +81,7 @@ function weeklyInput(overrides: Partial<WeeklyPlanInput> = {}): WeeklyPlanInput 
 }
 
 describe('Post-v2 Corrective Fix v2 §24.A/§24.G — minimum spacing is NOT the sole frequency gate', () => {
-  it('a 2/week target with real exposures 3 days apart (Monday, Thursday) never gets a 3rd exposure 3 days later (Sunday) merely because spacing alone would allow it', () => {
+  it('a 4/week target with real exposures 1 day apart (Mon-Thu) never gets a 5th exposure 1 day later (Friday) merely because spacing alone would allow it', () => {
     // 'obliques' is compatible with every session purpose (push/pull/
     // legs/upper), so purpose-compatibility itself never explains what
     // this test checks — only the frequency reference does. A large
@@ -89,34 +89,49 @@ describe('Post-v2 Corrective Fix v2 §24.A/§24.G — minimum spacing is NOT the
     // the day-construction loop actually reach every real day this run
     // considers, rather than stopping early once the first exposure
     // consumes the whole weekly total.
+    //
+    // Coaching Depth Batch 2 wires obliques' own curated preferred
+    // frequency (Batch 1: 4/week) into this reference, so its expected
+    // exposure interval is now only 1 day (floor(7/4)) — this test's
+    // day spacing is scaled accordingly (5 consecutive real training
+    // days, not 3 spread across a week) to keep exercising the same
+    // real mechanism: minimum spacing alone would allow every one of
+    // these 5 days, but the separate rolling-window frequency gate must
+    // still block the 5th once 4 real exposures already sit inside the
+    // trailing 7-day window.
     const developmentReference = getDevelopmentReference('physique_target', 'obliques', 'efficient');
-    expect(developmentReference.sessions_per_week_reference).toBe(2);
+    expect(developmentReference.sessions_per_week_reference).toBe(4);
     const sessionCap = developmentReference.direct_sets_per_exposure!;
 
-    const target = normalDevTarget('obliques', { current_weekly_primary_sets: sessionCap * 3, weekly_exposure_units: sessionCap * 3 });
-    // Monday (day 0), Thursday (day 3), Sunday (day 6) — Monday and
-    // Thursday are each >= the 3-day minimum spacing apart, and Sunday
-    // is also >= 3 days after Thursday, so minimum spacing ALONE would
-    // permit all three. The separate maximum-frequency gate must still
-    // block the third.
-    const plan = buildWeeklyProgrammingPlan(weeklyInput({ available_training_days: ['monday', 'thursday', 'sunday'], targets: [target] }));
+    const target = normalDevTarget('obliques', { current_weekly_primary_sets: sessionCap * 5, weekly_exposure_units: sessionCap * 5 });
+    // Monday-Friday, each 1 day apart — every gap individually satisfies
+    // obliques' own 1-day expected interval, so minimum spacing ALONE
+    // would permit all five. The separate maximum-frequency gate must
+    // still block the fifth.
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({ available_training_days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], targets: [target] })
+    );
 
     const byDate = new Map(plan.sessions.map((s) => [s.date, s.plannedWork.filter((w) => w.target_id === 'obliques')]));
     const monday = byDate.get('2026-08-31') ?? [];
+    const tuesday = byDate.get('2026-09-01') ?? [];
+    const wednesday = byDate.get('2026-09-02') ?? [];
     const thursday = byDate.get('2026-09-03') ?? [];
-    const sunday = byDate.get('2026-09-06') ?? [];
+    const friday = byDate.get('2026-09-04') ?? [];
 
     expect(monday.length).toBeGreaterThan(0);
+    expect(tuesday.length).toBeGreaterThan(0);
+    expect(wednesday.length).toBeGreaterThan(0);
     expect(thursday.length).toBeGreaterThan(0);
-    // The core requirement: the third real day gets nothing, even though
-    // its own minimum-spacing check (3 days since Thursday) would pass.
-    expect(sunday.length).toBe(0);
+    // The core requirement: the fifth real day gets nothing, even though
+    // its own minimum-spacing check (1 day since Thursday) would pass.
+    expect(friday.length).toBe(0);
 
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'obliques')!;
-    // Exactly two exposures' worth delivered (Monday + Thursday), never
-    // a third crammed in — and never silently written off as "unmet"
+    // Exactly four exposures' worth delivered (Monday-Thursday), never
+    // a fifth crammed in — and never silently written off as "unmet"
     // either, since the target simply isn't due yet for it.
-    expect(allocation.deliveredDirectSets).toBe(sessionCap * 2);
+    expect(allocation.deliveredDirectSets).toBe(sessionCap * 4);
   });
 });
 
@@ -159,13 +174,19 @@ describe('Post-v2 Corrective Fix v2 §24.C — a real exposure near a calendar-w
       budget_minutes: 300,
       available_equipment: FULL_EQUIPMENT,
       available_training_days: ['monday'],
-      targets: [normalDevTarget('obliques', { last_trained_date: '2026-08-30', recent_direct_exposure_dates: ['2026-08-30'], days_since_target_last_trained: 1 })],
+      // 'mid-pec', not 'obliques' — obliques' own curated preferred
+      // frequency (Coaching Depth Batch 1/2: 4/week) now gives it a
+      // 1-day expected interval, which would make it correctly DUE
+      // after 1 day (not the "not yet due" case this test needs).
+      // mid-pec is unprofiled, keeping the original 2/week (3-day
+      // interval) this scenario is built around.
+      targets: [normalDevTarget('mid-pec', { last_trained_date: '2026-08-30', recent_direct_exposure_dates: ['2026-08-30'], days_since_target_last_trained: 1 })],
     });
     // Correctly NOT due (only 1 real day since Sunday's exposure) — the
     // real invariant this test protects is WHY: the engine must cite the
     // real Sunday date and a real 1-day gap, never null/"never trained,"
     // which is what a calendar-boundary reset bug would produce instead.
-    const skip = result.skipped_targets.find((s) => s.target_id === 'obliques');
+    const skip = result.skipped_targets.find((s) => s.target_id === 'mid-pec');
     expect(skip).toBeDefined();
     expect(skip!.reason_code).toBe('not_current_exposure');
     const exposureDecision = skip!.decision.exposure_decision;

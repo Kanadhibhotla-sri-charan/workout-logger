@@ -299,6 +299,23 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
         { set_number: 3, weight: 20, reps: 12, completed: true },
       ],
     });
+    // Coaching Depth Batch 2 gave gastrocnemius/soleus their own curated
+    // preferred-frequency profile (Batch 1) that Batch 2 now wires into
+    // their own weekly volume reference, materially raising their
+    // real programming priority for this same legs-day cap — heavy
+    // real completed volume on Tuesday makes them genuinely
+    // adequately-covered by Thursday (a realistic "already trained
+    // these earlier this week" scenario), freeing a real slot for
+    // quads exactly as the glute seeding above already does.
+    for (const exerciseId of ['standing-calf-raise', 'seated-calf-raise']) {
+      const calfSession = sessionsRepo.createSession({ date: TUESDAY, session_type: 'gym', status: 'completed' });
+      sessionsRepo.addExercisePerformance(calfSession.session_id, {
+        exercise_id: exerciseId,
+        order: 1,
+        role: 'primary',
+        sets: Array.from({ length: 30 }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 12, completed: true })),
+      });
+    }
     const result = assembleAndBuildWorkout(db, THURSDAY, 240);
     const plan = result.exercises.find((e) => e.target_id === 'quads');
     expect(plan).toBeDefined();
@@ -441,6 +458,26 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
         available_equipment: ['barbell', 'rack', 'machine'],
         other_activity_schedule: [],
       });
+      // Coaching Depth Batch 2 wires rectus-abdominis/obliques/
+      // gastrocnemius/soleus's own curated preferred-frequency profile
+      // (Batch 1) into their weekly volume reference, materially
+      // raising their real programming priority for this session's
+      // fixed exercise-count realism cap on a fresh, never-trained DB
+      // — heavy real completed volume on Tuesday makes them genuinely
+      // adequately-covered by Thursday (a realistic "already trained
+      // these earlier this week" scenario), so quads (this test's real
+      // subject) reliably gets its own session slot regardless of
+      // badminton intensity.
+      const seedSessionsRepo = new WorkoutSessionsRepo(fixtureDb);
+      for (const exerciseId of ['cable-crunch', 'cable-woodchop', 'standing-calf-raise', 'seated-calf-raise']) {
+        const s = seedSessionsRepo.createSession({ date: TUESDAY, session_type: 'gym', status: 'completed' });
+        seedSessionsRepo.addExercisePerformance(s.session_id, {
+          exercise_id: exerciseId,
+          order: 1,
+          role: 'primary',
+          sets: Array.from({ length: 30 }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 12, completed: true })),
+        });
+      }
       if (badmintonIntensity) {
         const sessionsRepo = new WorkoutSessionsRepo(fixtureDb);
         const session = sessionsRepo.createSession({ date: WEDNESDAY, session_type: 'badminton', status: 'completed' });

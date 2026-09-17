@@ -135,7 +135,14 @@ describe('Remaining Post-v2 Corrective Fixes §20 Test 2 — a large weekly defi
     // nothing) — yet it was already given a real exposure just
     // yesterday, well short of its own real minimum spacing (3 days for
     // a 2/week reference). The deficit must never override that.
-    const target = normalDevTarget('obliques', {
+    //
+    // 'mid-pec', not 'obliques' — obliques' own curated preferred
+    // frequency (Coaching Depth Batch 1/2: 4/week) now gives it a 1-day
+    // expected interval, so it would correctly BE due after 1 day
+    // rather than exercising this test's "not yet due" scenario.
+    // mid-pec is unprofiled, keeping the original 2/week (3-day
+    // interval) this scenario is built around.
+    const target = normalDevTarget('mid-pec', {
       current_weekly_primary_sets: 0,
       weekly_exposure_units: 0,
       last_trained_date: '2026-08-30',
@@ -145,8 +152,8 @@ describe('Remaining Post-v2 Corrective Fixes §20 Test 2 — a large weekly defi
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ available_training_days: ['monday'], targets: [target] }));
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
 
-    expect(monday.plannedWork.some((w) => w.target_id === 'obliques')).toBe(false);
-    const skip = monday.skipped.find((s) => s.target_id === 'obliques');
+    expect(monday.plannedWork.some((w) => w.target_id === 'mid-pec')).toBe(false);
+    const skip = monday.skipped.find((s) => s.target_id === 'mid-pec');
     expect(skip).toBeDefined();
     expect(skip!.reason_code).toBe('not_current_exposure');
     // The volume decision genuinely recommends real weekly volume (a

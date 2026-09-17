@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
+import { addDays } from '../../src/engine/dateMath.js';
 import { createApp } from '../../src/server/app.js';
 import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
@@ -107,6 +108,32 @@ async function logGluteIsolationSession(date: string) {
       ],
     })
     .expect(201);
+  await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
+}
+
+/** Coaching Depth Batch 2 wires rectus-abdominis/obliques/gastrocnemius/
+ * soleus's own curated preferred-frequency profile (Batch 1) into their
+ * own weekly volume reference, materially raising their real
+ * programming priority for this same session's exercise-count cap
+ * (obliques/rectus-abdominis compete on every day as universal targets;
+ * gastrocnemius/soleus compete specifically on the legs day) — heavy
+ * real completed volume makes them genuinely adequately-covered (a
+ * realistic "already trained these earlier this week" scenario),
+ * freeing a real slot for quads exactly as logGluteIsolationSession
+ * above already does for the glute competitors. */
+async function logCoachingDepthCompetitorIsolationSession(date: string) {
+  const created = await request(app).post('/api/workouts').send({ date, session_type: 'gym', status: 'in_progress' }).expect(201);
+  for (const exercise_id of ['cable-crunch', 'cable-woodchop', 'standing-calf-raise', 'seated-calf-raise']) {
+    await request(app)
+      .post(`/api/workouts/${created.body.session_id}/exercises`)
+      .send({
+        exercise_id,
+        order: 1,
+        role: 'primary',
+        sets: Array.from({ length: 30 }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 12, completed: true })),
+      })
+      .expect(201);
+  }
   await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
 }
 
@@ -287,6 +314,9 @@ describe('Step 12 Remediation §7 (P1): strengthened remaining-week adaptation r
     // quads' own exposure) so this test's real subject (quads) reliably
     // gets real work to check reallocation stability against.
     await logGluteIsolationSession(currentWeekStart());
+    // A different day than the glute-isolation session above — only one
+    // gym session may exist per calendar date.
+    await logCoachingDepthCompetitorIsolationSession(addDays(currentWeekStart(), 1));
     const before = await getWeek();
     const gymDays = before.days.filter((d: any) => d.type === 'gym').sort((a: any, b: any) => a.date.localeCompare(b.date));
     // Find whichever real gym day this real week actually planned quads
