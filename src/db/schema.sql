@@ -553,3 +553,28 @@ CREATE TABLE IF NOT EXISTS coaching_periodization_events (
   applied_policy_json TEXT,
   reason TEXT NOT NULL
 );
+
+-- Coaching Depth Batch 4 (Exercise Variety & Preference) spec §1/§6: one
+-- explicit rule per (user, exercise) — 'preferred'/'disliked' are soft
+-- ranking signals (Gate hierarchy tie-break influence only), 'avoided' is
+-- a hard exclusion. `temporary_until` (a real calendar date, inclusive)
+-- makes an otherwise-avoided/disliked/preferred rule automatically expire
+-- without a separate cleanup job — the effective preference on any given
+-- date is always computed at read time (never a separate "has this
+-- expired yet" write), matching this codebase's existing
+-- compute-don't-store discipline. `reason` is optional, free-form,
+-- user-supplied context (e.g. "shoulder discomfort"), never a diagnosis.
+-- One row per (user_id, exercise_id) — setting a new preference for the
+-- same exercise replaces the prior row rather than appending a history
+-- (this is current-state, not an event log; ExercisePreferencesRepo is
+-- the only writer).
+CREATE TABLE IF NOT EXISTS exercise_preferences (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  exercise_id TEXT NOT NULL,
+  preference TEXT NOT NULL CHECK (preference IN ('preferred', 'disliked', 'avoided')),
+  temporary_until TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, exercise_id)
+);

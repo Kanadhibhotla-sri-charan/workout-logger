@@ -293,3 +293,45 @@ describe('GET /api/programming/periodization — Coaching Depth Batch 3', () => 
     expect(res.body.deloadReason).toBe('calendar');
   });
 });
+
+describe('Coaching Depth Batch 4 — /api/programming/preferences', () => {
+  const BENCH = 'flat-barbell-bench-press';
+
+  it('GET returns an empty rule list for a fresh user', async () => {
+    const res = await request(app).get('/api/programming/preferences').expect(200);
+    expect(res.body.rules).toEqual([]);
+  });
+
+  it('PUT sets a preference rule, which GET then lists as active', async () => {
+    const put = await request(app).put(`/api/programming/preferences/${BENCH}`).send({ preference: 'avoided', reason: 'shoulder discomfort' }).expect(200);
+    expect(put.body.exerciseId).toBe(BENCH);
+    expect(put.body.preference).toBe('avoided');
+    expect(put.body.reason).toBe('shoulder discomfort');
+
+    const list = await request(app).get('/api/programming/preferences').expect(200);
+    expect(list.body.rules).toHaveLength(1);
+    expect(list.body.rules[0].exerciseId).toBe(BENCH);
+    expect(list.body.rules[0].preference).toBe('avoided');
+  });
+
+  it('PUT rejects an unknown exercise id', async () => {
+    await request(app).put('/api/programming/preferences/not-a-real-exercise').send({ preference: 'preferred' }).expect(404);
+  });
+
+  it('PUT rejects an invalid preference value', async () => {
+    await request(app).put(`/api/programming/preferences/${BENCH}`).send({ preference: 'neutral' }).expect(400);
+  });
+
+  it('a temporary rule already expired as of `date` is excluded from the active list', async () => {
+    await request(app).put(`/api/programming/preferences/${BENCH}`).send({ preference: 'disliked', temporaryUntil: '2026-01-01' }).expect(200);
+    const res = await request(app).get(`/api/programming/preferences?date=${MON}`).expect(200);
+    expect(res.body.rules).toEqual([]);
+  });
+
+  it('DELETE removes the rule, which GET then no longer lists', async () => {
+    await request(app).put(`/api/programming/preferences/${BENCH}`).send({ preference: 'preferred' }).expect(200);
+    await request(app).delete(`/api/programming/preferences/${BENCH}`).expect(204);
+    const res = await request(app).get('/api/programming/preferences').expect(200);
+    expect(res.body.rules).toEqual([]);
+  });
+});

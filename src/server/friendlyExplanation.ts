@@ -125,7 +125,7 @@ export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalNa
  * `workoutBuilder.ts`'s `SkippedTarget.reason_code` already assigns at
  * the exact site that decided it. Mirrors that type exactly so this
  * function can switch on it directly. */
-type SkipReasonCode = 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity' | 'session_realism_cap';
+type SkipReasonCode = 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity' | 'session_realism_cap' | 'all_candidates_avoided';
 
 interface FriendlySkipInput {
   target_type: TargetType;
@@ -252,6 +252,13 @@ export function buildFriendlySkipReasoning(skip: FriendlySkipInput): string {
       // count-only realism limit — never a time/equipment reason (§7/§8
       // still forbid those), and never a permanent exclusion.
       return `${skip.target_name} was deferred from this session once it reached its exercise/muscle limit — this target remains available for its next real session.`;
+    }
+    case 'all_candidates_avoided': {
+      // Coaching Depth Batch 4: a hard, user-declared exclusion — never
+      // framed as a Blueprint data gap (§18's data-integrity wording is
+      // reserved for a genuine malformed/missing record) or an ordinary
+      // "not due" decision.
+      return `Every real exercise for ${skip.target_name} is currently marked avoided in your preferences, so no substitute was used. Remove or adjust that avoidance rule to have this target programmed again.`;
     }
   }
 }

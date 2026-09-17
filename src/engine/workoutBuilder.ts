@@ -49,7 +49,8 @@ import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_SESSION
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
-import { exercisesTrainingTarget, selectExercise, type ExerciseSelectionResult } from './exerciseSelector.js';
+import { exercisesTrainingTarget, selectExercise, AllCandidatesAvoidedError, type ExerciseSelectionResult, type ExercisePreferenceLevel } from './exerciseSelector.js';
+import { evaluateSessionPairings } from './exercisePairing.js';
 import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
 import { computeProgression, type ProgressionResult } from './progressionEngine.js';
@@ -66,6 +67,7 @@ import { WeekActivityOverridesRepo } from '../repositories/weekActivityOverrides
 import { WeeklyProgramRepo } from '../repositories/weeklyProgramRepo.js';
 import { UsersRepo } from '../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../repositories/nonGoalRotationRepo.js';
+import { ExercisePreferencesRepo } from '../repositories/exercisePreferencesRepo.js';
 import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import { applyDeloadSetVolumeReduction } from '../coaching/periodization/deloadPolicy.js';
 import { getPeriodizationContext } from '../coaching/periodization/periodizationService.js';
@@ -187,6 +189,14 @@ export interface TargetBuildContext {
    * Blueprint's own candidates during selection below. Empty for most
    * targets (no proposal has ever been approved for them). */
   outside_blueprint_exercises: readonly OutsideBlueprintCandidate[];
+  /** Coaching Depth Batch 4: this user's effective preference/avoidance
+   * rule for every candidate exercise relevant to this target, already
+   * resolved as-of the plan's reference date (temporary exclusions
+   * expired, `neutral` entries omitted) — see
+   * ExercisePreferencesRepo.effectiveMapFor. Optional; a target with no
+   * map (or an absent key within one) is treated as `neutral` for every
+   * candidate, matching every pre-Batch-4 caller's behavior exactly. */
+  preferences?: ReadonlyMap<BlueprintId, ExercisePreferenceLevel>;
 }
 
 export interface BuildWorkoutInput {
@@ -406,7 +416,7 @@ export interface SkippedTarget {
    * genuinely day-specific decision; no current mechanism produces one
    * (time/equipment do not filter generation), kept for when one
    * legitimately exists. */
-  scope: 'exposure' | 'data_integrity' | 'session';
+  scope: 'exposure' | 'data_integrity' | 'session' | 'preference';
   /** Post-v2 Corrective Fix §18/§22 (superseding One-Pass Dev Spec v2
    * §18/§19's slightly different framing): the structured, discriminated
    * category this skip actually belongs to — set explicitly at the
@@ -447,7 +457,7 @@ export interface SkippedTarget {
    *     target may still be placed on another real day this week). The
    *     one real, deliberate exception to `'session'` scope's own "no
    *     current mechanism produces one" note above. */
-  reason_code: 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity' | 'session_realism_cap';
+  reason_code: 'recovery' | 'not_current_exposure' | 'adequately_covered' | 'no_volume_recommended' | 'blueprint_data_integrity' | 'session_realism_cap' | 'all_candidates_avoided';
   reason: string;
   /** As much of the same machine-readable explanation as had actually
    * been computed before this target was skipped — e.g. a target
@@ -619,6 +629,14 @@ export interface PlannedWorkItem {
   progression_decision: ProgressionResult | null;
   reasoning: string;
   decision: DecisionExplanation;
+  /** Coaching Depth Batch 4 §3: this exercise's antagonist (push/pull)
+   * superset partner for this exact session, when
+   * `exercisePairing.evaluateSessionPairings` found one — see that
+   * module's own doc comment for the real signal used (push/pull
+   * physique-target classification, never a fabricated relationship).
+   * Null when this exercise was evaluated and left unpaired, exactly
+   * like every pre-Batch-4 session (never forced). */
+  paired_with_exercise_id: BlueprintId | null;
 }
 
 /** One real day of the week this plan covers — §4's own `sessions[]`
@@ -1366,6 +1384,10 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         exercises_already_planned_today: [...plannedTodayIds, ...alreadyPlannedTodayForThisTarget],
         outside_blueprint_candidates: new Map([...outsideCandidatesById].map(([id, e]) => [id, { role: e.role, name: e.name }])),
         prefer_lower_fatigue_cost: badmintonLowerBodyReduce,
+        // Coaching Depth Batch 4: hard avoidance (Gate 2b) / soft
+        // preference ranking (Gate 5b) — absent entirely for a target
+        // with no preferences map, matching every pre-Batch-4 caller.
+        preference_by_exercise_id: target.preferences,
       });
       log.push(selection.reasoning);
 
@@ -1530,6 +1552,11 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           exposure_decision: exposureDecision,
           selection: selectionDecision,
         },
+        // Coaching Depth Batch 4: pairing can only be decided once this
+        // whole day's FINAL post-fitting exercise set is known (see
+        // `sessionWork` construction below, where this is overwritten) —
+        // never at this per-target, per-exercise construction point.
+        paired_with_exercise_id: null,
       };
 
       candidates.push({
@@ -1663,6 +1690,13 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     let everCompatibleThisRun = false;
     let lastAttemptedExerciseId: BlueprintId | null = null;
     let everAttemptedARealCandidate = false;
+    // Coaching Depth Batch 4: set the one time (across every real day this
+    // target is considered on) `attemptSelection` throws
+    // AllCandidatesAvoidedError — every real candidate remaining is
+    // user-avoided. Reported once, after the day loop, exactly like the
+    // other end-of-run summary skips below; never re-attempted with a
+    // substitute the user explicitly excluded.
+    let allCandidatesAvoidedHit = false;
     // The most recently computed real exposure-cycle decision — kept so
     // the end-of-run summary skip (when nothing was ever placed) can
     // carry real, structured `last_exposure_date`/`days_since_last_exposure`
@@ -1756,7 +1790,21 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // by the real number of feasible/prescribed candidates for this
       // target, never an invented cap.
       while (sessionRemaining > 0 && pool.length > 0) {
-        const attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
+        let attempt: ReturnType<typeof attemptSelection>;
+        try {
+          attempt = attemptSelection(pool, placedTodayIds, plannedTodayIds);
+        } catch (err) {
+          if (err instanceof AllCandidatesAvoidedError) {
+            // Coaching Depth Batch 4: a hard, non-fallback exclusion —
+            // never substitute a candidate the user explicitly avoided.
+            // Stop attempting this target for today; the end-of-run
+            // summary below reports it once, distinctly from an ordinary
+            // data gap or "not due" decision.
+            allCandidatesAvoidedHit = true;
+            break;
+          }
+          throw err;
+        }
         everAttemptedARealCandidate = true;
         lastAttemptedExerciseId = attempt.selection.exercise_id;
         if (!attempt.prescription) {
@@ -1808,7 +1856,22 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // this run — never confused with each other, and never reported
     // mid-run (a later real day may still succeed).
     if (globalExerciseIndex === 0) {
-      if (everAttemptedARealCandidate) {
+      if (allCandidatesAvoidedHit) {
+        // Coaching Depth Batch 4: every real candidate this target was
+        // ever attempted with is explicitly user-avoided — a hard
+        // exclusion, never reframed as a Blueprint data gap (this is not
+        // a data defect) or an ordinary "not due" decision (this target
+        // WAS due; the user's own rule is what kept it unprogrammed).
+        weekLevelSkips.push({
+          target_type: target.target_type,
+          scope: 'preference' as const,
+          reason_code: 'all_candidates_avoided',
+          target_id: target.target_id,
+          classification,
+          reason: `Every real candidate exercise for this target is explicitly avoided by your own preference rules, so no substitute was used. Remove or adjust the avoidance rule to have this target programmed again.`,
+          decision: makeSkipDecision({ volume_decision: volumeDecision }),
+        });
+      } else if (everAttemptedARealCandidate) {
         // A real candidate was actually attempted at least once (this
         // target WAS due on some real day) but nothing had a resolvable
         // Blueprint prescription anywhere — a genuine data gap, distinct
@@ -2011,6 +2074,18 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     trend: goalTrend.get(goalId) ?? ('insufficient_data' as AestheticProgressTrend),
   }));
 
+  // Coaching Depth Batch 4: preferences are a user-level fact, not a
+  // per-target one — every target's own TargetBuildContext.preferences
+  // is normally the identical map assembleWeeklyPlanInput built once
+  // (see that function), but this merges across whatever `input.targets`
+  // actually carries so a fixture/test supplying per-target maps still
+  // gets correct pairing-time avoidance behavior. Empty when no target
+  // supplies one, matching every pre-Batch-4 caller.
+  const pairingPreferences = new Map<BlueprintId, ExercisePreferenceLevel>();
+  for (const t of input.targets) {
+    if (t.preferences) for (const [id, level] of t.preferences) pairingPreferences.set(id, level);
+  }
+
   const sessions: WeeklyPlanSession[] = [];
   for (const day of orderedGymDays) {
     const date = dateForWeekday.get(day)!;
@@ -2024,7 +2099,16 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // computed straight from the full, unfiltered set for informational
     // display only. Session Realism Cap (above) is the one explicit,
     // user-requested exception — count-only, never time/equipment.
-    const sessionWork: PlannedWorkItem[] = dayCandidates.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes }));
+    const sessionWorkUnpaired: PlannedWorkItem[] = dayCandidates.map((c) => ({ ...c.planned, estimated_minutes: c.estimated_minutes }));
+    // Coaching Depth Batch 4 §3: pairing only ever runs on this day's
+    // FINAL post-fitting exercise set — see exercisePairing.ts's own doc
+    // comment ("never selects an exercise, only decides which two
+    // already-chosen exercises may be tagged as a pair").
+    const pairing = evaluateSessionPairings({
+      items: sessionWorkUnpaired.map((w) => ({ exercise_id: w.exercise_id, target_type: w.target_type, target_id: w.target_id })),
+      preference_by_exercise_id: pairingPreferences,
+    });
+    const sessionWork: PlannedWorkItem[] = sessionWorkUnpaired.map((w) => ({ ...w, paired_with_exercise_id: pairing.pairs.get(w.exercise_id) ?? null }));
     const sessionMinutes = dayCandidates.reduce((sum, c) => sum + c.estimated_minutes, 0);
 
     sessions.push({
@@ -2412,6 +2496,20 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
   const sessionsRepo = new WorkoutSessionsRepo(db);
   const outsideRepo = new OutsideBlueprintExercisesRepo(db);
 
+  // Coaching Depth Batch 4: this user's own preference/avoidance rules
+  // are user-level, not target-specific — resolved once here (as of
+  // `historyAsOfDate`, matching every other as-of-date read in this
+  // function) and reused identically for every target's
+  // TargetBuildContext below, exactly like ExercisePreferencesRepo's own
+  // bulk `effectiveMapFor` would for a fixed candidate pool. Absent
+  // entries default to `'neutral'` at every real consumer (exerciseSelector.ts,
+  // exercisePairing.ts) so a user with no rules at all sees this map as
+  // effectively empty and behavior is completely unaffected.
+  const userId = new UsersRepo(db).getOrCreateDefault().id;
+  const exercisePreferences = new Map<BlueprintId, ExercisePreferenceLevel>(
+    new ExercisePreferencesRepo(db).listActive(userId, historyAsOfDate).map((r) => [r.exerciseId, r.preference])
+  );
+
   const weeklyByTarget = new Map(state.weekly_exposure.map((e) => [`${e.target_type}:${e.target_id}`, e]));
   const rollingByTarget = new Map(state.rolling_exposure.map((e) => [`${e.target_type}:${e.target_id}`, e]));
   const touchesByTarget = gatherTargetTouches(sessionsRepo, state.recent_sessions);
@@ -2474,6 +2572,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
       recent_exercise_ids: [...new Set(touches.map((t) => t.exercise_id))],
       current_exercise_id: mostRecentTouch?.exercise_id ?? null,
       exercise_history: exerciseHistory,
+      preferences: exercisePreferences,
       outside_blueprint_exercises: outsideRepo.listApprovedForTarget(targetType, targetId).map((e) => ({
         id: e.id,
         name: e.name,
@@ -2620,7 +2719,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
   // day in the same week changed). Consulted by every caller (a plain
   // GET, an AI-context build, or a real regeneration alike); only
   // computeFreshWeek ever writes anything back.
-  const programId = new UsersRepo(db).getOrCreateDefault().id;
+  const programId = userId;
   const nonGoalRotationCursor = new NonGoalRotationRepo(db).cursorFor(programId, weekStart);
 
   // Coaching Depth Batch 3 (Periodization System): the single real read

@@ -32,6 +32,43 @@ import type { DemandLevel } from '../blueprint/types.js';
 import type { BlueprintId } from '../contracts/types.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
 
+/** Coaching Depth Batch 4 spec §1: the engine's own preference vocabulary
+ * — deliberately the same string values `ExercisePreferencesRepo
+ * .EffectivePreference` already returns, so a caller passes its resolved
+ * map straight through with no translation step, while this module still
+ * never imports a repository (engine stays persistence-agnostic). */
+export type ExercisePreferenceLevel = 'preferred' | 'disliked' | 'avoided' | 'neutral';
+
+/** Coaching Depth Batch 4 spec §1/§8: thrown when explicit avoidance
+ * would leave ZERO goal-relevant candidates for this target — spec's own
+ * required behavior ("if constraints make a target impossible, return a
+ * clear diagnostic rather than silently violating a rule" / "avoidance
+ * must not silently create uncovered targets"). Never silently falls
+ * back to using an avoided exercise anyway — that is exactly the
+ * "bypassed by fallback" spec §1 explicitly forbids, so this is a real
+ * thrown error, not `narrow()`'s soft-preference fallback. */
+export class AllCandidatesAvoidedError extends Error {
+  constructor(public targetType: TargetType, public targetId: BlueprintId, public avoidedCandidates: readonly BlueprintId[]) {
+    super(
+      `Every goal-relevant candidate for ${targetType} "${targetId}" is explicitly avoided (${avoidedCandidates.join(', ')}) — cannot select without violating an explicit avoidance rule.`
+    );
+    this.name = 'AllCandidatesAvoidedError';
+  }
+}
+
+/** Coaching Depth Batch 4 spec §2: two exercises are the same "exercise
+ * family" when Blueprint's own `overlaps_with` field (already
+ * documented/populated data — never an invented grouping) lists one as
+ * overlapping the other, in either direction (the source data is not
+ * guaranteed to be listed symmetrically on both records). Identity
+ * (`a === b`) is trivially also "same family". */
+function sameExerciseFamily(a: BlueprintId, b: BlueprintId): boolean {
+  if (a === b) return true;
+  const overlapsA = BlueprintAdapter.getExercise(a)?.overlaps_with ?? [];
+  const overlapsB = BlueprintAdapter.getExercise(b)?.overlaps_with ?? [];
+  return overlapsA.includes(b) || overlapsB.includes(a);
+}
+
 /** Ordinal ranking for Blueprint's own DemandLevel label, used only to
  * compare (never sum/weight) two candidates' fatigue_cost within Gate
  * 6's tie-break — see prefer_lower_fatigue_cost above. An outside-
@@ -85,6 +122,14 @@ export interface ExerciseSelectionInput {
    * left more than one candidate tied. Optional; defaults to false (no
    * fatigue preference — Gate 6 is alphabetical only, as before). */
   prefer_lower_fatigue_cost?: boolean;
+  /** Coaching Depth Batch 4 spec §1: resolved, effective (expiry already
+   * applied by the caller — see ExercisePreferencesRepo.effectiveMapFor)
+   * preference for every id in `candidate_exercise_ids`. An id with no
+   * entry is treated as `'neutral'`, identical to an explicit
+   * `'neutral'` entry. Optional; omitting it (or passing an empty map)
+   * reproduces this module's exact pre-Batch-4 behavior for every
+   * existing caller. */
+  preference_by_exercise_id?: ReadonlyMap<BlueprintId, ExercisePreferenceLevel>;
 }
 
 export interface ExerciseSelectionResult {
@@ -93,10 +138,23 @@ export interface ExerciseSelectionResult {
   /** Which gate actually made the final cut to one candidate — Gate 6
    * only when genuine ties survived every earlier gate. Machine-
    * readable, so a caller/UI can show *why* without parsing prose. */
-  decisive_gate: 'gate2_goal_relevance' | 'gate3_programming_need' | 'gate4_historical_context' | 'gate5_progression_continuity' | 'gate6_tie_break';
+  decisive_gate:
+    | 'gate2_goal_relevance'
+    | 'gate2b_avoidance'
+    | 'gate3_programming_need'
+    | 'gate4_historical_context'
+    | 'gate5_progression_continuity'
+    | 'gate5b_preference_ranking'
+    | 'gate6_tie_break';
   /** Candidates present after Gate 2 that did NOT win — for
    * explainability (remediation §16: "rejected candidates"). */
   rejected_candidates: BlueprintId[];
+  /** Coaching Depth Batch 4 spec §10: candidates removed specifically by
+   * the avoidance gate (a subset of `rejected_candidates`), so a caller
+   * can explain "excluded because avoided" distinctly from "excluded
+   * because a better-ranked candidate existed". Empty when no candidate
+   * was avoided. */
+  avoided_candidates: BlueprintId[];
 }
 
 export class NoFeasibleExerciseError extends Error {
@@ -186,6 +244,24 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
     throw new NoFeasibleExerciseError(input.target_type, input.target_id);
   }
 
+  // Gate 2b — explicit avoidance (Coaching Depth Batch 4 spec §1): a
+  // HARD exclusion, deliberately NOT built from `narrow()` — an avoided
+  // exercise must never silently reappear just because removing it would
+  // have left the pool with fewer candidates (spec: "avoidance must not
+  // be bypassed by fallback"). If avoidance would eliminate every
+  // remaining (goal-relevant) candidate, this throws a clear diagnostic
+  // instead of silently selecting an avoided exercise anyway.
+  const preferenceFor = (id: BlueprintId): ExercisePreferenceLevel => input.preference_by_exercise_id?.get(id) ?? 'neutral';
+  const avoidedCandidates = pool.filter((id) => preferenceFor(id) === 'avoided');
+  if (avoidedCandidates.length > 0) {
+    const nonAvoided = pool.filter((id) => preferenceFor(id) !== 'avoided');
+    if (nonAvoided.length === 0) {
+      throw new AllCandidatesAvoidedError(input.target_type, input.target_id, avoidedCandidates);
+    }
+    pool = nonAvoided;
+    decisiveGate = 'gate2b_avoidance';
+  }
+
   // Gate 3 — programming need: primary role fills the target's direct
   // exposure need first; only fall back to secondary-role candidates
   // when no primary-role candidate is feasible. Then prefer an
@@ -208,10 +284,18 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
   // pick — mechanically cycling through recently-tried-and-abandoned
   // options is the "inappropriate repetition" this gate screens for.
   // The current, ongoing exercise is deliberately exempted here: Gate 5
-  // is what decides whether continuity with it is warranted.
+  // is what decides whether continuity with it is warranted. Coaching
+  // Depth Batch 4 spec §2: this also penalizes any candidate belonging
+  // to the same EXERCISE FAMILY (Blueprint's own `overlaps_with` field —
+  // see sameExerciseFamily) as a recently-used exercise, not just an
+  // exact id match — "treating every variation as entirely unrelated
+  // when it belongs to the same exercise family" is explicitly listed as
+  // a rotation failure mode to avoid. A plain recency match is just the
+  // `a === b` case of `sameExerciseFamily`, so this is a strict
+  // generalization of the pre-Batch-4 check, not a second parallel rule.
   if (pool.length > 1) {
     const before = pool;
-    pool = narrow(pool, (id) => id === input.current_exercise_id || !input.recent_exercise_ids.includes(id));
+    pool = narrow(pool, (id) => id === input.current_exercise_id || !input.recent_exercise_ids.some((recentId) => sameExerciseFamily(id, recentId)));
     if (pool.length !== before.length) decisiveGate = 'gate4_historical_context';
   }
 
@@ -223,6 +307,26 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
   if (pool.length > 1 && input.current_exercise_id && pool.includes(input.current_exercise_id)) {
     pool = [input.current_exercise_id];
     decisiveGate = 'gate5_progression_continuity';
+  }
+
+  // Gate 5b — soft preference ranking (Coaching Depth Batch 4 spec §1/§9):
+  // reached only once every higher-priority gate has narrowed to
+  // multiple still-tied candidates. First try to narrow to an explicitly
+  // preferred candidate; if none of the survivors are preferred, instead
+  // deprioritize (never eliminate, via the same `narrow()` fallback
+  // safety) any explicitly disliked one. A soft preference can never
+  // override a higher-priority gate's own decision — it only ever
+  // breaks a tie those gates left unresolved.
+  if (pool.length > 1) {
+    const beforePreferred = pool;
+    pool = narrow(pool, (id) => preferenceFor(id) === 'preferred');
+    if (pool.length !== beforePreferred.length) {
+      decisiveGate = 'gate5b_preference_ranking';
+    } else {
+      const beforeDisliked = pool;
+      pool = narrow(pool, (id) => preferenceFor(id) !== 'disliked');
+      if (pool.length !== beforeDisliked.length) decisiveGate = 'gate5b_preference_ranking';
+    }
   }
 
   // Gate 6 — stable tie-break. Remediation §9: when badminton has
@@ -272,11 +376,15 @@ export function selectExercise(input: ExerciseSelectionInput): ExerciseSelection
   if (fatiguePreferenceApplied) {
     reasonParts.push('preferred over a tied candidate for lower fatigue_cost (remediation §9 — recent badminton already loaded this target)');
   }
+  if (preferenceFor(winnerId) === 'preferred') {
+    reasonParts.push('is an explicitly preferred exercise (Coaching Depth Batch 4)');
+  }
 
   return {
     exercise_id: winnerId,
     reasoning: `Selected ${exerciseName} for ${input.target_type} "${input.target_id}" (${input.target_tier} tier): ${reasonParts.join('; ')}.`,
     decisive_gate: decisiveGate,
     rejected_candidates: rejected,
+    avoided_candidates: avoidedCandidates,
   };
 }

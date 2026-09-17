@@ -318,6 +318,36 @@ export const REACTIVE_TRIGGER = {
   minimumDaysBetweenEvaluations: 1,
 } as const;
 
+/** [DEFAULT] Coaching Depth Batch 4 spec §2/§5: exercise-rotation
+ * thresholds — how much recent/family repetition counts against a
+ * candidate, and how long "recent" means, before falling back (never
+ * eliminating every candidate — see exerciseSelector.ts's own `narrow`
+ * primitive) to whichever exercise best satisfies the target anyway. */
+export const EXERCISE_ROTATION = {
+  /** A target's own most recent exercise, if used this many CONSECUTIVE
+   * real exposures in a row, is no longer protected by progression
+   * continuity alone — rotation may consider an alternative even though
+   * it's still the "current" pick. Counted from `exercise_history`'s
+   * own most-recent-first list, never a separately stored counter. */
+  maxConsecutiveUsesBeforeRotationConsidered: 6,
+  /** How many of a target's most recent real exposures "recent-use"
+   * penalization looks at — matches `recent_exercise_ids`'s own existing
+   * window size convention (the caller already builds this list; this
+   * constant documents its intended depth for a NEW caller). */
+  recentUseWindowExposures: 4,
+} as const;
+
+/** [DEFAULT] Coaching Depth Batch 4 spec §3/§5: exercise-pairing
+ * compatibility thresholds — centralized so no pairing branch invents
+ * its own inline number. */
+export const EXERCISE_PAIRING = {
+  /** Two exercises may not be paired if both carry Blueprint's own
+   * `fatigue_cost: 'high'` — spec §3's "fatigue overlap is acceptable"
+   * gate, expressed with Blueprint's own existing DemandLevel labels
+   * rather than a new invented fatigue score. */
+  maxCombinedFatigueRank: 3, // low=0, medium=1, high=2 per exerciseSelector.ts's own FATIGUE_RANK; 3 allows e.g. medium+medium or low+high, blocks high+high
+} as const;
+
 export const ENGINE_CONFIG = {
   exposureCoefficients: EXPOSURE_COEFFICIENTS,
   maxActiveAestheticGoals: MAX_ACTIVE_AESTHETIC_GOALS,
@@ -336,4 +366,6 @@ export const ENGINE_CONFIG = {
   deloadPolicy: DELOAD_POLICY,
   reactiveTrigger: REACTIVE_TRIGGER,
   defaultProgramBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
+  exerciseRotation: EXERCISE_ROTATION,
+  exercisePairing: EXERCISE_PAIRING,
 } as const;

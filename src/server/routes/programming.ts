@@ -34,6 +34,7 @@ import { OutsideBlueprintExercisesRepo } from '../../repositories/outsideBluepri
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
 import { WeeklyProgramRepo, type PersistedWeekProgram, type PersistedWeekSession } from '../../repositories/weeklyProgramRepo.js';
 import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
+import { ExercisePreferencesRepo } from '../../repositories/exercisePreferencesRepo.js';
 import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } from '../../engine/weekProgramReconciliation.js';
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
 import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
@@ -223,6 +224,7 @@ function enrichPlannedWork<
     rir_max: number;
     progression_decision: { recommendation: string } | null;
     decision: { weekly_exposure: { primary_sets: number } };
+    paired_with_exercise_id?: BlueprintId | null;
   }
 >(work: T, targetGoalMap?: TargetGoalMap, labels?: Map<string, string>, nameRefs?: Map<string, string>) {
   const goalInfo = targetGoalMap && labels ? resolveGoalLabelAndId(targetKey(work), work.classification, targetGoalMap, labels) : { goal_id: null, goal_label: null };
@@ -235,6 +237,10 @@ function enrichPlannedWork<
     target_name,
     ...goalInfo,
     friendly_reasoning: buildFriendlyPlannedReasoning({ ...work, exercise_name, target_name }, goalNameRef),
+    // Coaching Depth Batch 4 §10: surface the pairing decision's real
+    // exercise name alongside its id — never re-derive a name from the
+    // raw id client-side.
+    paired_with_exercise_name: work.paired_with_exercise_id ? resolveExerciseName(work.paired_with_exercise_id) : null,
   };
 }
 
@@ -975,4 +981,79 @@ programmingRouter.get('/periodization', (req, res) => {
     specializationTargetId: programState.specializationTargetId,
     explanation,
   });
+});
+
+// Coaching Depth Batch 4 spec §7 "Add/remove preference", "Add/remove
+// avoidance", "Set/clear temporary exclusion", "List active rules".
+// GET /api/programming/preferences — every currently-active rule (spec
+// §7 "list active rules"); an expired temporary rule is already excluded
+// by ExercisePreferencesRepo.listActive itself, never surfaced as if
+// still in effect.
+programmingRouter.get('/preferences', (req, res) => {
+  const database = db(req);
+  const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const rules = new ExercisePreferencesRepo(database).listActive(user.id, date);
+  res.json({
+    rules: rules.map((r) => ({
+      exerciseId: r.exerciseId,
+      exerciseName: resolveExerciseName(r.exerciseId),
+      preference: r.preference,
+      temporaryUntil: r.temporaryUntil,
+      reason: r.reason,
+      updatedAt: r.updatedAt,
+    })),
+  });
+});
+
+// PUT /api/programming/preferences/:exerciseId — spec §7 "Add/remove
+// preference", "Add/remove avoidance", "Set/clear temporary exclusion":
+// one endpoint sets (or replaces) the single rule for this exercise,
+// exactly matching ExercisePreferencesRepo.set's own replace-not-merge
+// semantics. `preference` must be one of the three real, non-neutral
+// kinds this repo ever stores — spec §1: "'neutral' is never stored,
+// only ever the absence of a row."
+programmingRouter.put('/preferences/:exerciseId', (req, res) => {
+  const database = db(req);
+  const { exerciseId } = req.params;
+  const { preference, temporaryUntil, reason } = req.body as { preference?: unknown; temporaryUntil?: unknown; reason?: unknown };
+
+  if (BlueprintAdapter.getExercise(exerciseId) === undefined && new OutsideBlueprintExercisesRepo(database).get(exerciseId) === undefined) {
+    return res.status(404).json({ error: `Unknown exercise id "${exerciseId}" — not a real Blueprint exercise or an approved outside-Blueprint one.` });
+  }
+  if (preference !== 'preferred' && preference !== 'disliked' && preference !== 'avoided') {
+    return res.status(400).json({ error: 'preference must be one of "preferred" | "disliked" | "avoided"' });
+  }
+  if (temporaryUntil !== undefined && temporaryUntil !== null && typeof temporaryUntil !== 'string') {
+    return res.status(400).json({ error: 'temporaryUntil, when provided, must be a date string (YYYY-MM-DD) or null' });
+  }
+  if (reason !== undefined && reason !== null && typeof reason !== 'string') {
+    return res.status(400).json({ error: 'reason, when provided, must be a string or null' });
+  }
+
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const record = new ExercisePreferencesRepo(database).set(user.id, {
+    exerciseId,
+    preference,
+    temporaryUntil: (temporaryUntil as string | null | undefined) ?? null,
+    reason: (reason as string | null | undefined) ?? null,
+  });
+  res.json({
+    exerciseId: record.exerciseId,
+    exerciseName: resolveExerciseName(record.exerciseId),
+    preference: record.preference,
+    temporaryUntil: record.temporaryUntil,
+    reason: record.reason,
+    updatedAt: record.updatedAt,
+  });
+});
+
+// DELETE /api/programming/preferences/:exerciseId — spec §7's explicit
+// removal, distinct from letting a temporary rule expire on its own (see
+// ExercisePreferencesRepo.remove's own doc comment).
+programmingRouter.delete('/preferences/:exerciseId', (req, res) => {
+  const database = db(req);
+  const user = new UsersRepo(database).getOrCreateDefault();
+  new ExercisePreferencesRepo(database).remove(user.id, req.params.exerciseId);
+  res.status(204).end();
 });

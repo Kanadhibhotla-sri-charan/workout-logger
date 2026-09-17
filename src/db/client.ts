@@ -88,6 +88,11 @@ function migrate(db: Database.Database): void {
   addColumnIfMissing(db, 'coaching_program_state', 'specialization_target_id', 'TEXT');
   addColumnIfMissing(db, 'coaching_program_state', 'specialization_goal_id', 'TEXT REFERENCES goals(id) ON DELETE SET NULL');
 
+  // Coaching Depth Batch 4 (Exercise Variety & Preference): exercise_preferences
+  // is a brand-new table (created above via CREATE TABLE IF NOT EXISTS),
+  // so no addColumnIfMissing calls are needed for it — a fresh CREATE TABLE
+  // IF NOT EXISTS is sufficient on both a new and an existing database.
+
   const row = db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('contract_version') as
     | { value: string }
     | undefined;
