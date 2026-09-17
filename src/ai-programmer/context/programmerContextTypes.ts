@@ -8,6 +8,7 @@
 import type { BlueprintId, GoalType, Weekday } from '../../contracts/types.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import type { RecoveryConstraintResult } from '../../engine/recoveryEngine.js';
+import type { CoachingFoundationContext } from '../../coaching/foundationContext.js';
 
 export const AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION = 'ai-programmer-context.v1' as const;
 
@@ -348,6 +349,16 @@ export interface AIProgrammerContext {
   crossWeek: AICrossWeekContext;
 
   currentProgram: AIProgrammerCurrentProgramContext;
+
+  /** Coaching Depth Batch 1 §7: read-only foundation data (program
+   * block/week position, muscle-specific profile references, real
+   * scheduled frequency, and historical summaries) — informational only.
+   * The AI must never treat this as authority to invent a frequency,
+   * volume, or rep-range change on its own; every actual programming
+   * decision still flows through `programmingBrief` above and the
+   * existing deterministic engine. See
+   * src/coaching/foundationContext.ts's own doc comment. */
+  coachingFoundation: CoachingFoundationContext;
 
   executionContext: {
     programmingFilteringAllowed: false;

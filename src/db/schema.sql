@@ -477,3 +477,31 @@ CREATE TABLE IF NOT EXISTS non_goal_rotation_state (
   cursor_after INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
+
+-- Coaching Depth Batch 1 §5: explicit persisted state for the program's
+-- position in time (which block, which kind of block, whether it is a
+-- deload) — a foundation for future periodization, not periodization
+-- itself (nothing in this codebase writes `block_kind = 'deload'` or
+-- `is_deload = 1` automatically). `program_id` is this app's single
+-- user's own stable id, not a `programs.id` row — see
+-- src/coaching/programState/programStateTypes.ts's own doc comment on
+-- why (every calendar week gets a fresh `programs` row today, so
+-- nothing there is stable across weeks the way this state must be).
+-- `week_index` is NEVER stored here — it is always computed from
+-- `block_start_date` and a real reference date
+-- (src/coaching/programState/programStateService.ts's
+-- calculateWeekIndex), so it can never drift into disagreement with the
+-- block's own real start date and can never be advanced by mere
+-- app-open time. One row per user, matching non_goal_rotation_state's
+-- own keying convention.
+CREATE TABLE IF NOT EXISTS coaching_program_state (
+  program_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  block_id TEXT NOT NULL,
+  block_kind TEXT NOT NULL CHECK (block_kind IN ('base', 'development', 'deload')),
+  block_start_date TEXT NOT NULL,
+  block_length_weeks INTEGER NOT NULL,
+  is_deload INTEGER NOT NULL DEFAULT 0,
+  state_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

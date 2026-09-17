@@ -52,6 +52,7 @@ import { WeeklyProgramRepo, type PersistedWeekSession } from '../../repositories
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { AIContextIncompleteError, AITargetNotEditableError } from '../errors.js';
 import { hashContext } from './programmerContextDiagnostics.js';
+import { buildCoachingFoundationContext } from '../../coaching/foundationContext.js';
 import {
   AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
   type AICrossWeekContext,
@@ -475,6 +476,18 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const programmingBrief = buildProgrammingBrief(targets, activeGoals, sessionPurpose, weeklyProgram?.sessions ?? [], currentDate, budgetMinutes);
   const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
 
+  // Coaching Depth Batch 1 §7: read-only foundation data, scoped to
+  // exactly the same targets this context already covers — never a
+  // second, wider target enumeration.
+  const coachingFoundation = buildCoachingFoundationContext(db, {
+    programId: user.id,
+    referenceDate: currentDate,
+    weekBoundary: profile.week_start_day,
+    weekStart,
+    targetIds: targets.map((t) => t.targetId),
+    persistedWeekSessions: weeklyProgram?.sessions ?? [],
+  });
+
   const contextWithoutVolatileFields = {
     schemaVersion: AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
     mode: 'generate_session' as const,
@@ -500,6 +513,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     targets,
     programmingBrief,
     crossWeek,
+    coachingFoundation,
     currentProgram: { weekProgramExists, targetDateLocked: false, lockReason: null },
     executionContext: {
       programmingFilteringAllowed: false as const,

@@ -45,6 +45,7 @@ import {
   type ReconciliationDailyActivity,
 } from './reconciliationContextTypes.js';
 import { newId } from '../../repositories/ids.js';
+import { buildCoachingFoundationContext } from '../../coaching/foundationContext.js';
 
 const NON_NEGOTIABLE_PRIORITY_HIERARCHY = [
   'Aesthetics/physique development is the primary programming objective.',
@@ -217,6 +218,17 @@ export function buildReconciliationContext(db: Database.Database, input: BuildRe
 
   const crossWeek = buildCrossWeekContext(db, weekStart, planInput, persistedProgram);
 
+  // Coaching Depth Batch 1 §7: read-only foundation data, scoped to
+  // exactly the same targets this context already covers.
+  const coachingFoundation = buildCoachingFoundationContext(db, {
+    programId: user.id,
+    referenceDate: currentDate,
+    weekBoundary: profile.week_start_day,
+    weekStart,
+    targetIds: targets.map((t) => t.targetId),
+    persistedWeekSessions: persistedProgram?.sessions ?? [],
+  });
+
   const contextWithoutVolatileFields = {
     schemaVersion: AI_RECONCILIATION_CONTEXT_SCHEMA_VERSION,
     mode: 'reconcile_week' as const,
@@ -250,6 +262,7 @@ export function buildReconciliationContext(db: Database.Database, input: BuildRe
     existingProgram,
     targets,
     crossWeek,
+    coachingFoundation,
     lockedDates,
     executionContext: {
       programmingFilteringAllowed: false as const,
