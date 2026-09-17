@@ -335,3 +335,57 @@ describe('Coaching Depth Batch 4 — /api/programming/preferences', () => {
     expect(res.body.rules).toEqual([]);
   });
 });
+
+describe('Coaching Depth Batch 5 — /api/programming/intensity-techniques', () => {
+  it('GET returns Blueprint\'s own real, vendored technique catalog', async () => {
+    const res = await request(app).get('/api/programming/intensity-techniques').expect(200);
+    expect(Array.isArray(res.body.techniques)).toBe(true);
+    expect(res.body.techniques.length).toBeGreaterThan(0);
+    expect(res.body.techniques.map((t: { id: string }) => t.id)).toContain('drop-set');
+  });
+});
+
+describe('Coaching Depth Batch 5 — /api/programming/structural-advisories', () => {
+  beforeEach(() => setupProfile());
+
+  it('GET returns a real, structured advisories array (possibly empty for a fresh program)', async () => {
+    const res = await request(app).get(`/api/programming/structural-advisories?date=${MON}`).expect(200);
+    expect(Array.isArray(res.body.advisories)).toBe(true);
+  });
+});
+
+describe('Coaching Depth Batch 5 — /api/programming/profile-factors', () => {
+  it('GET returns an empty list for a fresh user', async () => {
+    const res = await request(app).get('/api/programming/profile-factors').expect(200);
+    expect(res.body.factors).toEqual([]);
+  });
+
+  it('PUT sets a supported, user-confirmed factor, which GET then lists', async () => {
+    const put = await request(app).put('/api/programming/profile-factors/training_experience').send({ value: 'advanced', userConfirmed: true }).expect(200);
+    expect(put.body).toMatchObject({ factorName: 'training_experience', value: 'advanced', userConfirmed: true });
+
+    const list = await request(app).get('/api/programming/profile-factors').expect(200);
+    expect(list.body.factors).toHaveLength(1);
+    expect(list.body.factors[0]).toMatchObject({ factorName: 'training_experience', value: 'advanced', userConfirmed: true });
+  });
+
+  it('PUT defaults userConfirmed to false when omitted', async () => {
+    const put = await request(app).put('/api/programming/profile-factors/training_experience').send({ value: 'advanced' }).expect(200);
+    expect(put.body.userConfirmed).toBe(false);
+  });
+
+  it('PUT rejects an unsupported factor name', async () => {
+    await request(app).put('/api/programming/profile-factors/shoe_size').send({ value: '10' }).expect(400);
+  });
+
+  it('PUT rejects an unsupported value for a supported factor', async () => {
+    await request(app).put('/api/programming/profile-factors/training_experience').send({ value: 'expert' }).expect(400);
+  });
+
+  it('DELETE removes the factor, which GET then no longer lists', async () => {
+    await request(app).put('/api/programming/profile-factors/training_experience').send({ value: 'advanced', userConfirmed: true }).expect(200);
+    await request(app).delete('/api/programming/profile-factors/training_experience').expect(204);
+    const res = await request(app).get('/api/programming/profile-factors').expect(200);
+    expect(res.body.factors).toEqual([]);
+  });
+});

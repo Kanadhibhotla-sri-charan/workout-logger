@@ -348,6 +348,57 @@ export const EXERCISE_PAIRING = {
   maxCombinedFatigueRank: 3, // low=0, medium=1, high=2 per exerciseSelector.ts's own FATIGUE_RANK; 3 allows e.g. medium+medium or low+high, blocks high+high
 } as const;
 
+/** [DEFAULT] Coaching Depth Batch 5 spec §4.4/§4.6/§4.8: app-level
+ * intensity-technique policy layered on top of Blueprint's own real
+ * per-technique suitability data (see BlueprintIntensityTechnique) —
+ * these numbers are this app's own explicit, documented guardrails, not
+ * Blueprint-authored figures (Blueprint's raw catalog has no frequency
+ * or experience-gating fields of its own). */
+export const INTENSITY_TECHNIQUE_POLICY = {
+  /** Spec §4.8: "Disable intensity techniques by default" during any
+   * active deload — no technique in this app's catalog is currently
+   * flagged as an approved low-stress exception. */
+  disabledDuringDeload: true,
+  /** Spec §4.6 "technique uses per session" — count-only cap, never a
+   * time/equipment one (mirrors SESSION_REALISM_CAP's own count-only
+   * philosophy). */
+  maxApplicationsPerSession: 1,
+  /** Spec §4.6 "technique uses per week" — a whole-plan ceiling so
+   * technique use can never silently accumulate into a de facto second
+   * volume system. */
+  maxApplicationsPerWeek: 2,
+  /** Spec §4.4 "the user has sufficient training context, if required":
+   * the minimum confirmed TrainingExperienceLevel (see
+   * intensityTechniques.ts) each technique requires before it is ever
+   * eligible — missing/unconfirmed experience means "insufficient
+   * context," never a guessed default (spec §2.2), so the technique is
+   * simply never applied rather than assumed novice-safe. Myo-reps
+   * requires 'advanced' specifically because Blueprint's own
+   * `when_not_to_use` text for it names inaccurate proximity-to-failure
+   * judgment as the real risk — a skill this app has no way to verify
+   * below advanced self-reported experience. */
+  minimumExperienceByTechniqueId: {
+    'drop-set': 'intermediate',
+    'rest-pause': 'intermediate',
+    'myo-reps': 'advanced',
+  },
+} as const;
+
+/** [DEFAULT] Coaching Depth Batch 5 spec §5.3/§5.4: structural-balance
+ * advisory evidence thresholds — deliberately conservative so a single
+ * week's noise never produces a strong advisory (spec §5.3: "A single
+ * measurement or isolated session should not create a strong advisory"). */
+export const STRUCTURAL_ADVISORY_POLICY = {
+  /** Spec §5.2 "Push/pull... imbalance": the push-side (or pull-side)
+   * share of combined push+pull rolling exposure below which a WATCH
+   * advisory fires — evaluated over the target's own existing
+   * `rolling_window_days` (never a single week), so this is inherently a
+   * sustained-evidence signal, not a snapshot. */
+  pushPullWatchShareBelow: 0.4,
+  /** Below this share, the advisory escalates to REVIEW. */
+  pushPullReviewShareBelow: 0.3,
+} as const;
+
 export const ENGINE_CONFIG = {
   exposureCoefficients: EXPOSURE_COEFFICIENTS,
   maxActiveAestheticGoals: MAX_ACTIVE_AESTHETIC_GOALS,
@@ -368,4 +419,6 @@ export const ENGINE_CONFIG = {
   defaultProgramBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
   exerciseRotation: EXERCISE_ROTATION,
   exercisePairing: EXERCISE_PAIRING,
+  intensityTechniquePolicy: INTENSITY_TECHNIQUE_POLICY,
+  structuralAdvisoryPolicy: STRUCTURAL_ADVISORY_POLICY,
 } as const;

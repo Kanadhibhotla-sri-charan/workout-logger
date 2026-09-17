@@ -195,12 +195,32 @@ export interface BlueprintDevelopmentPackages {
   packages: BlueprintDevelopmentPackage[];
 }
 
+/** Coaching Depth Batch 5 (Phase 5): Blueprint's own authoritative
+ * intensity-technique catalog — real, vendored data (see
+ * snapshot/programming.json's `intensityTechniques`), never an
+ * app-invented list. `suitable_when_*_at_most` are real Blueprint
+ * `DemandLevel` ceilings expressed against Exercise's own
+ * `fatigue_cost`/`skill_demand`/`stability_demand` fields — the same
+ * demand vocabulary Blueprint already uses everywhere else. */
+export interface BlueprintIntensityTechnique {
+  id: string;
+  name: string;
+  what: string;
+  when_it_may_help: string;
+  when_not_to_use: string;
+  fatigue_time_implications: string;
+  suitable_exercise_types: ExerciseType[];
+  suitable_when_fatigue_cost_at_most: DemandLevel;
+  suitable_when_skill_demand_at_most: DemandLevel;
+  suitable_when_stability_demand_at_most: DemandLevel;
+}
+
 export interface BlueprintProgramming {
   physiqueTargets: BlueprintPhysiqueTarget[];
   globalPrinciples: BlueprintGlobalPrinciples;
   repRanges: unknown;
   programmingProfiles: unknown;
-  intensityTechniques: unknown[];
+  intensityTechniques: BlueprintIntensityTechnique[];
   aestheticOutcomes: BlueprintAestheticOutcome[];
   functionalGoals: BlueprintFunctionalGoal[];
   developmentPackages: BlueprintDevelopmentPackages;

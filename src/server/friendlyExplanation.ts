@@ -58,6 +58,10 @@ interface FriendlyPlannedInput {
   rir_max: number;
   progression_decision: { recommendation: string } | null;
   decision: { weekly_exposure: { primary_sets: number } };
+  /** Coaching Depth Batch 5 (Phase 5) — present only when a real
+   * intensity technique was applied to this exercise's final working
+   * set. See workoutBuilder.ts's `PlannedWorkItem.applied_intensity_technique`. */
+  applied_intensity_technique?: { name: string; instruction: string } | null;
 }
 
 /** Builds the plain-language explanation for one placed exercise,
@@ -115,6 +119,10 @@ export function buildFriendlyPlannedReasoning(work: FriendlyPlannedInput, goalNa
     }
   } else {
     sentences.push('First time using this variation in your logged history, so start with a weight that lets you stay within the prescribed rep range with good form.');
+  }
+
+  if (work.applied_intensity_technique) {
+    sentences.push(`On your final set, add a ${work.applied_intensity_technique.name.toLowerCase()}: ${work.applied_intensity_technique.instruction}`);
   }
 
   return sentences.join(' ');

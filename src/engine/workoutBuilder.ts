@@ -68,6 +68,15 @@ import { WeeklyProgramRepo } from '../repositories/weeklyProgramRepo.js';
 import { UsersRepo } from '../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../repositories/nonGoalRotationRepo.js';
 import { ExercisePreferencesRepo } from '../repositories/exercisePreferencesRepo.js';
+import { ProfileFactorsRepo } from '../repositories/profileFactorsRepo.js';
+import {
+  assignWeeklyIntensityTechniques,
+  type AppliedIntensityTechnique,
+  type IntensityTechniqueEvaluation,
+  type TechniqueCandidateItem,
+  type TrainingExperienceLevel,
+} from './intensityTechniques.js';
+import { evaluateStructuralAdvisories, type StructuralAdvisory, type StructuralAdvisoryTargetInput } from '../coaching/structuralAdvisories/structuralAdvisoryService.js';
 import { applyWeekOverrides } from '../lib/dailyActivity.js';
 import { applyDeloadSetVolumeReduction } from '../coaching/periodization/deloadPolicy.js';
 import { getPeriodizationContext } from '../coaching/periodization/periodizationService.js';
@@ -365,6 +374,15 @@ export interface DecisionExplanation {
      * prior current exercise to replace. */
     substituted_from: BlueprintId | null;
   } | null;
+  /** Coaching Depth Batch 5 (Phase 5): null under the identical
+   * conditions as `selection` above (nothing to evaluate yet). Once
+   * populated, `considered: false` means this exercise/target
+   * combination is structurally outside intensity-technique scope
+   * (e.g. a functional_goal target) — distinct from `considered: true,
+   * applied_technique_id: null`, which means a technique WAS evaluated
+   * and a specific, named reason (`suppressed_reason`) is why none was
+   * applied. See intensityTechniques.ts. */
+  intensity_technique_evaluation: IntensityTechniqueEvaluation | null;
 }
 
 export interface PlannedExercise {
@@ -595,6 +613,14 @@ export interface WeeklyPlanInput {
     setVolumeMultiplier: number;
     deloadRepRangeBias: 'lower' | 'standard' | 'higher' | null;
   };
+  /** Coaching Depth Batch 5 (Phase 8): this user's own live,
+   * user-confirmed, non-expired `training_experience` profile factor, if
+   * any — see `ProfileFactorsRepo.effectiveValue`. Null (the default for
+   * every caller that never heard of profile factors) means insufficient
+   * confirmed context, which intensityTechniques.ts treats as "no
+   * experience-gated technique is eligible" (spec §2.2), never a
+   * guessed novice/intermediate default. */
+  trainingExperience?: TrainingExperienceLevel | null;
 }
 
 /** One real exercise placed into one real session by the weekly
@@ -637,6 +663,14 @@ export interface PlannedWorkItem {
    * Null when this exercise was evaluated and left unpaired, exactly
    * like every pre-Batch-4 session (never forced). */
   paired_with_exercise_id: BlueprintId | null;
+  /** Coaching Depth Batch 5 (Phase 5): the real intensity technique
+   * applied to this exercise's final working set, when one was — never
+   * changes `sets`/`primary_exposure`/`secondary_exposure` above (spec
+   * §4.7: technique-modified sets must never distort volume/fatigue/
+   * muscle-impact accounting). Null for every pre-Batch-5 caller and for
+   * every exercise a technique was evaluated for but not applied to —
+   * see `decision.intensity_technique_evaluation` for why. */
+  applied_intensity_technique: AppliedIntensityTechnique | null;
 }
 
 /** One real day of the week this plan covers — §4's own `sessions[]`
@@ -729,6 +763,13 @@ export interface WeeklyProgrammingPlan {
    * (the real regeneration boundary) ever persists this value — every
    * other caller of this function may simply discard it. */
   nonGoalRotationCursorAfter: number;
+  /** Coaching Depth Batch 5 (Phase 7): read-only structural-balance
+   * advisories computed independently from `input.targets` (see
+   * `evaluateStructuralAdvisories`). Never influences placement/
+   * prescription in this batch (no adjustment rule is implemented yet
+   * — spec 5.6's default). Empty array, never undefined, for every
+   * caller (including one with no real training history yet). */
+  structuralAdvisories: readonly StructuralAdvisory[];
 }
 
 export function estimateMinutes(sets: number): number {
@@ -1110,6 +1151,10 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       session_purpose: target.target_type === 'physique_target' ? sessionPurposeOverride : null,
       exposure_decision: overrides.exposure_decision ?? null,
       selection: overrides.selection ?? null,
+      // Coaching Depth Batch 5: a skipped target never reached exercise
+      // placement, so there is nothing for an intensity technique to
+      // have been evaluated against yet.
+      intensity_technique_evaluation: null,
     });
 
     // Same-Week History & Day-Specific Recovery Fix §6/§7: `recovery`
@@ -1551,12 +1596,19 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
           session_purpose: purposeThisDay,
           exposure_decision: exposureDecision,
           selection: selectionDecision,
+          // Coaching Depth Batch 5: intensity-technique eligibility can
+          // only be decided once this whole WEEK's final post-fitting
+          // exercise set is known (weekly frequency caps) — see the
+          // assignWeeklyIntensityTechniques pass near the end of
+          // buildWeeklyProgrammingPlan, where this is overwritten.
+          intensity_technique_evaluation: null,
         },
         // Coaching Depth Batch 4: pairing can only be decided once this
         // whole day's FINAL post-fitting exercise set is known (see
         // `sessionWork` construction below, where this is overwritten) —
         // never at this per-target, per-exercise construction point.
         paired_with_exercise_id: null,
+        applied_intensity_technique: null,
       };
 
       candidates.push({
@@ -2138,6 +2190,56 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
 
   assertNoContradictoryProgramState(sessions);
 
+  // Coaching Depth Batch 5 spec §4/§8 step 5/6/9: intensity-technique
+  // eligibility can only be decided once EVERY real session this week
+  // has its own final, post-fitting, post-pairing exercise set (weekly
+  // frequency/session caps are cross-day state) — this is deliberately
+  // the LAST pass over `sessions`, after pairing and after the
+  // no-contradictory-state check. `assignWeeklyIntensityTechniques`
+  // never selects an exercise and never changes
+  // sets/primary_exposure/secondary_exposure — see intensityTechniques.ts's
+  // own doc comment — so re-running `assertNoContradictoryProgramState`
+  // afterward would be redundant; the dev-time invariant check below
+  // documents and enforces that guarantee directly instead (spec §8 step
+  // 9 "revalidate all constraints").
+  const techniqueDays = sessions.map((session) => ({
+    date: session.date,
+    items: session.plannedWork.map(
+      (w): TechniqueCandidateItem => ({
+        exercise_id: w.exercise_id,
+        target_type: w.target_type,
+        has_progression_history: w.progression_decision !== null,
+        preference: pairingPreferences.get(w.exercise_id) ?? 'neutral',
+      })
+    ),
+  }));
+  const workingSetCountByKey = new Map<string, number>();
+  for (const session of sessions) {
+    for (const w of session.plannedWork) workingSetCountByKey.set(`${session.date}::${w.exercise_id}`, w.sets);
+  }
+  const { applied: appliedTechniques, evaluations: techniqueEvaluations } = assignWeeklyIntensityTechniques(techniqueDays, workingSetCountByKey, {
+    trainingExperience: input.trainingExperience ?? null,
+    deloadActive: input.periodizationContext?.deloadActive ?? false,
+  });
+  for (const session of sessions) {
+    session.plannedWork = session.plannedWork.map((w): PlannedWorkItem => {
+      const key = `${session.date}::${w.exercise_id}`;
+      // Spec §8 step 9 / §4.7's "never distort volume/fatigue
+      // accounting" is enforced BY CONSTRUCTION here, not by a runtime
+      // check: `assignWeeklyIntensityTechniques` never receives
+      // `sets`/`primary_exposure`/`secondary_exposure` at all (its own
+      // `TechniqueCandidateItem` input carries only exercise/target
+      // identity and progression-history/preference flags — see
+      // intensityTechniques.ts), so it has no way to influence them; the
+      // spread below only ever adds the two new annotation fields.
+      return {
+        ...w,
+        applied_intensity_technique: appliedTechniques.get(key) ?? null,
+        decision: { ...w.decision, intensity_technique_evaluation: techniqueEvaluations.get(key) ?? null },
+      };
+    });
+  }
+
   // Non-Goal Muscle Rotation Fix (2026-09-16): advance the cursor by
   // however many DISTINCT non-goal physique targets actually received
   // real plannedWork this run — never by how many were merely ranked —
@@ -2155,12 +2257,20 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   const nonGoalRotationCursorAfter =
     nonGoalRing.length > 0 ? (rotationCursor + nonGoalTargetIdsWithRealWorkThisRun.size) % nonGoalRing.length : rotationCursor;
 
+  // Coaching Depth Batch 5 (Phase 7): computed independently from
+  // `input.targets` — the same real, already-assembled per-target
+  // rolling-exposure facts every other part of this function reads —
+  // never from `sessions` (spec §5.6/§2.4: advisories are read-only
+  // observations, not derived from or feeding back into placement).
+  const structuralAdvisories = evaluateStructuralAdvisories(input.targets, input.today);
+
   return {
     weekStart: input.weekStart,
     sessions,
     targetAllocations: rebuildTargetAllocationsFromFinalSessions(sessions, requiredDirectSetsByTarget, classificationByTarget),
     decisions: log,
     nonGoalRotationCursorAfter,
+    structuralAdvisories,
   };
 }
 
@@ -2736,6 +2846,16 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     defaultBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
   });
 
+  // Coaching Depth Batch 5 (Phase 8): the one profile factor this batch
+  // wires into a real programming effect. `effectiveValue` already
+  // enforces user-confirmed + not-expired (spec §2.2/§6.3) — the extra
+  // exact-value check here is defensive against a row written with an
+  // unexpected string (this repo's `value` column has no CHECK
+  // constraint, since it is a generic factor store — see schema.sql).
+  const rawTrainingExperience = new ProfileFactorsRepo(db).effectiveValue(userId, 'training_experience', historyAsOfDate);
+  const trainingExperience: TrainingExperienceLevel | null =
+    rawTrainingExperience === 'novice' || rawTrainingExperience === 'intermediate' || rawTrainingExperience === 'advanced' ? rawTrainingExperience : null;
+
   return {
     weekStart,
     today: historyAsOfDate,
@@ -2759,6 +2879,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
       setVolumeMultiplier: periodization.setVolumeMultiplier,
       deloadRepRangeBias: periodization.deloadRepRangeBias,
     },
+    trainingExperience,
   };
 }
 

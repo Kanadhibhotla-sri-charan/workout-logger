@@ -93,6 +93,13 @@ function migrate(db: Database.Database): void {
   // so no addColumnIfMissing calls are needed for it — a fresh CREATE TABLE
   // IF NOT EXISTS is sufficient on both a new and an existing database.
 
+  // Coaching Depth Batch 5 (Individual Profile Factors): user_profile_factors
+  // is likewise a brand-new table — no addColumnIfMissing calls needed.
+  // Migration safety (spec §10): an existing database has zero rows here,
+  // so every ProfileFactorsRepo.effectiveValue call reads back `null`
+  // (genuine absence) for every user until they explicitly confirm a
+  // factor — no inferred/default value is ever assigned automatically.
+
   const row = db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('contract_version') as
     | { value: string }
     | undefined;

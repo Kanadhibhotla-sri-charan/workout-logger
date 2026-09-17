@@ -17,6 +17,7 @@ import type {
   BlueprintExercise,
   BlueprintFunctionalGoal,
   BlueprintGlobalPrinciples,
+  BlueprintIntensityTechnique,
   BlueprintManifest,
   BlueprintPhysiqueTarget,
   BlueprintProgramming,
@@ -44,6 +45,9 @@ const functionalGoalsById = new Map<string, BlueprintFunctionalGoal>(
 );
 const targetsById = new Map<string, BlueprintPhysiqueTarget>(
   programming.physiqueTargets.map((t) => [t.id, t])
+);
+const intensityTechniquesById = new Map<string, BlueprintIntensityTechnique>(
+  programming.intensityTechniques.map((t) => [t.id, t])
 );
 
 const equipmentCounts = new Map<string, number>();
@@ -133,6 +137,18 @@ export const BlueprintAdapter = {
   getDevelopmentPackages(): BlueprintDevelopmentPackages {
     return programming.developmentPackages;
   },
+
+  /** Coaching Depth Batch 5 (Phase 5): Blueprint's own real, vendored
+   * intensity-technique catalog (drop-set/rest-pause/myo-reps as of
+   * this snapshot) — never an app-invented list; see
+   * BlueprintIntensityTechnique's own doc comment. */
+  listIntensityTechniques(): readonly BlueprintIntensityTechnique[] {
+    return programming.intensityTechniques;
+  },
+
+  getIntensityTechnique(id: string): BlueprintIntensityTechnique | undefined {
+    return intensityTechniquesById.get(id);
+  },
 };
 
 export type {
@@ -142,5 +158,6 @@ export type {
   BlueprintExercise,
   BlueprintFunctionalGoal,
   BlueprintGlobalPrinciples,
+  BlueprintIntensityTechnique,
   BlueprintPhysiqueTarget,
 };

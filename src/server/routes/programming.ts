@@ -35,6 +35,8 @@ import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverri
 import { WeeklyProgramRepo, type PersistedWeekProgram, type PersistedWeekSession } from '../../repositories/weeklyProgramRepo.js';
 import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { ExercisePreferencesRepo } from '../../repositories/exercisePreferencesRepo.js';
+import { ProfileFactorsRepo } from '../../repositories/profileFactorsRepo.js';
+import { evaluateStructuralAdvisories } from '../../coaching/structuralAdvisories/structuralAdvisoryService.js';
 import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } from '../../engine/weekProgramReconciliation.js';
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
 import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
@@ -1055,5 +1057,115 @@ programmingRouter.delete('/preferences/:exerciseId', (req, res) => {
   const database = db(req);
   const user = new UsersRepo(database).getOrCreateDefault();
   new ExercisePreferencesRepo(database).remove(user.id, req.params.exerciseId);
+  res.status(204).end();
+});
+
+// GET /api/programming/intensity-techniques — Coaching Depth Batch 5
+// spec §9 "Available intensity techniques": Blueprint's own real,
+// vendored catalog, verbatim — never a second, app-maintained copy.
+programmingRouter.get('/intensity-techniques', (_req, res) => {
+  res.json({ techniques: BlueprintAdapter.listIntensityTechniques() });
+});
+
+// GET /api/programming/structural-advisories — Coaching Depth Batch 5
+// spec §9 "Structural advisories" / "Advisory evidence and severity".
+// Read-only, computed fresh from the same real per-target facts
+// `assembleWeeklyPlanInput` gathers for actual generation — never a
+// second, independently-tracked notion of exposure. Deliberately calls
+// `assembleWeeklyPlanInput` directly rather than the full
+// `buildWeeklyProgrammingPlan` (which this reads a field from
+// elsewhere) — advisories don't need a full weekly plan to be
+// constructed just to be displayed.
+programmingRouter.get('/structural-advisories', (req, res) => {
+  const database = db(req);
+  const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
+  const input = assembleWeeklyPlanInput(database, date, defaultBudgetMinutes(database));
+  res.json({ advisories: evaluateStructuralAdvisories(input.targets, input.today) });
+});
+
+// Coaching Depth Batch 5 spec §6.2: the only profile factor this batch
+// wires into a real programming effect — see intensityTechniques.ts.
+// PUT deliberately rejects any other factor_name for now (spec §6.2:
+// "Only use factors that are supported by the current product
+// requirements and data model") — the repo itself is generic, but this
+// route's validation is not, so an unsupported factor can never be
+// silently stored as though it had a real effect.
+const SUPPORTED_PROFILE_FACTORS: Record<string, readonly string[]> = {
+  training_experience: ['novice', 'intermediate', 'advanced'],
+};
+
+// GET /api/programming/profile-factors — spec §9 "Profile factors" /
+// "Profile-factor source and confirmation state". Lists every non-
+// expired record regardless of confirmation state (spec §9 UI: "Review
+// and edit relevant profile factors" / "Understand which factors are
+// user-confirmed" — a caller needs to see an unconfirmed factor to
+// confirm or discard it).
+programmingRouter.get('/profile-factors', (req, res) => {
+  const database = db(req);
+  const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const factors = new ProfileFactorsRepo(database).listActive(user.id, date);
+  res.json({
+    factors: factors.map((f) => ({
+      factorName: f.factorName,
+      value: f.value,
+      source: f.source,
+      userConfirmed: f.userConfirmed,
+      expiresAt: f.expiresAt,
+      updatedAt: f.updatedAt,
+    })),
+  });
+});
+
+// PUT /api/programming/profile-factors/:factorName — spec §9 "User
+// controls to add, update, review, or remove supported profile
+// factors". `userConfirmed` defaults to false (spec §2.2/§6.3's
+// conservative default) — a caller must explicitly pass `true` for a
+// factor to ever affect real programming.
+programmingRouter.put('/profile-factors/:factorName', (req, res) => {
+  const database = db(req);
+  const { factorName } = req.params;
+  const { value, userConfirmed, source, expiresAt } = req.body as { value?: unknown; userConfirmed?: unknown; source?: unknown; expiresAt?: unknown };
+
+  const allowedValues = SUPPORTED_PROFILE_FACTORS[factorName];
+  if (!allowedValues) {
+    return res.status(400).json({ error: `Unsupported profile factor "${factorName}" — supported factors: ${Object.keys(SUPPORTED_PROFILE_FACTORS).join(', ')}` });
+  }
+  if (typeof value !== 'string' || !allowedValues.includes(value)) {
+    return res.status(400).json({ error: `value must be one of: ${allowedValues.join(' | ')}` });
+  }
+  if (userConfirmed !== undefined && typeof userConfirmed !== 'boolean') {
+    return res.status(400).json({ error: 'userConfirmed, when provided, must be a boolean' });
+  }
+  if (expiresAt !== undefined && expiresAt !== null && typeof expiresAt !== 'string') {
+    return res.status(400).json({ error: 'expiresAt, when provided, must be a date string (YYYY-MM-DD) or null' });
+  }
+  if (source !== undefined && source !== null && typeof source !== 'string') {
+    return res.status(400).json({ error: 'source, when provided, must be a string or null' });
+  }
+
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const record = new ProfileFactorsRepo(database).set(user.id, {
+    factorName,
+    value,
+    userConfirmed: userConfirmed === true,
+    source: (source as string | null | undefined) ?? null,
+    expiresAt: (expiresAt as string | null | undefined) ?? null,
+  });
+  res.json({
+    factorName: record.factorName,
+    value: record.value,
+    source: record.source,
+    userConfirmed: record.userConfirmed,
+    expiresAt: record.expiresAt,
+    updatedAt: record.updatedAt,
+  });
+});
+
+// DELETE /api/programming/profile-factors/:factorName
+programmingRouter.delete('/profile-factors/:factorName', (req, res) => {
+  const database = db(req);
+  const user = new UsersRepo(database).getOrCreateDefault();
+  new ProfileFactorsRepo(database).remove(user.id, req.params.factorName);
   res.status(204).end();
 });

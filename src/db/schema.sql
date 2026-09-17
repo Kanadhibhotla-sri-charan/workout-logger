@@ -578,3 +578,28 @@ CREATE TABLE IF NOT EXISTS exercise_preferences (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, exercise_id)
 );
+
+-- Coaching Depth Batch 5 (Phase 8, Individual Profile Factors) spec §6.3:
+-- one explicit, current-state record per (user, factor_name) — never an
+-- event log (mirrors exercise_preferences' own current-state, not
+-- history, semantics). `user_confirmed = 0` (the default) marks a
+-- factor as NOT yet reliable enough to affect programming (spec §6.3:
+-- "Do not treat inferred or stale information as equivalent to a
+-- current user-confirmed restriction") — every real consumer in this
+-- codebase requires `user_confirmed = 1` AND (`expires_at IS NULL` OR
+-- `expires_at` in the future as of the reference date) before reading
+-- `value` at all; anything else is treated as a genuine absence (spec
+-- §2.2's conservative default), never a guessed value. `source` is a
+-- free-text provenance note (e.g. "profile-setup-form"), not a
+-- confirmation signal by itself.
+CREATE TABLE IF NOT EXISTS user_profile_factors (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  factor_name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  source TEXT,
+  user_confirmed INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, factor_name)
+);
