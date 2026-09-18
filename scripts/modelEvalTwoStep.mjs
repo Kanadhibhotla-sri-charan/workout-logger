@@ -45,11 +45,20 @@ const DB_PATH = process.env.DB_PATH || '/home/ubuntu/workout-logger/data/workout
 const REPS_PER_MODEL = Number(process.env.EVAL_REPS || 5);
 const CONCURRENCY = Number(process.env.EVAL_CONCURRENCY || 4);
 
-// USD per 1M tokens — same source as modelEval.mjs's own CANDIDATES
-// comment (Velona's live /models catalog). Luna Pro deliberately
-// excluded per explicit instruction this batch. Add more rows here once
-// the catalog is checked for other genuinely cheap options.
-const CANDIDATES = [{ model: 'mistralai/mistral-small-2603', label: 'Mistral Small 4', inputPer1M: 0.15, outputPer1M: 0.6 }];
+// USD per 1M tokens — Velona's live /models catalog, fetched
+// 2026-09-18. Luna Pro deliberately excluded per explicit instruction
+// this batch. deepseek-v4-flash is the app's own current default model
+// (a real baseline, not a candidate swap); gemma-3-12b-it directly
+// answers the earlier "what about a hosted Gemma" question with real
+// data instead of speculation; mistral-small-2603 carries over from the
+// earlier single-step eval for continuity; qwen3.7-flash is the
+// cheapest large-context option in the catalog worth a look.
+const CANDIDATES = [
+  { model: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash (current prod default)', inputPer1M: 0.049, outputPer1M: 0.098 },
+  { model: 'mistralai/mistral-small-2603', label: 'Mistral Small 4', inputPer1M: 0.15, outputPer1M: 0.6 },
+  { model: 'google/gemma-3-12b-it', label: 'Google Gemma 3 12B', inputPer1M: 0.05, outputPer1M: 0.15 },
+  { model: 'qwen/qwen3.7-flash', label: 'Qwen3.7 Flash', inputPer1M: 0.03, outputPer1M: 0.13 },
+];
 
 // A real, deliberately small schema for the reasoning step — NOT `null`
 // and not the full session-proposal schema. buildVelonaUserTurnContent
