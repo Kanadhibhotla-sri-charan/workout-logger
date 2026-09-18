@@ -40,6 +40,9 @@ import { todayForUser } from '../dist/lib/userTimezone.js';
 import { weekdayOfDate } from '../dist/engine/workoutBuilder.js';
 import { addDays } from '../dist/engine/dateMath.js';
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+
+const FULL_RESULTS_PATH = process.env.EVAL_FULL_RESULTS_PATH || '/tmp/twoStepEvalFull.json';
 
 const DB_PATH = process.env.DB_PATH || '/home/ubuntu/workout-logger/data/workout-logger.sqlite';
 const REPS_PER_MODEL = Number(process.env.EVAL_REPS || 5);
@@ -152,22 +155,34 @@ async function runOnce(db, config, reasoningSystemInstruction, commitSystemInstr
     parsedJson = JSON.parse(commitResponse.rawText);
   } catch {
     const truncated = isLikelyTruncatedOutput(commitResponse.finishReason, commitResponse.usage?.outputTokens, commitResponse.requestDiagnostics?.configuredMaxOutputTokens);
-    return { outcome: truncated ? 'truncated' : 'invalid_json', latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd };
+    return { outcome: truncated ? 'truncated' : 'invalid_json', latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawCommitText: commitResponse.rawText?.slice(0, 2000) };
   }
+
+  // The raw, as-produced program — kept on every outcome from here on
+  // (even a rejected one) so a disqualified attempt's actual proposed
+  // workout can be inspected, not just the validator's error strings.
+  const rawProgram = {
+    sessionPurpose: parsedJson.sessionPurpose,
+    exercises: parsedJson.exercises,
+    programmingRationale: parsedJson.programmingRationale,
+    goalAlignment: parsedJson.goalAlignment,
+    recoveryConsiderations: parsedJson.recoveryConsiderations,
+    warnings: parsedJson.warnings,
+  };
 
   const structural = validateProposalSchema(parsedJson);
   if (!structural.ok || !structural.value) {
-    return { outcome: 'schema_invalid', detail: structural.errors?.slice(0, 3), latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd };
+    return { outcome: 'schema_invalid', detail: structural.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, reasoning };
   }
 
   const domain = validateProposalDomain(structural.value, context, db);
   if (!domain.ok || !domain.value) {
-    return { outcome: 'domain_invalid', detail: domain.errors?.slice(0, 5), latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd };
+    return { outcome: 'domain_invalid', detail: domain.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, reasoning };
   }
 
   const adequacy = validateProposalAdequacy(domain.value, context);
   if (!adequacy.ok) {
-    return { outcome: 'adequacy_invalid', detail: adequacy.errors?.slice(0, 3), latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd };
+    return { outcome: 'adequacy_invalid', detail: adequacy.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, reasoning };
   }
 
   // How many judgment-call rules (18-23) actually got a citable mention
@@ -186,6 +201,8 @@ async function runOnce(db, config, reasoningSystemInstruction, commitSystemInstr
     exerciseCount: domain.value.exercises.length,
     reasoningNoteCount,
     rationaleLength: rationaleText.length,
+    rawProgram,
+    reasoning,
   };
 }
 
@@ -216,12 +233,14 @@ async function main() {
   console.log(`[modelEvalTwoStep] real context built (${JSON.stringify(context).length} chars). reps per model=${REPS_PER_MODEL}, concurrency=${CONCURRENCY}\n`);
 
   const summary = [];
+  const allResults = [];
 
   for (const candidate of CANDIDATES) {
     const config = { ...baseConfig, model: candidate.model };
     const tasks = Array.from({ length: REPS_PER_MODEL }, () => () => runOnce(db, config, reasoningSystemInstruction, commitSystemInstruction, context, outputSchema, candidate));
     console.log(`[modelEvalTwoStep] running ${candidate.label} (${candidate.model}) x${REPS_PER_MODEL}...`);
     const results = await runWithConcurrency(tasks, CONCURRENCY);
+    results.forEach((r, i) => allResults.push({ model: candidate.model, label: candidate.label, rep: i, ...r }));
 
     const outcomeCounts = {};
     let totalLatency = 0;
@@ -247,7 +266,7 @@ async function main() {
     console.log(`  outcomes: ${JSON.stringify(outcomeCounts)}`);
     console.log(`  successRate=${successRate.toFixed(0)}%  avgLatency=${avgLatencyS}s  avgTotalCostUsd(2 calls)=$${avgCostUsd}  avgReasoningNotesUsed=${avgReasoningNotes}`);
     const sampleFailure = results.find((r) => r.outcome !== 'success' && r.detail);
-    if (sampleFailure) console.log(`  sample failure (${sampleFailure.outcome}): ${JSON.stringify(sampleFailure.detail).slice(0, 300)}`);
+    if (sampleFailure) console.log(`  sample failure (${sampleFailure.outcome}): ${JSON.stringify(sampleFailure.detail).slice(0, 300)}... (full detail + actual program in ${FULL_RESULTS_PATH})`);
     console.log('');
 
     summary.push({ model: candidate.model, label: candidate.label, successRate, avgLatencyS: Number(avgLatencyS), avgCostUsd, avgReasoningNotes });
@@ -257,6 +276,9 @@ async function main() {
   summary
     .sort((a, b) => b.successRate - a.successRate)
     .forEach((s) => console.log(`${s.successRate.toFixed(0)}%  ${s.avgLatencyS}s  $${s.avgCostUsd}  avgReasoningNotesUsed=${s.avgReasoningNotes}  ${s.label} (${s.model})`));
+
+  writeFileSync(FULL_RESULTS_PATH, JSON.stringify(allResults, null, 2));
+  console.log(`\n[modelEvalTwoStep] full per-attempt results (including every disqualified attempt's actual proposed program) written to ${FULL_RESULTS_PATH}`);
 
   db.close();
 }
