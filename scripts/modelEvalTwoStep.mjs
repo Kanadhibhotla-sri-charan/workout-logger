@@ -47,17 +47,13 @@ const CONCURRENCY = Number(process.env.EVAL_CONCURRENCY || 4);
 
 // USD per 1M tokens — Velona's live /models catalog, fetched
 // 2026-09-18. Luna Pro deliberately excluded per explicit instruction
-// this batch. deepseek-v4-flash is the app's own current default model
-// (a real baseline, not a candidate swap); gemma-3-12b-it directly
-// answers the earlier "what about a hosted Gemma" question with real
-// data instead of speculation; mistral-small-2603 carries over from the
-// earlier single-step eval for continuity; qwen3.7-flash is the
-// cheapest large-context option in the catalog worth a look.
+// this batch. User's own explicit candidate list.
 const CANDIDATES = [
+  { model: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', inputPer1M: 0.09, outputPer1M: 0.3 },
   { model: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash (current prod default)', inputPer1M: 0.049, outputPer1M: 0.098 },
   { model: 'mistralai/mistral-small-2603', label: 'Mistral Small 4', inputPer1M: 0.15, outputPer1M: 0.6 },
-  { model: 'google/gemma-3-12b-it', label: 'Google Gemma 3 12B', inputPer1M: 0.05, outputPer1M: 0.15 },
-  { model: 'qwen/qwen3.7-flash', label: 'Qwen3.7 Flash', inputPer1M: 0.03, outputPer1M: 0.13 },
+  { model: 'qwen/qwen3-next-80b-a3b-instruct', label: 'Qwen3 Next 80B A3B Instruct', inputPer1M: 0.09, outputPer1M: 1.1 },
+  { model: 'qwen/qwen3-30b-a3b', label: 'Qwen3 30B A3B', inputPer1M: 0.12, outputPer1M: 0.5 },
 ];
 
 // A real, deliberately small schema for the reasoning step — NOT `null`
