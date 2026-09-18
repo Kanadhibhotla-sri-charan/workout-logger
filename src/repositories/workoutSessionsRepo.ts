@@ -114,6 +114,10 @@ export interface AddExercisePerformanceInput {
   target_rir_min?: number | null;
   target_rir_max?: number | null;
   target_rest_seconds?: number | null;
+  /** Optional Blueprint target this exercise was prescribed for — see
+   * ExercisePerformance's own doc comment. */
+  target_type?: 'physique_target' | 'functional_goal' | null;
+  target_id?: string | null;
 }
 
 export interface UpdateWorkoutSessionInput {
@@ -268,10 +272,12 @@ export class WorkoutSessionsRepo {
     const insertExercise = this.db.prepare(
       `INSERT INTO workout_exercises
          (id, workout_session_id, exercise_id, order_index, role,
-          target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds)
+          target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds,
+          target_type, target_id)
        VALUES
          (@id, @workout_session_id, @exercise_id, @order_index, @role,
-          @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds)`
+          @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds,
+          @target_type, @target_id)`
     );
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
@@ -287,6 +293,8 @@ export class WorkoutSessionsRepo {
       target_rir_min: input.target_rir_min ?? null,
       target_rir_max: input.target_rir_max ?? null,
       target_rest_seconds: input.target_rest_seconds ?? null,
+      target_type: input.target_type ?? null,
+      target_id: input.target_id ?? null,
     };
 
     const tx = this.db.transaction(() => {
@@ -354,6 +362,8 @@ export class WorkoutSessionsRepo {
           target_rir_min: number | null;
           target_rir_max: number | null;
           target_rest_seconds: number | null;
+          target_type: 'physique_target' | 'functional_goal' | null;
+          target_id: string | null;
         }
       | undefined;
     if (!exerciseRow) return undefined;
@@ -404,8 +414,21 @@ export class WorkoutSessionsRepo {
       target_rir_min: exerciseRow.target_rir_min,
       target_rir_max: exerciseRow.target_rir_max,
       target_rest_seconds: exerciseRow.target_rest_seconds,
+      target_type: exerciseRow.target_type,
+      target_id: exerciseRow.target_id,
       sets: normalizedSets,
     };
+  }
+
+  /** Fix: the counterpart to `addExercisePerformance` for removing an
+   * exercise row outright (e.g. "Skip" on an already-persisted, not-yet-
+   * logged AI-committed exercise, or the first half of a Substitute:
+   * delete then re-add with the new exercise_id — see logger.html).
+   * `ON DELETE CASCADE` on workout_sets.workout_exercise_id removes its
+   * sets automatically. Returns false if no such row existed. */
+  deleteExercisePerformance(workoutExerciseId: string): boolean {
+    const result = this.db.prepare('DELETE FROM workout_exercises WHERE id = ?').run(workoutExerciseId);
+    return result.changes > 0;
   }
 
   /** UI Build Phase §35: every real performance of one exact exercise,
@@ -462,6 +485,8 @@ export class WorkoutSessionsRepo {
       target_rir_min: number | null;
       target_rir_max: number | null;
       target_rest_seconds: number | null;
+      target_type: 'physique_target' | 'functional_goal' | null;
+      target_id: string | null;
     }>;
 
     const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
@@ -491,6 +516,8 @@ export class WorkoutSessionsRepo {
         target_rir_min: row.target_rir_min,
         target_rir_max: row.target_rir_max,
         target_rest_seconds: row.target_rest_seconds,
+        target_type: row.target_type,
+        target_id: row.target_id,
         sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
       };
     });

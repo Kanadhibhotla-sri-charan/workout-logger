@@ -61,6 +61,17 @@ function migrate(db: Database.Database): void {
   addColumnIfMissing(db, 'workout_exercises', 'target_rir_max', 'REAL');
   addColumnIfMissing(db, 'workout_exercises', 'target_rest_seconds', 'INTEGER');
 
+  // Fix: which Blueprint target (physique_target/functional_goal + id)
+  // this exercise was prescribed for — needed so an already-persisted
+  // exercise (e.g. an AI-committed session's pre-created rows; see
+  // aiProposalLifecycle.ts's commit) can still offer "Substitute", which
+  // requires this exact target_type/target_id pair
+  // (GET /api/programming/substitutes). Additive/nullable-safe; every
+  // pre-existing row simply has NULL here (Substitute is unavailable for
+  // those, same as before this fix).
+  addColumnIfMissing(db, 'workout_exercises', 'target_type', 'TEXT');
+  addColumnIfMissing(db, 'workout_exercises', 'target_id', 'TEXT');
+
   // Final AI-Deterministic Precedence and Scheduling Fixes §1: real
   // session provenance, so the shared precedence rule (see
   // programming.ts's renderWeekDays) can tell a deterministic day's own

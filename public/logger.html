@@ -212,13 +212,18 @@
         }
       }
 
-      // Fix: a session that isn't completed yet is still editable — this
-      // used to always render a static read-only table, which meant NO
-      // exercise (AI-committed or otherwise) could ever have weight/reps
-      // entered or corrected once its row existed. `session.status !==
-      // 'completed'` matches the exact same readOnly convention already
-      // used elsewhere in this file (buildExerciseSection).
-      if (session.status === 'completed') {
+      // Fix: freeze into the static read-only table once the session is
+      // completed, OR once this exercise actually has real logged data —
+      // matching the ORIGINAL intended behavior (a truly-performed
+      // exercise shows a clean summary), not "any exercise with a
+      // pre-existing row is permanently frozen" (the actual bug: an
+      // AI-committed exercise is pre-created with empty, uncompleted
+      // sets — see aiProposalLifecycle.ts's commit — so it must stay
+      // editable, with Skip/Substitute, until the user actually logs
+      // something, exactly like a deterministic not-yet-logged exercise
+      // already does via buildPreloadedExerciseCard).
+      const hasLoggedData = perf.sets.some((s) => s.completed || s.weight !== null || s.reps !== null);
+      if (session.status === 'completed' || hasLoggedData) {
         const table = el('table');
         const headRow = el('tr');
         for (const h of ['Set', 'Weight', 'Reps', 'Done']) headRow.appendChild(el('th', { text: h }));
@@ -260,10 +265,101 @@
         } catch (err) { /* values preserved — card stays as-is (spec §61) */ }
       }});
       actions.appendChild(saveBtn);
+
+      // Fix: Skip/Substitute for an already-persisted, not-yet-logged
+      // exercise. Unlike the deterministic flow's own Skip (purely
+      // client-side, since a generated-preview item was never
+      // persisted), this row already exists in the database, so
+      // skipping it means actually deleting it — otherwise it would
+      // just reappear on the next reload.
+      actions.appendChild(createButton({ label: 'Skip exercise', variant: 'secondary', onClick: async () => {
+        if (!window.confirm(`Skip ${exerciseDisplayName(perf, generatedMatch)}? This removes it from today's session.`)) return;
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/exercises/${perf.id}`, { method: 'DELETE' }), 'Skipped.');
+          await reload();
+        } catch (err) { /* left as-is on failure */ }
+      }}));
+
+      // Substitute needs target_type/target_id to look up feasible
+      // alternatives (GET /api/programming/substitutes) — absent for a
+      // row created before this fix, or one added with no prescription.
+      if (perf.target_type && perf.target_id) {
+        actions.appendChild(createButton({ label: 'Substitute', variant: 'ghost', onClick: () => openPersistedSubstitutePicker(perf) }));
+      }
+
       card.appendChild(actions);
       card.appendChild(statusEl);
 
       return card;
+    }
+
+    // Fix: the counterpart to openSubstitutePicker for an
+    // already-persisted exercise (e.g. an AI-committed session's
+    // pre-created row) — a separate function rather than a shared one
+    // with different onSelect branches, since the two cases differ in a
+    // way that matters for safety: this one must create the substitute
+    // row BEFORE deleting the original, so a failed create never loses
+    // the exercise slot entirely (worst case on a failed delete is a
+    // harmless duplicate the user can Skip, never a vanished exercise).
+    async function openPersistedSubstitutePicker(perf) {
+      const root = document.getElementById('day-modal-root');
+      root.innerHTML = '';
+      const exerciseName = exerciseDisplayName(perf, null);
+      const panel = el('div', { class: 'modal-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Substitute exercise' });
+      panel.appendChild(el('h2', { text: `Substitute for ${exerciseName}` }));
+      panel.appendChild(el('p', { class: 'muted', text: 'Loading feasible alternatives…' }));
+      const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeSubstituteModal(); });
+      document.addEventListener('keydown', onSubstituteModalKeydown);
+      root.appendChild(backdrop);
+
+      try {
+        const candidates = await api(`/api/programming/substitutes?target_type=${perf.target_type}&target_id=${perf.target_id}`);
+        panel.innerHTML = '';
+        panel.appendChild(el('h2', { text: `Substitute for ${exerciseName}` }));
+        const list = [...candidates.blueprint.map((c) => ({ ...c, source: 'Blueprint' })), ...candidates.outsideBlueprint.map((c) => ({ ...c, source: 'Approved outside-Blueprint' }))]
+          .filter((c) => c.id !== perf.exercise_id);
+        if (list.length === 0) panel.appendChild(el('p', { class: 'muted', text: 'No feasible alternative found.' }));
+        for (const c of list) {
+          const row = createButton({ label: `${c.name} (${c.source})`, variant: 'secondary', onClick: async () => {
+            row.disabled = true;
+            try {
+              await api(`/api/workouts/${sessionId}/exercises`, {
+                method: 'POST',
+                body: {
+                  exercise_id: c.id,
+                  order: perf.order,
+                  role: perf.role,
+                  target_sets: perf.target_sets,
+                  target_reps_min: perf.target_reps_min,
+                  target_reps_max: perf.target_reps_max,
+                  target_rir_min: perf.target_rir_min,
+                  target_rir_max: perf.target_rir_max,
+                  target_rest_seconds: perf.target_rest_seconds,
+                  target_type: perf.target_type,
+                  target_id: perf.target_id,
+                  sets: Array.from({ length: perf.target_sets || perf.sets.length }, (_, i) => ({ set_number: i + 1, weight: null, reps: null, completed: false })),
+                },
+              });
+              // Only delete the original AFTER the substitute is safely
+              // created — a failed delete here leaves a harmless
+              // duplicate rather than ever losing the exercise slot.
+              await api(`/api/workouts/${sessionId}/exercises/${perf.id}`, { method: 'DELETE' });
+              closeSubstituteModal();
+              await reload();
+            } catch (err) {
+              row.disabled = false;
+            }
+          }});
+          row.classList.add('btn-block');
+          row.style.marginTop = '0.5rem';
+          panel.appendChild(row);
+        }
+        panel.appendChild(createButton({ label: 'Cancel', variant: 'ghost', onClick: closeSubstituteModal }));
+      } catch (err) {
+        panel.innerHTML = '';
+        panel.appendChild(el('p', { class: 'muted', text: "Couldn't load alternatives." }));
+      }
     }
 
     // Final Copy/Explanation Fixes §1: the PERFORMED exercise's own

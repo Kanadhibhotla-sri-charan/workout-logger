@@ -203,7 +203,20 @@ workoutsRouter.get('/:id/badminton-details', (req, res) => {
 });
 
 workoutsRouter.post('/:id/exercises', (req, res) => {
-  const { exercise_id, order, role, sets } = req.body ?? {};
+  const {
+    exercise_id,
+    order,
+    role,
+    sets,
+    target_sets,
+    target_reps_min,
+    target_reps_max,
+    target_rir_min,
+    target_rir_max,
+    target_rest_seconds,
+    target_type,
+    target_id,
+  } = req.body ?? {};
   if (typeof exercise_id !== 'string' || typeof order !== 'number' || typeof role !== 'string' || !Array.isArray(sets)) {
     return res.status(400).json({ error: 'exercise_id (string), order (number), role (string), sets (array) are required' });
   }
@@ -212,7 +225,24 @@ workoutsRouter.post('/:id/exercises', (req, res) => {
   const repo = new WorkoutSessionsRepo(database);
   try {
     const session = repo.getSession(req.params.id);
-    const performance = repo.addExercisePerformance(req.params.id, { exercise_id, order, role, sets });
+    // Fix: optional planned prescription — e.g. Substitute (logger.html)
+    // preserves the replaced exercise's own target_* fields on the new
+    // row. Omitted fields stay undefined -> stored NULL, same as before
+    // this fix for every existing caller that never sends them.
+    const performance = repo.addExercisePerformance(req.params.id, {
+      exercise_id,
+      order,
+      role,
+      sets,
+      target_sets,
+      target_reps_min,
+      target_reps_max,
+      target_rir_min,
+      target_rir_max,
+      target_rest_seconds,
+      target_type,
+      target_id,
+    });
     // Programming Redesign (Step 12) §7/§8/rule #14: a correction to an
     // ALREADY-completed session's own actual logged work still counts
     // as real actual training and still needs the remaining week to
@@ -260,4 +290,26 @@ workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
   const performance = repo.updateExercisePerformanceSets(req.params.exerciseId, sets);
   if (session.status === 'completed') adaptCurrentWeekIfNeeded(database, session.date);
   res.json(performance);
+});
+
+/** Fix: "Skip" for an already-persisted, not-yet-logged exercise (e.g.
+ * an AI-committed session's pre-created row) — the deterministic
+ * flow's own "Skip" is purely client-side because a generated-preview
+ * item was never persisted in the first place (see logger.html's own
+ * comment on `skippedExerciseIds`); an already-existing row needs a
+ * real delete so it doesn't reappear on the next reload. Same
+ * ownership check as the PATCH route above. */
+workoutsRouter.delete('/:id/exercises/:exerciseId', (req, res) => {
+  const repo = new WorkoutSessionsRepo(db(req));
+  const session = repo.getSession(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: `No workout session with id "${req.params.id}"` });
+  }
+  const existing = repo.getExercisePerformances(req.params.id).find((p) => p.id === req.params.exerciseId);
+  if (!existing) {
+    return res.status(404).json({ error: `No exercise "${req.params.exerciseId}" on workout session "${req.params.id}"` });
+  }
+
+  repo.deleteExercisePerformance(req.params.exerciseId);
+  res.status(204).end();
 });

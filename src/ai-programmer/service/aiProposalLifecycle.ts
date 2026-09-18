@@ -373,6 +373,11 @@ export function commitAIProposalToPlannedSession(
           target_rir_min: exercise.rirMin,
           target_rir_max: exercise.rirMax,
           target_rest_seconds: exercise.restSeconds ?? null,
+          // Fix: persisted so an already-committed exercise can still
+          // offer "Substitute" in the logger UI, which needs the exact
+          // target_type/target_id pair to query feasible alternatives.
+          target_type: exercise.targetType,
+          target_id: exercise.targetId,
           sets: Array.from({ length: exercise.sets }, (_, setIndex) => ({
             set_number: setIndex + 1,
             weight: null,
