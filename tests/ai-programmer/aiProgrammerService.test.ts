@@ -14,6 +14,7 @@ import {
   AIOutputSchemaInvalidError,
   AIProgrammerDisabledError,
   AIProposalAlreadyPendingError,
+  AIProviderOutputTruncatedError,
   AIProviderUnavailableError,
 } from '../../src/ai-programmer/errors.js';
 import { approveProposal, commitAIProposalToPlannedSession } from '../../src/ai-programmer/service/aiProposalLifecycle.js';
@@ -262,6 +263,82 @@ describe('AIProgrammerService', () => {
     const provider = new FakeProvider(() => ({ provider: 'fake', model: 'm', requestId: 'r', rawText: 'not json at all' }));
     const service = new AIProgrammerService(db, provider);
     await expect(service.generateSession({ targetDate: SUNDAY })).rejects.toBeInstanceOf(AIOutputSchemaInvalidError);
+  });
+
+  // Coaching Depth follow-up fix regression coverage: a provider
+  // response whose completion was cut off by the output-token limit
+  // (observed live in production after the Coaching Depth rollout —
+  // `actualOutputTokens` landing exactly on `configuredMaxOutputTokens`,
+  // producing incomplete/invalid JSON) must be reported as a distinct
+  // AIProviderOutputTruncatedError, never the generic
+  // AIOutputSchemaInvalidError — the two have different causes (a
+  // provider budget problem vs. a genuinely malformed response) and the
+  // truncated case should never be treated as if schema validation ran
+  // against real, complete content.
+  it('reports a truncated (incomplete-JSON) provider response as AIProviderOutputTruncatedError, not a generic schema-invalid error', async () => {
+    const { date } = futureDate();
+    const provider = new FakeProvider(() => ({
+      provider: 'fake',
+      model: 'm',
+      requestId: 'r',
+      rawText: '{"schemaVersion": 1, "exercises": [{"exerciseId": "flat-barbell-bench-press", "rationale": ["incomplete',
+      finishReason: 'length',
+      usage: { inputTokens: 29000, outputTokens: 4096, totalTokens: 33096 },
+      requestDiagnostics: { systemInstructionChars: 1, userTurnChars: 1, wirePayloadChars: 1, configuredMaxOutputTokens: 4096 },
+    }));
+    const service = new AIProgrammerService(db, provider);
+    const err = await service.generateSession({ targetDate: date }).catch((e) => e);
+    expect(err).toBeInstanceOf(AIProviderOutputTruncatedError);
+    expect(err).not.toBeInstanceOf(AIOutputSchemaInvalidError);
+  });
+
+  it('a numeric truncation signal (completion tokens at the configured cap) is detected even when the provider reports no recognized finishReason', async () => {
+    const { date } = futureDate();
+    const provider = new FakeProvider(() => ({
+      provider: 'fake',
+      model: 'm',
+      requestId: 'r',
+      rawText: '{"incomplete truncated json',
+      usage: { inputTokens: 100, outputTokens: 4096, totalTokens: 4196 },
+      requestDiagnostics: { systemInstructionChars: 1, userTurnChars: 1, wirePayloadChars: 1, configuredMaxOutputTokens: 4096 },
+    }));
+    const service = new AIProgrammerService(db, provider);
+    await expect(service.generateSession({ targetDate: date })).rejects.toBeInstanceOf(AIProviderOutputTruncatedError);
+  });
+
+  it('malformed JSON with NO truncation signal (well under the token cap, ordinary finish reason) is still the generic schema-invalid error', async () => {
+    const { date } = futureDate();
+    const provider = new FakeProvider(() => ({
+      provider: 'fake',
+      model: 'm',
+      requestId: 'r',
+      rawText: 'not json at all',
+      finishReason: 'stop',
+      usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+      requestDiagnostics: { systemInstructionChars: 1, userTurnChars: 1, wirePayloadChars: 1, configuredMaxOutputTokens: 4096 },
+    }));
+    const service = new AIProgrammerService(db, provider);
+    const err = await service.generateSession({ targetDate: date }).catch((e) => e);
+    expect(err).toBeInstanceOf(AIOutputSchemaInvalidError);
+    expect(err).not.toBeInstanceOf(AIProviderOutputTruncatedError);
+  });
+
+  it('never persists a proposal when the provider output was truncated', async () => {
+    const { date } = futureDate();
+    const before = new AIProposalRepo(db).findLatestForTargetDate(date);
+    expect(before).toBeUndefined();
+    const provider = new FakeProvider(() => ({
+      provider: 'fake',
+      model: 'm',
+      requestId: 'r',
+      rawText: '{"incomplete',
+      finishReason: 'length',
+      usage: { inputTokens: 100, outputTokens: 4096, totalTokens: 4196 },
+      requestDiagnostics: { systemInstructionChars: 1, userTurnChars: 1, wirePayloadChars: 1, configuredMaxOutputTokens: 4096 },
+    }));
+    const service = new AIProgrammerService(db, provider);
+    await service.generateSession({ targetDate: date }).catch(() => undefined);
+    expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeUndefined();
   });
 
   it('rejects output that fails domain validation (unknown exercise) and never returns a proposal', async () => {

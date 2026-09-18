@@ -15,6 +15,7 @@ import type { AIProgrammerMode, AIProgrammerProvider, AIProgrammerProviderReques
 import {
   AIProviderAuthenticationError,
   AIProviderInvalidResponseError,
+  AIProviderOutputTruncatedError,
   AIProviderRateLimitedError,
   AIProviderTimeoutError,
   AIProviderUnavailableError,
@@ -148,12 +149,55 @@ export interface VelonaPayloadBuildResult {
 // already configured higher than this floor.
 const RECONCILE_WEEK_MIN_MAX_TOKENS = 6144;
 
+// Coaching Depth follow-up fix: production logs after the Coaching
+// Depth rollout showed `generate_session` — previously assumed to have
+// "its own much smaller real need" (see comment above) — now regularly
+// exhausting the shared 4096-token default and getting its JSON
+// response truncated (`actualOutputTokens` landing exactly on the
+// configured `max_tokens`, repeatedly, in production). The output
+// SCHEMA itself is unchanged; the richer `programmingBrief`/
+// `coachingFoundation` context now supplied (periodization state,
+// muscle profiles, historical trends, structural-balance advisories)
+// gives the model materially more to justify, and it spends that in the
+// existing free-text `rationale`/`programmingRationale` arrays. Same
+// targeted, mode-specific floor pattern as RECONCILE_WEEK_MIN_MAX_TOKENS
+// — an operator's own explicit VELONA_MAX_TOKENS still wins whenever it
+// is already configured higher than this floor.
+const GENERATE_SESSION_MIN_MAX_TOKENS = 8192;
+
 /** The actual `max_tokens` value a given request mode should use — the
  * ONE place this decision is made, so `buildVelonaRequestBody` (the
  * real wire body) and tokenReport.ts (diagnostics, which reads the
  * built body back) can never disagree about it. */
 export function effectiveMaxTokensForMode(config: VelonaConfig, mode: AIProgrammerMode): number {
-  return mode === 'reconcile_week' ? Math.max(config.maxTokens, RECONCILE_WEEK_MIN_MAX_TOKENS) : config.maxTokens;
+  const floor = mode === 'reconcile_week' ? RECONCILE_WEEK_MIN_MAX_TOKENS : GENERATE_SESSION_MIN_MAX_TOKENS;
+  return Math.max(config.maxTokens, floor);
+}
+
+// Velona does not document a fixed vocabulary for `data.finish` beyond
+// the "stop" example in its own integration spec, so a recognized
+// truncation string is treated as a strong signal when present, but the
+// authoritative signal is numeric: a provider that reports completion
+// usage landing at or above the exact max_tokens it was just sent is,
+// by construction, a response that was cut off mid-generation —
+// verified live against this deployment's own production logs (two
+// consecutive failures both showed `actualOutputTokens` exactly equal
+// to `configuredMaxOutputTokens`).
+const KNOWN_TRUNCATION_FINISH_REASONS = new Set(['length', 'max_tokens', 'max_output_tokens', 'model_length']);
+
+/** Pure, exported so both `attemptOnce` (the null/empty-output case,
+ * before any usage-shaped response object exists) and callers holding a
+ * full `AIProgrammerProviderResponse` (the non-null-but-incomplete-JSON
+ * case, checked in aiProgrammerService.ts) can make the identical
+ * truncation decision without duplicating the logic. */
+export function isLikelyTruncatedOutput(finishReason: string | undefined, completionTokens: number | undefined, configuredMaxOutputTokens: number | undefined): boolean {
+  if (finishReason && KNOWN_TRUNCATION_FINISH_REASONS.has(finishReason.toLowerCase())) {
+    return true;
+  }
+  if (typeof completionTokens === 'number' && typeof configuredMaxOutputTokens === 'number') {
+    return completionTokens >= configuredMaxOutputTokens;
+  }
+  return false;
 }
 
 /** Fix AI Weekly Reconciliation Review, Finding 2 / Real Dry-Run Token
@@ -192,7 +236,7 @@ export class VelonaProvider implements AIProgrammerProvider {
     for (;;) {
       attempt++;
       try {
-        const result = await this.attemptOnce(body, request.requestId);
+        const result = await this.attemptOnce(body, request.requestId, request.mode);
         // Deployment §2.10: how to inspect logs for provider-call
         // success/failure. safeLogFields never includes the API key or
         // raw context/prompt content.
@@ -225,7 +269,7 @@ export class VelonaProvider implements AIProgrammerProvider {
     }
   }
 
-  private async attemptOnce(body: unknown, requestId: string): Promise<AIProgrammerProviderResponse> {
+  private async attemptOnce(body: VelonaRequestBody, requestId: string, mode: AIProgrammerMode): Promise<AIProgrammerProviderResponse> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
@@ -294,6 +338,11 @@ export class VelonaProvider implements AIProgrammerProvider {
 
     const rawOutput = payload.data?.output;
     if (rawOutput === undefined || rawOutput === null) {
+      const completionTokens = payload.data?.usage?.completion_tokens;
+      const configuredMaxOutputTokens = body.config.max_tokens;
+      if (isLikelyTruncatedOutput(payload.data?.finish, completionTokens, configuredMaxOutputTokens)) {
+        throw new AIProviderOutputTruncatedError({ mode, finishReason: payload.data?.finish, completionTokens, configuredMaxOutputTokens });
+      }
       throw new AIProviderInvalidResponseError('Velona response did not contain data.output.');
     }
     const rawText = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
@@ -303,6 +352,7 @@ export class VelonaProvider implements AIProgrammerProvider {
       model: payload.data?.model ?? this.config.model,
       requestId,
       rawText,
+      finishReason: payload.data?.finish,
       usage: payload.data?.usage
         ? {
             inputTokens: payload.data.usage.prompt_tokens,

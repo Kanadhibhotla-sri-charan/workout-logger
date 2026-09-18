@@ -4,11 +4,12 @@
 // real Velona API key is ever used or required.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { VelonaProvider, buildVelonaRequestBody, buildVelonaUserTurnContent } from '../../src/ai-programmer/provider/velonaProvider.js';
+import { VelonaProvider, buildVelonaRequestBody, buildVelonaUserTurnContent, effectiveMaxTokensForMode, isLikelyTruncatedOutput } from '../../src/ai-programmer/provider/velonaProvider.js';
 import {
   AIProgrammerError,
   AIProviderAuthenticationError,
   AIProviderInvalidResponseError,
+  AIProviderOutputTruncatedError,
   AIProviderRateLimitedError,
   AIProviderTimeoutError,
   AIProviderUnavailableError,
@@ -87,12 +88,15 @@ describe('VelonaProvider', () => {
   });
 
   it('sends the configured temperature and max_tokens in config (per the documented Velona contract)', async () => {
+    // maxTokens deliberately set above BOTH mode floors (see
+    // effectiveMaxTokensForMode's own tests below) so this test still
+    // proves pure pass-through of the operator's own configured value.
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
-    const provider = new VelonaProvider({ ...CONFIG, temperature: 0.2, maxTokens: 4096 });
+    const provider = new VelonaProvider({ ...CONFIG, temperature: 0.2, maxTokens: 10000 });
     await provider.generate(BASE_REQUEST);
     const [, init] = fetchMock.mock.calls[0]!;
     const body = JSON.parse(init.body);
-    expect(body.config).toEqual({ temperature: 0.2, max_tokens: 4096 });
+    expect(body.config).toEqual({ temperature: 0.2, max_tokens: 10000 });
   });
 
   it('never includes the API key anywhere in a request/response log helper', async () => {
@@ -202,6 +206,83 @@ describe('VelonaProvider', () => {
     await expect(provider.generate(BASE_REQUEST)).rejects.toBeInstanceOf(AIProviderInvalidResponseError);
   });
 
+  // Coaching Depth follow-up fix regression coverage (test scenario A):
+  // a response reporting a recognized truncation finish reason with
+  // null output/content must be a distinct AIProviderOutputTruncatedError
+  // — never crash, never fall through to JSON parsing/schema validation
+  // against null content, and never be mistaken for a generic
+  // "response did not contain data.output" failure.
+  it('a null-output response with finish "length" throws AIProviderOutputTruncatedError, not the generic invalid-response error', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { data: { output: null, model: 'm', finish: 'length', usage: { completion_tokens: 4096 } } })
+    );
+    const provider = new VelonaProvider(CONFIG);
+    const err = await provider.generate(BASE_REQUEST).catch((e) => e);
+    expect(err).toBeInstanceOf(AIProviderOutputTruncatedError);
+    expect(err).not.toBeInstanceOf(AIProviderInvalidResponseError);
+    expect((err as AIProgrammerError).code).toBe('AI_PROVIDER_OUTPUT_TRUNCATED');
+    // CONFIG.maxTokens (4096) is below generate_session's own floor, so
+    // the value actually sent (and reported as configuredMaxOutputTokens)
+    // is the effective, floored value — see effectiveMaxTokensForMode.
+    const effectiveMaxTokens = effectiveMaxTokensForMode(CONFIG, BASE_REQUEST.mode);
+    expect((err as AIProgrammerError).details).toMatchObject({ finishReason: 'length', completionTokens: 4096, configuredMaxOutputTokens: effectiveMaxTokens });
+  });
+
+  it('a null-output response with completion_tokens at the configured cap (no recognized finish string) also throws AIProviderOutputTruncatedError', async () => {
+    const effectiveMaxTokens = effectiveMaxTokensForMode(CONFIG, BASE_REQUEST.mode);
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: null, usage: { completion_tokens: effectiveMaxTokens } } }));
+    const provider = new VelonaProvider(CONFIG);
+    await expect(provider.generate(BASE_REQUEST)).rejects.toBeInstanceOf(AIProviderOutputTruncatedError);
+  });
+
+  it('a null-output response with finish "stop" and no usage well under the cap remains the generic invalid-response error', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: null, finish: 'stop' } }));
+    const provider = new VelonaProvider(CONFIG);
+    const err = await provider.generate(BASE_REQUEST).catch((e) => e);
+    expect(err).toBeInstanceOf(AIProviderInvalidResponseError);
+    expect(err).not.toBeInstanceOf(AIProviderOutputTruncatedError);
+  });
+
+  it('a successful response carries the provider finishReason through verbatim', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{"ok":true}', finish: 'stop' } }));
+    const provider = new VelonaProvider(CONFIG);
+    const result = await provider.generate(BASE_REQUEST);
+    expect(result.finishReason).toBe('stop');
+  });
+
+  describe('isLikelyTruncatedOutput', () => {
+    it('recognizes known truncation finish reasons regardless of case', () => {
+      expect(isLikelyTruncatedOutput('length', undefined, undefined)).toBe(true);
+      expect(isLikelyTruncatedOutput('LENGTH', undefined, undefined)).toBe(true);
+      expect(isLikelyTruncatedOutput('max_tokens', 10, 4096)).toBe(true);
+    });
+
+    it('treats completion tokens at or above the configured cap as truncation even with an unrecognized/absent finish reason', () => {
+      expect(isLikelyTruncatedOutput(undefined, 4096, 4096)).toBe(true);
+      expect(isLikelyTruncatedOutput('stop', 4097, 4096)).toBe(true);
+    });
+
+    it('is false when neither signal indicates truncation', () => {
+      expect(isLikelyTruncatedOutput('stop', 500, 4096)).toBe(false);
+      expect(isLikelyTruncatedOutput(undefined, undefined, undefined)).toBe(false);
+      expect(isLikelyTruncatedOutput('content_filter', 10, 4096)).toBe(false);
+    });
+  });
+
+  describe('effectiveMaxTokensForMode (Coaching Depth follow-up fix)', () => {
+    it('floors generate_session at 8192 when the operator config is lower', () => {
+      expect(effectiveMaxTokensForMode({ ...CONFIG, maxTokens: 4096 }, 'generate_session')).toBe(8192);
+    });
+
+    it('still honors an operator config already above the floor', () => {
+      expect(effectiveMaxTokensForMode({ ...CONFIG, maxTokens: 12000 }, 'generate_session')).toBe(12000);
+    });
+
+    it('leaves reconcile_week\'s own existing 6144 floor unchanged', () => {
+      expect(effectiveMaxTokensForMode({ ...CONFIG, maxTokens: 4096 }, 'reconcile_week')).toBe(6144);
+    });
+  });
+
   it('a network failure is retried and then normalized to AIProviderUnavailableError', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
     const provider = new VelonaProvider({ ...CONFIG, maxRetries: 1 });
@@ -296,7 +377,9 @@ describe('VelonaProvider', () => {
     expect(result.requestDiagnostics!.systemInstructionChars).toBe(BASE_REQUEST.systemInstruction.length);
     expect(result.requestDiagnostics!.userTurnChars).toBe((sentBody.turns[1].content as string).length);
     expect(result.requestDiagnostics!.wirePayloadChars).toBe(sentBodyString.length);
-    expect(result.requestDiagnostics!.configuredMaxOutputTokens).toBe(CONFIG.maxTokens);
+    // CONFIG.maxTokens (4096) is below generate_session's own floor, so
+    // the effective value actually sent is the floor, not the raw config.
+    expect(result.requestDiagnostics!.configuredMaxOutputTokens).toBe(effectiveMaxTokensForMode(CONFIG, BASE_REQUEST.mode));
   });
 
   it('requestDiagnostics.wirePayloadChars reflects a changed max_tokens/temperature config', async () => {

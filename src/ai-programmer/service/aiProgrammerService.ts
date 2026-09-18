@@ -27,11 +27,12 @@ import {
   AIOutputDomainInvalidError,
   AIProgrammerDisabledError,
   AIProposalAlreadyPendingError,
+  AIProviderOutputTruncatedError,
   AIWeekReconciliationOutputDomainInvalidError,
   AIWeekReconciliationOutputSchemaInvalidError,
 } from '../errors.js';
 import { isAiProgrammerEnabled, loadVelonaConfig } from '../provider/config.js';
-import { VelonaProvider } from '../provider/velonaProvider.js';
+import { isLikelyTruncatedOutput, VelonaProvider } from '../provider/velonaProvider.js';
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
 import { validateProposalAdequacy } from '../validation/programmerAdequacyValidator.js';
 import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
@@ -193,6 +194,14 @@ export class AIProgrammerService {
       try {
         parsedJson = JSON.parse(providerResponse.rawText);
       } catch {
+        if (isLikelyTruncatedOutput(providerResponse.finishReason, providerResponse.usage?.outputTokens, providerResponse.requestDiagnostics?.configuredMaxOutputTokens)) {
+          throw new AIProviderOutputTruncatedError({
+            mode: 'generate_session',
+            finishReason: providerResponse.finishReason,
+            completionTokens: providerResponse.usage?.outputTokens,
+            configuredMaxOutputTokens: providerResponse.requestDiagnostics?.configuredMaxOutputTokens,
+          });
+        }
         throw new AIOutputSchemaInvalidError(['provider response was not valid JSON']);
       }
     }
@@ -298,6 +307,14 @@ export class AIProgrammerService {
       try {
         parsedJson = JSON.parse(providerResponse.rawText);
       } catch {
+        if (isLikelyTruncatedOutput(providerResponse.finishReason, providerResponse.usage?.outputTokens, providerResponse.requestDiagnostics?.configuredMaxOutputTokens)) {
+          throw new AIProviderOutputTruncatedError({
+            mode: 'reconcile_week',
+            finishReason: providerResponse.finishReason,
+            completionTokens: providerResponse.usage?.outputTokens,
+            configuredMaxOutputTokens: providerResponse.requestDiagnostics?.configuredMaxOutputTokens,
+          });
+        }
         throw new AIWeekReconciliationOutputSchemaInvalidError(['provider response was not valid JSON']);
       }
     }

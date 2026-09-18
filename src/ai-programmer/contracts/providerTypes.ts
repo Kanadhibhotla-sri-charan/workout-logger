@@ -24,6 +24,14 @@ export interface AIProgrammerProviderResponse {
   requestId: string;
   rawText: string;
   parsedJson?: unknown;
+  /** The provider's own reported completion-stop reason (Velona's
+   * `data.finish`, e.g. `"stop"` on a normal completion) — passed
+   * through verbatim, never normalized/guessed, so callers that DO
+   * recognize a given provider's vocabulary (see
+   * `isLikelyTruncatedOutput` in velonaProvider.ts) can use it, and it
+   * is always safe to log. Absent when the provider does not report
+   * one. */
+  finishReason?: string;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
