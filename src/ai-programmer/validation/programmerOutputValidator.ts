@@ -14,7 +14,6 @@ import {
   type AIWorkoutSessionProposal,
 } from '../contracts/programmerTypes.js';
 
-const EXERCISE_ROLES: readonly AIWorkoutExerciseRole[] = ['primary', 'secondary', 'accessory', 'isolation', 'conditioning'];
 const TARGET_TYPES = ['physique_target', 'functional_goal'] as const;
 
 /** Never expected in a rationale/warning string — spec §7: "do not
@@ -72,10 +71,15 @@ export function validateExercise(raw: unknown, path: string, errors: string[]): 
     errors.push(`${path}.exerciseId: expected a non-empty string`);
     valid = false;
   }
-  if (typeof e.role !== 'string' || !EXERCISE_ROLES.includes(e.role as AIWorkoutExerciseRole)) {
-    errors.push(`${path}.role: expected one of ${EXERCISE_ROLES.join('|')}`);
-    valid = false;
-  }
+  // Role repair (2026-09-18): the model is no longer asked for `role` at
+  // all — "primary"/"secondary" ambiguously overlapped with the model's
+  // own general-purpose reading of those words, and the app already
+  // knows the real answer deterministically (BlueprintAdapter's own
+  // exercise/target role data) with zero need to ask. A placeholder is
+  // set here so the object satisfies AIWorkoutExerciseProposal's shape;
+  // programmerProposalRepair.ts always overwrites it with the real
+  // value before anything else ever reads this field.
+  (e as { role?: AIWorkoutExerciseRole }).role = 'primary';
   if (typeof e.targetType !== 'string' || !TARGET_TYPES.includes(e.targetType as (typeof TARGET_TYPES)[number])) {
     errors.push(`${path}.targetType: expected one of ${TARGET_TYPES.join('|')}`);
     valid = false;

@@ -20,6 +20,7 @@ import { getProgrammerOutputSchema } from '../dist/ai-programmer/contracts/progr
 import { validateProposalSchema } from '../dist/ai-programmer/validation/programmerOutputValidator.js';
 import { validateProposalDomain } from '../dist/ai-programmer/validation/programmerDomainValidator.js';
 import { validateProposalAdequacy } from '../dist/ai-programmer/validation/programmerAdequacyValidator.js';
+import { repairProposal } from '../dist/ai-programmer/validation/programmerProposalRepair.js';
 import { VelonaProvider, isLikelyTruncatedOutput } from '../dist/ai-programmer/provider/velonaProvider.js';
 import { loadVelonaConfig } from '../dist/ai-programmer/provider/config.js';
 import { todayForUser } from '../dist/lib/userTimezone.js';
@@ -72,7 +73,8 @@ async function runOnce(db, config, systemInstruction, context, outputSchema) {
     return { outcome: 'schema_invalid', detail: structural.errors?.slice(0, 3), latencyMs, usage };
   }
 
-  const domain = validateProposalDomain(structural.value, context, db);
+  const repaired = repairProposal(structural.value, context);
+  const domain = validateProposalDomain(repaired, context, db);
   if (!domain.ok || !domain.value) {
     const errors = domain.errors ?? [];
     const setsIssues = errors.filter((e) => /\.sets must equal/.test(e)).length;

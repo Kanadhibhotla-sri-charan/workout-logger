@@ -34,6 +34,7 @@ import { getProgrammerOutputSchema } from '../dist/ai-programmer/contracts/progr
 import { validateProposalSchema } from '../dist/ai-programmer/validation/programmerOutputValidator.js';
 import { validateProposalDomain } from '../dist/ai-programmer/validation/programmerDomainValidator.js';
 import { validateProposalAdequacy } from '../dist/ai-programmer/validation/programmerAdequacyValidator.js';
+import { repairProposal } from '../dist/ai-programmer/validation/programmerProposalRepair.js';
 import { VelonaProvider, isLikelyTruncatedOutput } from '../dist/ai-programmer/provider/velonaProvider.js';
 import { loadVelonaConfig } from '../dist/ai-programmer/provider/config.js';
 import { todayForUser } from '../dist/lib/userTimezone.js';
@@ -175,14 +176,15 @@ async function runOnce(db, config, reasoningSystemInstruction, commitSystemInstr
     return { outcome: 'schema_invalid', detail: structural.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, reasoning };
   }
 
-  const domain = validateProposalDomain(structural.value, context, db);
+  const repaired = repairProposal(structural.value, context);
+  const domain = validateProposalDomain(repaired, context, db);
   if (!domain.ok || !domain.value) {
-    return { outcome: 'domain_invalid', detail: domain.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, reasoning };
+    return { outcome: 'domain_invalid', detail: domain.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, repairedExercises: repaired.exercises, reasoning };
   }
 
   const adequacy = validateProposalAdequacy(domain.value, context);
   if (!adequacy.ok) {
-    return { outcome: 'adequacy_invalid', detail: adequacy.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, reasoning };
+    return { outcome: 'adequacy_invalid', detail: adequacy.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, repairedExercises: repaired.exercises, reasoning };
   }
 
   // How many judgment-call rules (18-23) actually got a citable mention

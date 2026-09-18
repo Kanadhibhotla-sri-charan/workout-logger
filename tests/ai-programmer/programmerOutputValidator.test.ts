@@ -76,10 +76,12 @@ describe('AI Programmer output schema validator', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('rejects an unknown exercise role enum value', () => {
+  it('role repair (2026-09-18): the model is no longer required to declare a role at all — any value, or none, still passes schema validation', () => {
     const raw = validRaw();
     (raw.exercises as any[])[0].role = 'bogus-role';
-    expect(validateProposalSchema(raw).ok).toBe(false);
+    expect(validateProposalSchema(raw).ok).toBe(true);
+    delete (raw.exercises as any[])[0].role;
+    expect(validateProposalSchema(raw).ok).toBe(true);
   });
 
   it('rejects negative sets', () => {

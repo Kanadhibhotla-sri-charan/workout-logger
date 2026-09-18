@@ -106,11 +106,9 @@ export function validateExerciseAgainstTargets(
     return;
   }
 
-  if ((exercise.role === 'primary' || exercise.role === 'secondary') && exercise.role !== catalogueEntry.role) {
-    errors.push(
-      `${path}: declared role "${exercise.role}" does not match Blueprint's own primary/secondary role ("${catalogueEntry.role}") for this exercise/target pair`
-    );
-  }
+  // Role repair (2026-09-18): `role` is no longer model-declared input to
+  // check — programmerProposalRepair.ts always sets it from Blueprint's
+  // own truth (catalogueEntry.role) before this validator ever runs.
 
   if (catalogueEntry.authoredPrescription) {
     // Correction pass §2: every authored field is authoritative and
