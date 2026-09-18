@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildWeeklyProgrammingPlan, type TargetBuildContext, type WeeklyPlanInput } from '../../src/engine/workoutBuilder.js';
-import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../src/engine/config.js';
+import { LEGS_SESSION_MAX_EXERCISES, LEGS_SESSION_MAX_TARGETS, LEGS_WITH_ABS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../src/engine/config.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 
@@ -280,5 +280,53 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
     expect(monday.sessionPurpose).toBe('push');
     expect(monday.plannedWork.length).toBeGreaterThan(LEGS_SESSION_MAX_EXERCISES);
     expect(monday.plannedWork.length).toBeLessThanOrEqual(SESSION_REALISM_CAP.maxExercisesPerSession);
+  });
+
+  // Fix (2026-09-19), explicit user request: a leg day's own muscle
+  // ceiling is now tighter (5) than the general cap (7) too, not just
+  // its exercise ceiling.
+  it('Leg+Abs Session Cap fix: a real legs-purpose session never exceeds 5 distinct muscles, even with all 7 real leg-region targets eligible', () => {
+    const SEVEN_LEG_TARGET_IDS = ['quads', 'hamstrings', 'gluteus-maximus', 'gluteus-medius-minimus', 'adductors', 'gastrocnemius', 'soleus'];
+    // current_weekly_primary_sets: 3 (near-adequate) isolates the
+    // muscle-count dimension from the exercise-count one, matching the
+    // same isolation technique the general-cap test above uses.
+    const targets = SEVEN_LEG_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 3 }));
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({ targets, available_training_days: ['monday', 'tuesday', 'thursday'] })
+    );
+    const thursday = plan.sessions.find((s) => s.date === '2026-09-03')!;
+    expect(thursday.sessionPurpose).toBe('legs');
+
+    const distinctTargetsInSession = new Set(thursday.plannedWork.map((w) => w.target_id));
+    expect(distinctTargetsInSession.size).toBeLessThanOrEqual(LEGS_SESSION_MAX_TARGETS);
+    expect(LEGS_SESSION_MAX_TARGETS).toBeLessThan(SESSION_REALISM_CAP.maxTargetsPerSession);
+
+    const capSkips = thursday.skipped.filter((s) => s.reason_code === 'session_realism_cap');
+    expect(capSkips.length).toBeGreaterThan(0);
+  });
+
+  it('Leg+Abs Session Cap fix: abs work alongside legs raises the exercise ceiling to 8, but leg exercises themselves stay capped at 5', () => {
+    const SEVEN_LEG_TARGET_IDS = ['quads', 'hamstrings', 'gluteus-maximus', 'gluteus-medius-minimus', 'adductors', 'gastrocnemius', 'soleus'];
+    const targets = [
+      ...SEVEN_LEG_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 0 })),
+      normalDevTarget({ target_id: 'obliques', current_weekly_primary_sets: 0 }),
+      normalDevTarget({ target_id: 'rectus-abdominis', current_weekly_primary_sets: 0 }),
+    ];
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({ targets, available_training_days: ['monday', 'tuesday', 'thursday'] })
+    );
+    const thursday = plan.sessions.find((s) => s.date === '2026-09-03')!;
+    expect(thursday.sessionPurpose).toBe('legs');
+
+    const legExercises = thursday.plannedWork.filter((w) => SEVEN_LEG_TARGET_IDS.includes(w.target_id));
+    expect(legExercises.length).toBeLessThanOrEqual(LEGS_SESSION_MAX_EXERCISES);
+    expect(thursday.plannedWork.length).toBeLessThanOrEqual(LEGS_WITH_ABS_SESSION_MAX_EXERCISES);
+
+    // The whole point: real room for abs beyond the leg-only 5-exercise
+    // ceiling, genuinely used in this fixture (otherwise this test would
+    // prove nothing about the +3 exception actually engaging).
+    const absExercises = thursday.plannedWork.filter((w) => w.target_id === 'obliques' || w.target_id === 'rectus-abdominis');
+    expect(absExercises.length).toBeGreaterThan(0);
+    expect(thursday.plannedWork.length).toBeGreaterThan(LEGS_SESSION_MAX_EXERCISES);
   });
 });

@@ -9,6 +9,8 @@ import type { BlueprintId, GoalType, Weekday } from '../../contracts/types.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import type { RecoveryConstraintResult } from '../../engine/recoveryEngine.js';
 import type { CoachingFoundationContext } from '../../coaching/foundationContext.js';
+import type { TrainingExperienceLevel } from '../../engine/intensityTechniques.js';
+import type { StructuralAdvisory } from '../../coaching/structuralAdvisories/structuralAdvisoryService.js';
 
 export const AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION = 'ai-programmer-context.v1' as const;
 
@@ -46,6 +48,37 @@ export interface AIProgrammerValidExerciseContext {
     rirMin: number;
     rirMax: number;
   } | null;
+  /** Rule 6 fix (2026-09-19): repsMin/repsMax here already reflect this
+   * muscle's own curated rep-range bias (a real coaching preference —
+   * e.g. calves/abs leaning toward higher reps) and, on a deload week,
+   * the deload's own low-fatigue bias — applied the exact same way
+   * deload set-volume already is. Never re-derived or second-guessed by
+   * the AI; these are the final numbers. `null` when no authored
+   * prescription exists for this exercise at all. */
+  /** Real, already-authored Blueprint guidance on whether an intensity
+   * technique (drop-set/rest-pause/myo-reps/etc.) is a plausible fit for
+   * THIS exercise — Blueprint's own suitability criteria (exercise type,
+   * fatigue/skill/stability demand), never a fabricated suggestion.
+   * Empty when no technique's authored criteria match this exercise.
+   * This is informational, not a directive — whether applying one is
+   * actually a good idea today is a real judgment call (rule 12). */
+  plausibleIntensityTechniques: readonly {
+    id: string;
+    name: string;
+    what: string;
+    whenToUse: string;
+    whenNotToUse: string;
+    fatigueImplications: string;
+  }[];
+  /** How many of this target's own most recent real sessions (up to 4)
+   * used this exact exercise, consecutively counting back from the most
+   * recent — derived from the same `exerciseHistory` already on
+   * AIProgrammerTargetContext, never a second tracking mechanism. A
+   * real, informational signal for deliberate rotation (a different
+   * angle on the same muscle, avoiding staleness) — never a requirement
+   * to swap; an exercise still being effective is reason enough to keep
+   * it. */
+  recentConsecutiveSessionsUsed: number;
 }
 
 export interface AIProgrammerTargetContext {
@@ -165,6 +198,13 @@ export interface AIProgrammerMuscleGuidance {
    * recommendation back to the deterministic decision that produced
    * it. */
   reasoning: string;
+  /** 'push' or 'pull' when this target is classified as one (the same
+   * PUSH_PHYSIQUE_TARGETS/PULL_PHYSIQUE_TARGETS classification the
+   * deterministic engine's own antagonist-pairing logic uses), else
+   * null. A push target and a pull target both receiving real direct
+   * work today are natural antagonist-superset candidates — real
+   * judgment (rule 12), never a requirement. */
+  antagonistGroup: 'push' | 'pull' | null;
 }
 
 export interface AIProgrammerSessionIdentityContext {
@@ -318,9 +358,6 @@ export interface AIProgrammerContext {
     defaultSessionDurationMinutes: number;
     minimumSessionDurationMinutes: number;
     maximumSessionDurationMinutes: number;
-    /** Informational only — see executionContext below; never a
-     * normal-generation eligibility filter (rule 11). */
-    availableEquipment: readonly string[];
   };
 
   objectives: {
@@ -360,10 +397,20 @@ export interface AIProgrammerContext {
    * src/coaching/foundationContext.ts's own doc comment. */
   coachingFoundation: CoachingFoundationContext;
 
-  executionContext: {
-    programmingFilteringAllowed: false;
-    note: string;
-  };
+  /** Rule 6 fix (2026-09-19): the user's confirmed training-experience
+   * level, when one exists — real coaching judgment (how aggressively
+   * to progress volume/intensity over time) is genuinely different for
+   * a beginner vs. an advanced lifter. Null when no confirmed value
+   * exists (never guessed). */
+  trainingExperience: TrainingExperienceLevel | null;
+
+  /** Rule 6 fix (2026-09-19): real, already-computed structural-balance
+   * advisories (e.g. a push/pull volume imbalance) — see
+   * structuralAdvisoryService.ts. Purely informational; never a
+   * directive to auto-adjust anything (this batch's own design: an
+   * advisory is evidence to weigh, not an instruction to obey). Empty
+   * when nothing is currently flagged. */
+  structuralAdvisories: readonly StructuralAdvisory[];
 
   outputRequirements: {
     outputSchemaVersion: string;

@@ -6,7 +6,7 @@
 // already has) rather than a second, drifting copy.
 
 import type Database from 'better-sqlite3';
-import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../engine/config.js';
+import { LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
@@ -105,16 +105,26 @@ export function validateWeekReconciliationDomain(
       // real (unlocked) day, since a week reconciliation can rewrite
       // several days at once.
       const distinctTargets = new Set(day.session.exercises.map((ex) => `${ex.targetType}:${ex.targetId}`));
-      if (distinctTargets.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
-        errors.push(`${path}.session: ${distinctTargets.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
+      const targetIdsInSession = [...new Set(day.session.exercises.map((ex) => ex.targetId))];
+      const purpose = day.session.sessionPurpose;
+      const validatedPurpose = purpose === 'push' || purpose === 'pull' || purpose === 'legs' || purpose === 'upper' ? purpose : null;
+      const caps = sessionRealismCapFor(validatedPurpose, targetIdsInSession);
+      if (distinctTargets.size > caps.maxTargets) {
+        errors.push(`${path}.session: ${distinctTargets.size} distinct targets — exceeds the hard cap of ${caps.maxTargets} targets per session`);
       }
-      // Legs-Session Exercise Cap (2026-09-16), explicit user request: a
-      // 'legs'-purpose day's own exercise ceiling is tighter (5) than the
-      // general cap (9) — same LEGS_SESSION_MAX_EXERCISES constant the
-      // deterministic engine (workoutBuilder.ts) enforces.
-      const maxExercisesForThisSession = day.session.sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
-      if (day.session.exercises.length > maxExercisesForThisSession) {
-        errors.push(`${path}.session: ${day.session.exercises.length} total exercises — exceeds the hard cap of ${maxExercisesForThisSession} exercises per session`);
+      // Legs-Session Exercise Cap (2026-09-16, tightened 2026-09-19),
+      // explicit user request: sessionRealismCapFor (config.ts, the one
+      // shared source of truth every caller reads) decides the same
+      // muscle/exercise ceilings the deterministic engine enforces,
+      // including the leg+abs exception.
+      if (day.session.exercises.length > caps.maxExercises) {
+        errors.push(`${path}.session: ${day.session.exercises.length} total exercises — exceeds the hard cap of ${caps.maxExercises} exercises per session`);
+      }
+      if (caps.legExerciseShareMax !== null) {
+        const legExerciseCount = day.session.exercises.filter((ex) => LEGS_PHYSIQUE_TARGETS.includes(ex.targetId)).length;
+        if (legExerciseCount > caps.legExerciseShareMax) {
+          errors.push(`${path}.session: ${legExerciseCount} leg exercises — exceeds the leg-day exercise cap of ${caps.legExerciseShareMax} (extra room in an abs-paired leg day is for abs, not more leg work)`);
+        }
       }
     }
   }

@@ -94,7 +94,13 @@ export interface AssignWeeklyIntensityTechniquesContext {
   deloadActive: boolean;
 }
 
-function isExerciseSuitable(exerciseId: BlueprintId, technique: BlueprintIntensityTechnique): boolean {
+/** Exported for the AI Programmer context builder (rule 6 fix,
+ * 2026-09-19): the exact same Blueprint-authored suitability check
+ * (exercise type + fatigue/skill/stability demand ceilings), reused
+ * rather than re-implemented, so "what techniques are plausible for
+ * this exercise" can never drift between the deterministic engine and
+ * what the AI is told. */
+export function isExerciseSuitable(exerciseId: BlueprintId, technique: BlueprintIntensityTechnique): boolean {
   const exercise = BlueprintAdapter.getExercise(exerciseId);
   if (!exercise) return false; // Outside-Blueprint exercise: no real demand fields to evaluate against.
   if (!technique.suitable_exercise_types.includes(exercise.exercise_type)) return false;

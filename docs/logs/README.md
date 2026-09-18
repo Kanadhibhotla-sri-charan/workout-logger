@@ -66,3 +66,4 @@ story of how the app got to its current state.
 - [2026-09-15-58-goal-category-conflict-and-cap-increase.md](2026-09-15-58-goal-category-conflict-and-cap-increase.md)
 - [2026-09-16-59-exercise-slot-trimming-and-non-goal-rotation.md](2026-09-16-59-exercise-slot-trimming-and-non-goal-rotation.md)
 - [2026-09-16-60-legs-session-exercise-cap.md](2026-09-16-60-legs-session-exercise-cap.md)
+- [2026-09-18-61-ai-programmer-rules-audit-and-coaching-depth-wiring.md](2026-09-18-61-ai-programmer-rules-audit-and-coaching-depth-wiring.md)

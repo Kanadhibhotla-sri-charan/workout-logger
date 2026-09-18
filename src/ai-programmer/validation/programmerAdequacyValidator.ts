@@ -18,7 +18,7 @@
 // remains fully eligible, and nothing here inspects WHICH exercise was
 // chosen, only how much total volume landed on which target.
 
-import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../engine/config.js';
+import { LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
 
@@ -175,16 +175,24 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
   // (workoutBuilder.ts) and what the system instruction itself already
   // told the model (rule 26) — this is the check that actually holds
   // the model to it, exactly like every other adequacy check here. ---
-  if (totals.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
-    errors.push(`session has ${totals.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
+  const targetIdsInSession = [...new Set(proposal.exercises.map((e) => e.targetId))];
+  const caps = sessionRealismCapFor(brief.session.purpose, targetIdsInSession);
+  if (totals.size > caps.maxTargets) {
+    errors.push(`session has ${totals.size} distinct targets — exceeds the hard cap of ${caps.maxTargets} targets per session`);
   }
-  // Legs-Session Exercise Cap (2026-09-16), explicit user request: a
-  // 'legs'-purpose session's own exercise ceiling is tighter (5) than
-  // the general cap (9) — same LEGS_SESSION_MAX_EXERCISES constant the
-  // deterministic engine (workoutBuilder.ts) enforces.
-  const maxExercisesForThisSession = brief.session.purpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
-  if (proposal.exercises.length > maxExercisesForThisSession) {
-    errors.push(`session has ${proposal.exercises.length} total exercises — exceeds the hard cap of ${maxExercisesForThisSession} exercises per session`);
+  // Legs-Session Exercise Cap (2026-09-16, tightened 2026-09-19),
+  // explicit user request: sessionRealismCapFor (config.ts, the one
+  // shared source of truth every caller reads) decides the same
+  // muscle/exercise ceilings the deterministic engine enforces,
+  // including the leg+abs exception.
+  if (proposal.exercises.length > caps.maxExercises) {
+    errors.push(`session has ${proposal.exercises.length} total exercises — exceeds the hard cap of ${caps.maxExercises} exercises per session`);
+  }
+  if (caps.legExerciseShareMax !== null) {
+    const legExerciseCount = proposal.exercises.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length;
+    if (legExerciseCount > caps.legExerciseShareMax) {
+      errors.push(`session has ${legExerciseCount} leg exercises — exceeds the leg-day exercise cap of ${caps.legExerciseShareMax} (extra room in an abs-paired leg day is for abs, not more leg work)`);
+    }
   }
 
   // --- No single target dominating the whole session. ---

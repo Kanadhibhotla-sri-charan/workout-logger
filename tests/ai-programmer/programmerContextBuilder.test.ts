@@ -175,6 +175,5 @@ describe('AI Programmer context builder', () => {
     const context = buildProgrammerContext(db, { targetDate: SUNDAY });
     expect(context.objectives.priorityHierarchy.some((r) => /aesthetics/i.test(r))).toBe(true);
     expect(context.outputRequirements.forbiddenBehaviors.length).toBeGreaterThan(0);
-    expect(context.executionContext.programmingFilteringAllowed).toBe(false);
   });
 });

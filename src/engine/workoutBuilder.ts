@@ -45,7 +45,7 @@ import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/dev
 import { getProfile, applyRepRangeBias } from '../coaching/profiles/muscleProfileService.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_SESSION_MAX_EXERCISES, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
+import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_PHYSIQUE_TARGETS, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, sessionRealismCapFor, TIME_ESTIMATION } from './config.js';
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
@@ -2019,14 +2019,18 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * also what keeps `assertNoContradictoryProgramState` satisfied (a
    * target cannot be both programmed and marked skipped).
    *
-   * Legs-Session Exercise Cap (2026-09-16): `maxExercisesForThisSession`
-   * is `LEGS_SESSION_MAX_EXERCISES` (5) on a 'legs'-purpose day, the
-   * general `SESSION_REALISM_CAP.maxExercisesPerSession` (9) otherwise —
-   * explicit user request. The muscle-count ceiling
-   * (`maxTargetsPerSession`) is unchanged for every purpose, legs
-   * included. */
+   * Legs-Session Exercise Cap (2026-09-16, tightened 2026-09-19):
+   * `sessionRealismCapFor` (config.ts, the one shared source of truth
+   * every caller — deterministic and both AI validators — reads) decides
+   * both ceilings for a 'legs'-purpose day: 5 muscles/5 exercises alone,
+   * or 5 muscles/8 exercises when abs is also part of THIS session (the
+   * extra 3 slots are for abs specifically — `legExerciseShareMax` keeps
+   * leg work itself capped at 5 even then, enforced below via
+   * `legExerciseCountKept`). Every other purpose keeps the general
+   * 7-target/9-exercise cap. */
   function applySessionRealismCap(dayCandidates: typeof candidates, sessionPurpose: SessionPurpose | null): { kept: typeof candidates; deferred: typeof candidates } {
-    const maxExercisesForThisSession = sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
+    const targetIdsInSession = [...new Set(dayCandidates.map((c) => c.planned.target_id))];
+    const caps = sessionRealismCapFor(sessionPurpose, targetIdsInSession);
 
     // Group by target first (order preserved — dayCandidates already
     // arrives priority-ordered) so a target's own multiple exercise
@@ -2048,16 +2052,20 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     const kept: typeof candidates = [];
     const deferred: typeof candidates = [];
     let keptTargetCount = 0;
+    let legExerciseCountKept = 0;
     for (const key of order) {
       const group = byTarget.get(key)!;
-      if (keptTargetCount >= SESSION_REALISM_CAP.maxTargetsPerSession) {
+      if (keptTargetCount >= caps.maxTargets) {
         // Muscle-count ceiling already reached — a wholly new target
         // cannot claim a slot no matter how much exercise budget
         // remains; fully deferred.
         deferred.push(...group);
         continue;
       }
-      const remainingExerciseSlots = maxExercisesForThisSession - kept.length;
+      const isLegGroup = caps.legExerciseShareMax !== null && LEGS_PHYSIQUE_TARGETS.includes(group[0]!.planned.target_id);
+      const remainingExerciseSlots = isLegGroup
+        ? Math.min(caps.maxExercises - kept.length, caps.legExerciseShareMax! - legExerciseCountKept)
+        : caps.maxExercises - kept.length;
       if (remainingExerciseSlots <= 0) {
         deferred.push(...group);
         continue;
@@ -2065,6 +2073,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       if (group.length <= remainingExerciseSlots) {
         kept.push(...group);
         keptTargetCount++;
+        if (isLegGroup) legExerciseCountKept += group.length;
       } else {
         // The starvation fix itself: this target's own full exercise
         // count doesn't fit what's left, but SOME of it does — keep
@@ -2072,6 +2081,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         kept.push(...group.slice(0, remainingExerciseSlots));
         deferred.push(...group.slice(remainingExerciseSlots));
         keptTargetCount++;
+        if (isLegGroup) legExerciseCountKept += remainingExerciseSlots;
       }
     }
     return { kept, deferred };
@@ -2089,7 +2099,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * separate skip needed, exactly like any other under-delivered
    * target. */
   function sessionRealismSkipsFor(deferred: typeof candidates, kept: typeof candidates, sessionPurpose: SessionPurpose | null): SkippedTarget[] {
-    const maxExercisesForThisSession = sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
+    const targetIdsInSession = [...new Set([...deferred, ...kept].map((c) => c.planned.target_id))];
+    const caps = sessionRealismCapFor(sessionPurpose, targetIdsInSession);
     const keptKeys = new Set(kept.map((c) => targetKey(c.planned)));
     const seen = new Set<string>();
     const skips: SkippedTarget[] = [];
@@ -2104,7 +2115,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         classification: c.planned.classification,
         scope: 'session',
         reason_code: 'session_realism_cap',
-        reason: `This session already reached the ${SESSION_REALISM_CAP.maxTargetsPerSession}-target/${maxExercisesForThisSession}-exercise session realism cap before this target's own turn — deferred, not dropped; it remains available for this target's next real exposure.`,
+        reason: `This session already reached the ${caps.maxTargets}-target/${caps.maxExercises}-exercise session realism cap before this target's own turn — deferred, not dropped; it remains available for this target's next real exposure.`,
         decision: c.planned.decision,
       });
     }

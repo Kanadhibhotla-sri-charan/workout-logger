@@ -26,6 +26,7 @@ function guidance(overrides: Partial<AIProgrammerMuscleGuidance> & Pick<AIProgra
     recoveryAdjustment: 'none',
     eligibleForThisSession: true,
     reasoning: 'test fixture',
+    antagonistGroup: null,
     ...overrides,
   };
 }
@@ -298,5 +299,55 @@ describe('validateProposalAdequacy', () => {
 
     const result = validateProposalAdequacy(p, contextWith(brief));
     expect(result.errors.some((e) => e.includes('exceeds the hard cap'))).toBe(false);
+  });
+
+  // Fix (2026-09-19), explicit user request: a legs-purpose proposal's
+  // own muscle/exercise ceilings are now tighter (5/5), with a specific
+  // exception when abs is also present (exercise ceiling rises to 8, but
+  // leg exercises themselves stay capped at 5).
+  it('rejects a legs-purpose proposal exceeding 5 leg exercises even when abs is also present (the extra room is for abs, not more leg work)', () => {
+    const brief: AIProgrammerProgrammingBrief = {
+      session: { purpose: 'legs', expectedCoverageTargetIds: ['quads', 'hamstrings', 'obliques'] },
+      muscles: [guidance({ targetId: 'quads', recommendedSessionSets: { min: 6, max: 12 } }), guidance({ targetId: 'obliques', recommendedSessionSets: { min: 2, max: 8 } })],
+      approxSessionSetBudget: 20,
+    };
+    const p = proposal([
+      exercise({ exerciseId: 'back-squat', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'leg-press', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'leg-extension', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'walking-lunge', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'hack-squat', targetId: 'quads', sets: 3 }), // 5th leg exercise — at the leg-share ceiling
+      exercise({ exerciseId: 'bulgarian-split-squat', targetId: 'quads', sets: 3 }), // 6th leg exercise — over it
+      exercise({ exerciseId: 'cable-crunch', targetId: 'obliques', sets: 3 }),
+    ]);
+
+    const result = validateProposalAdequacy(p, contextWith(brief));
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes('leg exercises') && e.includes('exceeds the leg-day exercise cap'))).toBe(true);
+  });
+
+  it('accepts a legs-purpose proposal with 5 leg exercises plus real abs work (8 total) — the leg+abs exception genuinely working', () => {
+    const brief: AIProgrammerProgrammingBrief = {
+      session: { purpose: 'legs', expectedCoverageTargetIds: ['quads', 'obliques', 'rectus-abdominis'] },
+      muscles: [
+        guidance({ targetId: 'quads', recommendedSessionSets: { min: 6, max: 15 } }),
+        guidance({ targetId: 'obliques', recommendedSessionSets: { min: 2, max: 8 } }),
+        guidance({ targetId: 'rectus-abdominis', recommendedSessionSets: { min: 2, max: 8 } }),
+      ],
+      approxSessionSetBudget: 30,
+    };
+    const p = proposal([
+      exercise({ exerciseId: 'back-squat', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'leg-press', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'leg-extension', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'walking-lunge', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'hack-squat', targetId: 'quads', sets: 3 }),
+      exercise({ exerciseId: 'cable-crunch', targetId: 'rectus-abdominis', sets: 3 }),
+      exercise({ exerciseId: 'hanging-leg-raise', targetId: 'rectus-abdominis', sets: 3 }),
+      exercise({ exerciseId: 'cable-woodchopper', targetId: 'obliques', sets: 3 }),
+    ]);
+
+    const result = validateProposalAdequacy(p, contextWith(brief));
+    expect(result.errors.some((e) => e.includes('exceeds the hard cap') || e.includes('exceeds the leg-day exercise cap'))).toBe(false);
   });
 });

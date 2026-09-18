@@ -104,18 +104,57 @@ export const SESSION_REALISM_CAP = {
   maxExercisesPerSession: 9,
 } as const;
 
-/** [DEFAULT] Legs-Session Exercise Cap (2026-09-16), explicit user
- * request: a leg session's own exercise ceiling is tighter than the
- * general SESSION_REALISM_CAP.maxExercisesPerSession (9) — 5 instead.
- * The muscle-count ceiling (maxTargetsPerSession, 7) is unchanged for
- * legs; only the exercise-count ceiling is lower. Applied everywhere
- * SESSION_REALISM_CAP itself is: `workoutBuilder.ts` for deterministic
- * generation, and as a validation ceiling on AI output by
- * `programmerAdequacyValidator.ts`/`weekReconciliationDomainValidator.ts`
- * — all three read this same constant, one source of truth. Every OTHER
- * session purpose (push/pull/upper) keeps the general 9-exercise cap
- * unchanged. */
+/** [DEFAULT] Legs-Session Exercise Cap (2026-09-16, tightened
+ * 2026-09-19), explicit user request: a leg session's own ceilings are
+ * tighter than the general SESSION_REALISM_CAP — both the muscle-count
+ * ceiling (5, not 7) and the exercise-count ceiling (5, not 9). Abs
+ * (`ABS_PHYSIQUE_TARGETS`) is the only muscle group that pairs with legs
+ * (it is universal, already eligible on every session purpose — this is
+ * not a new pairing concept, just a leg-day exercise-count exception for
+ * when it happens to show up there): when abs work is present alongside
+ * legs, the day's total exercise ceiling rises to
+ * `LEGS_WITH_ABS_SESSION_MAX_EXERCISES` (8), but leg work itself stays
+ * capped at `LEGS_SESSION_MAX_EXERCISES` (5) within that total — the
+ * extra room is for abs, never for more leg exercises. Applied
+ * everywhere `SESSION_REALISM_CAP` itself is via `sessionRealismCapFor`
+ * below: `workoutBuilder.ts` for deterministic generation, and as a
+ * validation ceiling on AI output by `programmerAdequacyValidator.ts`/
+ * `weekReconciliationDomainValidator.ts` — one source of truth, never
+ * four independently-drifting copies of these numbers. Every OTHER
+ * session purpose (push/pull/upper) keeps the general 7-target/
+ * 9-exercise cap unchanged. */
+export const LEGS_SESSION_MAX_TARGETS = 5;
 export const LEGS_SESSION_MAX_EXERCISES = 5;
+export const LEGS_WITH_ABS_SESSION_MAX_EXERCISES = 8;
+
+/** [DEFAULT] Abs (obliques + rectus-abdominis) — a subset of
+ * `UNIVERSAL_PHYSIQUE_TARGETS` (defined below), named separately only so
+ * `sessionRealismCapFor`'s leg+abs exception can check for it precisely
+ * without accidentally matching `neck-thickness` (also universal, but
+ * not "abs"). */
+export const ABS_PHYSIQUE_TARGETS: readonly string[] = ['obliques', 'rectus-abdominis'];
+
+/** The ONE place every caller (deterministic generation AND both AI
+ * output validators) decides this session's real target/exercise
+ * ceilings — see LEGS_SESSION_MAX_EXERCISES's own doc comment for the
+ * full leg+abs rule. `targetIdsInSession` is every distinct target
+ * actually receiving dedicated work in the session being checked (not
+ * the eligible/candidate list) — the abs-presence check only fires once
+ * abs is genuinely part of THIS session, never merely eligible. */
+export function sessionRealismCapFor(
+  sessionPurpose: SessionPurpose | null,
+  targetIdsInSession: readonly string[]
+): { maxTargets: number; maxExercises: number; legExerciseShareMax: number | null } {
+  if (sessionPurpose !== 'legs') {
+    return { maxTargets: SESSION_REALISM_CAP.maxTargetsPerSession, maxExercises: SESSION_REALISM_CAP.maxExercisesPerSession, legExerciseShareMax: null };
+  }
+  const hasAbs = targetIdsInSession.some((id) => ABS_PHYSIQUE_TARGETS.includes(id));
+  return {
+    maxTargets: LEGS_SESSION_MAX_TARGETS,
+    maxExercises: hasAbs ? LEGS_WITH_ABS_SESSION_MAX_EXERCISES : LEGS_SESSION_MAX_EXERCISES,
+    legExerciseShareMax: LEGS_SESSION_MAX_EXERCISES,
+  };
+}
 
 /** [SPEC] §16: default weekly schedule. Explicitly documented as
  * shiftable (Wednesday's rest may move to Tuesday/Thursday; Saturday or
