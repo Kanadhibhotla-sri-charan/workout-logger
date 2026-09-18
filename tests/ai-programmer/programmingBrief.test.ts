@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { buildProgrammingBrief } from '../../src/ai-programmer/context/programmerContextBuilder.js';
 import type { AIProgrammerActiveGoalContext, AIProgrammerTargetContext } from '../../src/ai-programmer/context/programmerContextTypes.js';
 import type { RecoveryConstraintResult } from '../../src/engine/recoveryEngine.js';
+import { applyDeloadSetVolumeReduction } from '../../src/coaching/periodization/deloadPolicy.js';
 
 const TODAY = '2026-09-15';
 
@@ -115,5 +116,49 @@ describe('buildProgrammingBrief', () => {
     const briefTightBudget = buildProgrammingBrief(targets, [], 'push', [], TODAY, 10); // 10 real minutes — clearly not enough
     const briefGenerousBudget = buildProgrammingBrief(targets, [], 'push', [], TODAY, 120);
     expect(briefTightBudget.approxSessionSetBudget).toBeLessThan(briefGenerousBudget.approxSessionSetBudget);
+  });
+
+  // Fix: previously buildProgrammingBrief never applied deload's
+  // set-volume reduction at all — the AI received the full, non-deload
+  // number and was left to guess its own reduction (see the RIR-drift
+  // and back-omission incidents this fixes). recommendedWeeklyPrimarySets/
+  // recommendedSessionSets must now already reflect an active deload,
+  // via the exact same applyDeloadSetVolumeReduction the deterministic
+  // engine itself uses — never a second, independently-derived formula.
+  describe('deload set-volume reduction (Fix: coaching judgment vs. deterministic reliability)', () => {
+    it('defaults to no reduction when periodization is omitted (backward compatible with every existing call site)', () => {
+      const targets = [target({ targetId: 'triceps-long-head', isSpecialization: true, currentWeeklyPrimarySets: 0 })];
+      const brief = buildProgrammingBrief(targets, [], 'push', [], TODAY, 60);
+      expect(brief.muscles[0]!.recommendedWeeklyPrimarySets).toBe(8); // build-up rule, unreduced
+    });
+
+    it('reduces recommendedWeeklyPrimarySets by the exact real deload formula when deloadActive is true', () => {
+      const targets = [target({ targetId: 'triceps-long-head', isSpecialization: true, currentWeeklyPrimarySets: 0 })];
+      const brief = buildProgrammingBrief(targets, [], 'push', [], TODAY, 60, { deloadActive: true });
+      // 8 is the real, unreduced build-up value (see the sibling test
+      // above) — this asserts against applyDeloadSetVolumeReduction
+      // itself, never a hand-derived expected number, so this test can
+      // never silently drift from the real deload policy.
+      expect(brief.muscles[0]!.recommendedWeeklyPrimarySets).toBe(applyDeloadSetVolumeReduction(8));
+    });
+
+    it('recommendedSessionSets itself also reflects the deload reduction, not just recommendedWeeklyPrimarySets', () => {
+      const targets = [target({ targetId: 'triceps-long-head', isSpecialization: true, currentWeeklyPrimarySets: 20 })];
+      const normal = buildProgrammingBrief(targets, [], 'push', [], TODAY, 60);
+      const deloaded = buildProgrammingBrief(targets, [], 'push', [], TODAY, 60, { deloadActive: true });
+      const normalMuscle = normal.muscles[0]!;
+      const deloadedMuscle = deloaded.muscles[0]!;
+      // .min, not .max: directSetsPerExposureCap (a fixed Blueprint
+      // ceiling) binds .max regardless of the weekly number here, since
+      // this fixture's un-deloaded weekly (20) already exceeds it — .min
+      // is the field that actually moves with recommendedWeeklyPrimarySets.
+      expect(deloadedMuscle.recommendedSessionSets.min).toBeLessThan(normalMuscle.recommendedSessionSets.min);
+    });
+
+    it('never reduces below 1, matching applyDeloadSetVolumeReduction\'s own floor', () => {
+      const targets = [target({ targetId: 'triceps-long-head', isSpecialization: true, currentWeeklyPrimarySets: 1 })];
+      const brief = buildProgrammingBrief(targets, [], 'push', [], TODAY, 60, { deloadActive: true });
+      expect(brief.muscles[0]!.recommendedWeeklyPrimarySets).toBeGreaterThanOrEqual(1);
+    });
   });
 });

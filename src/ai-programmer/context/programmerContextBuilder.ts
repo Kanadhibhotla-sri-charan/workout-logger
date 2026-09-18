@@ -40,7 +40,9 @@ import {
 } from '../../engine/workoutBuilder.js';
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
 import { classifyAestheticTrend, decideVolume } from '../../engine/volumeEngine.js';
-import { SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
+import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
+import { applyDeloadSetVolumeReduction } from '../../coaching/periodization/deloadPolicy.js';
+import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
 import { isTargetCompatibleWithPurpose, type SessionPurpose } from '../../engine/sessionPurpose.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { AestheticAssessmentsRepo } from '../../repositories/aestheticAssessmentsRepo.js';
@@ -217,7 +219,19 @@ export function buildProgrammingBrief(
   sessionPurpose: SessionPurpose | null,
   weeklyProgramSessions: readonly Pick<PersistedWeekSession, 'name'>[],
   asOfDate: string,
-  budgetMinutes: number
+  budgetMinutes: number,
+  // Fix: deload's set-volume reduction was previously never applied
+  // here at all — `recommendedWeeklyPrimarySets`/`recommendedSessionSets`
+  // were always the FULL, non-deload numbers, leaving the AI to notice
+  // "we're in a deload" (from coachingFoundation.programState) and guess
+  // its own reduction, entirely unchecked. `applyDeloadSetVolumeReduction`
+  // is the exact same function/formula workoutBuilder.ts's own
+  // deterministic path already applies at this exact point (weekly,
+  // before the per-session floor/cap math below) — never a second,
+  // independently-derived reduction. Defaults to inactive so every
+  // existing call site (tests, programmerAdequacyValidator.ts's own
+  // comment reference) that doesn't pass this keeps its prior behavior.
+  periodization: { deloadActive: boolean } = { deloadActive: false }
 ): AIProgrammerProgrammingBrief {
   const expectedCoverageTargetIds: readonly BlueprintId[] = sessionPurpose
     ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS]
@@ -249,7 +263,18 @@ export function buildProgrammingBrief(
       development_reference: developmentReference,
     });
 
-    const recommendedWeeklyPrimarySets = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : t.currentWeeklyPrimarySets;
+    const recommendedWeeklyPrimarySetsBeforeDeload = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : t.currentWeeklyPrimarySets;
+    // Fix: the ONE place this deload reduction is applied — exactly once,
+    // before any downstream floor/cap/min/max math reads it (matching
+    // workoutBuilder.ts's own "avoid applying deload reduction twice"
+    // discipline for its analogous `desiredWeekly`). volumeDecision's own
+    // methodology is untouched — this reduces the OUTCOME, never the
+    // decision logic. The AI's system instruction (rule 13) states this
+    // number already reflects any active deload — the AI must never
+    // apply a second reduction of its own on top of it.
+    const recommendedWeeklyPrimarySets = periodization.deloadActive
+      ? applyDeloadSetVolumeReduction(recommendedWeeklyPrimarySetsBeforeDeload)
+      : recommendedWeeklyPrimarySetsBeforeDeload;
 
     const daysThisWeek = compatibleGymDaysThisWeek(t.targetType, t.targetId);
     const perExposureFloor = Math.max(0, Math.ceil(recommendedWeeklyPrimarySets / daysThisWeek));
@@ -473,7 +498,25 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const targetDaySessionName = weeklyProgram?.sessions.find((s) => s.day_index === targetDayIndex)?.name;
   const sessionPurpose = targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null;
 
-  const programmingBrief = buildProgrammingBrief(targets, activeGoals, sessionPurpose, weeklyProgram?.sessions ?? [], currentDate, budgetMinutes);
+  // Fix: the same real periodization read every other planner call site
+  // (workoutBuilder.ts, and per periodizationService.ts's own doc
+  // comment, this "AI foundation context" too) already goes through —
+  // needed so buildProgrammingBrief can apply the exact same deload
+  // set-volume reduction the deterministic engine applies, rather than
+  // leaving that reduction to the AI's own unchecked judgment. Safe to
+  // call on every generation attempt (including a retried one) — a
+  // fresh reactive-trend evaluation is itself rate-limited to once per
+  // real calendar day; a same-day re-read never re-evaluates.
+  const periodization = getPeriodizationContext(db, {
+    programId: user.id,
+    referenceDate: currentDate,
+    weekBoundary: profile.week_start_day,
+    defaultBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
+  });
+
+  const programmingBrief = buildProgrammingBrief(targets, activeGoals, sessionPurpose, weeklyProgram?.sessions ?? [], currentDate, budgetMinutes, {
+    deloadActive: periodization.deloadActive,
+  });
   const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
 
   // Coaching Depth Batch 1 §7: read-only foundation data, scoped to
