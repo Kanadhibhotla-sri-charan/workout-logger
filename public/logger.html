@@ -194,31 +194,75 @@
       if (!generatedMatch) header.appendChild(el('span', { class: 'badge badge-warning', text: 'Unplanned exercise' }));
       card.appendChild(header);
 
-      if (generatedMatch) {
+      // Fix: `perf.target_*` is this exercise's own planned prescription
+      // when it was pre-created with one (e.g. an AI-committed session —
+      // see aiProposalLifecycle.ts) — shown as "Planned" the same way a
+      // deterministic `generatedMatch` already was, so an AI-planned
+      // exercise isn't silently missing its own prescription display.
+      const plannedSource = generatedMatch || (perf.target_sets != null ? perf : null);
+      if (plannedSource) {
         const completed = perf.sets.filter((s) => s.completed).length;
         const skipped = perf.sets.length - completed;
         const pva = el('div', { class: 'planned-vs-actual' });
-        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Planned' }), document.createTextNode(formatSets(generatedMatch.target_sets, generatedMatch.target_reps_min, generatedMatch.target_reps_max))]));
+        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Planned' }), document.createTextNode(formatSets(plannedSource.target_sets, plannedSource.target_reps_min, plannedSource.target_reps_max))]));
         pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(`${completed} completed${skipped ? `, ${skipped} skipped` : ''}`)]));
         card.appendChild(pva);
-        if (generatedMatch.previous_performance) {
+        if (generatedMatch && generatedMatch.previous_performance) {
           card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'} (${formatDate(generatedMatch.previous_performance.date)})` }));
         }
       }
 
-      const table = el('table');
-      const headRow = el('tr');
-      for (const h of ['Set', 'Weight', 'Reps', 'Done']) headRow.appendChild(el('th', { text: h }));
-      table.appendChild(headRow);
-      for (const s of perf.sets) {
-        const row = el('tr');
-        row.appendChild(el('td', { text: String(s.set_number) }));
-        row.appendChild(el('td', { text: s.weight ?? '—' }));
-        row.appendChild(el('td', { text: s.reps ?? '—' }));
-        row.appendChild(el('td', { text: s.completed ? 'Yes' : 'No' }));
-        table.appendChild(row);
+      // Fix: a session that isn't completed yet is still editable — this
+      // used to always render a static read-only table, which meant NO
+      // exercise (AI-committed or otherwise) could ever have weight/reps
+      // entered or corrected once its row existed. `session.status !==
+      // 'completed'` matches the exact same readOnly convention already
+      // used elsewhere in this file (buildExerciseSection).
+      if (session.status === 'completed') {
+        const table = el('table');
+        const headRow = el('tr');
+        for (const h of ['Set', 'Weight', 'Reps', 'Done']) headRow.appendChild(el('th', { text: h }));
+        table.appendChild(headRow);
+        for (const s of perf.sets) {
+          const row = el('tr');
+          row.appendChild(el('td', { text: String(s.set_number) }));
+          row.appendChild(el('td', { text: s.weight ?? '—' }));
+          row.appendChild(el('td', { text: s.reps ?? '—' }));
+          row.appendChild(el('td', { text: s.completed ? 'Yes' : 'No' }));
+          table.appendChild(row);
+        }
+        card.appendChild(table);
+        return card;
       }
-      card.appendChild(table);
+
+      const state = { sets: perf.sets.map((s) => ({ ...s })) };
+      const setsContainer = el('div');
+      renderSetEditor(setsContainer, state, () => { dirty = true; });
+      card.appendChild(setsContainer);
+
+      const addSetBtn = createButton({ label: '+ Add set', variant: 'secondary', onClick: () => {
+        state.sets.push({ set_number: state.sets.length + 1, weight: null, reps: null, completed: false });
+        renderSetEditor(setsContainer, state, () => { dirty = true; });
+        dirty = true;
+      }});
+      card.appendChild(addSetBtn);
+
+      const statusEl = el('div');
+      const actions = el('div', { class: 'btn-row' });
+      const saveBtn = createButton({ label: 'Save exercise', onClick: async () => {
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/exercises/${perf.id}`, {
+            method: 'PATCH',
+            body: { sets: state.sets },
+          }), 'Exercise saved.');
+          dirty = false;
+          await reload();
+        } catch (err) { /* values preserved — card stays as-is (spec §61) */ }
+      }});
+      actions.appendChild(saveBtn);
+      card.appendChild(actions);
+      card.appendChild(statusEl);
+
       return card;
     }
 

@@ -231,3 +231,33 @@ workoutsRouter.post('/:id/exercises', (req, res) => {
     throw err;
   }
 });
+
+/** Fix: the counterpart to `addExercisePerformance` for an exercise row
+ * that already exists — e.g. an AI-committed session
+ * (src/ai-programmer/service/aiProposalLifecycle.ts), whose exercises
+ * are pre-created with empty, uncompleted sets at commit time. Without
+ * this route there was no way to log weight/reps against them at all.
+ * `exerciseId` must belong to `:id`'s own session — never trusted from
+ * the request body alone — so one session's logging can never leak into
+ * another's exercise rows. */
+workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
+  const { sets } = req.body ?? {};
+  if (!Array.isArray(sets)) {
+    return res.status(400).json({ error: 'sets (array) is required' });
+  }
+
+  const database = db(req);
+  const repo = new WorkoutSessionsRepo(database);
+  const session = repo.getSession(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: `No workout session with id "${req.params.id}"` });
+  }
+  const existing = repo.getExercisePerformances(req.params.id).find((p) => p.id === req.params.exerciseId);
+  if (!existing) {
+    return res.status(404).json({ error: `No exercise "${req.params.exerciseId}" on workout session "${req.params.id}"` });
+  }
+
+  const performance = repo.updateExercisePerformanceSets(req.params.exerciseId, sets);
+  if (session.status === 'completed') adaptCurrentWeekIfNeeded(database, session.date);
+  res.json(performance);
+});

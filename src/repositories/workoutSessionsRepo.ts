@@ -328,6 +328,86 @@ export class WorkoutSessionsRepo {
     };
   }
 
+  /** Fix: an AI-committed session's exercises are pre-created (with
+   * empty, uncompleted sets) at commit time by
+   * commitAIProposalToPlannedSession — unlike the deterministic
+   * "generated preview" flow, where addExercisePerformance() above is
+   * the FIRST time an exercise's row ever exists. There was previously
+   * no way to fill in weight/reps for an already-existing exercise row,
+   * so an AI-committed session could never actually be logged against.
+   * This replaces one exercise's own sets wholesale (matching the
+   * frontend's own array-shaped set-editor state) rather than patching
+   * individual set rows by id — simpler, and set identity within one
+   * exercise was never meaningful beyond set_number order. Returns
+   * undefined if workoutExerciseId doesn't exist. */
+  updateExercisePerformanceSets(workoutExerciseId: string, sets: Array<Partial<Set> & { set_number: number }>): ExercisePerformance | undefined {
+    const exerciseRow = this.db.prepare('SELECT * FROM workout_exercises WHERE id = ?').get(workoutExerciseId) as
+      | {
+          id: string;
+          workout_session_id: string;
+          exercise_id: string;
+          order_index: number;
+          role: string;
+          target_sets: number | null;
+          target_reps_min: number | null;
+          target_reps_max: number | null;
+          target_rir_min: number | null;
+          target_rir_max: number | null;
+          target_rest_seconds: number | null;
+        }
+      | undefined;
+    if (!exerciseRow) return undefined;
+
+    const normalizedSets: Set[] = sets
+      .slice()
+      .sort((a, b) => a.set_number - b.set_number)
+      .map((s) => ({ ...DEFAULT_SET, ...s }));
+
+    const deleteSets = this.db.prepare('DELETE FROM workout_sets WHERE workout_exercise_id = ?');
+    const insertSet = this.db.prepare(
+      `INSERT INTO workout_sets
+         (id, workout_exercise_id, set_number, weight, reps, completed, rir, rpe, rest_seconds, technique, tempo, notes)
+       VALUES
+         (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes)`
+    );
+
+    const tx = this.db.transaction(() => {
+      deleteSets.run(workoutExerciseId);
+      for (const set of normalizedSets) {
+        insertSet.run({
+          id: newId('set'),
+          workout_exercise_id: workoutExerciseId,
+          set_number: set.set_number,
+          weight: set.weight,
+          reps: set.reps,
+          completed: set.completed ? 1 : 0,
+          rir: set.rir,
+          rpe: set.rpe,
+          rest_seconds: set.rest_seconds,
+          technique: set.technique,
+          tempo: set.tempo,
+          notes: set.notes,
+        });
+      }
+    });
+    tx();
+
+    return {
+      id: exerciseRow.id,
+      workout_session_id: exerciseRow.workout_session_id,
+      exercise_id: exerciseRow.exercise_id,
+      order: exerciseRow.order_index,
+      role: exerciseRow.role,
+      target_sets: exerciseRow.target_sets,
+      target_reps_min: exerciseRow.target_reps_min,
+      target_reps_max: exerciseRow.target_reps_max,
+      target_rir_min: exerciseRow.target_rir_min,
+      target_rir_max: exerciseRow.target_rir_max,
+      target_rest_seconds: exerciseRow.target_rest_seconds,
+      sets: normalizedSets,
+    };
+  }
+
   /** UI Build Phase §35: every real performance of one exact exercise,
    * across every real session, most-recent-session-first — the History
    * page's exercise filter. A thin, direct join reusing the exact same
