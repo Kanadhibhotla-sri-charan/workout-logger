@@ -92,11 +92,11 @@ describe('VelonaProvider', () => {
     // effectiveMaxTokensForMode's own tests below) so this test still
     // proves pure pass-through of the operator's own configured value.
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
-    const provider = new VelonaProvider({ ...CONFIG, temperature: 0.2, maxTokens: 10000 });
+    const provider = new VelonaProvider({ ...CONFIG, temperature: 0.2, maxTokens: 20000 });
     await provider.generate(BASE_REQUEST);
     const [, init] = fetchMock.mock.calls[0]!;
     const body = JSON.parse(init.body);
-    expect(body.config).toEqual({ temperature: 0.2, max_tokens: 10000 });
+    expect(body.config).toEqual({ temperature: 0.2, max_tokens: 20000 });
   });
 
   it('never includes the API key anywhere in a request/response log helper', async () => {
@@ -270,12 +270,12 @@ describe('VelonaProvider', () => {
   });
 
   describe('effectiveMaxTokensForMode (Coaching Depth follow-up fix)', () => {
-    it('floors generate_session at 8192 when the operator config is lower', () => {
-      expect(effectiveMaxTokensForMode({ ...CONFIG, maxTokens: 4096 }, 'generate_session')).toBe(8192);
+    it('floors generate_session at 16384 when the operator config is lower', () => {
+      expect(effectiveMaxTokensForMode({ ...CONFIG, maxTokens: 4096 }, 'generate_session')).toBe(16384);
     });
 
     it('still honors an operator config already above the floor', () => {
-      expect(effectiveMaxTokensForMode({ ...CONFIG, maxTokens: 12000 }, 'generate_session')).toBe(12000);
+      expect(effectiveMaxTokensForMode({ ...CONFIG, maxTokens: 20000 }, 'generate_session')).toBe(20000);
     });
 
     it('leaves reconcile_week\'s own existing 6144 floor unchanged', () => {
@@ -384,9 +384,9 @@ describe('VelonaProvider', () => {
 
   it('requestDiagnostics.wirePayloadChars reflects a changed max_tokens/temperature config', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { output: '{}' } }));
-    const provider = new VelonaProvider({ ...CONFIG, maxTokens: 8192, temperature: 0.7 });
+    const provider = new VelonaProvider({ ...CONFIG, maxTokens: 20000, temperature: 0.7 });
     const result = await provider.generate(BASE_REQUEST);
-    expect(result.requestDiagnostics!.configuredMaxOutputTokens).toBe(8192);
+    expect(result.requestDiagnostics!.configuredMaxOutputTokens).toBe(20000);
     const [, init] = fetchMock.mock.calls[0]!;
     expect(result.requestDiagnostics!.wirePayloadChars).toBe((init.body as string).length);
   });

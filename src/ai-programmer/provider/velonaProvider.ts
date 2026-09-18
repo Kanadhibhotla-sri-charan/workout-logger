@@ -159,11 +159,16 @@ const RECONCILE_WEEK_MIN_MAX_TOKENS = 6144;
 // `coachingFoundation` context now supplied (periodization state,
 // muscle profiles, historical trends, structural-balance advisories)
 // gives the model materially more to justify, and it spends that in the
-// existing free-text `rationale`/`programmingRationale` arrays. Same
-// targeted, mode-specific floor pattern as RECONCILE_WEEK_MIN_MAX_TOKENS
-// — an operator's own explicit VELONA_MAX_TOKENS still wins whenever it
-// is already configured higher than this floor.
-const GENERATE_SESSION_MIN_MAX_TOKENS = 8192;
+// existing free-text `rationale`/`programmingRationale` arrays. An
+// initial 8192 floor was live-tested against production and still
+// truncated on 2 of ~4 real completions (again landing exactly at the
+// cap) — raised to 16384 for real headroom. Raising this floor costs
+// nothing on its own: a completion is billed for tokens actually
+// generated, never for the configured ceiling. Same targeted,
+// mode-specific floor pattern as RECONCILE_WEEK_MIN_MAX_TOKENS — an
+// operator's own explicit VELONA_MAX_TOKENS still wins whenever it is
+// already configured higher than this floor.
+const GENERATE_SESSION_MIN_MAX_TOKENS = 16384;
 
 /** The actual `max_tokens` value a given request mode should use — the
  * ONE place this decision is made, so `buildVelonaRequestBody` (the
