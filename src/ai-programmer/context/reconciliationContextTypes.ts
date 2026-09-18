@@ -8,7 +8,7 @@
 // AIProgrammerRoutineDayContext) rather than re-declaring them.
 
 import type { Weekday } from '../../contracts/types.js';
-import type { AICrossWeekContext, AIProgrammerActiveGoalContext, AIProgrammerRoutineDayContext, AIProgrammerTargetContext } from './programmerContextTypes.js';
+import type { AICrossWeekContext, AIProgrammerActiveGoalContext, AIProgrammerContext, AIProgrammerRoutineDayContext, AIProgrammerTargetContext } from './programmerContextTypes.js';
 import type { CoachingFoundationContext } from '../../coaching/foundationContext.js';
 
 export const AI_RECONCILIATION_CONTEXT_SCHEMA_VERSION = 'ai-reconciliation-context.v1' as const;
@@ -105,6 +105,12 @@ export interface AIReconciliationContext {
   existingProgram: readonly AIReconciliationExistingDayContext[];
 
   targets: readonly AIProgrammerTargetContext[];
+
+  /** Context-bloat fix (2026-09-18) — see AIProgrammerContext's own doc
+   * comment on this identical field (programmerContextTypes.ts). Needed
+   * here too since `targets` above reuses the same
+   * `plausibleIntensityTechniques`-by-id shape. */
+  intensityTechniqueCatalogue: AIProgrammerContext['intensityTechniqueCatalogue'];
 
   /** Cross-Week Programming Intelligence Fix — see AICrossWeekContext's
    * own doc comment (programmerContextTypes.ts). */

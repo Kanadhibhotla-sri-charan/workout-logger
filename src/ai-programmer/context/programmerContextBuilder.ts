@@ -104,6 +104,39 @@ export function activityTypesForDailyActivity(activity: 'gym' | 'badminton' | 'b
   return activity === 'badminton' || activity === 'both' ? ['badminton'] : [];
 }
 
+/** Context-bloat fix (2026-09-18): every technique id actually
+ * referenced by any of `targets[].validExercises[].plausibleIntensityTechniques`,
+ * deduplicated, resolved to its full text exactly once — shared by both
+ * `buildProgrammerContext` and `buildReconciliationContext` so neither
+ * mode re-embeds the same handful of technique definitions once per
+ * suitable exercise (a real measured bug: 3 real techniques, 324
+ * suitability matches in one realistic single-session context, 75% of
+ * that context's entire size before this fix). */
+export function buildIntensityTechniqueCatalogue(targets: readonly AIProgrammerTargetContext[]): AIProgrammerContext['intensityTechniqueCatalogue'] {
+  const referencedTechniqueIds = new Set<string>();
+  for (const t of targets) {
+    for (const ex of t.validExercises) {
+      for (const id of ex.plausibleIntensityTechniques) referencedTechniqueIds.add(id);
+    }
+  }
+  return Object.fromEntries(
+    [...referencedTechniqueIds].map((id) => {
+      const technique = BlueprintAdapter.getIntensityTechnique(id)!;
+      return [
+        id,
+        {
+          id: technique.id,
+          name: technique.name,
+          what: technique.what,
+          whenToUse: technique.when_it_may_help,
+          whenNotToUse: technique.when_not_to_use,
+          fatigueImplications: technique.fatigue_time_implications,
+        },
+      ];
+    })
+  );
+}
+
 /** Shapes `assembleWeeklyPlanInput`'s per-target output into
  * `AIProgrammerTargetContext[]` — the exact per-target exposure/
  * history/recovery/valid-exercise shaping every AI context (single-
@@ -186,17 +219,13 @@ export function buildTargetContexts(
         }
       }
 
+      // IDs only — see AIProgrammerContext.intensityTechniqueCatalogue's
+      // own doc comment for why (2026-09-18 context-bloat fix: the full
+      // text used to be repeated per suitable exercise).
       const plausibleIntensityTechniques = exercise
         ? BlueprintAdapter.listIntensityTechniques()
             .filter((technique) => isExerciseSuitable(exerciseId, technique))
-            .map((technique) => ({
-              id: technique.id,
-              name: technique.name,
-              what: technique.what,
-              whenToUse: technique.when_it_may_help,
-              whenNotToUse: technique.when_not_to_use,
-              fatigueImplications: technique.fatigue_time_implications,
-            }))
+            .map((technique) => technique.id)
         : [];
 
       let recentConsecutiveSessionsUsed = 0;
@@ -615,6 +644,8 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   }));
   const structuralAdvisories = evaluateStructuralAdvisories(structuralAdvisoryInputs, currentDate);
 
+  const intensityTechniqueCatalogue = buildIntensityTechniqueCatalogue(targets);
+
   // Coaching Depth Batch 1 §7: read-only foundation data, scoped to
   // exactly the same targets this context already covers — never a
   // second, wider target enumeration.
@@ -655,6 +686,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     currentProgram: { weekProgramExists, targetDateLocked: false, lockReason: null },
     trainingExperience,
     structuralAdvisories,
+    intensityTechniqueCatalogue,
     outputRequirements: {
       outputSchemaVersion: 'ai-workout-session-proposal.v1',
       forbiddenBehaviors: FORBIDDEN_BEHAVIORS,

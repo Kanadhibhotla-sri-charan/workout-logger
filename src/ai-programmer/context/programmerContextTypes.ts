@@ -61,15 +61,17 @@ export interface AIProgrammerValidExerciseContext {
    * fatigue/skill/stability demand), never a fabricated suggestion.
    * Empty when no technique's authored criteria match this exercise.
    * This is informational, not a directive — whether applying one is
-   * actually a good idea today is a real judgment call (rule 12). */
-  plausibleIntensityTechniques: readonly {
-    id: string;
-    name: string;
-    what: string;
-    whenToUse: string;
-    whenNotToUse: string;
-    fatigueImplications: string;
-  }[];
+   * actually a good idea today is a real judgment call (rule 12).
+   *
+   * IDs only — the full what/whenToUse/whenNotToUse/fatigueImplications
+   * text for each id lives exactly once in
+   * `AIProgrammerContext.intensityTechniqueCatalogue`, never repeated
+   * per exercise. (Context-bloat fix, 2026-09-18: the prior shape
+   * embedded the full text on every suitable exercise entry — with only
+   * 3 real techniques in the catalogue but 324 suitability matches
+   * across a real session's targets, that was 75% of the entire
+   * context's size, all of it byte-identical duplication.) */
+  plausibleIntensityTechniques: readonly string[];
   /** How many of this target's own most recent real sessions (up to 4)
    * used this exact exercise, consecutively counting back from the most
    * recent — derived from the same `exerciseHistory` already on
@@ -411,6 +413,25 @@ export interface AIProgrammerContext {
    * advisory is evidence to weigh, not an instruction to obey). Empty
    * when nothing is currently flagged. */
   structuralAdvisories: readonly StructuralAdvisory[];
+
+  /** Context-bloat fix (2026-09-18): the full text for every intensity
+   * technique referenced anywhere in `targets[].validExercises[].plausibleIntensityTechniques`,
+   * keyed by id, sent exactly once regardless of how many exercises are
+   * suitable for it. Rule 19 tells the model to look a technique up here
+   * by id. */
+  intensityTechniqueCatalogue: Readonly<
+    Record<
+      string,
+      {
+        id: string;
+        name: string;
+        what: string;
+        whenToUse: string;
+        whenNotToUse: string;
+        fatigueImplications: string;
+      }
+    >
+  >;
 
   outputRequirements: {
     outputSchemaVersion: string;
