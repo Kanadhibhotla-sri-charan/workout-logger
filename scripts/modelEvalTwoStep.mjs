@@ -145,7 +145,7 @@ async function runOnce(db, config, reasoningSystemInstruction, commitSystemInstr
   try {
     commitResponse = await provider.generate({ mode: 'generate_session', systemInstruction: commitSystemInstruction, context: commitContext, outputSchema, requestId });
   } catch (err) {
-    return { outcome: 'commit_provider_error', detail: err.message, latencyMs: Date.now() - started, reasoningUsage: reasoningResponse.usage };
+    return { outcome: 'commit_provider_error', detail: err.message, latencyMs: Date.now() - started, reasoningUsage: reasoningResponse.usage, reasoning };
   }
   const latencyMs = Date.now() - started;
   const totalCostUsd = costUsd(reasoningResponse.usage, candidate) + costUsd(commitResponse.usage, candidate);
@@ -155,7 +155,7 @@ async function runOnce(db, config, reasoningSystemInstruction, commitSystemInstr
     parsedJson = JSON.parse(commitResponse.rawText);
   } catch {
     const truncated = isLikelyTruncatedOutput(commitResponse.finishReason, commitResponse.usage?.outputTokens, commitResponse.requestDiagnostics?.configuredMaxOutputTokens);
-    return { outcome: truncated ? 'truncated' : 'invalid_json', latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawCommitText: commitResponse.rawText?.slice(0, 2000) };
+    return { outcome: truncated ? 'truncated' : 'invalid_json', latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawCommitText: commitResponse.rawText?.slice(0, 2000), reasoning };
   }
 
   // The raw, as-produced program — kept on every outcome from here on
