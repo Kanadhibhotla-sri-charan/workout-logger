@@ -50,14 +50,13 @@ const REPS_PER_MODEL = Number(process.env.EVAL_REPS || 5);
 const CONCURRENCY = Number(process.env.EVAL_CONCURRENCY || 4);
 
 // USD per 1M tokens — Velona's live /models catalog, fetched
-// 2026-09-18. User's own explicit candidate list for this batch: GLM and
-// Mistral swapped out, Luna Pro back in, both Qwen candidates swapped to
-// their "Thinking" variant.
+// 2026-09-18. This batch: the two non-thinking Qwen variants from the
+// original candidate list, re-run against the properly-seeded scenario
+// with the repair fixes applied, for direct comparison against their
+// own "Thinking" siblings' run.
 const CANDIDATES = [
-  { model: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash (current prod default)', inputPer1M: 0.049, outputPer1M: 0.098 },
-  { model: 'qwen/qwen3-next-80b-a3b-thinking', label: 'Qwen3 Next 80B A3B Thinking', inputPer1M: 0.15, outputPer1M: 1.2 },
-  { model: 'qwen/qwen3-30b-a3b-thinking-2507', label: 'Qwen3 30B A3B Thinking 2507', inputPer1M: 0.2, outputPer1M: 2.4 },
-  { model: 'openai/gpt-5.6-luna-pro', label: 'GPT-5.6 Luna Pro', inputPer1M: 0.2, outputPer1M: 1.2 },
+  { model: 'qwen/qwen3-next-80b-a3b-instruct', label: 'Qwen3 Next 80B A3B Instruct', inputPer1M: 0.09, outputPer1M: 1.1 },
+  { model: 'qwen/qwen3-30b-a3b', label: 'Qwen3 30B A3B', inputPer1M: 0.12, outputPer1M: 0.5 },
 ];
 
 // A real, deliberately small schema for the reasoning step — NOT `null`
