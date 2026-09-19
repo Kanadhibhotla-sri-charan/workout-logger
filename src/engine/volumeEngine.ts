@@ -31,6 +31,7 @@ import type { TargetType } from './goalResolver.js';
 import { PROGRESSION_INCREMENTS } from './config.js';
 import { daysBetween } from './dateMath.js';
 import type { DevelopmentReference } from './developmentReferenceEngine.js';
+import type { TrainingExperienceLevel } from './intensityTechniques.js';
 
 export type AestheticProgressTrend = 'improving' | 'stagnant' | 'declining' | 'insufficient_data';
 
@@ -97,6 +98,20 @@ export interface VolumeDecisionInput {
    * which has no Blueprint development package at all).
    */
   development_reference?: DevelopmentReference | null;
+  /** Assessment-Gate Workaround (2026-09-19), explicit user request,
+   * temporary — logged in docs/logs/ as a stopgap pending the real fix
+   * (a real UI for logging aesthetic assessments; see that entry's own
+   * "Not yet done" section for the full plan). No UI anywhere in the app
+   * lets a real assessment ever be recorded, so `aesthetic_progress_trend`
+   * is 'insufficient_data' essentially forever for any goal — the
+   * increase path below (spec §10-11, `introspection_confirmed_...`)
+   * never has a real way to fire, and a target sits at its conservative
+   * starting volume indefinitely with no path to its own real Blueprint
+   * reference. For a user-confirmed 'advanced' trainee specifically —
+   * not novice/intermediate, where the build-up safety margin matters
+   * more — this lets volume progress automatically without waiting on
+   * an assessment that currently cannot be logged at all. */
+  training_experience?: TrainingExperienceLevel | null;
 }
 
 export interface VolumeDecision {
@@ -205,7 +220,15 @@ export function decideVolume(input: VolumeDecisionInput): VolumeDecision {
   // for a muscle whose own package recommends starting lower.
   if (input.current_weekly_primary_sets === 0) {
     const packageRef = input.development_reference?.weekly_direct_set_reference;
-    const startingSets = packageRef != null ? Math.min(starting_point_sets[0], packageRef) : starting_point_sets[0];
+    // Assessment-Gate Workaround: an advanced trainee skips the extra
+    // conservative-universal-number comparison entirely and starts
+    // directly at this muscle's own real Blueprint reference (when one
+    // exists) — the "build up gradually" caution below is specifically
+    // aimed at protecting a less experienced lifter from jumping
+    // straight to a demanding number; a confirmed advanced trainee
+    // doesn't need that same margin.
+    const startingSets =
+      packageRef != null ? (input.training_experience === 'advanced' ? packageRef : Math.min(starting_point_sets[0], packageRef)) : starting_point_sets[0];
     return {
       target_type: input.target_type,
       target_id: input.target_id,
@@ -215,16 +238,20 @@ export function decideVolume(input: VolumeDecisionInput): VolumeDecision {
       introspection_checklist: null,
       reasoning:
         packageRef != null
-          ? `No existing direct weekly volume for this target — starting at ${startingSets} sets/week (the lower of Blueprint's ` +
-            `conservative universal starting point and this target's own ${input.development_reference!.level} package reference of ` +
-            `${packageRef} sets/week), never jumping to the upper range regardless of goal priority (spec §9).`
+          ? input.training_experience === 'advanced'
+            ? `No existing direct weekly volume for this target — starting directly at this target's own ${input.development_reference!.level} ` +
+              `package reference of ${startingSets} sets/week (Assessment-Gate Workaround: skipping Blueprint's conservative universal ` +
+              `starting point, since training_experience is confirmed 'advanced').`
+            : `No existing direct weekly volume for this target — starting at ${startingSets} sets/week (the lower of Blueprint's ` +
+              `conservative universal starting point and this target's own ${input.development_reference!.level} package reference of ` +
+              `${packageRef} sets/week), never jumping to the upper range regardless of goal priority (spec §9).`
           : `No existing direct weekly volume for this target — starting at Blueprint's conservative starting point ` +
             `(${starting_point_sets[0]} sets/week), never jumping to the upper range regardless of goal priority (spec §9).`,
     };
   }
 
   // §13: aesthetic outcome is the top-level signal.
-  if (input.aesthetic_progress_trend === 'improving' || input.aesthetic_progress_trend === 'insufficient_data') {
+  if (input.aesthetic_progress_trend === 'improving') {
     return {
       target_type: input.target_type,
       target_id: input.target_id,
@@ -232,10 +259,43 @@ export function decideVolume(input: VolumeDecisionInput): VolumeDecision {
       recommended_weekly_primary_sets: input.current_weekly_primary_sets,
       blueprint_reference_range: referenceRange,
       introspection_checklist: null,
-      reasoning:
-        input.aesthetic_progress_trend === 'improving'
-          ? 'Aesthetic progress is improving — maintain is the default even when performance data alone might suggest more (§10, §13).'
-          : 'No recent (or no non-stale) aesthetic assessment to justify a change — maintaining current volume rather than acting on insufficient evidence.',
+      reasoning: 'Aesthetic progress is improving — maintain is the default even when performance data alone might suggest more (§10, §13).',
+    };
+  }
+
+  if (input.aesthetic_progress_trend === 'insufficient_data') {
+    // Assessment-Gate Workaround: with no UI anywhere to ever log a real
+    // assessment, 'insufficient_data' is the permanent, unbreakable
+    // state for almost every goal — a plain "maintain" here means
+    // volume can never move past its starting point at all. For a
+    // confirmed advanced trainee, allow the exact same small, bounded
+    // step the stagnation-confirmed path below already uses, gated on
+    // the same recovery_ok check — never for novice/intermediate, where
+    // the real evidence-before-increasing principle still fully applies.
+    if (input.training_experience === 'advanced' && input.recovery_ok) {
+      const recommended = Math.min(input.current_weekly_primary_sets + PROGRESSION_INCREMENTS.weeklyExposureUnits, referenceRange.max);
+      return {
+        target_type: input.target_type,
+        target_id: input.target_id,
+        action: recommended > input.current_weekly_primary_sets ? 'increase' : 'maintain',
+        recommended_weekly_primary_sets: recommended,
+        blueprint_reference_range: referenceRange,
+        introspection_checklist: null,
+        reasoning:
+          `Assessment-Gate Workaround: no aesthetic assessment exists to classify real progress (no UI currently lets one be logged), ` +
+          `but training_experience is confirmed 'advanced' and recovery is acceptable — a small configured increase of ` +
+          `${PROGRESSION_INCREMENTS.weeklyExposureUnits} sets/week toward this target's own reference ceiling of ${referenceRange.max}, ` +
+          `rather than staying stuck at the starting point indefinitely. Temporary, pending a real assessment-logging UI (see docs/logs/).`,
+      };
+    }
+    return {
+      target_type: input.target_type,
+      target_id: input.target_id,
+      action: 'maintain',
+      recommended_weekly_primary_sets: input.current_weekly_primary_sets,
+      blueprint_reference_range: referenceRange,
+      introspection_checklist: null,
+      reasoning: 'No recent (or no non-stale) aesthetic assessment to justify a change — maintaining current volume rather than acting on insufficient evidence.',
     };
   }
 

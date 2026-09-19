@@ -1217,6 +1217,9 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // classification, so decideVolume's starting-point/ceiling and
       // rankTarget's/classification's threshold can never disagree.
       development_reference: developmentReference,
+      // Assessment-Gate Workaround (2026-09-19) — see volumeEngine.ts's
+      // own doc comment on VolumeDecisionInput.training_experience.
+      training_experience: input.trainingExperience,
     });
     log.push(`${target.target_type} "${target.target_id}": ${volumeDecision.reasoning}`);
 

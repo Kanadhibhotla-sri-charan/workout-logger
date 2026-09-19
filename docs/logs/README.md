@@ -68,3 +68,4 @@ story of how the app got to its current state.
 - [2026-09-16-60-legs-session-exercise-cap.md](2026-09-16-60-legs-session-exercise-cap.md)
 - [2026-09-18-61-ai-programmer-rules-audit-and-coaching-depth-wiring.md](2026-09-18-61-ai-programmer-rules-audit-and-coaching-depth-wiring.md)
 - [2026-09-18-62-intensity-technique-context-bloat-fix.md](2026-09-18-62-intensity-technique-context-bloat-fix.md)
+- [2026-09-19-63-assessment-gate-workaround-and-goal-volume-decision.md](2026-09-19-63-assessment-gate-workaround-and-goal-volume-decision.md)
