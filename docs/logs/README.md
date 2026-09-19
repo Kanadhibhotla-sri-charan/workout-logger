@@ -71,3 +71,4 @@ story of how the app got to its current state.
 - [2026-09-19-63-assessment-gate-workaround-and-goal-volume-decision.md](2026-09-19-63-assessment-gate-workaround-and-goal-volume-decision.md)
 - [2026-09-19-64-sub-target-exercise-scope-and-leg-day-numbers.md](2026-09-19-64-sub-target-exercise-scope-and-leg-day-numbers.md)
 - [2026-09-19-65-detailed-implementation-log.md](2026-09-19-65-detailed-implementation-log.md) — Complete implementation log with test eval suite design, all challenges & solutions, technical decisions, code changes, and verification results
+- [2026-09-19-66-deployment-guide.md](2026-09-19-66-deployment-guide.md) — Complete deployment guide: pre-checks, procedure, monitoring, rollback, testing strategy, risk assessment, timelines
