@@ -45,7 +45,7 @@ import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/dev
 import { getProfile, applyRepRangeBias } from '../coaching/profiles/muscleProfileService.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_PHYSIQUE_TARGETS, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, sessionRealismCapFor, TIME_ESTIMATION } from './config.js';
+import { ABS_PHYSIQUE_TARGETS, DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_PHYSIQUE_TARGETS, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, sessionRealismCapFor, TIME_ESTIMATION } from './config.js';
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
@@ -2027,7 +2027,9 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * extra 3 slots are for abs specifically — `legExerciseShareMax` keeps
    * leg work itself capped at 5 even then, enforced below via
    * `legExerciseCountKept`). Every other purpose keeps the general
-   * 7-target/9-exercise cap. */
+   * 8-target/10-exercise cap (raised 2026-09-19), with abs itself capped
+   * at `absExerciseShareMax` (2) of that total — enforced below via
+   * `absExerciseCountKept`, mirroring the leg-day mechanism exactly. */
   function applySessionRealismCap(dayCandidates: typeof candidates, sessionPurpose: SessionPurpose | null): { kept: typeof candidates; deferred: typeof candidates } {
     const targetIdsInSession = [...new Set(dayCandidates.map((c) => c.planned.target_id))];
     const caps = sessionRealismCapFor(sessionPurpose, targetIdsInSession);
@@ -2053,6 +2055,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     const deferred: typeof candidates = [];
     let keptTargetCount = 0;
     let legExerciseCountKept = 0;
+    let absExerciseCountKept = 0;
     for (const key of order) {
       const group = byTarget.get(key)!;
       if (keptTargetCount >= caps.maxTargets) {
@@ -2063,9 +2066,12 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         continue;
       }
       const isLegGroup = caps.legExerciseShareMax !== null && LEGS_PHYSIQUE_TARGETS.includes(group[0]!.planned.target_id);
+      const isAbsGroup = caps.absExerciseShareMax !== null && ABS_PHYSIQUE_TARGETS.includes(group[0]!.planned.target_id);
       const remainingExerciseSlots = isLegGroup
         ? Math.min(caps.maxExercises - kept.length, caps.legExerciseShareMax! - legExerciseCountKept)
-        : caps.maxExercises - kept.length;
+        : isAbsGroup
+          ? Math.min(caps.maxExercises - kept.length, caps.absExerciseShareMax! - absExerciseCountKept)
+          : caps.maxExercises - kept.length;
       if (remainingExerciseSlots <= 0) {
         deferred.push(...group);
         continue;
@@ -2074,6 +2080,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         kept.push(...group);
         keptTargetCount++;
         if (isLegGroup) legExerciseCountKept += group.length;
+        if (isAbsGroup) absExerciseCountKept += group.length;
       } else {
         // The starvation fix itself: this target's own full exercise
         // count doesn't fit what's left, but SOME of it does — keep
@@ -2082,6 +2089,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         deferred.push(...group.slice(remainingExerciseSlots));
         keptTargetCount++;
         if (isLegGroup) legExerciseCountKept += remainingExerciseSlots;
+        if (isAbsGroup) absExerciseCountKept += remainingExerciseSlots;
       }
     }
     return { kept, deferred };

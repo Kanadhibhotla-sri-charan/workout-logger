@@ -58,12 +58,14 @@ function weeklyInput(overrides: Partial<WeeklyPlanInput> = {}): WeeklyPlanInput 
 // (proving the cap is a real count limit, never a time-derived one).
 const SIX_PUSH_TARGET_IDS = ['mid-pec', 'upper-pec', 'lower-pec', 'side-delt', 'obliques', 'triceps'];
 
-// Nine real push/universal-compatible targets — more than the raised
-// maxTargetsPerSession (7) — used specifically to prove the RAISED
+// All nine real push/universal-compatible targets that exist at all
+// (the 7 PUSH_PHYSIQUE_TARGETS plus the 2 remaining UNIVERSAL_PHYSIQUE_TARGETS
+// now that neck-thickness has been removed) — more than the raised
+// maxTargetsPerSession (8) — used specifically to prove the RAISED
 // ceiling: strictly more than 4 (the old limit) may now share a
-// session, while the new 7-muscle ceiling (and the unchanged 9-exercise
+// session, while the new 8-muscle ceiling (and the raised 10-exercise
 // ceiling) still both hold.
-const NINE_TARGET_IDS = ['mid-pec', 'upper-pec', 'lower-pec', 'side-delt', 'obliques', 'triceps', 'triceps-long-head', 'rectus-abdominis', 'neck-thickness'];
+const NINE_TARGET_IDS = ['mid-pec', 'upper-pec', 'lower-pec', 'front-delt', 'side-delt', 'triceps', 'triceps-long-head', 'obliques', 'rectus-abdominis'];
 
 describe('Session Realism Cap — a real session never exceeds the hard exercise/muscle limits', () => {
   it('the raised muscle ceiling (7, was 4) actually lets more than 4 real muscles share a session, while both hard caps still hold', () => {
@@ -98,29 +100,24 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
   it('Exercise-Slot-Consumption Starvation Fix: a legitimate top-N muscle whose own full exercise count no longer fits the remaining budget still gets SOME real work, never zero', () => {
     // current_weekly_primary_sets: 0 is deliberately the "untouched,
     // needs real volume" case that previously made several targets each
-    // need multiple exercises, exhausting the 9-exercise budget before
+    // need multiple exercises, exhausting the exercise budget before
     // every offered target got its turn — the exact scenario that,
     // before this fix, could exclude a legitimate, correctly-ranked
     // muscle (like the real triceps-long-head starvation case this fix
     // was diagnosed from) ENTIRELY, rather than giving it a fair,
     // reduced share.
     //
-    // Coaching Depth Batch 2 wires obliques'/rectus-abdominis' own
-    // curated preferred frequency into their weekly reference, which
-    // shifted this exact fixture's boundary so 'rectus-abdominis' at
-    // current_weekly_primary_sets: 0 now lands on an exact multiple of
-    // the 9-exercise budget (no partial trim at all). Giving
-    // rectus-abdominis a small non-zero starting volume (4, still a
-    // real, large deficit against its own 32-set weekly reference)
-    // shifts its own exercise count enough to genuinely misalign the
-    // boundary again — empirically (verified via direct instrumentation
-    // against this exact fixture), 'mid-pec' is now the target whose
-    // own full need doesn't fit what's left of the 9-exercise budget
-    // once 'obliques', 'rectus-abdominis', and 'lower-pec' are placed
-    // ahead of it.
-    const targets = NINE_TARGET_IDS.map((id) =>
-      normalDevTarget({ target_id: id, current_weekly_primary_sets: id === 'rectus-abdominis' ? 4 : 0 })
-    );
+    // Session Realism Cap raised 7/9 -> 8/10, Abs Session Exercise Share
+    // Cap added, neck-thickness removed (all 2026-09-19) shifted this
+    // fixture's exact boundary — 'mid-pec' now fits its own full need
+    // under the raised budget, so it no longer proves a partial trim.
+    // Re-derived empirically against the current rules: 'side-delt'
+    // (uncapped need 3 exercises) is the target whose full need doesn't
+    // fit what's left of the 10-exercise budget once the targets ranked
+    // ahead of it are placed — stable across every current_weekly_primary_sets
+    // value tried for the other targets, so this isn't a fragile,
+    // precisely-tuned boundary like the prior fixture was.
+    const targets = NINE_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 0 }));
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets }));
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
 
@@ -131,28 +128,28 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
     // this test would prove nothing).
     expect(monday.plannedWork.length).toBe(SESSION_REALISM_CAP.maxExercisesPerSession);
 
-    // The real proof: 'mid-pec' got SOME real work here...
-    const midPecExercisesInCappedSession = monday.plannedWork.filter((w) => w.target_id === 'mid-pec').length;
-    expect(midPecExercisesInCappedSession).toBeGreaterThan(0);
+    // The real proof: 'side-delt' got SOME real work here...
+    const sideDeltExercisesInCappedSession = monday.plannedWork.filter((w) => w.target_id === 'side-delt').length;
+    expect(sideDeltExercisesInCappedSession).toBeGreaterThan(0);
 
     // ...strictly fewer than its own natural, uncapped need (proving
     // this is a genuine partial trim, not a coincidence of it only ever
     // needing one exercise) — checked by building the exact same target
-    // alone, with the full 9-exercise budget entirely to itself.
-    const isolatedPlan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [normalDevTarget({ target_id: 'mid-pec', current_weekly_primary_sets: 0 })] }));
-    const midPecExercisesUncapped = isolatedPlan.sessions.find((s) => s.date === '2026-08-31')!.plannedWork.length;
-    expect(midPecExercisesUncapped).toBeGreaterThan(midPecExercisesInCappedSession);
+    // alone, with the full exercise budget entirely to itself.
+    const isolatedPlan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [normalDevTarget({ target_id: 'side-delt', current_weekly_primary_sets: 0 })] }));
+    const sideDeltExercisesUncapped = isolatedPlan.sessions.find((s) => s.date === '2026-08-31')!.plannedWork.length;
+    expect(sideDeltExercisesUncapped).toBeGreaterThan(sideDeltExercisesInCappedSession);
 
     // A partially-trimmed target must never ALSO carry a
     // session_realism_cap skip (assertNoContradictoryProgramState's own
     // invariant) — it already has real plannedWork.
-    expect(capSkips.some((s) => s.target_id === 'mid-pec')).toBe(false);
+    expect(capSkips.some((s) => s.target_id === 'side-delt')).toBe(false);
 
     // Its reduced (not zero, not full) delivered volume is real and
     // traceable, exactly like any other under-delivered target.
-    const midPecAllocation = plan.targetAllocations.find((a) => a.target_id === 'mid-pec')!;
-    expect(midPecAllocation.deliveredDirectSets).toBeGreaterThan(0);
-    expect(midPecAllocation.unmetDirectSets).toBeGreaterThan(0);
+    const sideDeltAllocation = plan.targetAllocations.find((a) => a.target_id === 'side-delt')!;
+    expect(sideDeltAllocation.deliveredDirectSets).toBeGreaterThan(0);
+    expect(sideDeltAllocation.unmetDirectSets).toBeGreaterThan(0);
 
     // Every target that DOES have real plannedWork also has real,
     // non-zero delivered volume, and is never simultaneously reported

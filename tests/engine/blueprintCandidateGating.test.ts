@@ -161,40 +161,51 @@ describe('Requirement E — generic (non-rear-delt) package-gating regression te
 });
 
 describe('Requirement F — negative test: genuine prescription gap', () => {
-  it('a target with no development-package coverage at all (neck-thickness) is surfaced as a real data-quality gap — never fabricated, never blamed on mere package absence', () => {
-    // Equipment Filter Fix: neck-thickness (unlike rear-delt) is used
-    // here instead of rear-delt-fly specifically, because equipment can
-    // no longer isolate a single candidate — with the full candidate
-    // pool always in play, a genuine per-exercise gap (like
-    // rear-delt-fly's) would just be substituted away by the real
-    // per-attempt retry onto a real alternative that DOES have a
-    // prescription (e.g. face-pull), which is the CORRECT behavior,
-    // not a gap. neck-thickness instead has real Blueprint exercises
-    // (neck-extension, neck-flexion) but NO development package exists
-    // for its muscle group at ANY level — confirmed below — so every
-    // real candidate genuinely lacks a resolvable prescription
-    // regardless of which one ranking prefers, guaranteeing this
-    // exercises the true "entire real pool exhausted" gap path.
-    expect(lookupExercisePrescriptionAnyLevel('neck-thickness', 'neck-extension')).toBeNull();
-    expect(lookupExercisePrescriptionAnyLevel('neck-thickness', 'neck-flexion')).toBeNull();
-    expect(BlueprintAdapter.getExercise('neck-extension')).toBeDefined();
-    expect(BlueprintAdapter.getExercise('neck-flexion')).toBeDefined();
+  it('a target with no development-package coverage at all (adductors) is surfaced as a real data-quality gap — never fabricated, never blamed on mere package absence', () => {
+    // Originally used neck-thickness for this; neck-thickness was
+    // removed from UNIVERSAL_PHYSIQUE_TARGETS (2026-09-19, explicit user
+    // request — never a real training target) and is no longer
+    // schedulable on any session purpose at all, so it can no longer
+    // reach this gap path. adductors (a real LEGS target) has the same
+    // property and a larger real pool (9 candidates, all genuinely
+    // unprescribed for this specific target — confirmed below) rather
+    // than neck's 2, so the "entire real pool exhausted" property this
+    // test exists to prove is exercised even more robustly.
+    const adductorCandidates = [
+      'back-squat',
+      'bulgarian-split-squat-hip-dominant',
+      'bulgarian-split-squat-knee-dominant',
+      'dumbbell-squat-sides',
+      'hip-adduction',
+      'leg-press',
+      'smith-machine-bulgarian-split-squat',
+      'smith-machine-squat',
+      'static-lunge',
+    ];
+    for (const exerciseId of adductorCandidates) {
+      expect(lookupExercisePrescriptionAnyLevel('adductors', exerciseId)).toBeNull();
+      expect(BlueprintAdapter.getExercise(exerciseId)).toBeDefined();
+    }
 
     const result = buildWorkout({
-      date: '2026-08-31',
-      weekday: 'monday',
+      // adductors is a real LEGS-session target — with Monday/Tuesday/
+      // Wednesday as the week's only available gym days (rotation:
+      // push, pull, legs, upper), Wednesday is this week's real legs
+      // day (same convention Requirement E uses above).
+      date: '2026-09-02',
+      weekday: 'wednesday',
       budget_minutes: 60,
       available_equipment: FULL_EQUIPMENT,
-      available_training_days: ['monday'],
-      targets: [normalDevTarget({ target_id: 'neck-thickness' })],
+      available_training_days: ['monday', 'tuesday', 'wednesday'],
+      targets: [normalDevTarget({ target_id: 'adductors' })],
     });
 
-    // No exercise is fabricated for neck-thickness — there is
-    // genuinely no valid Blueprint prescription anywhere for either of
-    // its real candidates.
-    expect(result.exercises.find((e) => e.target_id === 'neck-thickness')).toBeUndefined();
+    // No exercise is fabricated for adductors — there is genuinely no
+    // valid Blueprint prescription anywhere for any of its real
+    // candidates.
+    expect(result.exercises.find((e) => e.target_id === 'adductors')).toBeUndefined();
 
-    const skip = result.skipped_targets.find((s) => s.target_id === 'neck-thickness');
+    const skip = result.skipped_targets.find((s) => s.target_id === 'adductors');
     expect(skip).toBeDefined();
     // The real reason is a genuine prescription/data gap...
     expect(skip!.reason).toContain('resolvable Blueprint prescription');

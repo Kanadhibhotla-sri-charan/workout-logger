@@ -6,7 +6,7 @@
 // already has) rather than a second, drifting copy.
 
 import type Database from 'better-sqlite3';
-import { LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
+import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
@@ -124,6 +124,14 @@ export function validateWeekReconciliationDomain(
         const legExerciseCount = day.session.exercises.filter((ex) => LEGS_PHYSIQUE_TARGETS.includes(ex.targetId)).length;
         if (legExerciseCount > caps.legExerciseShareMax) {
           errors.push(`${path}.session: ${legExerciseCount} leg exercises — exceeds the leg-day exercise cap of ${caps.legExerciseShareMax} (extra room in an abs-paired leg day is for abs, not more leg work)`);
+        }
+      }
+      // Abs Session Exercise Share Cap (2026-09-19), explicit user
+      // request: general (non-legs) mirror of the leg-day check above.
+      if (caps.absExerciseShareMax !== null) {
+        const absExerciseCount = day.session.exercises.filter((ex) => ABS_PHYSIQUE_TARGETS.includes(ex.targetId)).length;
+        if (absExerciseCount > caps.absExerciseShareMax) {
+          errors.push(`${path}.session: ${absExerciseCount} abs exercises — exceeds the abs-exercise share cap of ${caps.absExerciseShareMax} for this session`);
         }
       }
     }

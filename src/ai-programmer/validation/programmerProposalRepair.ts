@@ -26,7 +26,7 @@
 // Scoped to generate_session only; reconcile_week's own repair (a larger,
 // separate change) is not built here.
 
-import { LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
+import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
 
@@ -85,6 +85,15 @@ function trimToSessionCaps(exercises: readonly AIWorkoutExerciseProposal[], cont
   if (legCap !== null) {
     while (result.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length > legCap) {
       const next = removeLastNonGoalMatching(result, context, (e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId));
+      if (!next) break;
+      result = next;
+    }
+  }
+
+  const absCap = caps().absExerciseShareMax;
+  if (absCap !== null) {
+    while (result.filter((e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)).length > absCap) {
+      const next = removeLastNonGoalMatching(result, context, (e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId));
       if (!next) break;
       result = next;
     }

@@ -136,7 +136,7 @@ describe('repairProposal', () => {
     const guidances: AIProgrammerMuscleGuidance[] = [];
     const exercises: AIWorkoutExerciseProposal[] = [];
     // 1 goal-oriented target + 9 non-goal targets = 10 distinct targets,
-    // over the default (non-legs) muscle-count cap of 7.
+    // over the default (non-legs) muscle-count cap of 8.
     for (let i = 0; i < 10; i++) {
       const targetId = i === 0 ? 'goal-target' : `filler-${i}`;
       targets.push(target({ targetId, validExercises: [validExercise({ exerciseId: `ex-${i}`, role: 'primary' })] }));
@@ -147,16 +147,16 @@ describe('repairProposal', () => {
     const p = proposal(exercises);
 
     const repaired = repairProposal(p, context);
-    expect(new Set(repaired.exercises.map((e) => e.targetId)).size).toBe(7);
+    expect(new Set(repaired.exercises.map((e) => e.targetId)).size).toBe(8);
     expect(repaired.exercises.some((e) => e.targetId === 'goal-target')).toBe(true);
   });
 
   it('trims non-goal exercises first when the repaired session exceeds the exercise-count cap, with the muscle-count cap not itself binding', () => {
-    // 2 targets only (well under the muscle cap of 7), but 10 exercises
-    // total (over the exercise cap of 9) — isolates the exercise-count
+    // 2 targets only (well under the muscle cap of 8), but 12 exercises
+    // total (over the exercise cap of 10) — isolates the exercise-count
     // branch specifically.
     const goalExercises = Array.from({ length: 3 }, (_, i) => exercise({ exerciseId: `goal-ex-${i}`, targetId: 'goal-target', sets: 2 }));
-    const fillerExercises = Array.from({ length: 7 }, (_, i) => exercise({ exerciseId: `filler-ex-${i}`, targetId: 'filler-target', sets: 2 }));
+    const fillerExercises = Array.from({ length: 9 }, (_, i) => exercise({ exerciseId: `filler-ex-${i}`, targetId: 'filler-target', sets: 2 }));
     const context = contextWith(
       [
         target({ targetId: 'goal-target', validExercises: goalExercises.map((e) => validExercise({ exerciseId: e.exerciseId, role: 'primary' })) }),
@@ -171,7 +171,7 @@ describe('repairProposal', () => {
     const p = proposal([...goalExercises, ...fillerExercises]);
 
     const repaired = repairProposal(p, context);
-    expect(repaired.exercises.length).toBe(9);
+    expect(repaired.exercises.length).toBe(10);
     expect(repaired.exercises.filter((e) => e.targetId === 'goal-target').length).toBe(3); // every goal exercise kept
   });
 });

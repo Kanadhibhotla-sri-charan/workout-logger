@@ -18,7 +18,7 @@
 // remains fully eligible, and nothing here inspects WHICH exercise was
 // chosen, only how much total volume landed on which target.
 
-import { LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
+import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
 
@@ -192,6 +192,17 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
     const legExerciseCount = proposal.exercises.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length;
     if (legExerciseCount > caps.legExerciseShareMax) {
       errors.push(`session has ${legExerciseCount} leg exercises — exceeds the leg-day exercise cap of ${caps.legExerciseShareMax} (extra room in an abs-paired leg day is for abs, not more leg work)`);
+    }
+  }
+  // Abs Session Exercise Share Cap (2026-09-19), explicit user request:
+  // the general (non-legs) mirror of the leg-day check above — abs
+  // exercises never eat more than absExerciseShareMax of the session's
+  // total exercise budget, regardless of how many abs targets are
+  // eligible today.
+  if (caps.absExerciseShareMax !== null) {
+    const absExerciseCount = proposal.exercises.filter((e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)).length;
+    if (absExerciseCount > caps.absExerciseShareMax) {
+      errors.push(`session has ${absExerciseCount} abs exercises — exceeds the abs-exercise share cap of ${caps.absExerciseShareMax} for this session`);
     }
   }
 

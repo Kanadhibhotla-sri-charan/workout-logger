@@ -127,22 +127,47 @@ describe('Post-v2 Corrective Fix v2 §24.A/§24.G — minimum spacing is NOT the
     // its own minimum-spacing check (1 day since Thursday) would pass.
     expect(friday.length).toBe(0);
 
+    // Abs Session Exercise Share Cap (2026-09-19): on a non-legs day,
+    // obliques' own exercises are capped at ABS_SESSION_EXERCISE_SHARE_MAX
+    // (2), so a real single exposure now delivers less than sessionCap
+    // (the raw, uncapped Blueprint per-exposure reference) on push/pull/
+    // upper days — but NOT on a legs day, which has its own separate,
+    // uncapped abs handling. Monday(push)/Tuesday(pull)/Thursday(upper)
+    // are all non-legs and must match each other; Wednesday(legs) is
+    // deliberately excluded from that comparison since it's genuinely
+    // allowed to differ. Verified against the real Monday exposure
+    // itself rather than hardcoded, so this stays correct regardless of
+    // exactly how many sets those 2 exercises carry.
+    const mondaySets = monday.reduce((sum, e) => sum + e.sets, 0);
+    expect(mondaySets).toBeLessThan(sessionCap); // confirms the abs cap, not Blueprint's own reference, is now binding here on this non-legs day
+    for (const day of [tuesday, thursday]) {
+      expect(day.reduce((sum, e) => sum + e.sets, 0)).toBe(mondaySets);
+    }
+
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'obliques')!;
-    // Exactly four exposures' worth delivered (Monday-Thursday), never
-    // a fifth crammed in — and never silently written off as "unmet"
+    // Exactly the sum of the four real exposures delivered (Monday-
+    // Thursday; Wednesday's own legs-day amount included as-is, since
+    // it's genuinely allowed to differ from the other three), never a
+    // fifth crammed in — and never silently written off as "unmet"
     // either, since the target simply isn't due yet for it.
-    expect(allocation.deliveredDirectSets).toBe(sessionCap * 4);
+    const wednesdaySets = wednesday.reduce((sum, e) => sum + e.sets, 0);
+    expect(allocation.deliveredDirectSets).toBe(mondaySets * 3 + wednesdaySets);
   });
 });
 
 describe('Post-v2 Corrective Fix v2 §24.B — one real compatible session per calendar week, across several real weeks, never cramming or debt', () => {
   it('week 1 Thursday, week 2 Thursday, week 3 Thursday (only Thursday ever available) each deliver exactly one honest exposure, never doubled and never carrying debt forward', () => {
-    const developmentReference = getDevelopmentReference('physique_target', 'obliques', 'efficient');
-    const sessionCap = developmentReference.direct_sets_per_exposure!;
-
     let lastExposureDate: string | null = null;
     let history: string[] = [];
     const thursdays = ['2026-09-03', '2026-09-10', '2026-09-17']; // three real, separate calendar weeks
+    // Abs Session Exercise Share Cap (2026-09-19): the real per-exposure
+    // delivered amount is now capped by ABS_SESSION_EXERCISE_SHARE_MAX
+    // (2 exercises), not Blueprint's own raw per-exposure reference —
+    // captured from week 1's own real result below rather than hardcoded,
+    // so this test verifies what actually matters here (every week
+    // delivers the SAME honest amount, never doubled, never debt-
+    // inflated) without depending on the cap's exact numeric effect.
+    let referenceSets: number | null = null;
 
     for (const date of thursdays) {
       const result = buildWorkout({
@@ -159,7 +184,11 @@ describe('Post-v2 Corrective Fix v2 §24.B — one real compatible session per c
       // Exactly one exposure's worth every single real week — never
       // doubled to "make up" for the other 6 days having no compatible
       // session, and never a debt-inflated amount.
-      expect(totalSets).toBe(sessionCap);
+      if (referenceSets === null) {
+        referenceSets = totalSets;
+      } else {
+        expect(totalSets).toBe(referenceSets);
+      }
       lastExposureDate = date;
       history = [...history, date];
     }

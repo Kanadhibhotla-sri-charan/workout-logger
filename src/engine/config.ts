@@ -98,11 +98,27 @@ export const RECOVERY_THRESHOLDS = {
  * `workoutBuilder.ts` for deterministic generation, and enforced as a
  * validation ceiling on AI output by `programmerAdequacyValidator.ts`/
  * `weekReconciliationDomainValidator.ts` — the same two numbers, one
- * source of truth. */
+ * source of truth. Raised 7/9 -> 8/10 (2026-09-19), explicit user
+ * request: the original 7/9 was set without accounting for
+ * `UNIVERSAL_PHYSIQUE_TARGETS` (abs) always being part of
+ * expectedCoverageTargetIds on every session purpose — see
+ * `ABS_SESSION_EXERCISE_SHARE_MAX`'s own doc comment for the matching
+ * abs-specific exercise sub-cap this raise was paired with. */
 export const SESSION_REALISM_CAP = {
-  maxTargetsPerSession: 7,
-  maxExercisesPerSession: 9,
+  maxTargetsPerSession: 8,
+  maxExercisesPerSession: 10,
 } as const;
+
+/** [DEFAULT] (2026-09-19) On a non-legs session, abs (obliques/
+ * rectus-abdominis — see `ABS_PHYSIQUE_TARGETS`) exercises are capped at
+ * this many of the session's total exercise budget, regardless of how
+ * many abs targets are present — the same "leave real room for the
+ * session's actual focus" intent `LEGS_WITH_ABS_SESSION_MAX_EXERCISES`
+ * already applies to leg day, mirrored here for every other purpose.
+ * Leg day keeps its own existing abs handling
+ * (`LEGS_WITH_ABS_SESSION_MAX_EXERCISES`) unchanged — this constant only
+ * applies via `sessionRealismCapFor`'s non-legs branch. */
+export const ABS_SESSION_EXERCISE_SHARE_MAX = 2;
 
 /** [DEFAULT] Legs-Session Exercise Cap (2026-09-16, tightened
  * 2026-09-19), explicit user request: a leg session's own ceilings are
@@ -127,11 +143,13 @@ export const LEGS_SESSION_MAX_TARGETS = 5;
 export const LEGS_SESSION_MAX_EXERCISES = 5;
 export const LEGS_WITH_ABS_SESSION_MAX_EXERCISES = 8;
 
-/** [DEFAULT] Abs (obliques + rectus-abdominis) — a subset of
- * `UNIVERSAL_PHYSIQUE_TARGETS` (defined below), named separately only so
- * `sessionRealismCapFor`'s leg+abs exception can check for it precisely
- * without accidentally matching `neck-thickness` (also universal, but
- * not "abs"). */
+/** [DEFAULT] Abs (obliques + rectus-abdominis) — now identical to
+ * `UNIVERSAL_PHYSIQUE_TARGETS` (defined below) since neck-thickness was
+ * removed from it, but kept as its own named constant (not a re-export)
+ * since the two lists mean different things — `sessionRealismCapFor`'s
+ * leg+abs and abs-exercise-share checks are specifically about abs, and
+ * should keep working unchanged if UNIVERSAL_PHYSIQUE_TARGETS ever grows
+ * a genuinely different universal target again. */
 export const ABS_PHYSIQUE_TARGETS: readonly string[] = ['obliques', 'rectus-abdominis'];
 
 /** The ONE place every caller (deterministic generation AND both AI
@@ -144,15 +162,21 @@ export const ABS_PHYSIQUE_TARGETS: readonly string[] = ['obliques', 'rectus-abdo
 export function sessionRealismCapFor(
   sessionPurpose: SessionPurpose | null,
   targetIdsInSession: readonly string[]
-): { maxTargets: number; maxExercises: number; legExerciseShareMax: number | null } {
+): { maxTargets: number; maxExercises: number; legExerciseShareMax: number | null; absExerciseShareMax: number | null } {
   if (sessionPurpose !== 'legs') {
-    return { maxTargets: SESSION_REALISM_CAP.maxTargetsPerSession, maxExercises: SESSION_REALISM_CAP.maxExercisesPerSession, legExerciseShareMax: null };
+    return {
+      maxTargets: SESSION_REALISM_CAP.maxTargetsPerSession,
+      maxExercises: SESSION_REALISM_CAP.maxExercisesPerSession,
+      legExerciseShareMax: null,
+      absExerciseShareMax: ABS_SESSION_EXERCISE_SHARE_MAX,
+    };
   }
   const hasAbs = targetIdsInSession.some((id) => ABS_PHYSIQUE_TARGETS.includes(id));
   return {
     maxTargets: LEGS_SESSION_MAX_TARGETS,
     maxExercises: hasAbs ? LEGS_WITH_ABS_SESSION_MAX_EXERCISES : LEGS_SESSION_MAX_EXERCISES,
     legExerciseShareMax: LEGS_SESSION_MAX_EXERCISES,
+    absExerciseShareMax: null, // leg day's own abs room is already governed by maxExercises/legExerciseShareMax above
   };
 }
 
@@ -251,10 +275,15 @@ export const LEGS_PHYSIQUE_TARGETS: readonly string[] = ['quads', 'hamstrings', 
  * apart. */
 export const UPPER_PHYSIQUE_TARGETS: readonly string[] = [...PUSH_PHYSIQUE_TARGETS, ...PULL_PHYSIQUE_TARGETS];
 
-/** [DEFAULT] Targets with no clear push/pull/legs identity (abs, neck) —
+/** [DEFAULT] Targets with no clear push/pull/legs identity (abs) —
  * commonly trained on any session in real programs, so compatible with
- * every session purpose rather than arbitrarily assigned to one. */
-export const UNIVERSAL_PHYSIQUE_TARGETS: readonly string[] = ['obliques', 'rectus-abdominis', 'neck-thickness'];
+ * every session purpose rather than arbitrarily assigned to one.
+ * neck-thickness removed (2026-09-19), explicit user request: never a
+ * real training target for this user, and it added complexity (a third
+ * universal target, on top of abs) with no real use. Blueprint's own
+ * snapshot data still defines it — this only stops it from ever being
+ * eligible in any session; nothing else references it. */
+export const UNIVERSAL_PHYSIQUE_TARGETS: readonly string[] = ['obliques', 'rectus-abdominis'];
 
 /** [DEFAULT] The full session-purpose -> compatible-target-id-list map
  * src/engine/sessionPurpose.ts's eligibility check reads. */
