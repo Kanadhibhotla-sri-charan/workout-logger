@@ -42,6 +42,7 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/developmentPackages.js';
+import { getSubTargetExerciseIds } from '../blueprint/subTargetExerciseScope.js';
 import { getProfile, applyRepRangeBias } from '../coaching/profiles/muscleProfileService.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
@@ -844,7 +845,13 @@ function rankTarget(
   const recoveryNeed = recovery.priority_adjustment === 'avoid' ? 2 : recovery.priority_adjustment === 'reduce' ? 1 : 0;
   if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0, recoveryNeed, rotationTieBreak: 0 };
   const threshold = developmentReference?.weekly_direct_set_reference ?? startingPointMin;
-  const needDeficit = Math.max(0, threshold - target.weekly_exposure_units);
+  // Fractional need (2026-09-19): share of THIS target's own reference still unmet,
+  // not the raw set count. With per-target references now differing (chest 10, delts
+  // 14, one-leg-day legs 2-8), an absolute deficit made the same big-reference muscles
+  // win every week and starved the small-reference ones; fractions tie at 1.0 for every
+  // untouched muscle so the non-goal rotation ring (not reference size) decides.
+  const rawDeficit = Math.max(0, threshold - target.weekly_exposure_units);
+  const needDeficit = threshold > 0 ? Math.round((rawDeficit / threshold) * 1e6) / 1e6 : rawDeficit;
   return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit, recoveryNeed, rotationTieBreak };
 }
 
@@ -1295,14 +1302,31 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // risk this fix targets is specifically several simultaneously-
     // untrained sibling targets each independently adopting the same
     // package's own recommended starting point.
+    //
+    // Sub-Target Exercise Scope (2026-09-19): this pooling exists ONLY to
+    // guard against several sibling target_ids each separately being
+    // credited with the SAME whole-package total. For a package with a
+    // real scope entry (getSubTargetExerciseIds returns non-null), that
+    // duplication can no longer happen — developmentReferenceEngine.ts
+    // already scoped `packageWeeklyReference` down to only the exercises
+    // that count toward THIS target specifically, so siblings' own
+    // references are already mutually exclusive (e.g. mid-pec's 5
+    // per-exposure sets and upper-pec's own 7 don't overlap). Pooling
+    // them under one package-wide budget in that case would double-
+    // discount and incorrectly starve a later sibling. This guard applies
+    // only to still-untagged multi-target_id muscle_groups, where the
+    // whole-package duplication risk this fix was built for still exists.
     const isPackageDerivedRecommendation = target.current_weekly_primary_sets === 0 && volumeDecision.action === 'increase';
     const packageId = developmentReference?.package_id ?? null;
     const packageWeeklyReference = developmentReference?.weekly_direct_set_reference ?? null;
+    const isAlreadyScopedToThisTarget = packageId !== null && getSubTargetExerciseIds(packageId, target.target_id) !== null;
     const alreadyClaimedForPackage = packageId ? (plannedDirectSetsByPackage.get(packageId) ?? 0) : 0;
     const packageRemainingBudget =
-      packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation ? Math.max(0, packageWeeklyReference - alreadyClaimedForPackage) : Number.POSITIVE_INFINITY;
+      packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation && !isAlreadyScopedToThisTarget
+        ? Math.max(0, packageWeeklyReference - alreadyClaimedForPackage)
+        : Number.POSITIVE_INFINITY;
 
-    if (packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation && packageRemainingBudget <= 0) {
+    if (packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation && !isAlreadyScopedToThisTarget && packageRemainingBudget <= 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
         scope: 'exposure' as const,

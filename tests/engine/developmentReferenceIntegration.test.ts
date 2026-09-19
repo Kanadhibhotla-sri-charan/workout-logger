@@ -55,13 +55,21 @@ function weeklyInput(overrides: Partial<BuildWorkoutInput> = {}): BuildWorkoutIn
 }
 
 describe('decideVolume + development_reference (spec §16.B/§16.C)', () => {
-  const chestEfficient = getDevelopmentReference('physique_target', 'mid-pec', 'efficient');
-  const chestComplete = getDevelopmentReference('physique_target', 'mid-pec', 'complete');
+  // 'upper-pec', not 'mid-pec': under Sub-Target Exercise Scope
+  // (2026-09-19), Blueprint's chest-complete package only adds a real
+  // extra exercise for upper-pec (incline-dumbbell-fly) and lower-pec
+  // (dip-chest-biased) over chest-efficient — mid-pec's own scoped
+  // reference (flat-barbell-bench-press + the shared cable-fly) happens
+  // to be identical at both levels, so it can no longer demonstrate
+  // "Complete is strictly higher than Efficient" the way it could
+  // before per-target scoping existed.
+  const chestEfficient = getDevelopmentReference('physique_target', 'upper-pec', 'efficient');
+  const chestComplete = getDevelopmentReference('physique_target', 'upper-pec', 'complete');
 
   it('a non-goal target is capped at its own Efficient reference, never the universal higher_recovery_dependent band', () => {
     const input: VolumeDecisionInput = {
       target_type: 'physique_target',
-      target_id: 'mid-pec',
+      target_id: 'upper-pec',
       goal_priority: 1000,
       current_weekly_primary_sets: chestEfficient.weekly_direct_set_reference! - 1,
       aesthetic_progress_trend: 'stagnant',
@@ -79,7 +87,7 @@ describe('decideVolume + development_reference (spec §16.B/§16.C)', () => {
     expect(chestComplete.weekly_direct_set_reference).toBeGreaterThan(chestEfficient.weekly_direct_set_reference!);
     const input: VolumeDecisionInput = {
       target_type: 'physique_target',
-      target_id: 'mid-pec',
+      target_id: 'upper-pec',
       goal_priority: 1,
       current_weekly_primary_sets: chestComplete.weekly_direct_set_reference! - 1,
       aesthetic_progress_trend: 'stagnant',
@@ -136,30 +144,34 @@ describe('buildWorkout classification uses per-muscle Efficient reference, not a
   it('two different non-goal muscles with the identical raw exposure can classify differently once each muscle\'s own reference is applied', () => {
     // Pick two real muscle groups with genuinely different Efficient
     // references (established directly from real Blueprint data).
-    // 'biceps', not 'gastrocnemius' — gastrocnemius now has a Coaching
-    // Depth curated preferred-frequency profile (Batch 2) that raises
-    // its weekly reference, so it's no longer reliably the lower of the
-    // two; 'biceps' has no curated profile.
+    // 'biceps' and 'triceps', not 'gastrocnemius' — gastrocnemius now has
+    // a Coaching Depth curated preferred-frequency profile (Batch 2) that
+    // raises its weekly reference, so it's no longer reliably the lower
+    // of the two. Not 'mid-pec' either: under Sub-Target Exercise Scope
+    // (2026-09-19) mid-pec's own scoped Efficient reference happens to
+    // equal biceps' now, so it can no longer prove "genuinely different."
+    // 'biceps' and 'triceps' are each the general (unfiltered) member of
+    // their own group and have no curated profile.
     const biceps = getDevelopmentReference('physique_target', 'biceps', 'efficient');
-    const chest = getDevelopmentReference('physique_target', 'mid-pec', 'efficient');
-    expect(biceps.weekly_direct_set_reference).not.toBe(chest.weekly_direct_set_reference);
+    const triceps = getDevelopmentReference('physique_target', 'triceps', 'efficient');
+    expect(biceps.weekly_direct_set_reference).not.toBe(triceps.weekly_direct_set_reference);
 
     // An exposure level between the two references: at/above biceps'
-    // (lower) reference -> maintenance; below chest's (higher)
+    // (lower) reference -> maintenance; below triceps' (higher)
     // reference -> normal_development.
-    const midpoint = Math.round(((biceps.weekly_direct_set_reference ?? 0) + (chest.weekly_direct_set_reference ?? 0)) / 2);
+    const midpoint = Math.round(((biceps.weekly_direct_set_reference ?? 0) + (triceps.weekly_direct_set_reference ?? 0)) / 2);
     expect(midpoint).toBeGreaterThanOrEqual(biceps.weekly_direct_set_reference!);
-    expect(midpoint).toBeLessThan(chest.weekly_direct_set_reference!);
+    expect(midpoint).toBeLessThan(triceps.weekly_direct_set_reference!);
 
     const bicepsTarget = baseTarget({ target_id: 'biceps', weekly_exposure_units: midpoint });
-    const chestTarget = baseTarget({ target_id: 'mid-pec', weekly_exposure_units: midpoint });
-    const result = buildWorkout(weeklyInput({ targets: [bicepsTarget, chestTarget] }));
+    const tricepsTarget = baseTarget({ target_id: 'triceps', weekly_exposure_units: midpoint });
+    const result = buildWorkout(weeklyInput({ targets: [bicepsTarget, tricepsTarget] }));
 
     const allDecisions = [...result.exercises, ...result.skipped_targets];
     const bicepsDecision = allDecisions.find((d) => d.target_id === 'biceps');
-    const chestDecision = allDecisions.find((d) => d.target_id === 'mid-pec');
+    const tricepsDecision = allDecisions.find((d) => d.target_id === 'triceps');
     expect(bicepsDecision?.classification).toBe('maintenance');
-    expect(chestDecision?.classification).toBe('normal_development');
+    expect(tricepsDecision?.classification).toBe('normal_development');
   });
 });
 

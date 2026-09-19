@@ -57,13 +57,21 @@ describe('buildProgrammingBrief', () => {
     expect(triceps.isGoalOriented).toBe(true);
     expect(chest.developmentLevel).toBe('efficient');
     expect(chest.isGoalOriented).toBe(false);
-    // Real Blueprint numbers (src/blueprint/snapshot/programming.json):
-    // triceps muscle_group Complete package = 12 sets/session x 2/week = 24.
-    expect(triceps.weeklyDevelopmentReference).toBe(24);
-    expect(triceps.directSetsPerExposureCap).toBe(12);
-    // chest muscle_group Efficient package = 8 sets/session x 2/week = 16.
-    expect(chest.weeklyDevelopmentReference).toBe(16);
-    expect(chest.directSetsPerExposureCap).toBe(8);
+    // Real Blueprint numbers (src/blueprint/snapshot/programming.json),
+    // under Sub-Target Exercise Scope (2026-09-19): 'triceps-long-head'
+    // and 'upper-pec' each share their muscle_group's package with
+    // sibling target_ids, so they're credited only with the exercises
+    // that actually train them (per each exercise's own contribution
+    // text), not the whole shared package.
+    // triceps-long-head Complete: overhead-triceps-extension(2) +
+    // cable-overhead-extension-leaning-forward(2) = 4 sets/session x
+    // 2/week = 8.
+    expect(triceps.weeklyDevelopmentReference).toBe(8);
+    expect(triceps.directSetsPerExposureCap).toBe(4);
+    // upper-pec Efficient: incline-barbell-press(3) + cable-fly(2) =
+    // 5 sets/session x 2/week = 10.
+    expect(chest.weeklyDevelopmentReference).toBe(10);
+    expect(chest.directSetsPerExposureCap).toBe(5);
   });
 
   it('never jumps a zero-volume target straight to its full weekly reference, even when goal-oriented (build-up rule, regardless of priority)', () => {
@@ -76,7 +84,12 @@ describe('buildProgrammingBrief', () => {
     const triceps = brief.muscles[0]!;
 
     expect(triceps.volumeAction).toBe('increase');
-    // Universal starting_point_sets[0] = 8, min(8, 24) = 8 — never jumps to 24.
+    // Universal starting_point_sets[0] = 8. Under Sub-Target Exercise
+    // Scope (2026-09-19), triceps-long-head's own Complete reference is
+    // also 8 (see the test above) — min(8, 8) = 8 either way, but this
+    // still proves the build-up rule genuinely runs (never jumps straight
+    // to a package figure without going through the universal starting
+    // point's own min()).
     expect(triceps.recommendedWeeklyPrimarySets).toBe(8);
   });
 
@@ -143,15 +156,20 @@ describe('buildProgrammingBrief', () => {
     });
 
     it('recommendedSessionSets itself also reflects the deload reduction, not just recommendedWeeklyPrimarySets', () => {
-      const targets = [target({ targetId: 'triceps-long-head', isSpecialization: true, currentWeeklyPrimarySets: 20 })];
+      // Sub-Target Exercise Scope (2026-09-19): triceps-long-head's own
+      // directSetsPerExposureCap dropped from 12 to 4 (see the first
+      // describe block above), so a currentWeeklyPrimarySets fixture
+      // large enough to clear the OLD cap (20) now clamps BOTH normal and
+      // deloaded .min to the same new, much smaller ceiling (4),
+      // hiding the reduction this test exists to prove. Re-derived to a
+      // smaller, still-realistic weekly figure (5) that stays under the
+      // new cap on the un-deloaded side, so the deload's own proportional
+      // reduction is what actually moves .min, not the ceiling.
+      const targets = [target({ targetId: 'triceps-long-head', isSpecialization: true, currentWeeklyPrimarySets: 5 })];
       const normal = buildProgrammingBrief(targets, [], 'push', [], TODAY, 60);
       const deloaded = buildProgrammingBrief(targets, [], 'push', [], TODAY, 60, { deloadActive: true });
       const normalMuscle = normal.muscles[0]!;
       const deloadedMuscle = deloaded.muscles[0]!;
-      // .min, not .max: directSetsPerExposureCap (a fixed Blueprint
-      // ceiling) binds .max regardless of the weekly number here, since
-      // this fixture's un-deloaded weekly (20) already exceeds it — .min
-      // is the field that actually moves with recommendedWeeklyPrimarySets.
       expect(deloadedMuscle.recommendedSessionSets.min).toBeLessThan(normalMuscle.recommendedSessionSets.min);
     });
 

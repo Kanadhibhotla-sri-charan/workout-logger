@@ -314,19 +314,25 @@ describe('assembleAndBuildWorkout — the impure DB-reading boundary, wired to b
     // exactly like it did before those two muscles had any curated
     // profile at all.
     const seedSessionsRepo = new WorkoutSessionsRepo(db);
-    function seedHeavyVolume(exerciseId: string) {
+    function seedHeavyVolume(exerciseId: string, setCount = 30) {
       const s = seedSessionsRepo.createSession({ date: TUESDAY, session_type: 'gym', status: 'completed' });
       seedSessionsRepo.addExercisePerformance(s.session_id, {
         exercise_id: exerciseId,
         order: 1,
         role: 'primary',
-        sets: Array.from({ length: 30 }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 12, completed: true })),
+        sets: Array.from({ length: setCount }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 12, completed: true })),
       });
     }
     seedHeavyVolume('cable-crunch');
     seedHeavyVolume('cable-woodchop');
     seedHeavyVolume('standing-calf-raise');
     seedHeavyVolume('seated-calf-raise');
+    // Fractional need ranking (2026-09-19): untouched non-goal muscles now tie at 100% unmet
+    // and the rotation ring orders them, so hamstrings (alphabetically ahead of quads) is
+    // seeded as already-covered to keep quads (this test's subject) in the session. Other
+    // leg exercises are NOT seeded: any real leg exposure on Tuesday would make quads
+    // 'not due' Thursday under its now-realistic 1/week frequency.
+    for (const id of ['seated-leg-curl']) seedHeavyVolume(id, 6);
 
     const withoutBadminton = assembleAndBuildWorkout(db, THURSDAY, 240);
     const planWithout = withoutBadminton.exercises.find((e) => e.target_id === 'quads');

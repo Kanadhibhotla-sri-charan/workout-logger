@@ -112,7 +112,9 @@ describe('Coaching Depth Batch 2 — preferred frequency wired into developmentR
   it('direct_sets_per_exposure itself is never altered by the frequency override', () => {
     const pkg = BlueprintAdapter.getDevelopmentPackages().packages.find((p) => p.id === 'calves-efficient')!;
     const ref = getDevelopmentReference('physique_target', 'gastrocnemius', 'efficient');
-    expect(ref.direct_sets_per_exposure).toBe(pkg.exercises.reduce((s, e) => s + e.sets, 0));
+    // Sub-Target Exercise Scope: gastrocnemius owns only standing-calf-raise (seated is soleus's) — the
+    // point of this test is that the FREQUENCY override never changes per-exposure sets.
+    expect(ref.direct_sets_per_exposure).toBe(pkg.exercises.find((e) => e.exercise_id === 'standing-calf-raise')!.sets);
   });
 });
 

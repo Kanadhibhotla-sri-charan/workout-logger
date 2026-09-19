@@ -225,9 +225,29 @@ describe('Post-v2 Corrective Fix v2 §24.C — a real exposure near a calendar-w
 });
 
 describe("Post-v2 Corrective Fix v2 §24.L — a shared Blueprint package's aggregate is never duplicated as every covered target's own complete objective", () => {
-  it('three chest sub-targets (upper-pec/mid-pec/lower-pec) sharing the same "chest-efficient" package never together deliver more than that package\'s own real weekly aggregate', () => {
-    const packageRef = getDevelopmentReference('physique_target', 'mid-pec', 'efficient');
-    expect(packageRef.package_id).toBe('chest-efficient');
+  it('three chest sub-targets (upper-pec/mid-pec/lower-pec) sharing the same "chest-efficient" package each deliver up to their own (already scope-exclusive) reference, never a shared pool', () => {
+    // Sub-Target Exercise Scope (2026-09-19): upper-pec/mid-pec/lower-pec
+    // share one Blueprint package, but each now has its OWN distinct
+    // weekly reference derived only from the exercises that actually
+    // train it (upper-pec: incline press + the shared fly; mid-pec: flat
+    // bench + the shared fly; lower-pec: just the shared fly at the
+    // Efficient level — no lower-pec-specific exercise exists below
+    // Complete). Those three references no longer overlap, so there is
+    // no shared aggregate left to duplicate — the old "combined total
+    // never exceeds one package-wide number" invariant this test used to
+    // check no longer applies (see workoutBuilder.ts's
+    // isAlreadyScopedToThisTarget, which now bypasses package-sharing
+    // pooling for exactly this reason). What must still hold: each
+    // sibling is independently bounded by its OWN reference.
+    const upperPecRef = getDevelopmentReference('physique_target', 'upper-pec', 'efficient');
+    const midPecRef = getDevelopmentReference('physique_target', 'mid-pec', 'efficient');
+    const lowerPecRef = getDevelopmentReference('physique_target', 'lower-pec', 'efficient');
+    expect(upperPecRef.package_id).toBe('chest-efficient');
+    const references: Record<string, number> = {
+      'upper-pec': upperPecRef.weekly_direct_set_reference!,
+      'mid-pec': midPecRef.weekly_direct_set_reference!,
+      'lower-pec': lowerPecRef.weekly_direct_set_reference!,
+    };
     const targetIds = ['upper-pec', 'mid-pec', 'lower-pec'];
 
     const plan = buildWeeklyProgrammingPlan(
@@ -237,24 +257,20 @@ describe("Post-v2 Corrective Fix v2 §24.L — a shared Blueprint package's aggr
       })
     );
 
-    const totalDelivered = targetIds.reduce((sum, id) => sum + (plan.targetAllocations.find((a) => a.target_id === id)?.deliveredDirectSets ?? 0), 0);
-    // The core invariant: three sibling targets sharing one package never
-    // combine to exceed that package's own real weekly reference — never
-    // 3x (or even 2x) the package's own intended total, which is exactly
-    // what independently duplicating the full aggregate to each target
-    // would produce.
-    expect(totalDelivered).toBeLessThanOrEqual(packageRef.weekly_direct_set_reference!);
-    expect(totalDelivered).toBeGreaterThan(0);
-
-    // At least one sibling is honestly reported as covered by its
-    // package-mates' own work, rather than silently receiving nothing
-    // with no explanation, or being mislabeled a data-integrity gap.
-    const packageSharingSkips = plan.sessions.flatMap((s) => s.skipped).filter((s) => targetIds.includes(s.target_id) && s.reason_code === 'adequately_covered');
-    expect(packageSharingSkips.length).toBeGreaterThan(0);
-    for (const skip of packageSharingSkips) {
-      expect(skip.reason).toContain('chest-efficient');
-      expect(skip.scope).toBe('exposure');
+    let anyDelivered = false;
+    for (const id of targetIds) {
+      const delivered = plan.targetAllocations.find((a) => a.target_id === id)?.deliveredDirectSets ?? 0;
+      expect(delivered).toBeLessThanOrEqual(references[id]!);
+      if (delivered > 0) anyDelivered = true;
     }
+    expect(anyDelivered).toBe(true);
+
+    // No sibling is skipped merely because a package-mate already
+    // claimed a SHARED chest-efficient budget — that pooling is bypassed
+    // once a package's sub-targets are scope-tagged, since each already
+    // owns an exclusive slice with nothing left to duplicate.
+    const packageSharingSkips = plan.sessions.flatMap((s) => s.skipped).filter((s) => targetIds.includes(s.target_id) && s.reason_code === 'adequately_covered' && s.reason.includes('chest-efficient'));
+    expect(packageSharingSkips.length).toBe(0);
   });
 
   it('a target with genuinely maintained real volume above its own package reference is never suppressed by the package-sharing cap when it has no active sibling this run', () => {

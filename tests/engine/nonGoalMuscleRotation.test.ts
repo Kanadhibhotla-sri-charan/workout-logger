@@ -48,29 +48,43 @@ function weeklyInput(overrides: Partial<WeeklyPlanInput> = {}): WeeklyPlanInput 
     todayBudgetMinutes: 300,
     defaultSessionMinutes: 300,
     available_equipment: FULL_EQUIPMENT,
-    available_training_days: ['monday'],
+    available_training_days: ['monday', 'tuesday'],
     targets: [],
     ...overrides,
   };
 }
 
-// Three real, push-compatible targets sharing the exact same
-// muscle_group package (chest) — so their weekly development-package
-// threshold is identically 16 for all three, tying needDeficit at the
-// same positive value regardless of `current_weekly_primary_sets`/
+// Three real, PULL-compatible targets, inspected on Tuesday (this
+// fixture's second available day — Monday always gets 'push' per
+// SESSION_PURPOSE_ROTATION[0], so a pull-compatible ring needs the next
+// day in rotation) with a genuinely identical Efficient weekly
+// development-package reference (16 sets/week each, verified directly
+// against real Blueprint data) — so needDeficit ties at the same
+// positive value regardless of `current_weekly_primary_sets`/
 // `weekly_exposure_units` (both left at this fixture's defaults);
 // days_since_target_last_trained: null (never trained) ties the
 // maintenance comparator too; no recovery caution ties recoveryNeed at
 // 0. This is the exact condition that let the OLD alphabetical
 // tie-break pick the same early-alphabet subset forever — several
-// genuinely-tied targets. Deliberately three DIFFERENT chest sub-targets
-// (never 'obliques'/'rectus-abdominis' — Coaching Depth Batch 2 gave
-// those two their own curated preferred-frequency profile, which is now
-// wired into their weekly reference and would break this tie). Alphabetically:
-// 'lower-pec' < 'mid-pec' < 'upper-pec', i.e. ring order [A, B, C].
-const RING_A = 'lower-pec';
-const RING_B = 'mid-pec';
-const RING_C = 'upper-pec';
+// genuinely-tied targets. Not chest's upper-pec/mid-pec/lower-pec (used
+// before Sub-Target Exercise Scope, 2026-09-19): each of those three now
+// has its own distinct, non-overlapping reference (they no longer tie
+// with each other). Not 'obliques'/'rectus-abdominis' either — Coaching
+// Depth Batch 2 gave those two their own curated preferred-frequency
+// profile, which is wired into their weekly reference and would break a
+// tie. Not 'front-delt' either — a genuine, pre-existing Blueprint data
+// gap (no resolvable exercise prescription on any real day) unrelated to
+// this fix, discovered while re-deriving this test. 'back-thickness',
+// 'lat-width' and 'upper-traps' are all pull-compatible members of the
+// still-unscoped 3-way "back" muscle_group (unaffected by Sub-Target
+// Exercise Scope, since no current goal needs back's own sub-targets
+// split) and all share the same real 16-set Efficient reference.
+// Alphabetically: 'back-thickness' < 'lat-width' < 'upper-traps', i.e.
+// ring order [A, B, C].
+const RING_A = 'back-thickness';
+const RING_B = 'lat-width';
+const RING_C = 'upper-traps';
+const TUESDAY = '2026-09-01';
 
 function orderOfRingTargets(targets: string[]): string[] {
   const seen: string[] = [];
@@ -87,8 +101,8 @@ function ringTarget(id: string): TargetBuildContext {
 function buildWithCursor(cursor: number) {
   const targets = [RING_A, RING_B, RING_C].map(ringTarget);
   const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets, nonGoalRotationCursor: cursor }));
-  const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
-  return { plan, order: orderOfRingTargets(monday.plannedWork.map((w) => w.target_id)) };
+  const tuesday = plan.sessions.find((s) => s.date === TUESDAY)!;
+  return { plan, order: orderOfRingTargets(tuesday.plannedWork.map((w) => w.target_id)) };
 }
 
 describe('Non-Goal Muscle Rotation — the A,B -> C,A -> B,C -> repeat design', () => {
@@ -144,8 +158,8 @@ describe('Non-Goal Muscle Rotation — the A,B -> C,A -> B,C -> repeat design', 
   it('nonGoalRotationCursorAfter advances by exactly the count of distinct non-goal targets that received real plannedWork this run', () => {
     const targets = [RING_A, RING_B, RING_C].map(ringTarget);
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets, nonGoalRotationCursor: 0 }));
-    const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
-    const distinctNonGoalTargetsWithWork = new Set(monday.plannedWork.map((w) => w.target_id)).size;
+    const tuesday = plan.sessions.find((s) => s.date === TUESDAY)!;
+    const distinctNonGoalTargetsWithWork = new Set(tuesday.plannedWork.map((w) => w.target_id)).size;
     expect(plan.nonGoalRotationCursorAfter).toBe(distinctNonGoalTargetsWithWork % 3);
   });
 
@@ -211,5 +225,22 @@ describe('Non-Goal Muscle Rotation — the A,B -> C,A -> B,C -> repeat design', 
       cursor = plan.nonGoalRotationCursorAfter;
     }
     expect(everSeen.size).toBeGreaterThan(distinct1.size);
+  });
+
+  it('fractional need (2026-09-19): non-goal leg muscles with different references all tie untouched, so the rotation gives every one a turn across weeks', () => {
+    // quads 8 / hamstrings 5 / glute-max 6 / glute-med 2 / gastroc 3 / soleus 3 Efficient references differ,
+    // yet ranked by SHARE unmet they all tie at 100% — reference size no longer lets the same
+    // big-reference muscles win every leg day and starve the rest.
+    const legIds = ['quads', 'hamstrings', 'gluteus-maximus', 'gluteus-medius-minimus', 'gastrocnemius', 'soleus'];
+    const seen = new Set<string>();
+    let cursor = 0;
+    for (let week = 0; week < 6; week++) {
+      const plan = buildWeeklyProgrammingPlan(
+        weeklyInput({ available_training_days: ['monday', 'tuesday', 'thursday', 'friday'], targets: legIds.map((id) => normalDevTarget({ target_id: id })), nonGoalRotationCursor: cursor })
+      );
+      for (const s of plan.sessions) for (const w of s.plannedWork) seen.add(w.target_id);
+      cursor = plan.nonGoalRotationCursorAfter;
+    }
+    expect([...seen].sort()).toEqual([...legIds].sort());
   });
 });
