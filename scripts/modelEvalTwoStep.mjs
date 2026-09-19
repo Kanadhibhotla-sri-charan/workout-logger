@@ -129,8 +129,32 @@ function buildReasoningSystemInstruction() {
 function buildCommitSystemInstruction() {
   return (
     buildProgrammerSystemInstruction() +
-    '\n24. context.priorReasoning.muscleNotes contains your own reasoning, already worked out in a prior step, about rules 18-23 for today\'s eligible muscles. Apply it faithfully — it is not a suggestion from someone else, it is your own prior conclusion. You may deviate from it only if the data in this context clearly contradicts it, and if you do, say why in programmingRationale.'
+    '\n24. context.priorReasoning.muscleNotes contains your own reasoning, already worked out in a prior step, about rules 18-23 for today\'s eligible muscles. Apply it faithfully — it is not a suggestion from someone else, it is your own prior conclusion. You may deviate from it only if the data in this context clearly contradicts it, and if you do, say why in programmingRationale.' +
+    '\n25. [Eval-only rule, never shipped to production] Also return a top-level programJustification field: a genuine, multi-sentence brief (not a one-liner, not a bullet list) explaining the WHOLE session\'s real strategy, in your own words, as if explaining your reasoning to the person you programmed it for. It must specifically address: (a) how each active-goal muscle (isGoalOriented=true) was treated and why that\'s the right amount of attention for a goal muscle specifically, citing its real recommendedSessionSets range and what you actually gave it; (b) which muscles you left out entirely and the real data reason; (c) any judgment call from rules 18-23 you actually acted on. Write it as real prose a coach would say out loud, not a restatement of the JSON you already produced.'
   );
+}
+
+// Eval-only (2026-09-19): getProgrammerOutputSchema() plus one extra
+// required field (programJustification) requesting the whole-session
+// brief rule 25 above asks for. The real structural validator
+// (programmerOutputValidator.ts) never rejects unknown extra top-level
+// keys, so this stays fully compatible with the real validation
+// pipeline — the extra field is simply read separately, never fed into
+// AIWorkoutSessionProposal itself.
+function buildEvalOnlyOutputSchema() {
+  const base = getProgrammerOutputSchema();
+  return {
+    ...base,
+    required: [...base.required, 'programJustification'],
+    properties: {
+      ...base.properties,
+      programJustification: {
+        type: 'string',
+        description:
+          'Eval-only field. A genuine multi-sentence brief explaining the whole session\'s real strategy in your own words — not a one-liner, not a restatement of the JSON. Must address how each active-goal muscle was treated and why that matches its real recommendedSessionSets range, which muscles were left out and why, and any rules-18-23 judgment call actually acted on.',
+      },
+    },
+  };
 }
 
 function nextMonday(today) {
@@ -200,6 +224,7 @@ async function runOnce(db, config, reasoningSystemInstruction, commitSystemInstr
     goalAlignment: parsedJson.goalAlignment,
     recoveryConsiderations: parsedJson.recoveryConsiderations,
     warnings: parsedJson.warnings,
+    programJustification: parsedJson.programJustification, // eval-only field, rule 25
   };
 
   const structural = validateProposalSchema(parsedJson);
@@ -261,7 +286,7 @@ async function main() {
   const context = buildProgrammerContext(db, { targetDate });
   const reasoningSystemInstruction = buildReasoningSystemInstruction();
   const commitSystemInstruction = buildCommitSystemInstruction();
-  const outputSchema = getProgrammerOutputSchema();
+  const outputSchema = buildEvalOnlyOutputSchema();
   const baseConfig = loadVelonaConfig();
   console.log(`[modelEvalTwoStep] real context built (${JSON.stringify(context).length} chars). reps per model=${REPS_PER_MODEL}, concurrency=${CONCURRENCY}\n`);
 
