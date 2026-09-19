@@ -50,14 +50,12 @@ const REPS_PER_MODEL = Number(process.env.EVAL_REPS || 5);
 const CONCURRENCY = Number(process.env.EVAL_CONCURRENCY || 4);
 
 // USD per 1M tokens — Velona's live /models catalog, fetched
-// 2026-09-18. This batch: the two non-thinking Qwen variants from the
-// original candidate list, re-run against the properly-seeded scenario
-// with the repair fixes applied, for direct comparison against their
-// own "Thinking" siblings' run.
-const CANDIDATES = [
-  { model: 'qwen/qwen3-next-80b-a3b-instruct', label: 'Qwen3 Next 80B A3B Instruct', inputPer1M: 0.09, outputPer1M: 1.1 },
-  { model: 'qwen/qwen3-30b-a3b', label: 'Qwen3 30B A3B', inputPer1M: 0.12, outputPer1M: 0.5 },
-];
+// 2026-09-18. This batch: Qwen3 Next 80B A3B Instruct alone, re-run
+// against the redesigned reasoning-step prompt/schema (sessionWideReasoning
+// now required) to test whether the training-experience/antagonist-pairing
+// gap found in its earlier run was a prompt-structure problem, not a
+// capability ceiling.
+const CANDIDATES = [{ model: 'qwen/qwen3-next-80b-a3b-instruct', label: 'Qwen3 Next 80B A3B Instruct', inputPer1M: 0.09, outputPer1M: 1.1 }];
 
 // A real, deliberately small schema for the reasoning step — NOT `null`
 // and not the full session-proposal schema. buildVelonaUserTurnContent
@@ -67,15 +65,43 @@ const CANDIDATES = [
 // null"). This tests the actual hypothesis under test — a small,
 // task-shaped schema vs. the big session-proposal one — without an
 // untested/unsupported null-schema edge case.
+// Redesigned 2026-09-19: the original single muscleNotes-only shape let
+// two of the six judgment calls (training experience, antagonist
+// pairing) have no dedicated place to answer — both scored 0-1/5 real
+// engagement across a real model eval, not because the model couldn't
+// reason about them, but because a per-muscle-only schema made both
+// trivially easy to silently skip. sessionWideReasoning gives those two
+// their own REQUIRED fields so skipping isn't an option; the other four
+// (genuinely per-muscle) stay in muscleNotes.
 const REASONING_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['muscleNotes'],
+  required: ['sessionWideReasoning', 'muscleNotes'],
   properties: {
+    sessionWideReasoning: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['trainingExperience', 'antagonistPairing'],
+      description:
+        'Two judgment calls that apply to the whole session, not any one muscle — both fields are mandatory every time. A real, reasoned answer is required even when the conclusion is that nothing applies today; a one-line dismissal with no cited reason is not acceptable.',
+      properties: {
+        trainingExperience: {
+          type: 'string',
+          description:
+            'Reason through context.trainingExperience against what today\'s session is actually asking of the lifter. State your conclusion AND the specific data point behind it — including when your conclusion is "nothing unusual today," which still needs a stated reason, not just a restatement of the experience level.',
+        },
+        antagonistPairing: {
+          type: 'string',
+          description:
+            'Reason through every eligible-today muscle\'s antagonistGroup and decide whether a genuine antagonist-superset opportunity exists. State your conclusion AND which muscles you actually checked — including when your conclusion is "no real pairing opportunity," which still needs a stated reason (e.g. every eligible muscle today shares the same group).',
+        },
+      },
+    },
     muscleNotes: {
       type: 'object',
-      description: 'Keyed by targetId. Include an entry only for an eligible-today muscle with something non-trivial to say — never pad every muscle with filler.',
-      additionalProperties: { type: 'string', description: '2-3 sentences, citing the specific data point behind it.' },
+      description:
+        'Keyed by targetId, for the remaining four judgment calls (intensity technique, exercise rotation, structural advisories, historical trend) — genuinely per-muscle, unlike the two above. Include an entry only for a muscle where you reached an actual, evidence-backed conclusion on one of these four; omitting a muscle means these four points genuinely changed nothing for it, not that you skipped considering it.',
+      additionalProperties: { type: 'string', description: '2-4 sentences. Work through the specific real data point(s) and state your conclusion — never a bare label or a restated fact with no judgment attached.' },
     },
   },
 };
@@ -83,14 +109,20 @@ const REASONING_OUTPUT_SCHEMA = {
 function buildReasoningSystemInstruction() {
   return [
     'You are a fitness coach doing ONLY a reasoning pass before another step writes the final session — you are not producing the session itself, and you must not mention sets/reps/RIR numbers at all (those are already fixed elsewhere and not your concern here).',
-    'You will be given the same real JSON context a workout-programming step would use. Think through these judgment calls for today\'s eligible muscles (context.programmingBrief.muscles[].eligibleForThisSession=true):',
-    '(a) context.trainingExperience — is anything today unusually demanding given this level, worth flagging?',
-    '(b) Each exercise\'s plausibleIntensityTechniques (ids — resolve full text via context.intensityTechniqueCatalogue) — is one genuinely worth using today, on which exercise, and why?',
-    '(c) Each muscle\'s antagonistGroup — is there a real antagonist-pairing opportunity among today\'s eligible muscles?',
-    '(d) Each exercise\'s recentConsecutiveSessionsUsed — is today the day to rotate away from an overused exercise?',
-    '(e) context.structuralAdvisories — does any flagged imbalance genuinely change how you\'d weigh an eligible muscle today?',
+    '',
+    'You will be given the same real JSON context a workout-programming step would use. Your job is to REASON THROUGH six real judgment calls, one at a time, using the actual data in context — not to pick a plausible-sounding answer off a menu. A judgment call is not complete until you have looked at the specific real number, date, or flag behind it and stated what it actually tells you.',
+    '',
+    'Two of these six apply to the WHOLE SESSION, not any one muscle, and go in sessionWideReasoning — both are required every time, with no exception:',
+    '(a) context.trainingExperience — work through what today\'s session is actually asking of the lifter at this experience level, and say whether anything is unusually demanding. If nothing is, say so and say why not (e.g. no intensity techniques are in play, or every exercise is already familiar) — do not just restate the experience level and move on.',
+    '(b) Every eligible-today muscle\'s antagonistGroup — check ALL of them against each other and decide whether a genuine antagonist-superset opportunity exists (e.g. a push muscle and a pull muscle both eligible today). If none exists, say so and say why not (e.g. every eligible muscle today shares the same group) — never skip this just because the answer happens to be "no."',
+    '',
+    'The remaining four are genuinely per-muscle and go in muscleNotes, keyed by targetId — reason through each for every muscle where the real data actually gives you something to say:',
+    '(c) Each exercise\'s plausibleIntensityTechniques (ids — resolve full text via context.intensityTechniqueCatalogue) — is one genuinely worth using today, on which exercise, and why, or is none of them appropriate right now?',
+    '(d) Each exercise\'s recentConsecutiveSessionsUsed — has it actually been used enough in a row to be worth rotating away from today? A single recent use is not the same as overuse — judge genuine staleness from the real count; do not treat "has been used before at all" as automatic grounds to rotate.',
+    '(e) context.structuralAdvisories — does any flagged imbalance genuinely change how you\'d weigh an eligible muscle today, or is it not actionable right now?',
     '(f) Recent trend data (context.targets[].exerciseHistory, context.coachingFoundation.historicalSummaries) — does a stalling/declining trend argue for a different exercise or angle today?',
-    'For each point, ground it in a REAL, SPECIFIC data value from the context — never a generic impression, never invent a technique/exercise/id not present in the context.',
+    '',
+    'For every point — session-wide or per-muscle — ground your conclusion in a REAL, SPECIFIC data value from the context (an exact number, date, or flag) and state your actual conclusion, never just a restatement of the data. Never invent a technique/exercise/id not present in the context. Omitting a muscle from muscleNotes means these four points genuinely gave you nothing to say for it — not that you skipped considering it.',
   ].join('\n');
 }
 
