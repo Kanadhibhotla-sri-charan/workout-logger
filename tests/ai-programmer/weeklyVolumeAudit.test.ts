@@ -117,3 +117,40 @@ describe('goalBriefVsGenerated — did the model miss the brief, or is the audit
     expect(goalBriefVsGenerated(audit, brief(8, false))).toEqual([]);
   });
 });
+
+describe('auditWeeklyVolume — the requirement is the brief the model was given', () => {
+  const targets = [target('triceps', true)];
+  const briefOf = (recommendedWeeklyPrimarySets: number) => ({ muscles: [{ targetType: 'physique_target', targetId: 'triceps', recommendedWeeklyPrimarySets }] });
+  const fourteen = week(
+    [ex('close-grip-bench-press', 'triceps', 3), ex('overhead-triceps-extension', 'triceps', 2), ex('cable-overhead-extension-leaning-forward', 'triceps', 2)],
+    [ex('close-grip-bench-press', 'triceps', 3), ex('overhead-triceps-extension', 'triceps', 2), ex('cable-overhead-extension-leaning-forward', 'triceps', 2)]
+  );
+  const audit = (recommended: number | null) =>
+    auditWeeklyVolume(fourteen, { targets, existingProgram: program('push', 'upper'), ...(recommended === null ? {} : { programmingBrief: briefOf(recommended) }) });
+
+  it('a week that exceeds a hold-current brief (14 vs 6) has no shortfall, even though the full reference is 24', () => {
+    const result = audit(6);
+    const row = rowFor(result, 'triceps');
+    expect(row.reference).toBe(24);
+    expect(row.required).toBe(6);
+    expect(row.shortfall).toBe(0);
+    expect(result.goalShortfalls).toEqual([]);
+  });
+
+  it('still fails a goal week that gives less than the brief asked for', () => {
+    const result = audit(24);
+    expect(rowFor(result, 'triceps').shortfall).toBe(10);
+    expect(result.goalShortfalls.map((r) => r.targetId)).toEqual(['triceps']);
+  });
+
+  it('never requires more than the week can deliver, even when the brief asks for more', () => {
+    const result = auditWeeklyVolume(week([]), { targets: [target('quads')], existingProgram: program('legs'), programmingBrief: { muscles: [{ targetType: 'physique_target', targetId: 'quads', recommendedWeeklyPrimarySets: 99 }] } });
+    expect(rowFor(result, 'quads').required).toBe(rowFor(result, 'quads').deliverable);
+  });
+
+  it('falls back to the deliverable figure when no brief is supplied', () => {
+    const row = rowFor(audit(null), 'triceps');
+    expect(row.briefRecommendedWeeklySets).toBeNull();
+    expect(row.required).toBe(row.deliverable);
+  });
+});

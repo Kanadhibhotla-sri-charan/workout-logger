@@ -3,7 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { openDb } from '../dist/db/client.js';
 import { buildReconciliationContext } from '../dist/ai-programmer/context/reconciliationContextBuilder.js';
-import { buildProgrammingBrief } from '../dist/ai-programmer/context/programmerContextBuilder.js';
+import { buildProgrammingBrief, readTrainingExperience } from '../dist/ai-programmer/context/programmerContextBuilder.js';
+import { UsersRepo } from '../dist/repositories/usersRepo.js';
 import { buildWeekReconciliationSystemInstruction } from '../dist/ai-programmer/service/aiProgrammerService.js';
 import { getWeekReconciliationOutputSchema } from '../dist/ai-programmer/contracts/weekReconciliationOutputSchema.js';
 import { validateWeekReconciliationSchema } from '../dist/ai-programmer/validation/weekReconciliationOutputValidator.js';
@@ -19,7 +20,7 @@ const context = buildReconciliationContext(db, { targetDate, requestedActivity: 
 const provider = new VelonaProvider({ ...loadVelonaConfig(), model: process.env.VELONA_MODEL });
 const reasoningSchema = { type: 'object', additionalProperties: false, required: ['weekStrategy', 'goalPriority'], properties: { weekStrategy: { type: 'string' }, goalPriority: { type: 'string' } } };
 const reasoningInstruction = 'You are a coaching reviewer. Analyze the complete week context, recent history, active goals, recovery, and session caps. Decide how to distribute quality work across the week. State which goal targets deserve priority, which non-goal targets should be deferred, and why. Return only JSON matching the supplied schema.';
-const commitInstruction = `${buildWeekReconciliationSystemInstruction()}\n\n[EVAL-ONLY WHOLE-WEEK GENERATION] Return a complete fresh week using all unlocked gym days in context.existingProgram. You may modify every unlocked future gym session, not only the requested target date. Use priorReasoning as your own planning pass. Preserve rest/badminton activities and locked days. Prioritize quality over filling every eligible target; defer non-goal work when that creates better goal-session quality. Add deliberate shortfalls to reconciliation.deferrals; the harness computes unmetSets from the exact weekly reference minus planned sets, so do not invent or use zero. Goal shortfalls require a recovery or recent_overexposure deferral. Normal-muscle shortfalls are warnings, not failures.`;
+const commitInstruction = `${buildWeekReconciliationSystemInstruction()}\n\n[EVAL-ONLY WHOLE-WEEK GENERATION] Return a complete fresh week using all unlocked gym days in context.existingProgram. You may modify every unlocked future gym session, not only the requested target date. Use priorReasoning as your own planning pass. Preserve rest/badminton activities and locked days. Prioritize quality over filling every eligible target; defer non-goal work when that creates better goal-session quality. Add deliberate shortfalls to reconciliation.deferrals; the harness computes unmetSets from the required weekly volume (the brief's recommended weekly sets, capped at what the week can deliver) minus planned sets, so do not invent or use zero. Goal shortfalls require a recovery or recent_overexposure deferral. Normal-muscle shortfalls are warnings, not failures.`;
 
 const programmingBrief = buildProgrammingBrief(
   context.targets,
@@ -27,7 +28,10 @@ const programmingBrief = buildProgrammingBrief(
   null,
   context.existingProgram.filter((d) => d.sessionPurpose).map((d) => ({ name: d.sessionPurpose })),
   targetDate,
-  context.profile.defaultSessionDurationMinutes
+  context.profile.defaultSessionDurationMinutes,
+  { deloadActive: false },
+  // The same confirmed experience level the deterministic engine's volume decision uses.
+  readTrainingExperience(db, new UsersRepo(db).getOrCreateDefault().id, context.currentDate)
 );
 const evalContext = { ...context, programmingBrief };
 

@@ -137,3 +137,16 @@ A read-through of the branch found that the eval and production were two differe
 
 Typecheck clean. Full suite: 231 failed on both the branch baseline and after these changes, identical failure set (date rot in hardcoded 2026-09-13 fixtures), 19 new tests passing. With a temporary faked clock the AI programmer tests, including the week service and validators, pass except 9 that fail identically on the untouched branch. The live model eval was not rerun in this pass (needs the Velona credentials and isolated eval database).
 
+### Brief-based benchmark and advanced-trainee gap (2026-09-20)
+
+The first repaired eval passed domain validation 3/3 but failed weekly adequacy on triceps at 14 of 24. A goal-versus-brief diagnostic then showed the brief had told the model to hold triceps at 6 sets (session range 3 to 12, action maintain), so the model exceeded the brief and the audit was demanding a benchmark the model was never given.
+
+Two findings and changes:
+
+1. The audit benchmark was the package's long-term weekly reference. A target's requirement is now min(the brief's recommended weekly sets, what the week can deliver); the full reference is still reported for context. Goal shortfalls and deferral amounts use the new requirement. A week that gives less than the brief asked for still fails.
+2. The brief ignored training experience. The eval seed marks the profile advanced, yet the brief said maintain at 6, because buildProgrammingBrief called decideVolume without training_experience. The advanced-trainee workaround (commit 5f0a8ea) reached only the deterministic engine. buildProgrammingBrief now takes the confirmed experience level (readTrainingExperience, one shared read, done before the brief in buildProgrammerContext and in the eval script). A confirmed advanced trainee with no volume yet starts a goal at its package reference; with existing volume and no assessment data the goal takes the same small step the engine takes instead of holding forever. Non-advanced behaviour and every existing call site (argument omitted) are unchanged.
+
+Effect on the triceps case: the brief becomes 8 sets with action increase instead of 6 with maintain. It does not jump to 24 unless the goal has no volume yet that week.
+
+Verification: typecheck clean; new brief tests (advanced vs not, with and without existing volume, argument omitted) and audit tests pass; with the temporary faked clock the AI programmer tests fail identically to the untouched branch (frozen-clock artifacts and token-report tests). Live eval not rerun.
+

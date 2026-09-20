@@ -293,6 +293,14 @@ export function buildTargetContexts(
  * — see docs from the read-only investigation) without duplicating that
  * function's cross-target running-state bookkeeping, which a single
  * one-session generation does not need. */
+/** The user's confirmed, non-expired training-experience level, or null. The
+ * one read every caller shares: the AI brief's volume decision must see the
+ * same value the deterministic engine's own decision does. */
+export function readTrainingExperience(db: Database.Database, userId: string, asOfDate: string): 'novice' | 'intermediate' | 'advanced' | null {
+  const raw = new ProfileFactorsRepo(db).effectiveValue(userId, 'training_experience', asOfDate);
+  return raw === 'novice' || raw === 'intermediate' || raw === 'advanced' ? raw : null;
+}
+
 export function buildProgrammingBrief(
   targets: readonly AIProgrammerTargetContext[],
   activeGoals: readonly AIProgrammerActiveGoalContext[],
@@ -311,7 +319,14 @@ export function buildProgrammingBrief(
   // independently-derived reduction. Defaults to inactive so every
   // existing call site (tests, programmerAdequacyValidator.ts's own
   // comment reference) that doesn't pass this keeps its prior behavior.
-  periodization: { deloadActive: boolean } = { deloadActive: false }
+  periodization: { deloadActive: boolean } = { deloadActive: false },
+  // The volume decision's own advanced-trainee path (Assessment-Gate
+  // Workaround): a confirmed advanced trainee starts a goal with no volume
+  // directly at its package reference and, with no assessment data, takes the
+  // same small +step the deterministic engine takes instead of holding the
+  // current volume forever. Was never passed here, so the AI brief always used
+  // the novice path. Null keeps the previous behaviour.
+  trainingExperience: 'novice' | 'intermediate' | 'advanced' | null = null
 ): AIProgrammerProgrammingBrief {
   const expectedCoverageTargetIds: readonly BlueprintId[] = sessionPurpose
     ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS]
@@ -341,6 +356,7 @@ export function buildProgrammingBrief(
       // pipeline cannot verify the §11 introspection checklist either.
       introspection_confirmed_no_other_explanation: false,
       development_reference: developmentReference,
+      training_experience: trainingExperience,
     });
 
     const recommendedWeeklyPrimarySetsBeforeDeload = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : t.currentWeeklyPrimarySets;
@@ -617,18 +633,22 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const targetDaySessionName = weeklyProgram?.sessions.find((s) => s.day_index === targetDayIndex)?.name;
   const sessionPurpose = targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null;
 
-  const programmingBrief = buildProgrammingBrief(targets, activeGoals, sessionPurpose, weeklyProgram?.sessions ?? [], currentDate, budgetMinutes, {
-    deloadActive: periodization.deloadActive,
-  });
-  const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
-
   // Rule 6 fix (2026-09-19): the user's confirmed training-experience
-  // level, when one exists — same real profile-factor read
-  // workoutBuilder.ts's own WeeklyPlanInput assembly already uses
-  // (ProfileFactorsRepo), never a second, independently-read source.
-  const rawTrainingExperience = new ProfileFactorsRepo(db).effectiveValue(user.id, 'training_experience', currentDate);
-  const trainingExperience: 'novice' | 'intermediate' | 'advanced' | null =
-    rawTrainingExperience === 'novice' || rawTrainingExperience === 'intermediate' || rawTrainingExperience === 'advanced' ? rawTrainingExperience : null;
+  // level, when one exists — read once, before the brief, because the brief's
+  // own volume decision needs it as well as the context.
+  const trainingExperience = readTrainingExperience(db, user.id, currentDate);
+
+  const programmingBrief = buildProgrammingBrief(
+    targets,
+    activeGoals,
+    sessionPurpose,
+    weeklyProgram?.sessions ?? [],
+    currentDate,
+    budgetMinutes,
+    { deloadActive: periodization.deloadActive },
+    trainingExperience
+  );
+  const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
 
   // Rule 6 fix: real, already-computed structural-balance advisories —
   // the exact same evaluateStructuralAdvisories the deterministic

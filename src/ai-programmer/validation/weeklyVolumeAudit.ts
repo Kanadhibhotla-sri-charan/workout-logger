@@ -9,10 +9,14 @@
 //     exactly as the reference engine's sub-target scope defines it. An
 //     exercise the scope deliberately leaves untagged (`[]`), or one whose
 //     package has no scope entry, credits the target the model assigned it to.
-//  2. The comparison figure is what the week can deliver, not the raw weekly
-//     reference: min(weekly reference, per-exposure cap x this week's
-//     compatible sessions). One leg day cannot deliver a reference written for
-//     two, so it is not reported as a shortfall.
+//  2. What a target is REQUIRED to receive is what the app's own volume
+//     decision told the model to aim for (the brief's recommended weekly sets:
+//     the build-up rule, or hold-current), capped at what the week can deliver,
+//     min(weekly reference, per-exposure cap x this week's compatible sessions).
+//     The full package reference is a long-term target reached by progression,
+//     and is reported for context, not enforced; enforcing it would fail a week
+//     that followed the brief exactly. With no brief supplied, the deliverable
+//     figure is used.
 
 import { getSubTargetExerciseIds } from '../../blueprint/subTargetExerciseScope.js';
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
@@ -34,6 +38,8 @@ export interface AuditWeek {
 export interface AuditContext {
   targets: readonly AIProgrammerTargetContext[];
   existingProgram: readonly { date: string; sessionPurpose: string | null }[];
+  /** The brief the model was given; supplies each target's recommended weekly sets. */
+  programmingBrief?: { muscles: readonly { targetType: string; targetId: string; recommendedWeeklyPrimarySets: number }[] };
 }
 
 export interface WeeklyVolumeRow {
@@ -45,7 +51,11 @@ export interface WeeklyVolumeRow {
   deliverable: number;
   compatibleSessions: number;
   generatedDirectSets: number;
-  /** deliverable - generated, never negative. */
+  /** The brief's recommended weekly sets for this target, when a brief was supplied. */
+  briefRecommendedWeeklySets: number | null;
+  /** What this target must receive: min(brief recommendation, deliverable), or deliverable with no brief. */
+  required: number;
+  /** required - generated, never negative. */
   shortfall: number;
   goal: boolean;
 }
@@ -99,6 +109,8 @@ export function auditWeeklyVolume(week: AuditWeek, context: AuditContext): Weekl
     const cap = reference.direct_sets_per_exposure;
     const deliverable = cap == null ? reference.weekly_direct_set_reference : Math.min(reference.weekly_direct_set_reference, cap * compatibleSessions);
     const generated = totals.get(keyOf(target.targetType, target.targetId)) ?? 0;
+    const briefRecommended = context.programmingBrief?.muscles.find((m) => m.targetType === target.targetType && m.targetId === target.targetId)?.recommendedWeeklyPrimarySets ?? null;
+    const required = briefRecommended === null ? deliverable : Math.min(deliverable, briefRecommended);
     rows.push({
       targetType: target.targetType,
       targetId: target.targetId,
@@ -106,7 +118,9 @@ export function auditWeeklyVolume(week: AuditWeek, context: AuditContext): Weekl
       deliverable,
       compatibleSessions,
       generatedDirectSets: generated,
-      shortfall: Math.max(0, deliverable - generated),
+      briefRecommendedWeeklySets: briefRecommended,
+      required,
+      shortfall: Math.max(0, required - generated),
       goal: isGoalTarget(target),
     });
   }
@@ -135,7 +149,7 @@ export function auditGoalDeferrals(audit: WeeklyVolumeAudit, deferrals: readonly
   }
   for (const row of audit.goalShortfalls) {
     if (!deferrals.some((d) => d.targetId === row.targetId && GOAL_DEFERRAL_REASONS.includes(d.reasonCode))) {
-      errors.push(`goal target ${row.targetId} is short by ${row.shortfall} set(s) (generated ${row.generatedDirectSets} of ${row.deliverable} deliverable); a recovery or recent_overexposure deferral is required`);
+      errors.push(`goal target ${row.targetId} is short by ${row.shortfall} set(s) (generated ${row.generatedDirectSets} of ${row.required} required); a recovery or recent_overexposure deferral is required`);
     }
   }
   return errors;
