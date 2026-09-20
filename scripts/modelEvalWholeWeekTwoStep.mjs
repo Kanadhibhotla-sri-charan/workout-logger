@@ -9,7 +9,7 @@ import { getWeekReconciliationOutputSchema } from '../dist/ai-programmer/contrac
 import { validateWeekReconciliationSchema } from '../dist/ai-programmer/validation/weekReconciliationOutputValidator.js';
 import { validateWeekReconciliationDomain } from '../dist/ai-programmer/validation/weekReconciliationDomainValidator.js';
 import { repairWeekReconciliation } from '../dist/ai-programmer/validation/programmerProposalRepair.js';
-import { auditGoalDeferrals, auditWeeklyVolume } from '../dist/ai-programmer/validation/weeklyVolumeAudit.js';
+import { auditGoalDeferrals, auditWeeklyVolume, goalBriefVsGenerated } from '../dist/ai-programmer/validation/weeklyVolumeAudit.js';
 import { VelonaProvider } from '../dist/ai-programmer/provider/velonaProvider.js';
 import { loadVelonaConfig } from '../dist/ai-programmer/provider/config.js';
 
@@ -59,6 +59,8 @@ if (structural.ok && structural.value) {
     .map((d) => ({ ...d, unmetSets: audit.rows.find((r) => r.targetId === d.targetId)?.shortfall ?? d.unmetSets }))
     .filter((d) => d.unmetSets > 0);
 
+  // Did the model miss what the brief asked for, or is the audit stricter than the brief?
+  result.goalBriefVsGenerated = goalBriefVsGenerated(audit, evalContext.programmingBrief.muscles);
   result.domain = validateWeekReconciliationDomain(repaired, evalContext, db);
   const deferralErrors = auditGoalDeferrals(audit, deferrals, evalContext.targets);
   result.usableAfterRepair = result.domain.ok;

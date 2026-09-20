@@ -18,7 +18,7 @@ import { getSubTargetExerciseIds } from '../../blueprint/subTargetExerciseScope.
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import { isTargetCompatibleWithPurpose } from '../../engine/sessionPurpose.js';
-import type { AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
+import type { AIProgrammerMuscleGuidance, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
 
 export interface AuditExercise {
   exerciseId: string;
@@ -139,4 +139,48 @@ export function auditGoalDeferrals(audit: WeeklyVolumeAudit, deferrals: readonly
     }
   }
   return errors;
+}
+
+export type GoalBriefVerdict = 'below_brief' | 'meets_brief_below_reference' | 'meets_reference';
+
+export interface GoalBriefRow {
+  targetId: string;
+  generatedDirectSets: number;
+  /** What the app's own volume decision told the model to aim for this week. */
+  briefRecommendedWeeklySets: number;
+  briefSessionRange: { min: number; max: number };
+  briefVolumeAction: string;
+  briefReasoning: string;
+  /** The package's full weekly reference, and what the week can deliver. */
+  weeklyReference: number | null;
+  deliverable: number | null;
+  verdict: GoalBriefVerdict;
+}
+
+/** For each goal muscle: did the generated week meet what the brief asked for,
+ * and how does that compare with the full reference the audit reports? This
+ * separates 'the model ignored the brief' from 'the audit benchmark is stricter
+ * than the brief the model was given'. */
+export function goalBriefVsGenerated(audit: WeeklyVolumeAudit, muscles: readonly AIProgrammerMuscleGuidance[]): GoalBriefRow[] {
+  const rows: GoalBriefRow[] = [];
+  for (const muscle of muscles) {
+    if (!muscle.isGoalOriented) continue;
+    const audited = audit.rows.find((r) => r.targetType === muscle.targetType && r.targetId === muscle.targetId);
+    const generated = audited?.generatedDirectSets ?? 0;
+    const deliverable = audited?.deliverable ?? null;
+    const verdict: GoalBriefVerdict =
+      generated < muscle.recommendedWeeklyPrimarySets ? 'below_brief' : deliverable !== null && generated < deliverable ? 'meets_brief_below_reference' : 'meets_reference';
+    rows.push({
+      targetId: muscle.targetId,
+      generatedDirectSets: generated,
+      briefRecommendedWeeklySets: muscle.recommendedWeeklyPrimarySets,
+      briefSessionRange: muscle.recommendedSessionSets,
+      briefVolumeAction: muscle.volumeAction,
+      briefReasoning: muscle.reasoning,
+      weeklyReference: audited?.reference ?? null,
+      deliverable,
+      verdict,
+    });
+  }
+  return rows;
 }

@@ -4,8 +4,8 @@
 // reference written for two).
 
 import { describe, expect, it } from 'vitest';
-import { auditGoalDeferrals, auditWeeklyVolume, type AuditExercise } from '../../src/ai-programmer/validation/weeklyVolumeAudit.js';
-import type { AIProgrammerTargetContext } from '../../src/ai-programmer/context/programmerContextTypes.js';
+import { auditGoalDeferrals, auditWeeklyVolume, goalBriefVsGenerated, type AuditExercise } from '../../src/ai-programmer/validation/weeklyVolumeAudit.js';
+import type { AIProgrammerMuscleGuidance, AIProgrammerTargetContext } from '../../src/ai-programmer/context/programmerContextTypes.js';
 
 function target(targetId: string, goal = false): AIProgrammerTargetContext {
   return { targetType: 'physique_target', targetId, isSpecialization: goal, goalId: goal ? 'g1' : null, validExercises: [] } as unknown as AIProgrammerTargetContext;
@@ -85,5 +85,35 @@ describe('auditGoalDeferrals', () => {
 
   it('does not require a deferral for a normal-muscle shortfall', () => {
     expect(auditGoalDeferrals(audit, [{ targetId: 'triceps', reasonCode: 'recovery' }], targets)).toEqual([]);
+  });
+});
+
+describe('goalBriefVsGenerated — did the model miss the brief, or is the audit stricter than the brief?', () => {
+  const targets = [target('triceps', true)];
+  const brief = (recommendedWeeklyPrimarySets: number, isGoalOriented = true) =>
+    [{ targetType: 'physique_target', targetId: 'triceps', isGoalOriented, recommendedWeeklyPrimarySets, recommendedSessionSets: { min: 4, max: 12 }, volumeAction: 'increase', reasoning: 'build-up' } as unknown as AIProgrammerMuscleGuidance];
+  // 3 + 2 + 2 = 7 sets on each of two days = 14 total, against a 24-set reference.
+  const fourteen = () => week([ex('close-grip-bench-press', 'triceps', 3), ex('overhead-triceps-extension', 'triceps', 2), ex('cable-overhead-extension-leaning-forward', 'triceps', 2)], [ex('close-grip-bench-press', 'triceps', 3), ex('overhead-triceps-extension', 'triceps', 2), ex('cable-overhead-extension-leaning-forward', 'triceps', 2)]);
+  const audit = auditWeeklyVolume(fourteen(), { targets, existingProgram: program('push', 'upper') });
+
+  it('meets the brief but not the full reference when the brief asked for a build-up figure', () => {
+    const [row] = goalBriefVsGenerated(audit, brief(8));
+    expect(row!.generatedDirectSets).toBe(14);
+    expect(row!.briefRecommendedWeeklySets).toBe(8);
+    expect(row!.weeklyReference).toBe(24);
+    expect(row!.verdict).toBe('meets_brief_below_reference');
+  });
+
+  it('is below the brief when the brief asked for the full reference and the model gave less', () => {
+    expect(goalBriefVsGenerated(audit, brief(24))[0]!.verdict).toBe('below_brief');
+  });
+
+  it('meets the reference when the week delivers it', () => {
+    const full = auditWeeklyVolume(week([ex('close-grip-bench-press', 'triceps', 12)], [ex('close-grip-bench-press', 'triceps', 12)]), { targets, existingProgram: program('push', 'upper') });
+    expect(goalBriefVsGenerated(full, brief(24))[0]!.verdict).toBe('meets_reference');
+  });
+
+  it('only reports goal muscles', () => {
+    expect(goalBriefVsGenerated(audit, brief(8, false))).toEqual([]);
   });
 });
