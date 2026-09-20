@@ -37,7 +37,7 @@ import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } fro
 import { validateProposalAdequacy } from '../validation/programmerAdequacyValidator.js';
 import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
 import { validateProposalSchema } from '../validation/programmerOutputValidator.js';
-import { repairProposal } from '../validation/programmerProposalRepair.js';
+import { repairProposal, repairWeekReconciliation } from '../validation/programmerProposalRepair.js';
 import { validateWeekReconciliationDomain } from '../validation/weekReconciliationDomainValidator.js';
 import { validateWeekReconciliationSchema } from '../validation/weekReconciliationOutputValidator.js';
 
@@ -331,7 +331,12 @@ export class AIProgrammerService {
       throw new AIWeekReconciliationOutputSchemaInvalidError(structural.errors);
     }
 
-    const domain = validateWeekReconciliationDomain(structural.value, context, this.db);
+    // Same repair the single-session path runs: fix what has one correct answer
+    // (role, reps/RIR, set ceilings, duplicates, session caps) on every unlocked day
+    // so a usable week is delivered instead of rejected.
+    const repairedWeek = repairWeekReconciliation(structural.value, context);
+
+    const domain = validateWeekReconciliationDomain(repairedWeek, context, this.db);
     if (!domain.ok || !domain.value) {
       throw new AIWeekReconciliationOutputDomainInvalidError(domain.errors);
     }

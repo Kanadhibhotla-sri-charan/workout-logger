@@ -1,73 +1,124 @@
-// Repair pass (2026-09-18): three real, mechanically-correctable issues
-// found via a real model eval (Option B two-step comparison,
-// GLM/DeepSeek/Mistral/Qwen3 candidates) — every one of them has exactly
-// one correct answer, already known with certainty, before this repair
-// ever runs:
-//  1. role — the model is no longer asked for it at all (see
-//     AIWorkoutExerciseProposal's own doc comment); always set here from
-//     Blueprint's own truth (context's own validExercises catalogue
-//     entry), never left to the model's ambiguous reading of the words
-//     "primary"/"secondary".
-//  2. an authored-prescription exercise's sets/repsMin/repsMax/rirMin/
-//     rirMax drifting from the one correct value (rule 6) — every model
-//     tested inflated at least one such exercise's sets rather than
-//     reject the whole proposal over a single deterministically-known
-//     number, clamp it back.
-//  3. reaching a muscle's real recommendedSessionSets total by adding a
-//     second/third exercise (rule 11's own new distribution guidance)
-//     can push the session over its real exercise/muscle-count cap —
-//     trim non-goal (maintenance) exercises first, the exact same "cut
-//     supporting muscles before goal ones" precedence rule 11 itself
-//     already uses, rather than reject the whole session.
-// Deliberately never touches anything genuinely non-mechanical: an
-// invented/unknown exercise, a duplicate exerciseId, or a target not in
-// context is left exactly as the model produced it — those stay real
-// domain-validation rejections, not something a repair should guess at.
-// Scoped to generate_session only; reconcile_week's own repair (a larger,
-// separate change) is not built here.
+// Repair pass (2026-09-18, extended 2026-09-20): fixes the mechanically
+// correctable problems in a model's output BEFORE domain validation, so a
+// usable program is delivered whenever the model's coaching intent can be
+// honoured. Every rule below has exactly one correct answer that is known
+// without asking the model again:
+//  1. role — always Blueprint's own truth, never the model's reading of the
+//     words "primary"/"secondary".
+//  2. reps/RIR — always the authored values.
+//  3. sets — the authored sets (and the target's per-exposure cap) are a
+//     CEILING, not an exact value. A coach may deliberately give fewer.
+//       - above the ceiling      -> clamped DOWN to it;
+//       - below 1 / fractional   -> rounded to a whole number of at least 1;
+//       - a reduction on a GOAL muscle with no rationale -> restored to the
+//         ceiling, because an unexplained cut to goal work is exactly what the
+//         validator refuses; reverting it delivers a usable session instead of
+//         a rejection. A reduction on a non-goal muscle, or any reduction that
+//         carries a rationale, is kept as the model wrote it.
+//     Repair never raises a number the model chose to lower for a stated reason.
+//  4. the same exerciseId assigned twice in one session -> keep the stronger
+//     claim (goal, then expected coverage, then most under-covered).
+//  5. over the session's exercise / muscle-count / leg / abs ceilings -> trim
+//     non-goal work first, never a goal exercise.
+// Deliberately untouched: an invented/unknown exercise, or a target not in
+// context. Those stay real domain-validation rejections.
+//
+// The same routine runs for a single generated session (generate_session) and
+// for every unlocked day of a whole-week reconciliation (reconcile_week).
 
 import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
+import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
+import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
 import type { AIProgrammerContext, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
+import type { AIReconciliationContext } from '../context/reconciliationContextTypes.js';
+import { directSetsPerExposureCapFor } from './setCaps.js';
+
+/** Same value the domain validator applies to an exercise with no authored
+ * prescription. */
+const MAX_SETS_WITHOUT_AUTHORED_CAP = 6;
 
 function findTarget(targets: readonly AIProgrammerTargetContext[], targetType: string, targetId: string): AIProgrammerTargetContext | undefined {
   return targets.find((t) => t.targetType === targetType && t.targetId === targetId);
 }
 
-function isGoalOriented(context: AIProgrammerContext, targetId: string): boolean {
-  return context.programmingBrief.muscles.some((m) => m.targetId === targetId && m.isGoalOriented);
+function validPurpose(purpose: string | null | undefined): SessionPurpose | null {
+  return purpose === 'push' || purpose === 'pull' || purpose === 'legs' || purpose === 'upper' ? purpose : null;
 }
 
-function duplicatePriority(exercise: AIWorkoutExerciseProposal, context: AIProgrammerContext): number {
-  const guidance = context.programmingBrief.muscles.find(
-    (m) => m.targetType === exercise.targetType && m.targetId === exercise.targetId
-  );
-  let score = 0;
-  if (guidance?.isGoalOriented) score += 3;
-  if (guidance?.eligibleForThisSession && context.programmingBrief.session.expectedCoverageTargetIds.includes(exercise.targetId)) score += 2;
-  if (guidance) score += Math.max(0, guidance.recommendedSessionSets.min - guidance.currentWeeklyDirectSets);
-  return score;
+function hasRationale(exercise: AIWorkoutExerciseProposal): boolean {
+  return Array.isArray(exercise.rationale) && exercise.rationale.some((entry) => typeof entry === 'string' && entry.trim().length > 0);
 }
 
-/** Removes duplicate exercise IDs before domain validation. A single exercise
- * entry can only carry one targetId, so keeping both would double-count the
- * same physical movement. Goal/expected/most-undercovered assignments win;
- * ties keep the first occurrence. Returns the repaired exercises and notes. */
-function repairDuplicateExercises(
-  exercises: readonly AIWorkoutExerciseProposal[],
-  context: AIProgrammerContext
-): { exercises: AIWorkoutExerciseProposal[]; notes: string[] } {
-  const kept = new Map<string, { exercise: AIWorkoutExerciseProposal; index: number; score: number }>();
+/** What the repair needs to know about the session it is repairing. */
+interface RepairScope {
+  targets: readonly AIProgrammerTargetContext[];
+  purpose: SessionPurpose | null;
+  isGoal: (exercise: AIWorkoutExerciseProposal) => boolean;
+  /** The target's per-exposure cap, or null when it has none. */
+  setCapFor: (exercise: AIWorkoutExerciseProposal) => number | null;
+  duplicatePriority: (exercise: AIWorkoutExerciseProposal) => number;
+}
+
+function repairSets(exercise: AIWorkoutExerciseProposal, maxSets: number, scope: RepairScope, notes: string[]): number {
+  const given = exercise.sets;
+  let sets = Number.isFinite(given) ? Math.min(maxSets, Math.max(1, Math.round(given))) : maxSets;
+  if (sets < maxSets && scope.isGoal(exercise) && !hasRationale(exercise)) {
+    notes.push(`Restored ${exercise.exerciseId} for ${exercise.targetId} to ${maxSets} sets: goal work was reduced to ${sets} without a stated reason.`);
+    sets = maxSets;
+  } else if (sets < given) {
+    notes.push(`Reduced ${exercise.exerciseId} for ${exercise.targetId} from ${given} to ${sets} sets to respect the authored prescription and session cap.`);
+  } else if (sets !== given) {
+    notes.push(`Adjusted ${exercise.exerciseId} for ${exercise.targetId} sets from ${given} to ${sets}.`);
+  }
+  return sets;
+}
+
+function repairExercise<T extends AIWorkoutExerciseProposal>(exercise: T, scope: RepairScope, notes: string[]): T {
+  const target = findTarget(scope.targets, exercise.targetType, exercise.targetId);
+  const catalogueEntry = target?.validExercises.find((v) => v.exerciseId === exercise.exerciseId);
+  if (!catalogueEntry) return exercise; // unknown exercise/target pair — left for domain validation to reject
+
+  const fixed: T = { ...exercise, role: catalogueEntry.role };
+  if (exercise.role !== catalogueEntry.role) {
+    notes.push(`Corrected ${exercise.exerciseId} role for ${exercise.targetId} from ${exercise.role} to ${catalogueEntry.role}.`);
+  }
+
+  const authored = catalogueEntry.authoredPrescription;
+  if (authored) {
+    const cap = scope.setCapFor(exercise);
+    const maxSets = Math.min(authored.sets, cap ?? Number.POSITIVE_INFINITY);
+    fixed.sets = repairSets(exercise, maxSets, scope, notes);
+    fixed.repsMin = authored.repsMin;
+    fixed.repsMax = authored.repsMax;
+    fixed.rirMin = authored.rirMin;
+    fixed.rirMax = authored.rirMax;
+    for (const field of ['repsMin', 'repsMax', 'rirMin', 'rirMax'] as const) {
+      if (exercise[field] !== fixed[field]) {
+        notes.push(`Adjusted ${exercise.exerciseId} ${field} for ${exercise.targetId} to the Blueprint-authored value ${fixed[field]}.`);
+      }
+    }
+  } else if (Number.isFinite(exercise.sets) && exercise.sets > MAX_SETS_WITHOUT_AUTHORED_CAP) {
+    fixed.sets = MAX_SETS_WITHOUT_AUTHORED_CAP;
+    notes.push(`Reduced ${exercise.exerciseId} for ${exercise.targetId} from ${exercise.sets} to ${MAX_SETS_WITHOUT_AUTHORED_CAP} sets (no authored prescription exists; application cap).`);
+  }
+  return fixed;
+}
+
+/** Removes duplicate exercise IDs. A single exercise entry can only carry
+ * one targetId, so keeping both would double-count the same movement. The
+ * stronger claim wins; ties keep the first occurrence. */
+function repairDuplicateExercises<T extends AIWorkoutExerciseProposal>(exercises: readonly T[], scope: RepairScope): { exercises: T[]; notes: string[] } {
+  const kept = new Map<string, { exercise: T; index: number; score: number }>();
   const notes: string[] = [];
 
   for (const exercise of exercises) {
     const existing = kept.get(exercise.exerciseId);
     if (!existing) {
-      kept.set(exercise.exerciseId, { exercise, index: kept.size, score: duplicatePriority(exercise, context) });
+      kept.set(exercise.exerciseId, { exercise, index: kept.size, score: scope.duplicatePriority(exercise) });
       continue;
     }
-
-    const candidateScore = duplicatePriority(exercise, context);
+    const candidateScore = scope.duplicatePriority(exercise);
     if (candidateScore > existing.score) {
       kept.set(exercise.exerciseId, { exercise, index: existing.index, score: candidateScore });
       notes.push(`Removed duplicate ${exercise.exerciseId} assignment for ${existing.exercise.targetId}; retained it for ${exercise.targetId}.`);
@@ -75,55 +126,47 @@ function repairDuplicateExercises(
       notes.push(`Removed duplicate ${exercise.exerciseId} assignment for ${exercise.targetId}; retained it for ${existing.exercise.targetId}.`);
     }
   }
-
   return { exercises: [...kept.values()].sort((a, b) => a.index - b.index).map((entry) => entry.exercise), notes };
 }
 
-/** Removes the last exercise in `exercises` matching `predicate` whose
- * own target is NOT goal-oriented — a goal-oriented exercise is never
- * removed by this repair. Returns null (no change) when nothing
- * eligible remains, so the caller can stop rather than loop forever. */
-function removeLastNonGoalMatching(
-  exercises: readonly AIWorkoutExerciseProposal[],
-  context: AIProgrammerContext,
-  predicate: (e: AIWorkoutExerciseProposal) => boolean
-): AIWorkoutExerciseProposal[] | null {
+/** Removes the last exercise matching `predicate` whose own target is NOT a
+ * goal — a goal exercise is never removed by this repair. Returns null when
+ * nothing qualifies. */
+function removeLastNonGoalMatching<T extends AIWorkoutExerciseProposal>(
+  exercises: readonly T[],
+  scope: RepairScope,
+  predicate: (e: T) => boolean
+): T[] | null {
   for (let i = exercises.length - 1; i >= 0; i--) {
     const e = exercises[i]!;
-    if (predicate(e) && !isGoalOriented(context, e.targetId)) {
-      return [...exercises.slice(0, i), ...exercises.slice(i + 1)];
-    }
+    if (!scope.isGoal(e) && predicate(e)) return [...exercises.slice(0, i), ...exercises.slice(i + 1)];
   }
   return null;
 }
 
-/** Item 3 above: trims non-goal exercises/targets until the session's
- * real exercise-count, muscle-count, and (on a legs day) leg-exercise
- * caps are all satisfied, or no more non-goal exercises are left to cut
- * — whichever comes first. Never removes a goal-oriented exercise; a
- * session still over cap after every non-goal exercise is gone is left
- * for adequacy validation to reject as a genuine judgment failure, not
- * something this repair should paper over. */
-function trimToSessionCaps(exercises: readonly AIWorkoutExerciseProposal[], context: AIProgrammerContext): { exercises: AIWorkoutExerciseProposal[]; notes: string[] } {
+/** Trims a session to its real ceilings, non-goal work first. A session that
+ * is still over after every non-goal exercise is gone is left for validation
+ * to reject as a genuine judgment failure. */
+function trimToSessionCaps<T extends AIWorkoutExerciseProposal>(exercises: readonly T[], scope: RepairScope): { exercises: T[]; notes: string[] } {
   let result = [...exercises];
   const notes: string[] = [];
-  const removeWithNote = (next: AIWorkoutExerciseProposal[] | null, reason: string): boolean => {
+  const removeWithNote = (next: T[] | null, reason: string): boolean => {
     if (!next) return false;
     const removed = result.find((e) => !next.includes(e));
     if (removed) notes.push(`Removed ${removed.exerciseId} for ${removed.targetId} to stay within the ${reason}.`);
     result = next;
     return true;
   };
-  const purpose = context.programmingBrief.session.purpose;
-  const caps = () => sessionRealismCapFor(purpose, [...new Set(result.map((e) => e.targetId))]);
+  const caps = () => sessionRealismCapFor(scope.purpose, [...new Set(result.map((e) => e.targetId))]);
 
   while (result.length > caps().maxExercises) {
-    const next = removeLastNonGoalMatching(result, context, () => true);
-    if (!removeWithNote(next, `${caps().maxExercises}-exercise session limit`)) break;
+    if (!removeWithNote(removeLastNonGoalMatching(result, scope, () => true), `${caps().maxExercises}-exercise session limit`)) break;
   }
 
   while (new Set(result.map((e) => e.targetId)).size > caps().maxTargets) {
-    const nonGoalTargetIds = [...new Set(result.map((e) => e.targetId))].filter((id) => !isGoalOriented(context, id));
+    const nonGoalTargetIds = [...new Set(result.map((e) => e.targetId))].filter(
+      (id) => !scope.isGoal(result.find((e) => e.targetId === id)!)
+    );
     const targetIdToRemove = nonGoalTargetIds[nonGoalTargetIds.length - 1];
     if (targetIdToRemove === undefined) break;
     const removed = result.filter((e) => e.targetId === targetIdToRemove);
@@ -134,65 +177,78 @@ function trimToSessionCaps(exercises: readonly AIWorkoutExerciseProposal[], cont
   const legCap = caps().legExerciseShareMax;
   if (legCap !== null) {
     while (result.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length > legCap) {
-      const next = removeLastNonGoalMatching(result, context, (e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId));
-      if (!removeWithNote(next, `${caps().legExerciseShareMax}-leg-exercise share limit`)) break;
+      if (!removeWithNote(removeLastNonGoalMatching(result, scope, (e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)), `${legCap}-leg-exercise share limit`)) break;
     }
   }
 
   const absCap = caps().absExerciseShareMax;
   if (absCap !== null) {
     while (result.filter((e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)).length > absCap) {
-      const next = removeLastNonGoalMatching(result, context, (e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId));
-      if (!removeWithNote(next, `${caps().absExerciseShareMax}-ab-exercise share limit`)) break;
+      if (!removeWithNote(removeLastNonGoalMatching(result, scope, (e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)), `${absCap}-ab-exercise share limit`)) break;
     }
   }
 
   return { exercises: result, notes };
 }
 
-/** Repairs items 1-3 above on a cloned copy of `proposal.exercises` —
- * never mutates the caller's own object. Every other field of `proposal`
- * passes through unchanged. Called after schema validation and before
- * domain validation, so the repaired shape is what domain/adequacy
- * validation actually checks (and, on success, what gets persisted). */
-export function repairProposal(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext): AIWorkoutSessionProposal {
-  const repairNotes: string[] = [];
-  const repaired = proposal.exercises.map((exercise): AIWorkoutExerciseProposal => {
-    const target = findTarget(context.targets, exercise.targetType, exercise.targetId);
-    const catalogueEntry = target?.validExercises.find((v) => v.exerciseId === exercise.exerciseId);
-    if (!catalogueEntry) return exercise; // unknown exercise/target pair — left for domain validation to reject
+function repairExerciseList<T extends AIWorkoutExerciseProposal>(exercises: readonly T[], scope: RepairScope): { exercises: T[]; notes: string[] } {
+  const notes: string[] = [];
+  const perExercise = exercises.map((exercise) => repairExercise(exercise, scope, notes));
+  const deduped = repairDuplicateExercises(perExercise, scope);
+  const capped = trimToSessionCaps(deduped.exercises, scope);
+  return { exercises: capped.exercises, notes: [...notes, ...deduped.notes, ...capped.notes] };
+}
 
-    const fixed: AIWorkoutExerciseProposal = { ...exercise, role: catalogueEntry.role };
-    if (exercise.role !== catalogueEntry.role) {
-      repairNotes.push(`Corrected ${exercise.exerciseId} role for ${exercise.targetId} from ${exercise.role} to ${catalogueEntry.role}.`);
-    }
-    if (catalogueEntry.authoredPrescription) {
-      const guidance = context.programmingBrief.muscles.find(
-        (m) => m.targetType === exercise.targetType && m.targetId === exercise.targetId
-      );
-      const cappedSets = Math.min(catalogueEntry.authoredPrescription.sets, guidance?.directSetsPerExposureCap ?? Number.POSITIVE_INFINITY);
-      fixed.sets = cappedSets;
-      if (exercise.sets !== cappedSets) {
-        repairNotes.push(`Adjusted ${exercise.exerciseId} for ${exercise.targetId} from ${exercise.sets} to ${cappedSets} sets to respect the authored prescription and session cap.`);
-      }
-      fixed.repsMin = catalogueEntry.authoredPrescription.repsMin;
-      fixed.repsMax = catalogueEntry.authoredPrescription.repsMax;
-      fixed.rirMin = catalogueEntry.authoredPrescription.rirMin;
-      fixed.rirMax = catalogueEntry.authoredPrescription.rirMax;
-      for (const [field, value] of Object.entries({ repsMin: fixed.repsMin, repsMax: fixed.repsMax, rirMin: fixed.rirMin, rirMax: fixed.rirMax })) {
-        if (exercise[field as keyof AIWorkoutExerciseProposal] !== value) {
-          repairNotes.push(`Adjusted ${exercise.exerciseId} ${field} for ${exercise.targetId} to the Blueprint-authored value ${value}.`);
-        }
-      }
-    }
-    return fixed;
+function isGoalTarget(targets: readonly AIProgrammerTargetContext[], exercise: AIWorkoutExerciseProposal): boolean {
+  const target = findTarget(targets, exercise.targetType, exercise.targetId);
+  return Boolean(target?.goalId) || Boolean(target?.isSpecialization);
+}
+
+/** Repairs one generated session. */
+export function repairProposal(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext): AIWorkoutSessionProposal {
+  const muscles = context.programmingBrief.muscles;
+  const guidanceFor = (e: AIWorkoutExerciseProposal) => muscles.find((m) => m.targetType === e.targetType && m.targetId === e.targetId);
+  const scope: RepairScope = {
+    targets: context.targets,
+    purpose: validPurpose(context.programmingBrief.session.purpose),
+    isGoal: (e) => Boolean(guidanceFor(e)?.isGoalOriented) || isGoalTarget(context.targets, e),
+    setCapFor: (e) => guidanceFor(e)?.directSetsPerExposureCap ?? null,
+    duplicatePriority: (e) => {
+      const guidance = guidanceFor(e);
+      let score = 0;
+      if (guidance?.isGoalOriented) score += 3;
+      if (guidance?.eligibleForThisSession && context.programmingBrief.session.expectedCoverageTargetIds.includes(e.targetId)) score += 2;
+      if (guidance) score += Math.max(0, guidance.recommendedSessionSets.min - guidance.currentWeeklyDirectSets);
+      return score;
+    },
+  };
+  const repaired = repairExerciseList(proposal.exercises, scope);
+  return { ...proposal, exercises: repaired.exercises, warnings: [...proposal.warnings, ...repaired.notes] };
+}
+
+/** Repairs every unlocked day of a whole-week reconciliation with the same
+ * routine the single-session path uses. Locked days are never touched, and a
+ * day with no session is left alone. */
+export function repairWeekReconciliation(output: AIWeekReconciliationOutput, context: AIReconciliationContext): AIWeekReconciliationOutput {
+  const lockedDates = new Set(context.existingProgram.filter((d) => d.locked).map((d) => d.date));
+  const notes: string[] = [];
+
+  const days = output.days.map((day) => {
+    if (!day.session || lockedDates.has(day.date)) return day;
+    const scope: RepairScope = {
+      targets: context.targets,
+      purpose: validPurpose(day.session.sessionPurpose),
+      isGoal: (e) => isGoalTarget(context.targets, e),
+      setCapFor: (e) => {
+        const target = findTarget(context.targets, e.targetType, e.targetId);
+        return target ? directSetsPerExposureCapFor(target) : null;
+      },
+      duplicatePriority: (e) => (isGoalTarget(context.targets, e) ? 3 : 0),
+    };
+    const repaired = repairExerciseList(day.session.exercises, scope);
+    for (const note of repaired.notes) notes.push(`${day.date}: ${note}`);
+    return { ...day, session: { ...day.session, exercises: repaired.exercises } };
   });
 
-  const duplicateRepair = repairDuplicateExercises(repaired, context);
-  const capped = trimToSessionCaps(duplicateRepair.exercises, context);
-  return {
-    ...proposal,
-    exercises: capped.exercises,
-    warnings: [...proposal.warnings, ...repairNotes, ...duplicateRepair.notes, ...capped.notes],
-  };
+  return { ...output, days, reconciliation: { ...output.reconciliation, warnings: [...output.reconciliation.warnings, ...notes] } };
 }

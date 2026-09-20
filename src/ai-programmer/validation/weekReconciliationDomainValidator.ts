@@ -12,6 +12,7 @@ import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
 import type { AIReconciliationContext } from '../context/reconciliationContextTypes.js';
 import { validateExerciseAgainstTargets } from './programmerDomainValidator.js';
+import { directSetsPerExposureCapFor } from './setCaps.js';
 
 export interface WeekReconciliationDomainValidationResult {
   ok: boolean;
@@ -98,8 +99,9 @@ export function validateWeekReconciliationDomain(
     if (day.session) {
       const seen = new Set<string>();
       for (const [exIndex, exercise] of day.session.exercises.entries()) {
-        const guidance = context.targets.find((t) => t.targetType === exercise.targetType && t.targetId === exercise.targetId);
-        validateExerciseAgainstTargets(exercise, context.targets, seen, `${path}.session.exercises[${exIndex}] (${exercise.exerciseId})`, errors, warnings, undefined);
+        const exerciseTarget = context.targets.find((t) => t.targetType === exercise.targetType && t.targetId === exercise.targetId);
+        const setCap = exerciseTarget ? directSetsPerExposureCapFor(exerciseTarget) : null;
+        validateExerciseAgainstTargets(exercise, context.targets, seen, `${path}.session.exercises[${exIndex}] (${exercise.exerciseId})`, errors, warnings, setCap ?? undefined);
       }
 
       // Session Realism Cap (Programming Advisor Fix, 2026-09-14): the

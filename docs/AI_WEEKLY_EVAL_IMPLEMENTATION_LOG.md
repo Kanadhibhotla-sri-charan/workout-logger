@@ -108,3 +108,32 @@ Production checkout, production database, and production user data were not modi
 ## Follow-up recommendation
 
 Before treating weekly volume audit numbers as authoritative, update the eval helper to use the same sub-target exercise-scope mapping as the reference engine so shared exercises receive credit for every target they genuinely train. Do not loosen the goal adequacy rule or add more prompt rules based on these three Qwen iterations.
+
+## Follow-up review and repairs (2026-09-20)
+
+A read-through of the branch found that the eval and production were two different pipelines, which explains most of the failures reported above. Goal: a usable program after repair, instead of a rejection.
+
+### Gaps found in commit 68bd7f0
+
+1. The whole-week path (production and eval) never ran repair; only the single-session path did. So the eval judged raw model output against rules production repairs: 8-target overruns, over-authored sets and duplicates were rejected instead of fixed. The earlier claim that duplicate repair caused no failures was vacuous because repair never ran on a week.
+2. Repair forced sets UP to the maximum unconditionally, silently reverting a coach's deliberate reduction, and made the reduced-rationale check unreachable in the single-session path.
+3. The week validator never enforced the per-target set cap (it passed undefined and computed an unused variable). The dip-3 versus lower-pec-2 conflict stayed open there.
+4. The eval read goal target ids from fields that do not exist (primaryTargetIds/supportingTargetIds), so its goal-deferral reason check never fired.
+5. The prompt and error text required 'carryover' but the deferral schema has no such field and nothing checked it.
+6. The eval hard-coded legsUseTwoWeekHorizon: true and horizon 'week' for every row; legs were audited against a weekly reference one leg day cannot deliver.
+7. The audit credited only the assigned target, undercounting shared exercises.
+
+### Changes
+
+- programmerProposalRepair.ts: one shared repair for a single session and for every unlocked day of a week (locked days untouched). Sets are a ceiling: clamped down when above it, rounded to a whole number of at least 1, a reduction with a rationale is kept, a reduction on a non-goal muscle is kept, and an UNEXPLAINED reduction on a goal muscle is restored to the ceiling with a note (an unexplained cut to goal work is what the validator refuses, and restoring it delivers a usable session). Repair never raises a reduction the model chose for a stated reason.
+- setCaps.ts (new): one source for the per-exposure cap, used by the repair and the week validator.
+- weekReconciliationDomainValidator.ts: enforces the per-target cap.
+- aiProgrammerService.ts: runs repairWeekReconciliation before week validation.
+- weeklyVolumeAudit.ts (new, unit tested): credits shared exercises via the engine's own sub-target scope (untagged or unscoped exercises credit the assigned target); compares against what the week can deliver, min(weekly reference, per-exposure cap x compatible sessions); one definition of goal; goal deferrals need recovery or recent_overexposure, and the deferral is the carryover record (no separate field).
+- modelEvalWholeWeekTwoStep.mjs: runs the repair, uses the audit module, reports usableAfterRepair separately from weekAdequacy, drops the false horizon flag and the carryover wording.
+- Three tests that still asserted exact-match sets were updated to the ceiling rule (they were hidden by date rot).
+
+### Verification
+
+Typecheck clean. Full suite: 231 failed on both the branch baseline and after these changes, identical failure set (date rot in hardcoded 2026-09-13 fixtures), 19 new tests passing. With a temporary faked clock the AI programmer tests, including the week service and validators, pass except 9 that fail identically on the untouched branch. The live model eval was not rerun in this pass (needs the Velona credentials and isolated eval database).
+

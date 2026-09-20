@@ -7,7 +7,9 @@
 // work without ever touching a genuinely non-mechanical issue.
 
 import { describe, expect, it } from 'vitest';
-import { repairProposal } from '../../src/ai-programmer/validation/programmerProposalRepair.js';
+import { repairProposal, repairWeekReconciliation } from '../../src/ai-programmer/validation/programmerProposalRepair.js';
+import type { AIWeekReconciliationOutput } from '../../src/ai-programmer/contracts/weekReconciliationTypes.js';
+import type { AIReconciliationContext } from '../../src/ai-programmer/context/reconciliationContextTypes.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../../src/ai-programmer/contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance, AIProgrammerProgrammingBrief, AIProgrammerTargetContext, AIProgrammerValidExerciseContext } from '../../src/ai-programmer/context/programmerContextTypes.js';
 
@@ -106,7 +108,7 @@ describe('repairProposal', () => {
 
     const repaired = repairProposal(p, context);
     expect(repaired.exercises[0]!.sets).toBe(2);
-    expect(repaired.warnings.some((w) => w.includes('Adjusted cable-pushdown for triceps'))).toBe(true);
+    expect(repaired.warnings.some((w) => w.includes('Reduced cable-pushdown for triceps from 7 to 2'))).toBe(true);
   });
 
   it('clamps an authored exercise to the target exposure cap', () => {
@@ -222,5 +224,85 @@ describe('repairProposal', () => {
     const repaired = repairProposal(p, context);
     expect(repaired.exercises.length).toBe(10);
     expect(repaired.exercises.filter((e) => e.targetId === 'goal-target').length).toBe(3); // every goal exercise kept
+  });
+
+  describe('sets are a ceiling: reductions are kept, unexplained goal cuts are restored (2026-09-20)', () => {
+    const pushdown = (goal: boolean) =>
+      contextWith(
+        [target({ targetId: 'triceps', goalId: goal ? 'g1' : null, isSpecialization: goal, validExercises: [validExercise({ exerciseId: 'cable-pushdown', role: 'primary', authoredPrescription: { sets: 3, repsMin: 10, repsMax: 16, rirMin: 1, rirMax: 3 } })] })],
+        { session: { purpose: null, expectedCoverageTargetIds: [] }, muscles: [guidance({ targetId: 'triceps', isGoalOriented: goal, directSetsPerExposureCap: 12 })], approxSessionSetBudget: 20 }
+      );
+    const withSets = (sets: number, rationale: string[]) => proposal([exercise({ exerciseId: 'cable-pushdown', targetId: 'triceps', sets, repsMin: 10, repsMax: 16, rirMin: 1, rirMax: 3, rationale })]);
+
+    it('keeps a deliberate reduction that carries a rationale, on a goal muscle', () => {
+      const repaired = repairProposal(withSets(2, ['recent overexposure']), pushdown(true));
+      expect(repaired.exercises[0]!.sets).toBe(2);
+      expect(repaired.warnings).toEqual([]);
+    });
+
+    it('keeps a reduction on a non-goal muscle even without a rationale', () => {
+      const repaired = repairProposal(withSets(1, []), pushdown(false));
+      expect(repaired.exercises[0]!.sets).toBe(1);
+    });
+
+    it('restores an unexplained reduction on a goal muscle to the ceiling, with a note', () => {
+      const repaired = repairProposal(withSets(2, []), pushdown(true));
+      expect(repaired.exercises[0]!.sets).toBe(3);
+      expect(repaired.warnings.some((w) => w.includes('Restored cable-pushdown for triceps to 3 sets'))).toBe(true);
+    });
+
+    it('never raises a reduction above what the model chose, and clamps an excess down to the ceiling', () => {
+      expect(repairProposal(withSets(5, ['x']), pushdown(false)).exercises[0]!.sets).toBe(3);
+      expect(repairProposal(withSets(2, ['x']), pushdown(false)).exercises[0]!.sets).toBe(2);
+    });
+
+    it('rounds a fractional set count and never goes below 1', () => {
+      expect(repairProposal(withSets(0, []), pushdown(false)).exercises[0]!.sets).toBe(1);
+      expect(repairProposal(withSets(2.4, []), pushdown(false)).exercises[0]!.sets).toBe(2);
+    });
+  });
+
+  describe('repairWeekReconciliation — the same repair on every unlocked day', () => {
+    const NINE = ['upper-pec', 'mid-pec', 'lower-pec', 'front-delt', 'side-delt', 'triceps', 'triceps-long-head', 'obliques', 'rectus-abdominis'];
+    const weekContext = (targets: AIProgrammerTargetContext[], lockedDates: string[] = []): AIReconciliationContext =>
+      ({
+        targets,
+        existingProgram: ['2026-09-21', '2026-09-22'].map((date) => ({ date, locked: lockedDates.includes(date) })),
+      }) as unknown as AIReconciliationContext;
+    const weekOutput = (days: Array<{ date: string; exercises: AIWorkoutExerciseProposal[] }>): AIWeekReconciliationOutput =>
+      ({
+        days: days.map((d) => ({ date: d.date, session: { sessionPurpose: 'push', exercises: d.exercises.map((e) => ({ ...e, classification: 'normal_development' })) } })),
+        reconciliation: { warnings: [] },
+      }) as unknown as AIWeekReconciliationOutput;
+
+    it('trims a 9-target unlocked day to the 8-target cap, non-goal work first, and notes the date', () => {
+      const targets = NINE.map((id) => target({ targetId: id, validExercises: [validExercise({ exerciseId: 'ex-' + id, role: 'primary' })] }));
+      const out = repairWeekReconciliation(weekOutput([{ date: '2026-09-21', exercises: NINE.map((id) => exercise({ exerciseId: 'ex-' + id, targetId: id, sets: 2 })) }]), weekContext(targets));
+      expect(new Set(out.days[0]!.session!.exercises.map((e) => e.targetId)).size).toBe(8);
+      expect(out.reconciliation.warnings.some((w) => w.startsWith('2026-09-21: Removed'))).toBe(true);
+    });
+
+    it('clamps an exercise to the target per-exposure cap (dip 3 sets vs lower-pec cap 2)', () => {
+      const targets = [target({ targetId: 'lower-pec', validExercises: [validExercise({ exerciseId: 'dip-chest-biased', role: 'primary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 12, rirMin: 1, rirMax: 3 } })] })];
+      const out = repairWeekReconciliation(weekOutput([{ date: '2026-09-21', exercises: [exercise({ exerciseId: 'dip-chest-biased', targetId: 'lower-pec', sets: 3, repsMin: 6, repsMax: 12 })] }]), weekContext(targets));
+      expect(out.days[0]!.session!.exercises[0]!.sets).toBe(2);
+    });
+
+    it('never touches a locked day', () => {
+      const targets = NINE.map((id) => target({ targetId: id, validExercises: [validExercise({ exerciseId: 'ex-' + id, role: 'primary' })] }));
+      const day = { date: '2026-09-21', exercises: NINE.map((id) => exercise({ exerciseId: 'ex-' + id, targetId: id, sets: 2 })) };
+      const out = repairWeekReconciliation(weekOutput([day]), weekContext(targets, ['2026-09-21']));
+      expect(out.days[0]!.session!.exercises).toHaveLength(9);
+      expect(out.reconciliation.warnings).toEqual([]);
+    });
+
+    it('keeps a reduction that has a rationale and restores an unexplained goal cut', () => {
+      const t = (goal: boolean) => [target({ targetId: 'triceps', goalId: goal ? 'g1' : null, isSpecialization: goal, validExercises: [validExercise({ exerciseId: 'close-grip-bench-press', role: 'primary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 10, rirMin: 1, rirMax: 3 } })] })];
+      const run = (goal: boolean, rationale: string[]) =>
+        repairWeekReconciliation(weekOutput([{ date: '2026-09-21', exercises: [exercise({ exerciseId: 'close-grip-bench-press', targetId: 'triceps', sets: 2, repsMin: 6, repsMax: 10, rationale })] }]), weekContext(t(goal)));
+      expect(run(true, ['recent overexposure']).days[0]!.session!.exercises[0]!.sets).toBe(2);
+      expect(run(true, []).days[0]!.session!.exercises[0]!.sets).toBe(3);
+      expect(run(false, []).days[0]!.session!.exercises[0]!.sets).toBe(2);
+    });
   });
 });
