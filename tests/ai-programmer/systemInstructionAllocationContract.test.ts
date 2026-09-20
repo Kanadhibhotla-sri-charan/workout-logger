@@ -34,20 +34,20 @@ describe('buildProgrammerSystemInstruction — session allocation contract', () 
 
   it('explicitly separates flexible target\\/exercise selection from non-flexible set-count allocation', () => {
     expect(instruction).toMatch(/full freedom over WHICH muscles\/exercises to train/);
-    expect(instruction).toMatch(/NO freedom over HOW MANY sets each one gets/);
+    expect(instruction).toMatch(/AT MOST its Blueprint-authored sets/);
+    expect(instruction).toMatch(/fewer sets are allowed/);
   });
 
   it('gives an explicit, ordered allocation procedure (goal muscles first, then maintenance, within-range, budget-exception-only)', () => {
     expect(instruction).toMatch(/Assigning sets, in this exact order/);
     expect(instruction).toMatch(/give each active-goal .* muscle you choose to train a set count within its own recommendedSessionSets/);
     expect(instruction).toMatch(/then give each eligible maintenance/);
-    expect(instruction).toMatch(/summing every eligible muscle's own recommendedSessionSets\.min already exceeds approxSessionSetBudget/);
-    expect(instruction).toMatch(/cut supporting \(maintenance\) muscles first, before ever taking an active-goal muscle below its own min/);
+    expect(instruction).toMatch(/lower exercise set count is allowed when recent exposure, recovery, or session capacity supports it/);
+    expect(instruction).toMatch(/cut supporting maintenance muscles before an active-goal muscle/);
   });
 
   it('forbids rounding down toward the bottom of a range without the real budget exception applying', () => {
-    expect(instruction).toMatch(/never choose a value near the bottom of a range.*merely because it .seems like a reasonable session./);
-    expect(instruction).toMatch(/that is a rules violation unless step \(3\)'s budget exception genuinely applies/);
+    expect(instruction).toMatch(/put one short concrete reason in that exercise's rationale array/);
   });
 
   it('no longer contains the old self-certifiable escape hatch', () => {

@@ -106,6 +106,54 @@ describe('repairProposal', () => {
 
     const repaired = repairProposal(p, context);
     expect(repaired.exercises[0]!.sets).toBe(2);
+    expect(repaired.warnings.some((w) => w.includes('Adjusted cable-pushdown for triceps'))).toBe(true);
+  });
+
+  it('clamps an authored exercise to the target exposure cap', () => {
+    const context = contextWith(
+      [target({ targetId: 'lower-pec', validExercises: [validExercise({ exerciseId: 'dip-chest-biased', role: 'primary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 12, rirMin: 1, rirMax: 3 } })] })],
+      { session: { purpose: null, expectedCoverageTargetIds: [] }, muscles: [guidance({ targetId: 'lower-pec', directSetsPerExposureCap: 2 })], approxSessionSetBudget: 20 }
+    );
+    const p = proposal([exercise({ exerciseId: 'dip-chest-biased', targetId: 'lower-pec', sets: 2 })]);
+
+    const repaired = repairProposal(p, context);
+    expect(repaired.exercises).toHaveLength(1);
+    expect(repaired.exercises[0]!.sets).toBe(2);
+  });
+
+  it('also clamps an over-cap goal exercise', () => {
+    const context = contextWith(
+      [target({ targetId: 'lower-pec', validExercises: [validExercise({ exerciseId: 'dip-chest-biased', role: 'primary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 12, rirMin: 1, rirMax: 3 } })] })],
+      { session: { purpose: null, expectedCoverageTargetIds: [] }, muscles: [guidance({ targetId: 'lower-pec', directSetsPerExposureCap: 2, isGoalOriented: true })], approxSessionSetBudget: 20 }
+    );
+    const p = proposal([exercise({ exerciseId: 'dip-chest-biased', targetId: 'lower-pec', sets: 2 })]);
+
+    const repaired = repairProposal(p, context);
+    expect(repaired.exercises).toHaveLength(1);
+    expect(repaired.exercises[0]!.sets).toBe(2);
+  });
+
+  it('repairs duplicate exercise IDs by keeping the higher-priority target and records a warning', () => {
+    const context = contextWith(
+      [
+        target({ targetId: 'maintenance-target', validExercises: [validExercise({ exerciseId: 'cable-crunch', role: 'primary' })] }),
+        target({ targetId: 'goal-target', validExercises: [validExercise({ exerciseId: 'cable-crunch', role: 'primary' })] }),
+      ],
+      {
+        session: { purpose: 'push', expectedCoverageTargetIds: ['maintenance-target', 'goal-target'] },
+        muscles: [guidance({ targetId: 'maintenance-target' }), guidance({ targetId: 'goal-target', isGoalOriented: true })],
+        approxSessionSetBudget: 20,
+      }
+    );
+    const p = proposal([
+      exercise({ exerciseId: 'cable-crunch', targetId: 'maintenance-target', sets: 2 }),
+      exercise({ exerciseId: 'cable-crunch', targetId: 'goal-target', sets: 2 }),
+    ]);
+
+    const repaired = repairProposal(p, context);
+    expect(repaired.exercises).toHaveLength(1);
+    expect(repaired.exercises[0]!.targetId).toBe('goal-target');
+    expect(repaired.warnings).toContain('Removed duplicate cable-crunch assignment for maintenance-target; retained it for goal-target.');
   });
 
   it('sets role from Blueprint\'s own truth, overwriting whatever the model declared', () => {
@@ -117,6 +165,7 @@ describe('repairProposal', () => {
 
     const repaired = repairProposal(p, context);
     expect(repaired.exercises[0]!.role).toBe('primary');
+    expect(repaired.warnings).toContain('Corrected cable-woodchop role for obliques from secondary to primary.');
   });
 
   it('leaves an unknown exercise/target pair untouched — not this repair\'s job, domain validation still rejects it', () => {

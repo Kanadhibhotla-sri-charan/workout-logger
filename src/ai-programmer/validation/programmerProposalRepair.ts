@@ -38,6 +38,47 @@ function isGoalOriented(context: AIProgrammerContext, targetId: string): boolean
   return context.programmingBrief.muscles.some((m) => m.targetId === targetId && m.isGoalOriented);
 }
 
+function duplicatePriority(exercise: AIWorkoutExerciseProposal, context: AIProgrammerContext): number {
+  const guidance = context.programmingBrief.muscles.find(
+    (m) => m.targetType === exercise.targetType && m.targetId === exercise.targetId
+  );
+  let score = 0;
+  if (guidance?.isGoalOriented) score += 3;
+  if (guidance?.eligibleForThisSession && context.programmingBrief.session.expectedCoverageTargetIds.includes(exercise.targetId)) score += 2;
+  if (guidance) score += Math.max(0, guidance.recommendedSessionSets.min - guidance.currentWeeklyDirectSets);
+  return score;
+}
+
+/** Removes duplicate exercise IDs before domain validation. A single exercise
+ * entry can only carry one targetId, so keeping both would double-count the
+ * same physical movement. Goal/expected/most-undercovered assignments win;
+ * ties keep the first occurrence. Returns the repaired exercises and notes. */
+function repairDuplicateExercises(
+  exercises: readonly AIWorkoutExerciseProposal[],
+  context: AIProgrammerContext
+): { exercises: AIWorkoutExerciseProposal[]; notes: string[] } {
+  const kept = new Map<string, { exercise: AIWorkoutExerciseProposal; index: number; score: number }>();
+  const notes: string[] = [];
+
+  for (const exercise of exercises) {
+    const existing = kept.get(exercise.exerciseId);
+    if (!existing) {
+      kept.set(exercise.exerciseId, { exercise, index: kept.size, score: duplicatePriority(exercise, context) });
+      continue;
+    }
+
+    const candidateScore = duplicatePriority(exercise, context);
+    if (candidateScore > existing.score) {
+      kept.set(exercise.exerciseId, { exercise, index: existing.index, score: candidateScore });
+      notes.push(`Removed duplicate ${exercise.exerciseId} assignment for ${existing.exercise.targetId}; retained it for ${exercise.targetId}.`);
+    } else {
+      notes.push(`Removed duplicate ${exercise.exerciseId} assignment for ${exercise.targetId}; retained it for ${existing.exercise.targetId}.`);
+    }
+  }
+
+  return { exercises: [...kept.values()].sort((a, b) => a.index - b.index).map((entry) => entry.exercise), notes };
+}
+
 /** Removes the last exercise in `exercises` matching `predicate` whose
  * own target is NOT goal-oriented — a goal-oriented exercise is never
  * removed by this repair. Returns null (no change) when nothing
@@ -63,30 +104,38 @@ function removeLastNonGoalMatching(
  * session still over cap after every non-goal exercise is gone is left
  * for adequacy validation to reject as a genuine judgment failure, not
  * something this repair should paper over. */
-function trimToSessionCaps(exercises: readonly AIWorkoutExerciseProposal[], context: AIProgrammerContext): AIWorkoutExerciseProposal[] {
+function trimToSessionCaps(exercises: readonly AIWorkoutExerciseProposal[], context: AIProgrammerContext): { exercises: AIWorkoutExerciseProposal[]; notes: string[] } {
   let result = [...exercises];
+  const notes: string[] = [];
+  const removeWithNote = (next: AIWorkoutExerciseProposal[] | null, reason: string): boolean => {
+    if (!next) return false;
+    const removed = result.find((e) => !next.includes(e));
+    if (removed) notes.push(`Removed ${removed.exerciseId} for ${removed.targetId} to stay within the ${reason}.`);
+    result = next;
+    return true;
+  };
   const purpose = context.programmingBrief.session.purpose;
   const caps = () => sessionRealismCapFor(purpose, [...new Set(result.map((e) => e.targetId))]);
 
   while (result.length > caps().maxExercises) {
     const next = removeLastNonGoalMatching(result, context, () => true);
-    if (!next) break;
-    result = next;
+    if (!removeWithNote(next, `${caps().maxExercises}-exercise session limit`)) break;
   }
 
   while (new Set(result.map((e) => e.targetId)).size > caps().maxTargets) {
     const nonGoalTargetIds = [...new Set(result.map((e) => e.targetId))].filter((id) => !isGoalOriented(context, id));
     const targetIdToRemove = nonGoalTargetIds[nonGoalTargetIds.length - 1];
     if (targetIdToRemove === undefined) break;
+    const removed = result.filter((e) => e.targetId === targetIdToRemove);
     result = result.filter((e) => e.targetId !== targetIdToRemove);
+    notes.push(`Removed ${removed.map((e) => e.exerciseId).join(', ')} for ${targetIdToRemove} to stay within the ${caps().maxTargets}-target session limit.`);
   }
 
   const legCap = caps().legExerciseShareMax;
   if (legCap !== null) {
     while (result.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length > legCap) {
       const next = removeLastNonGoalMatching(result, context, (e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId));
-      if (!next) break;
-      result = next;
+      if (!removeWithNote(next, `${caps().legExerciseShareMax}-leg-exercise share limit`)) break;
     }
   }
 
@@ -94,12 +143,11 @@ function trimToSessionCaps(exercises: readonly AIWorkoutExerciseProposal[], cont
   if (absCap !== null) {
     while (result.filter((e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)).length > absCap) {
       const next = removeLastNonGoalMatching(result, context, (e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId));
-      if (!next) break;
-      result = next;
+      if (!removeWithNote(next, `${caps().absExerciseShareMax}-ab-exercise share limit`)) break;
     }
   }
 
-  return result;
+  return { exercises: result, notes };
 }
 
 /** Repairs items 1-3 above on a cloned copy of `proposal.exercises` —
@@ -108,21 +156,43 @@ function trimToSessionCaps(exercises: readonly AIWorkoutExerciseProposal[], cont
  * domain validation, so the repaired shape is what domain/adequacy
  * validation actually checks (and, on success, what gets persisted). */
 export function repairProposal(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext): AIWorkoutSessionProposal {
+  const repairNotes: string[] = [];
   const repaired = proposal.exercises.map((exercise): AIWorkoutExerciseProposal => {
     const target = findTarget(context.targets, exercise.targetType, exercise.targetId);
     const catalogueEntry = target?.validExercises.find((v) => v.exerciseId === exercise.exerciseId);
     if (!catalogueEntry) return exercise; // unknown exercise/target pair — left for domain validation to reject
 
     const fixed: AIWorkoutExerciseProposal = { ...exercise, role: catalogueEntry.role };
+    if (exercise.role !== catalogueEntry.role) {
+      repairNotes.push(`Corrected ${exercise.exerciseId} role for ${exercise.targetId} from ${exercise.role} to ${catalogueEntry.role}.`);
+    }
     if (catalogueEntry.authoredPrescription) {
-      fixed.sets = catalogueEntry.authoredPrescription.sets;
+      const guidance = context.programmingBrief.muscles.find(
+        (m) => m.targetType === exercise.targetType && m.targetId === exercise.targetId
+      );
+      const cappedSets = Math.min(catalogueEntry.authoredPrescription.sets, guidance?.directSetsPerExposureCap ?? Number.POSITIVE_INFINITY);
+      fixed.sets = cappedSets;
+      if (exercise.sets !== cappedSets) {
+        repairNotes.push(`Adjusted ${exercise.exerciseId} for ${exercise.targetId} from ${exercise.sets} to ${cappedSets} sets to respect the authored prescription and session cap.`);
+      }
       fixed.repsMin = catalogueEntry.authoredPrescription.repsMin;
       fixed.repsMax = catalogueEntry.authoredPrescription.repsMax;
       fixed.rirMin = catalogueEntry.authoredPrescription.rirMin;
       fixed.rirMax = catalogueEntry.authoredPrescription.rirMax;
+      for (const [field, value] of Object.entries({ repsMin: fixed.repsMin, repsMax: fixed.repsMax, rirMin: fixed.rirMin, rirMax: fixed.rirMax })) {
+        if (exercise[field as keyof AIWorkoutExerciseProposal] !== value) {
+          repairNotes.push(`Adjusted ${exercise.exerciseId} ${field} for ${exercise.targetId} to the Blueprint-authored value ${value}.`);
+        }
+      }
     }
     return fixed;
   });
 
-  return { ...proposal, exercises: trimToSessionCaps(repaired, context) };
+  const duplicateRepair = repairDuplicateExercises(repaired, context);
+  const capped = trimToSessionCaps(duplicateRepair.exercises, context);
+  return {
+    ...proposal,
+    exercises: capped.exercises,
+    warnings: [...proposal.warnings, ...repairNotes, ...duplicateRepair.notes, ...capped.notes],
+  };
 }

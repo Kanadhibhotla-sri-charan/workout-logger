@@ -17,6 +17,7 @@ export interface WeekReconciliationDomainValidationResult {
   ok: boolean;
   value?: AIWeekReconciliationOutput;
   errors: string[];
+  warnings: string[];
 }
 
 /** `db` is optional for the same reason `validateProposalDomain`'s is:
@@ -29,6 +30,7 @@ export function validateWeekReconciliationDomain(
   db?: Database.Database
 ): WeekReconciliationDomainValidationResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   if (output.targetDate !== context.request.targetDate) {
     errors.push(`targetDate: output targets "${output.targetDate}" but the request was for "${context.request.targetDate}"`);
@@ -96,7 +98,8 @@ export function validateWeekReconciliationDomain(
     if (day.session) {
       const seen = new Set<string>();
       for (const [exIndex, exercise] of day.session.exercises.entries()) {
-        validateExerciseAgainstTargets(exercise, context.targets, seen, `${path}.session.exercises[${exIndex}] (${exercise.exerciseId})`, errors);
+        const guidance = context.targets.find((t) => t.targetType === exercise.targetType && t.targetId === exercise.targetId);
+        validateExerciseAgainstTargets(exercise, context.targets, seen, `${path}.session.exercises[${exIndex}] (${exercise.exerciseId})`, errors, warnings, undefined);
       }
 
       // Session Realism Cap (Programming Advisor Fix, 2026-09-14): the
@@ -157,7 +160,7 @@ export function validateWeekReconciliationDomain(
   }
 
   if (errors.length > 0) {
-    return { ok: false, errors };
+    return { ok: false, errors, warnings };
   }
-  return { ok: true, errors: [], value: output };
+  return { ok: true, errors: [], warnings, value: output };
 }
