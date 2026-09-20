@@ -5,6 +5,7 @@ import { openDb } from '../dist/db/client.js';
 import { buildReconciliationContext } from '../dist/ai-programmer/context/reconciliationContextBuilder.js';
 import { buildProgrammingBrief, readTrainingExperience } from '../dist/ai-programmer/context/programmerContextBuilder.js';
 import { UsersRepo } from '../dist/repositories/usersRepo.js';
+import { withGoalReferenceTargets } from '../dist/ai-programmer/context/evalBriefOverrides.js';
 import { buildWeekReconciliationSystemInstruction } from '../dist/ai-programmer/service/aiProgrammerService.js';
 import { getWeekReconciliationOutputSchema } from '../dist/ai-programmer/contracts/weekReconciliationOutputSchema.js';
 import { validateWeekReconciliationSchema } from '../dist/ai-programmer/validation/weekReconciliationOutputValidator.js';
@@ -22,7 +23,7 @@ const reasoningSchema = { type: 'object', additionalProperties: false, required:
 const reasoningInstruction = 'You are a coaching reviewer. Analyze the complete week context, recent history, active goals, recovery, and session caps. Decide how to distribute quality work across the week. State which goal targets deserve priority, which non-goal targets should be deferred, and why. Return only JSON matching the supplied schema.';
 const commitInstruction = `${buildWeekReconciliationSystemInstruction()}\n\n[EVAL-ONLY WHOLE-WEEK GENERATION] Return a complete fresh week using all unlocked gym days in context.existingProgram. You may modify every unlocked future gym session, not only the requested target date. Use priorReasoning as your own planning pass. Preserve rest/badminton activities and locked days. Prioritize quality over filling every eligible target; defer non-goal work when that creates better goal-session quality. Add deliberate shortfalls to reconciliation.deferrals; the harness computes unmetSets from the required weekly volume (the brief's recommended weekly sets, capped at what the week can deliver) minus planned sets, so do not invent or use zero. Goal shortfalls require a recovery or recent_overexposure deferral. Normal-muscle shortfalls are warnings, not failures.`;
 
-const programmingBrief = buildProgrammingBrief(
+const baseProgrammingBrief = buildProgrammingBrief(
   context.targets,
   context.activeGoals,
   null,
@@ -33,6 +34,13 @@ const programmingBrief = buildProgrammingBrief(
   // The same confirmed experience level the deterministic engine's volume decision uses.
   readTrainingExperience(db, new UsersRepo(db).getOrCreateDefault().id, context.currentDate)
 );
+// EVAL_GOAL_TARGET=reference: tell the model each goal muscle's target for the week is its full
+// package reference (e.g. triceps 24) instead of the build-up/hold figure. Off by default.
+const goalTargetMode = process.env.EVAL_GOAL_TARGET === 'reference' ? 'reference' : 'brief';
+const programmingBrief =
+  goalTargetMode === 'reference'
+    ? withGoalReferenceTargets(baseProgrammingBrief, context.existingProgram.map((d) => d.sessionPurpose))
+    : baseProgrammingBrief;
 const evalContext = { ...context, programmingBrief };
 
 async function call(systemInstruction, ctx, schema) {
@@ -50,7 +58,7 @@ const commitResponse = await call(commitInstruction, { ...evalContext, priorReas
 let raw;
 try { raw = JSON.parse(commitResponse.rawText); } catch (e) { throw new Error(`commit JSON invalid: ${e.message}`); }
 const structural = validateWeekReconciliationSchema(raw);
-const result = { targetDate, reasoning, rawOutput: raw, structural, usage: { reasoning: reasoningResponse.usage, commit: commitResponse.usage } };
+const result = { targetDate, goalTargetMode, reasoning, rawOutput: raw, structural, usage: { reasoning: reasoningResponse.usage, commit: commitResponse.usage } };
 if (structural.ok && structural.value) {
   // The same repair production runs on every unlocked day before validation.
   const repaired = repairWeekReconciliation(structural.value, evalContext);

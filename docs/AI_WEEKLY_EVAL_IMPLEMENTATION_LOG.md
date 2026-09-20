@@ -150,3 +150,13 @@ Effect on the triceps case: the brief becomes 8 sets with action increase instea
 
 Verification: typecheck clean; new brief tests (advanced vs not, with and without existing volume, argument omitted) and audit tests pass; with the temporary faked clock the AI programmer tests fail identically to the untouched branch (frozen-clock artifacts and token-report tests). Live eval not rerun.
 
+### Eval-only switch: EVAL_GOAL_TARGET=reference (2026-09-20)
+
+Purpose: test whether a model can plan a demanding goal week, separate from what the app would normally tell it. Off by default; with it unset the eval is unchanged.
+
+Set EVAL_GOAL_TARGET=reference when running scripts/modelEvalWholeWeekTwoStep.mjs. For every goal muscle the brief the model sees is overwritten: the weekly target becomes the package reference, capped at what the week can deliver (per-exposure cap x compatible sessions), the session range matches, the action is increase, and the reasoning is prefixed with EVAL OVERRIDE. Non-goal muscles are untouched. Because the audit requires the brief's number, the requirement becomes that same figure automatically (triceps 24, long-head 8 on the seeded week). The eval output records goalTargetMode ('brief' or 'reference').
+
+Implementation: withGoalReferenceTargets in src/ai-programmer/context/evalBriefOverrides.ts (never called by the app), 4 unit tests. Checked on the seeded eval database: default brief triceps 2 (maintain); with the switch triceps 24 (session 12 to 12).
+
+What to expect from a run: 24 triceps sets a week is about 12 per session, i.e. 5 exercises on each of the push and upper days, which crowds out other muscles. Repair trims non-goal work first and never removes goal exercises, so the results show whether the model plans it or defers honestly. This tests capability, not what production sends.
+
