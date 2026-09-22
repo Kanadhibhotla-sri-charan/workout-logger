@@ -68,23 +68,87 @@ describe('auditWeeklyVolume — what the week can actually deliver', () => {
 describe('auditGoalDeferrals', () => {
   const targets = [target('triceps', true), target('mid-pec')];
   const audit = auditWeeklyVolume(week([]), { targets, existingProgram: program('push') });
+  const shortfall = rowFor(audit, 'triceps').shortfall;
 
+  // Case 1: target fully met, no deferral -> PASS.
+  it('needs no deferral when the goal target is fully met (all 5 triceps exercises at full sets, both sessions)', () => {
+    const fullSession = [
+      ex('close-grip-bench-press', 'triceps', 3),
+      ex('dip-triceps-biased', 'triceps', 3),
+      ex('overhead-triceps-extension', 'triceps', 2),
+      ex('cable-pushdown', 'triceps', 2),
+      ex('cable-overhead-extension-leaning-forward', 'triceps', 2),
+    ];
+    const metAudit = auditWeeklyVolume(week(fullSession, fullSession), { targets: [target('triceps', true)], existingProgram: program('push', 'upper') });
+    expect(rowFor(metAudit, 'triceps').shortfall).toBe(0);
+    expect(auditGoalDeferrals(metAudit, [], [target('triceps', true)])).toEqual([]);
+  });
+
+  // Case 2: short, no deferral -> FAIL.
   it('flags a short goal target that has no deferral', () => {
+    expect(shortfall).toBeGreaterThan(0);
     expect(auditGoalDeferrals(audit, [], targets).some((e) => e.includes('goal target triceps is short'))).toBe(true);
   });
 
-  it('accepts a recovery or recent_overexposure deferral', () => {
-    expect(auditGoalDeferrals(audit, [{ targetId: 'triceps', reasonCode: 'recovery' }], targets)).toEqual([]);
-    expect(auditGoalDeferrals(audit, [{ targetId: 'triceps', reasonCode: 'recent_overexposure' }], targets)).toEqual([]);
+  // Case 3: short, deferral declares unmetSets 0 -> FAIL (never silently corrected to the real figure).
+  it('rejects a deferral that declares zero unmetSets for a real shortfall', () => {
+    const errors = auditGoalDeferrals(audit, [{ targetId: 'triceps', unmetSets: 0, reasonCode: 'recovery' }], targets);
+    expect(errors.some((e) => e.includes('unmetSets 0'))).toBe(true);
+    expect(errors.some((e) => e.includes('goal target triceps is short'))).toBe(false); // a deferral record does exist; the failure is its dishonest value, not its absence
   });
 
-  it('rejects a capacity or rotation deferral on a goal target', () => {
-    const errors = auditGoalDeferrals(audit, [{ targetId: 'triceps', reasonCode: 'capacity' }], targets);
+  // Case 4: short, deferral declares the exact audited shortfall, valid reason -> PASS.
+  it('accepts a recovery or recent_overexposure deferral whose declared unmetSets matches the audit exactly', () => {
+    expect(auditGoalDeferrals(audit, [{ targetId: 'triceps', unmetSets: shortfall, reasonCode: 'recovery' }], targets)).toEqual([]);
+    expect(auditGoalDeferrals(audit, [{ targetId: 'triceps', unmetSets: shortfall, reasonCode: 'recent_overexposure' }], targets)).toEqual([]);
+  });
+
+  // Case 5: short, deferral declares a smaller-than-real shortfall, valid reason -> FAIL.
+  it('rejects a deferral whose declared unmetSets is smaller than the audited shortfall', () => {
+    const errors = auditGoalDeferrals(audit, [{ targetId: 'triceps', unmetSets: Math.max(1, shortfall - 1), reasonCode: 'recovery' }], targets);
+    expect(errors.some((e) => e.includes('the declared shortfall must match the audited one exactly'))).toBe(true);
+  });
+
+  it('rejects a capacity or rotation deferral on a goal target even when unmetSets matches', () => {
+    const errors = auditGoalDeferrals(audit, [{ targetId: 'triceps', unmetSets: shortfall, reasonCode: 'capacity' }], targets);
     expect(errors.some((e) => e.includes('invalid deferral reasonCode capacity'))).toBe(true);
   });
 
+  // Case 6: multiple active goals, each checked independently.
+  it('checks each active goal independently', () => {
+    const twoGoals = [target('triceps', true), target('triceps-long-head', true)];
+    const twoAudit = auditWeeklyVolume(week([]), { targets: twoGoals, existingProgram: program('push', 'upper') });
+    const tricepsShort = rowFor(twoAudit, 'triceps').shortfall;
+    const longHeadShort = rowFor(twoAudit, 'triceps-long-head').shortfall;
+    expect(longHeadShort).toBeGreaterThan(0);
+    const errors = auditGoalDeferrals(twoAudit, [{ targetId: 'triceps', unmetSets: tricepsShort, reasonCode: 'recovery' }], twoGoals);
+    expect(errors.some((e) => e.includes('goal target triceps-long-head is short'))).toBe(true); // no deferral of its own
+    expect(errors.some((e) => e.includes('goal target triceps is short'))).toBe(false); // its own deferral was truthful
+  });
+
+  // Case 7: a shared exercise credits every target it trains, and each target's
+  // declared deferral is checked against its own (correctly shared) shortfall.
+  it('validates a shared exercise\'s credit consistently across every target it trains', () => {
+    const twoGoals = [target('triceps', true), target('triceps-long-head', true)];
+    const sharedWeek = week([ex('overhead-triceps-extension', 'triceps-long-head', 2)], [ex('overhead-triceps-extension', 'triceps-long-head', 2)]);
+    const sharedAudit = auditWeeklyVolume(sharedWeek, { targets: twoGoals, existingProgram: program('push', 'upper') });
+    const tricepsRow = rowFor(sharedAudit, 'triceps');
+    const longHeadRow = rowFor(sharedAudit, 'triceps-long-head');
+    expect(tricepsRow.generatedDirectSets).toBe(4); // credited via the shared exercise, same as triceps-long-head
+    expect(longHeadRow.generatedDirectSets).toBe(4);
+    const errors = auditGoalDeferrals(
+      sharedAudit,
+      [
+        { targetId: 'triceps', unmetSets: tricepsRow.shortfall, reasonCode: 'recovery' },
+        { targetId: 'triceps-long-head', unmetSets: longHeadRow.shortfall, reasonCode: 'recovery' },
+      ],
+      twoGoals
+    );
+    expect(errors).toEqual([]);
+  });
+
   it('does not require a deferral for a normal-muscle shortfall', () => {
-    expect(auditGoalDeferrals(audit, [{ targetId: 'triceps', reasonCode: 'recovery' }], targets)).toEqual([]);
+    expect(auditGoalDeferrals(audit, [{ targetId: 'triceps', unmetSets: shortfall, reasonCode: 'recovery' }], targets)).toEqual([]);
   });
 });
 

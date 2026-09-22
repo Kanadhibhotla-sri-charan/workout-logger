@@ -131,14 +131,27 @@ export function auditWeeklyVolume(week: AuditWeek, context: AuditContext): Weekl
 
 export interface AuditDeferral {
   targetId: string;
+  /** What the model itself declares the remaining shortfall to be.
+   * Never corrected to the audited figure before this check runs — see
+   * auditGoalDeferrals's own doc comment for why. */
+  unmetSets: number;
   reasonCode: string;
 }
 
 const GOAL_DEFERRAL_REASONS = ['recovery', 'recent_overexposure'];
 
-/** A goal target may be short only with a recovery / recent-overexposure
- * deferral. The deferral itself is the record that the volume is carried
- * forward; there is no separate carryover field. Returns error strings. */
+/** A goal target may be short only with a TRUTHFUL recovery /
+ * recent-overexposure deferral: a real reason, and a declared `unmetSets`
+ * that matches this audit's own computed shortfall exactly. Callers must
+ * pass the model's own declared `unmetSets` through unchanged — silently
+ * overwriting it with the audited figure before calling this (as the eval
+ * harness once did) hides exactly the dishonesty this check exists to
+ * catch: a model could declare `unmetSets: 0` (or any smaller number) on
+ * a real 15-set shortfall and have it quietly corrected into a valid-
+ * looking deferral instead of being rejected. A mismatch is reported
+ * here as its own failure, never silently fixed up. The deferral itself
+ * is the record that the volume is carried forward; there is no separate
+ * carryover field. Returns error strings. */
 export function auditGoalDeferrals(audit: WeeklyVolumeAudit, deferrals: readonly AuditDeferral[], targets: readonly AIProgrammerTargetContext[]): string[] {
   const errors: string[] = [];
   const goalTargetIds = new Set(targets.filter(isGoalTarget).map((t) => t.targetId));
@@ -148,8 +161,16 @@ export function auditGoalDeferrals(audit: WeeklyVolumeAudit, deferrals: readonly
     }
   }
   for (const row of audit.goalShortfalls) {
-    if (!deferrals.some((d) => d.targetId === row.targetId && GOAL_DEFERRAL_REASONS.includes(d.reasonCode))) {
+    const deferral = deferrals.find((d) => d.targetId === row.targetId);
+    if (!deferral) {
       errors.push(`goal target ${row.targetId} is short by ${row.shortfall} set(s) (generated ${row.generatedDirectSets} of ${row.required} required); a recovery or recent_overexposure deferral is required`);
+      continue;
+    }
+    if (!GOAL_DEFERRAL_REASONS.includes(deferral.reasonCode)) continue; // already reported above
+    if (!Number.isFinite(deferral.unmetSets) || deferral.unmetSets <= 0) {
+      errors.push(`goal target ${row.targetId} deferral declares unmetSets ${deferral.unmetSets}, but the audited shortfall is ${row.shortfall} set(s) — a real shortfall must be declared as a positive number, never zero, negative, or missing`);
+    } else if (deferral.unmetSets !== row.shortfall) {
+      errors.push(`goal target ${row.targetId} deferral declares unmetSets ${deferral.unmetSets}, but the audited shortfall is ${row.shortfall} set(s) (generated ${row.generatedDirectSets} of ${row.required} required) — the declared shortfall must match the audited one exactly`);
     }
   }
   return errors;

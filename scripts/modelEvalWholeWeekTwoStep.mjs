@@ -21,7 +21,12 @@ const context = buildReconciliationContext(db, { targetDate, requestedActivity: 
 const provider = new VelonaProvider({ ...loadVelonaConfig(), model: process.env.VELONA_MODEL });
 const reasoningSchema = { type: 'object', additionalProperties: false, required: ['weekStrategy', 'goalPriority'], properties: { weekStrategy: { type: 'string' }, goalPriority: { type: 'string' } } };
 const reasoningInstruction = 'You are a coaching reviewer. Analyze the complete week context, recent history, active goals, recovery, and session caps. Decide how to distribute quality work across the week. State which goal targets deserve priority, which non-goal targets should be deferred, and why. Return only JSON matching the supplied schema.';
-const commitInstruction = `${buildWeekReconciliationSystemInstruction()}\n\n[EVAL-ONLY WHOLE-WEEK GENERATION] Return a complete fresh week using all unlocked gym days in context.existingProgram. You may modify every unlocked future gym session, not only the requested target date. Use priorReasoning as your own planning pass. Preserve rest/badminton activities and locked days. Prioritize quality over filling every eligible target; defer non-goal work when that creates better goal-session quality. Add deliberate shortfalls to reconciliation.deferrals; the harness computes unmetSets from the required weekly volume (the brief's recommended weekly sets, capped at what the week can deliver) minus planned sets, so do not invent or use zero. Goal shortfalls require a recovery or recent_overexposure deferral. Normal-muscle shortfalls are warnings, not failures.`;
+const commitInstruction = `${buildWeekReconciliationSystemInstruction()}\n\n[EVAL-ONLY WHOLE-WEEK GENERATION] Return a complete fresh week using all unlocked gym days in context.existingProgram. You may modify every unlocked future gym session, not only the requested target date. Use priorReasoning as your own planning pass. Preserve rest/badminton activities and locked days. Prioritize quality over filling every eligible target; defer non-goal work when that creates better goal-session quality.
+
+Before you finalize the JSON, run this check for every active growth goal (context.activeGoals), one at a time: add up the sets your OWN final exercise list actually gives that goal's target across the whole week (never estimate this from memory or from your priorReasoning — count the real numbers in the days/session/exercises you are about to return), and compare that total with the target's required weekly sets (context.programmingBrief.muscles[].recommendedWeeklyPrimarySets).
+- If your total meets or exceeds that number: the goal is satisfied. Add no deferral entry for it, and never say in rationale/warnings that a goal was met unless this arithmetic actually reaches its number — a narrative claim is never a substitute for the count.
+- If your total falls short: add exactly one entry to reconciliation.deferrals for that target with targetId, unmetSets equal to the EXACT difference (recommendedWeeklyPrimarySets minus your own counted total for that target — never zero, never an estimate, never invented), reasonCode "recovery" or "recent_overexposure", and evidence naming the real data behind that reason.
+A goal target with no deferral entry is a claim that it was fully met. The harness independently recounts your final exercise list itself and will reject the week if your declared unmetSets does not exactly match what it counts, so get your own arithmetic right rather than relying on wording. Normal-muscle shortfalls remain warnings, not failures, and need no deferral entry.`;
 
 const baseProgrammingBrief = buildProgrammingBrief(
   context.targets,
@@ -66,10 +71,18 @@ if (structural.ok && structural.value) {
   result.repairNotes = repaired.reconciliation.warnings.filter((w) => !(structural.value.reconciliation.warnings ?? []).includes(w));
 
   const audit = auditWeeklyVolume(repaired, evalContext);
-  // unmetSets is computed here from the audit, never trusted from the model.
-  const deferrals = (raw.reconciliation?.deferrals ?? [])
-    .map((d) => ({ ...d, unmetSets: audit.rows.find((r) => r.targetId === d.targetId)?.shortfall ?? d.unmetSets }))
-    .filter((d) => d.unmetSets > 0);
+  // The model's own declared unmetSets is passed through UNCHANGED — never
+  // corrected to the audited figure here. auditGoalDeferrals compares the
+  // two itself and reports a mismatch as a failure, so a model cannot
+  // declare a smaller shortfall (or claim none at all, e.g. unmetSets: 0)
+  // than what it actually delivered and have that silently fixed into a
+  // valid-looking deferral.
+  const deferrals = (raw.reconciliation?.deferrals ?? []).map((d) => ({
+    targetId: d?.targetId,
+    unmetSets: typeof d?.unmetSets === 'number' ? d.unmetSets : Number(d?.unmetSets ?? NaN),
+    reasonCode: d?.reasonCode,
+  }));
+  result.declaredDeferrals = deferrals;
 
   // Did the model miss what the brief asked for, or is the audit stricter than the brief?
   result.goalBriefVsGenerated = goalBriefVsGenerated(audit, evalContext.programmingBrief.muscles);
