@@ -230,11 +230,15 @@ export function repairProposal(proposal: AIWorkoutSessionProposal, context: AIPr
 /** Superset of AIReconciliationContext carrying an OPTIONAL
  * programmingBrief — production's real reconcile_week context has none
  * (setCaps.ts's own note: "the whole-week path...has no brief"); only the
- * eval harness builds one today. auditWeeklyVolume already treats this
- * field as optional, and the goal-completion pass below reads it the exact
- * same way, so a real request without a brief still gets a "required"
- * number to work toward (the package's own deliverable figure) rather than
- * silently doing nothing. */
+ * eval harness builds one today. Production-impact review (2026-09-23)
+ * found that auditWeeklyVolume's no-brief fallback (the package's full
+ * deliverable figure) is NOT a safe stand-in for a real week's intended
+ * goal volume — decideVolume's real, conservative decision (maintain
+ * on improving trend, a small bounded step otherwise, hold on
+ * decline/stagnation) is what should govern that, and it isn't wired into
+ * reconciliation at all yet. The completion pass below therefore requires
+ * this field to be present (see completeGoalVolume's own guard) — it is a
+ * no-op on a real request until reconciliation gains a genuine brief. */
 export type AIWeekReconciliationRepairContext = AIReconciliationContext & {
   programmingBrief?: { muscles: readonly { targetType: string; targetId: string; recommendedWeeklyPrimarySets: number }[] };
 };
@@ -310,6 +314,17 @@ function buildGoalExercise(target: AIProgrammerTargetContext, catalogueEntry: AI
  * auditWeeklyVolume the validator itself trusts after every single swap —
  * never a second, approximate notion of "did this actually help." */
 function completeGoalVolume(days: readonly AIWeekReconciliationDay[], lockedDates: ReadonlySet<string>, context: AIWeekReconciliationRepairContext): { days: AIWeekReconciliationDay[]; notes: string[] } {
+  // Safety gate (2026-09-23 production-impact review): with no brief,
+  // auditWeeklyVolume's only fallback "required" figure is the package's
+  // full deliverable — a long-term reference, not a real week's intended
+  // volume (decideVolume's actual, conservative decision isn't wired into
+  // reconciliation at all). Acting on that fallback in real production
+  // output would push a goal target toward a ceiling nothing has actually
+  // decided it should reach this week. Never run this pass without a real
+  // brief to work toward; production's own reconcile_week context has none
+  // today, so this makes the whole pass a no-op there until it does.
+  if (!context.programmingBrief) return { days: [...days], notes: [] };
+
   const current: AIWeekReconciliationDay[] = days.map((d) => (d.session ? { ...d, session: { ...d.session, exercises: [...d.session.exercises] } } : d));
   const notes: string[] = [];
 

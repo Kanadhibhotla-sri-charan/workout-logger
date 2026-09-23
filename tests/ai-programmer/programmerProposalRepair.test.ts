@@ -317,8 +317,16 @@ describe('repairProposal', () => {
     // triceps-long-head requires 8/wk (4/session x 2). Session composition
     // matches the live data exactly: 3 triceps-family exercises + 7 non-goal
     // filler exercises = 10/10 (the exercise cap), 21 sets/session.
-    const richWeekContext = (targets: AIProgrammerTargetContext[], dates: string[] = ['2026-09-21', '2026-09-23']): AIReconciliationContext =>
-      ({ targets, existingProgram: dates.map((date) => ({ date, locked: false, sessionPurpose: 'push' })) }) as unknown as AIReconciliationContext;
+    // A brief matching the real triceps deliverable (24) — the completion
+    // pass now requires one to run at all (2026-09-23 safety gate); omit it
+    // to test the no-brief no-op case.
+    const tricepsBrief = { muscles: [{ targetType: 'physique_target', targetId: 'triceps', recommendedWeeklyPrimarySets: 24 }] };
+    // No brief by default — callers that need the completion pass to run
+    // must pass tricepsBrief explicitly (a default of tricepsBrief here
+    // would defeat the no-brief test: an explicit `undefined` argument
+    // still triggers a JS default parameter).
+    const richWeekContext = (targets: AIProgrammerTargetContext[], dates: string[] = ['2026-09-21', '2026-09-23'], programmingBrief?: typeof tricepsBrief): AIReconciliationContext =>
+      ({ targets, existingProgram: dates.map((date) => ({ date, locked: false, sessionPurpose: 'push' })), programmingBrief }) as unknown as AIReconciliationContext;
     const weekOutput = (days: Array<{ date: string; exercises: AIWorkoutExerciseProposal[] }>): AIWeekReconciliationOutput =>
       ({
         days: days.map((d) => ({ date: d.date, session: { sessionPurpose: 'push', exercises: d.exercises.map((e) => ({ ...e, classification: 'normal_development' })) } })),
@@ -386,7 +394,7 @@ describe('repairProposal', () => {
 
     it('replaces non-goal padding with the missing triceps exercises until the 24-set goal is met, leaving triceps-long-head correctly credited', () => {
       const targets = tricepsTargets(false);
-      const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets));
+      const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets, undefined, tricepsBrief));
 
       expect(tricepsGeneratedSets(out, targets, 'triceps')).toBe(24); // was 14 before completion (7/session: close-grip 3 + shared overhead 2+2)
       expect(tricepsGeneratedSets(out, targets, 'triceps-long-head')).toBe(8); // unchanged — it was already fully met and had nothing missing
@@ -403,7 +411,7 @@ describe('repairProposal', () => {
 
     it('never displaces an exercise needed by another active goal, and leaves triceps short rather than making an unsafe swap', () => {
       const targets = tricepsTargets(true);
-      const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets));
+      const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets, undefined, tricepsBrief));
 
       expect(tricepsGeneratedSets(out, targets, 'triceps')).toBe(14); // unchanged — every non-goal candidate is now itself an active goal
       for (const day of out.days) {
@@ -413,6 +421,35 @@ describe('repairProposal', () => {
         expect(day.session!.exercises).toHaveLength(10); // untouched from the model's own output — no swap was safe to make
       }
       expect(out.reconciliation.warnings.some((w) => w.includes('replaced'))).toBe(false);
+    });
+
+    describe('safety gate (2026-09-23): requires a real programmingBrief to run at all', () => {
+      it('makes no swaps or additions when no programmingBrief is supplied, even though the exact same shortfall exists', () => {
+        const targets = tricepsTargets(false);
+        const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets, undefined, undefined));
+
+        expect(tricepsGeneratedSets(out, targets, 'triceps')).toBe(14); // unchanged — the completion pass never ran
+        for (const day of out.days) {
+          const ids = day.session!.exercises.map((e) => e.exerciseId);
+          expect(ids).not.toContain('dip-triceps-biased');
+          expect(ids).not.toContain('cable-pushdown');
+          expect(day.session!.exercises).toHaveLength(10);
+        }
+        expect(out.reconciliation.warnings.some((w) => w.includes('replaced'))).toBe(false);
+      });
+
+      it('still runs the full triceps completion when a real programmingBrief is present — the eval path is unaffected', () => {
+        const targets = tricepsTargets(false);
+        const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets, undefined, tricepsBrief));
+
+        expect(tricepsGeneratedSets(out, targets, 'triceps')).toBe(24);
+        expect(tricepsGeneratedSets(out, targets, 'triceps-long-head')).toBe(8);
+        for (const day of out.days) {
+          const ids = day.session!.exercises.map((e) => e.exerciseId);
+          expect(ids).toContain('dip-triceps-biased');
+          expect(ids).toContain('cable-pushdown');
+        }
+      });
     });
   });
 });
