@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
-import { AIProgrammerService } from '../../src/ai-programmer/service/aiProgrammerService.js';
+import { AIProgrammerService, buildProgrammerSystemInstruction } from '../../src/ai-programmer/service/aiProgrammerService.js';
 import { AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION } from '../../src/ai-programmer/contracts/programmerTypes.js';
 import {
   AIOutputAdequacyInvalidError,
@@ -21,6 +21,7 @@ import { approveProposal, commitAIProposalToPlannedSession } from '../../src/ai-
 import { weekdayOfDate } from '../../src/engine/workoutBuilder.js';
 import type { AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../../src/ai-programmer/contracts/providerTypes.js';
 import { AIProposalRepo } from '../../src/repositories/aiProposalRepo.js';
+import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
@@ -253,6 +254,170 @@ describe('AIProgrammerService', () => {
       // The proposal is never persisted — bad AI output is rejected
       // outright, never silently accepted as if valid.
       expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeUndefined();
+    });
+  });
+
+  // "Generation layer" fix (2026-09-24): the forensic trace above proved
+  // the failure is real AFTER repair; this investigates whether
+  // generate_session's own prompt gave the model enough information and
+  // freedom to construct a valid multi-exercise proposal in the first
+  // place. Two changes, both to buildProgrammerSystemInstruction() only —
+  // no validator, repair, cap, or threshold touched anywhere:
+  //   Fix A: the parent/sub-target shared-credit rule (already present,
+  //     verbatim, in buildWeekReconciliationSystemInstruction and
+  //     buildGenerateWeekSystemInstruction) was missing from
+  //     generate_session specifically.
+  //   Fix B: rule 12(6) ("assigning sets") previously said "add A SECOND
+  //     valid exercise" — capping the model's own guidance at exactly one
+  //     addition even when a target's floor genuinely needs a third.
+  describe('"generation layer" fix — shared-credit rule + uncapped multi-exercise guidance', () => {
+    it('Fix A: generate_session\'s system instruction now carries the shared-credit rule', () => {
+      const instruction = buildProgrammerSystemInstruction();
+      expect(instruction).toMatch(/credited by the app toward the broader target's own weekly number too/);
+      expect(instruction).toMatch(/the exact same exerciseId appears in both targets' own validExercises lists/);
+      // Never counted twice — the anti-double-counting half of the rule.
+      expect(instruction).toMatch(/never counted as two separate sets/);
+      expect(instruction).toMatch(/must never list the same exercise under both target ids to try to credit it twice/);
+    });
+
+    it('the copied rule\'s own internal cross-reference is corrected for this function\'s real rule numbers (not silently pointing at the donor functions\' rule 19)', () => {
+      const instruction = buildProgrammerSystemInstruction();
+      // The donor functions' own "rules 5 and 19" would, in THIS
+      // function's numbering, point at "plausibleIntensityTechniques" —
+      // unrelated. Verifies the reference was corrected, not copied blind.
+      expect(instruction).toMatch(/the same judgment rules 5 and 9 already give you/);
+      expect(instruction).not.toMatch(/the same judgment rules 5 and 19 already give you/);
+    });
+
+    it('Fix B: rule 12(6) no longer caps the guidance at exactly one additional exercise', () => {
+      const instruction = buildProgrammerSystemInstruction();
+      expect(instruction).not.toMatch(/add a second valid exercise/);
+      expect(instruction).toMatch(/add additional valid exercises for that muscle as needed/);
+      expect(instruction).toMatch(/until the muscle's recommended minimum is reached or the realistic valid exercise options are exhausted/);
+    });
+
+    it('Fix B still explicitly forbids exceeding any individual exercise\'s own authored/per-exposure ceiling, even while adding more exercises', () => {
+      const instruction = buildProgrammerSystemInstruction();
+      expect(instruction).toMatch(/without exceeding any individual exercise's authored sets or per-exposure ceiling/);
+      expect(instruction).toMatch(/never inflating any one exercise beyond its own ceiling to avoid adding another/);
+    });
+
+    // The exact Push fixture from the trace above, but with a
+    // STRUCTURALLY VALID multi-exercise solution this time — proving the
+    // GENERATOR (not the validator) is the layer that needed fixing: the
+    // same context, same targets, same authored ceilings, now satisfied
+    // by combining exercises exactly as rule 12(6) now instructs.
+    it('the same Push scenario now succeeds when the (fake) provider returns a valid multi-exercise combination', async () => {
+      const { date, weekday } = futureRestDate();
+      const provider = new FakeProvider(() =>
+        fakeResponse(
+          validProposalJson({
+            targetDate: date,
+            weekday,
+            sessionFocus: ['push'],
+            exercises: [
+              // triceps floor 7: close-grip-bench-press(3) + overhead-
+              // triceps-extension(2) + cable-pushdown(2) = 7, none
+              // exceeding its own authored ceiling, no target-specific
+              // exercise-count cap applies to triceps.
+              { ...validProposalJson().exercises[0], exerciseId: 'close-grip-bench-press', targetId: 'triceps', sets: 3 },
+              { ...validProposalJson().exercises[0], exerciseId: 'overhead-triceps-extension', targetId: 'triceps', sets: 2 },
+              { ...validProposalJson().exercises[0], exerciseId: 'cable-pushdown', targetId: 'triceps', sets: 2 },
+              // obliques: the adequacy floor is only 50% of recommended
+              // min (UNDER_PRESCRIPTION_TOLERANCE — 4 of an 8-set min),
+              // never the full min itself, and ABS_SESSION_EXERCISE_
+              // SHARE_MAX (engine/config.ts) hard-caps abs/obliques at 2
+              // exercises per session regardless of floor — discovered
+              // directly (an earlier 3-exercise version of this fixture
+              // was silently trimmed to 2 by repair's own session caps).
+              // cable-crunch(3) + pallof-press(2) = 5, clearing the real
+              // 4-set threshold within the real 2-exercise cap.
+              { ...validProposalJson().exercises[0], exerciseId: 'cable-crunch', targetId: 'obliques', sets: 3 },
+              { ...validProposalJson().exercises[0], exerciseId: 'pallof-press', targetId: 'obliques', sets: 2 },
+            ],
+          })
+        )
+      );
+      const service = new AIProgrammerService(db, provider);
+
+      const result = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' });
+      expect(result.proposal.exercises).toHaveLength(5);
+      expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeDefined();
+    });
+
+    // Shared-credit "preserved" means, precisely: the ADEQUACY VALIDATOR's
+    // own per-target check is completely unchanged by either fix — it
+    // still sums sets strictly by each exercise's own literal targetId,
+    // with NO cross-target crediting logic anywhere (verified directly
+    // against programmerAdequacyValidator.ts's own setsByTarget(), which
+    // groups only by `${ex.targetType}:${ex.targetId}`). Rule 7 is
+    // information for the MODEL's own reasoning about what remains
+    // unmet; it does not, and was never asked to, change what the
+    // validator itself requires. This test proves that boundary holds:
+    // sets given only under the sub-target (triceps-long-head) do NOT
+    // satisfy the broader target's (triceps) own floor at the validator
+    // level, exactly as before either fix.
+    it('shared-credit is a prompt-level instruction only — the validator still requires a GOAL-ORIENTED target\'s OWN literal sets, with no automatic crediting from a shared sub-target exercise', async () => {
+      // triceps-back-depth's primary_targets is ['triceps'] (Blueprint) —
+      // makes context.targets.find('triceps').isGoalOriented === true, so
+      // the validator's own "an active-goal target...received no direct
+      // work at all" check (which — confirmed below — does NOT apply to
+      // a non-goal target left at zero, a pre-existing, unrelated
+      // legitimate-omission allowance) actually applies here.
+      new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'triceps-back-depth', priority: 1 });
+      const { date, weekday } = futureRestDate();
+      const provider = new FakeProvider(() =>
+        fakeResponse(
+          validProposalJson({
+            targetDate: date,
+            weekday,
+            sessionFocus: ['push'],
+            exercises: [
+              // Adequate work for mid-pec so it's not what fails here.
+              { ...validProposalJson().exercises[0], exerciseId: 'flat-barbell-bench-press', targetId: 'mid-pec', sets: 3 },
+              // ALL triceps volume given only under the sub-target
+              // (triceps-long-head) — per rule 7, this is a legitimate,
+              // real 2 sets of long-head-emphasis work, but it carries
+              // targetId: 'triceps-long-head', never 'triceps' itself.
+              { ...validProposalJson().exercises[0], exerciseId: 'overhead-triceps-extension', targetId: 'triceps-long-head', sets: 2 },
+            ],
+          })
+        )
+      );
+      const service = new AIProgrammerService(db, provider);
+
+      const err = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' }).catch((e) => e);
+      expect(err).toBeInstanceOf(AIOutputAdequacyInvalidError);
+      // triceps itself received zero directly-targeted sets — still
+      // flagged, exactly as it would have been before either fix. Shared
+      // credit never suppresses this check; it is prompt-only guidance
+      // for the model's own reasoning about how much MORE it still needs
+      // to add, never a change to what the validator itself requires.
+      expect(err.details.issues.some((i: string) => i.includes('physique_target:triceps:') && i.includes('no direct work at all'))).toBe(true);
+    });
+
+    // The pre-existing, unrelated allowance the test above depends on —
+    // confirmed directly so its own premise is documented, not assumed.
+    it('(pre-existing, unrelated behavior, confirmed for context) a non-goal target left at zero direct sets is a legitimate omission, not flagged — unaffected by either fix', async () => {
+      const { date, weekday } = futureRestDate();
+      const provider = new FakeProvider(() =>
+        fakeResponse(
+          validProposalJson({
+            targetDate: date,
+            weekday,
+            sessionFocus: ['push'],
+            exercises: [
+              { ...validProposalJson().exercises[0], exerciseId: 'flat-barbell-bench-press', targetId: 'mid-pec', sets: 3 },
+              { ...validProposalJson().exercises[0], exerciseId: 'overhead-triceps-extension', targetId: 'triceps-long-head', sets: 2 },
+            ],
+          })
+        )
+      );
+      const service = new AIProgrammerService(db, provider); // no goal seeded — triceps is non-goal here
+
+      const result = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' });
+      expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeDefined();
+      expect(result.proposal.exercises.some((e) => e.targetId === 'triceps')).toBe(false);
     });
   });
 
