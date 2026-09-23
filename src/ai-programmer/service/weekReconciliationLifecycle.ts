@@ -55,7 +55,23 @@ export function getLatestWeekReconciliationForDate(db: Database.Database, target
   const repo = new AIWeekReconciliationRepo(db);
   const record = repo.findLatestForTargetDate(targetDate);
   if (!record) return undefined;
-  return expireIfNeeded(repo, record);
+  const current = expireIfNeeded(repo, record);
+  if (isCommittedSessionElsewhereNow(db, current, targetDate)) return undefined;
+  return current;
+}
+
+/** Same schedule swap/move bugfix as aiProposalLifecycle.ts's own
+ * isCommittedSessionElsewhereNow — see its doc comment for the full
+ * rationale and the real production incident that surfaced this. A
+ * committed reconciliation's `target_date` is likewise never updated by
+ * a later swap/move, so its frozen commit-time content must stop being
+ * reported as "the active reconciliation for this date" once its real
+ * session has moved elsewhere (or been deleted). */
+function isCommittedSessionElsewhereNow(db: Database.Database, record: AIWeekReconciliationRecord, targetDate: string): boolean {
+  if (record.status !== 'committed') return false;
+  if (!record.committedSessionId) return true;
+  const session = new WorkoutSessionsRepo(db).getSession(record.committedSessionId);
+  return !session || session.date !== targetDate;
 }
 
 /** Explicit approval only — never commits, never mutates the proposal's
