@@ -358,27 +358,37 @@
       const weekReconciliation = buildWeekReconciliationSection(day, modalToken);
 
       if (day.type === 'gym') {
-        panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
+        // Phase 7 (2026-09-24): this day's own detail content (planned
+        // duration, plannedSession notice/preview/delete, exercises,
+        // skipped work) — previously bare paragraphs/cards appended
+        // directly to the modal panel with no visual boundary of their
+        // own, unlike every sibling section below it. Wrapped in one
+        // container now; exact same content and behavior, nothing
+        // removed or reordered within it.
+        const dayDetail = el('div', { class: 'day-detail-section' });
+        panel.appendChild(dayDetail);
+
+        dayDetail.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
 
         if (day.selectionConflict) {
           // Final Actionable vs Historical Session Resolution Fixes
           // §9/§10: more than one active planned session exists for
           // this date — show a clear recovery/error state rather than
           // opening an arbitrary one of them.
-          panel.appendChild(el('p', { class: 'muted', text: day.selectionConflict.message }));
-          panel.appendChild(el('p', { class: 'faint', text: `Conflicting session ids: ${day.selectionConflict.sessionIds.join(', ')}` }));
+          dayDetail.appendChild(el('p', { class: 'muted', text: day.selectionConflict.message }));
+          dayDetail.appendChild(el('p', { class: 'faint', text: `Conflicting session ids: ${day.selectionConflict.sessionIds.join(', ')}` }));
         } else if (day.plannedWork.length === 0 && day.plannedSession) {
           // Fix 8: a real planned workout exists (created via an AI
           // proposal replacement) but has no deterministic plannedWork
           // to list here — say so plainly, rather than showing "No
           // exercises were placed on this day," which would wrongly
           // imply nothing is scheduled.
-          panel.appendChild(el('p', { class: 'muted', text: 'This day\'s workout was created from an AI proposal.' }));
+          dayDetail.appendChild(el('p', { class: 'muted', text: 'This day\'s workout was created from an AI proposal.' }));
           const previewEl = el('div');
-          panel.appendChild(previewEl);
+          dayDetail.appendChild(previewEl);
           const sessionActionsEl = el('div');
           const sessionStatusEl = el('div');
-          panel.append(sessionActionsEl, sessionStatusEl);
+          dayDetail.append(sessionActionsEl, sessionStatusEl);
           // 2026-09-23 fix: previously the ONLY way to see what this
           // session actually contains was to open the full logger — a
           // real, reported point of confusion (a "planned workout
@@ -393,7 +403,7 @@
           buildCommittedSessionPreview(day.plannedSession.id, day.date, previewEl, modalToken);
           renderSessionActions(day, sessionActionsEl, sessionStatusEl, modalToken);
         } else if (day.plannedWork.length === 0) {
-          panel.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
+          dayDetail.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
         }
         // Part 9.4/9.3: exercises are read-only detail here — each one's
         // own rationale stays behind its existing "Why included" <details>
@@ -401,20 +411,20 @@
         // already correct; nothing about the exercise cards themselves
         // changes in Phase 7.
         for (const item of day.plannedWork) {
-          panel.appendChild(buildExerciseDetailCard(item));
+          dayDetail.appendChild(buildExerciseDetailCard(item));
         }
         const planDeleteEl = el('div');
         const planDeleteStatusEl = el('div');
-        panel.append(planDeleteEl, planDeleteStatusEl);
+        dayDetail.append(planDeleteEl, planDeleteStatusEl);
         renderPlanDeleteAction(day, planDeleteEl, planDeleteStatusEl);
         if (day.skipped && day.skipped.length > 0) {
-          panel.appendChild(el('h3', { text: 'Unmet / dropped work' }));
+          dayDetail.appendChild(el('h3', { text: 'Unmet / dropped work' }));
           for (const s of day.skipped) {
             const card = createCard([
               el('div', { class: 'card-title', text: s.target_name || s.target_id }),
               el('div', { class: 'card-subtitle', text: s.friendly_reason || s.reason }),
             ]);
-            panel.appendChild(card);
+            dayDetail.appendChild(card);
           }
         }
       } else {
@@ -635,7 +645,7 @@
         actionsEl.innerHTML = '';
         actionsEl.appendChild(el('div', { class: 'btn-row' }, [
           el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${day.plannedSession.id}`, text: 'Open planned workout' }),
-          createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'secondary', disabled: inFlight, onClick: onDelete }),
+          createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'ghost', disabled: inFlight, onClick: onDelete }),
         ]));
       }
       async function onDelete() {
@@ -676,7 +686,7 @@
       let inFlight = false;
       function render() {
         container.innerHTML = '';
-        container.appendChild(createButton({ label: inFlight ? 'Deleting…' : `Delete ${formatWeekday(day.weekday)}'s plan`, variant: 'secondary', disabled: inFlight, onClick: onDelete }));
+        container.appendChild(createButton({ label: inFlight ? 'Deleting…' : `Delete ${formatWeekday(day.weekday)}'s plan`, variant: 'ghost', disabled: inFlight, onClick: onDelete }));
       }
       async function onDelete() {
         if (inFlight) return;
@@ -1022,11 +1032,11 @@
         if (blockedByRealSession()) {
           actionsEl.appendChild(el('p', { class: 'muted', text: 'This day already has a real workout — delete it first if you want to generate a new one.' }));
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
-            createButton({ label: inFlight ? 'Deleting…' : 'Delete existing workout', variant: 'secondary', disabled: inFlight, onClick: onDeleteExistingSession }),
+            createButton({ label: inFlight ? 'Deleting…' : 'Delete existing workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }),
           ]));
           if (state && (state.status === 'pending' || state.status === 'approved')) {
             actionsEl.appendChild(el('p', { class: 'faint', text: 'You also have a separate, not-yet-committed proposal for this day.', style: 'margin-top:0.5rem' }));
-            actionsEl.appendChild(createButton({ label: inFlight ? 'Discarding…' : 'Discard this proposal instead', variant: 'secondary', disabled: inFlight, onClick: onReject }));
+            actionsEl.appendChild(createButton({ label: inFlight ? 'Discarding…' : 'Discard this proposal instead', variant: 'ghost', disabled: inFlight, onClick: onReject }));
           }
           return;
         }
@@ -1041,7 +1051,7 @@
         if (actions.canApprove) {
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
             createButton({ label: inFlight ? 'Approving…' : 'Approve Proposal', variant: 'secondary', disabled: inFlight, onClick: onApprove }),
-            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'secondary', disabled: inFlight, onClick: onReject }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
           ]));
           return;
         }
@@ -1054,7 +1064,7 @@
           }
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
             createButton({ label: inFlight ? 'Committing…' : 'Commit to Planned Workout', disabled: inFlight, onClick: onCommit }),
-            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'secondary', disabled: inFlight, onClick: onReject }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
           ]));
           return;
         }
@@ -1063,7 +1073,7 @@
           if (state.committedSessionId) {
             actionsEl.appendChild(el('div', { class: 'btn-row' }, [
               el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${state.committedSessionId}`, text: 'Open planned workout' }),
-              createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'secondary', disabled: inFlight, onClick: onDeleteExistingSession }),
+              createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }),
             ]));
           }
         }
@@ -1455,11 +1465,11 @@
         if (blockedByRealSession()) {
           actionsEl.appendChild(el('p', { class: 'muted', text: `${formatWeekday(day.weekday)} already has a real workout — delete it first if you want to reconcile the week again.` }));
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
-            createButton({ label: inFlight ? 'Deleting…' : 'Delete existing workout', variant: 'secondary', disabled: inFlight, onClick: onDeleteExistingSession }),
+            createButton({ label: inFlight ? 'Deleting…' : 'Delete existing workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }),
           ]));
           if (state && (state.status === 'pending' || state.status === 'approved')) {
             actionsEl.appendChild(el('p', { class: 'faint', text: 'You also have a separate, not-yet-applied reconciliation for this day.', style: 'margin-top:0.5rem' }));
-            actionsEl.appendChild(createButton({ label: inFlight ? 'Discarding…' : 'Discard this reconciliation instead', variant: 'secondary', disabled: inFlight, onClick: onReject }));
+            actionsEl.appendChild(createButton({ label: inFlight ? 'Discarding…' : 'Discard this reconciliation instead', variant: 'ghost', disabled: inFlight, onClick: onReject }));
           }
           return;
         }
@@ -1472,7 +1482,7 @@
         if (actions.canApprove) {
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
             createButton({ label: inFlight ? 'Approving…' : 'Approve', variant: 'secondary', disabled: inFlight, onClick: onApprove }),
-            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'secondary', disabled: inFlight, onClick: onReject }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
           ]));
           return;
         }
@@ -1480,14 +1490,14 @@
           actionsEl.appendChild(el('p', { class: 'muted', text: 'Approved — not yet applied to your week.' }));
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
             createButton({ label: inFlight ? 'Applying…' : 'Apply to this week', disabled: inFlight, onClick: onCommit }),
-            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'secondary', disabled: inFlight, onClick: onReject }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
           ]));
           return;
         }
         if (actions.isCommitted) {
           actionsEl.appendChild(el('p', { class: 'muted', text: 'Applied — your week has been updated.' }));
           if (state.committedSessionId) {
-            actionsEl.appendChild(createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'secondary', disabled: inFlight, onClick: onDeleteExistingSession }));
+            actionsEl.appendChild(createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }));
           }
         }
       }
