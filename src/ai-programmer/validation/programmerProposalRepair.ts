@@ -29,10 +29,11 @@
 import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
-import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
-import type { AIProgrammerContext, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
+import type { AIWeekReconciliationDay, AIWeekReconciliationExerciseProposal, AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
+import type { AIProgrammerContext, AIProgrammerTargetContext, AIProgrammerValidExerciseContext } from '../context/programmerContextTypes.js';
 import type { AIReconciliationContext } from '../context/reconciliationContextTypes.js';
 import { directSetsPerExposureCapFor } from './setCaps.js';
+import { auditWeeklyVolume } from './weeklyVolumeAudit.js';
 
 /** Same value the domain validator applies to an exercise with no authored
  * prescription. */
@@ -226,10 +227,135 @@ export function repairProposal(proposal: AIWorkoutSessionProposal, context: AIPr
   return { ...proposal, exercises: repaired.exercises, warnings: [...proposal.warnings, ...repaired.notes] };
 }
 
+/** Superset of AIReconciliationContext carrying an OPTIONAL
+ * programmingBrief — production's real reconcile_week context has none
+ * (setCaps.ts's own note: "the whole-week path...has no brief"); only the
+ * eval harness builds one today. auditWeeklyVolume already treats this
+ * field as optional, and the goal-completion pass below reads it the exact
+ * same way, so a real request without a brief still gets a "required"
+ * number to work toward (the package's own deliverable figure) rather than
+ * silently doing nothing. */
+export type AIWeekReconciliationRepairContext = AIReconciliationContext & {
+  programmingBrief?: { muscles: readonly { targetType: string; targetId: string; recommendedWeeklyPrimarySets: number }[] };
+};
+
+const MAX_GOAL_COMPLETION_ITERATIONS = 25;
+
+/** True iff removing `exercise` would leave its own target with zero
+ * exercises left in this session — the floor a completion swap must never
+ * cross, so a displaced non-goal muscle keeps at least some real coverage
+ * instead of being silently dropped from the session entirely. */
+function wouldZeroOutCoverage(exercise: AIWeekReconciliationExerciseProposal, dayExercises: readonly AIWeekReconciliationExerciseProposal[]): boolean {
+  return dayExercises.filter((e) => e.targetType === exercise.targetType && e.targetId === exercise.targetId).length <= 1;
+}
+
+/** The safest currently-selected exercise to give up its slot to a
+ * deficient goal: scanning from the end (same convention as
+ * removeLastNonGoalMatching), the last exercise that (a) does not itself
+ * belong to an active goal — point 7: never displace another goal's work —
+ * and (b) has a sibling exercise for the same target remaining afterward,
+ * so that target keeps real coverage this session instead of being zeroed
+ * out. Returns null when no such exercise exists. */
+function findDisplaceableExercise(dayExercises: readonly AIWeekReconciliationExerciseProposal[], targets: readonly AIProgrammerTargetContext[]): AIWeekReconciliationExerciseProposal | null {
+  for (let i = dayExercises.length - 1; i >= 0; i--) {
+    const candidate = dayExercises[i]!;
+    if (isGoalTarget(targets, candidate)) continue;
+    if (wouldZeroOutCoverage(candidate, dayExercises)) continue;
+    return candidate;
+  }
+  return null;
+}
+
+/** The first of `target`'s own authored, catalogued exercises not already
+ * present in this session — the next exercise a completion swap would add.
+ * Only ever drawn from the deficient target's own validExercises (never a
+ * different target's list), so a swap can only ever help the target it is
+ * actually for. */
+function findMissingAuthoredExercise(target: AIProgrammerTargetContext, dayExercises: readonly AIWeekReconciliationExerciseProposal[]): AIProgrammerValidExerciseContext | null {
+  const present = new Set(dayExercises.map((e) => e.exerciseId));
+  return target.validExercises.find((v) => v.authoredPrescription && !present.has(v.exerciseId)) ?? null;
+}
+
+function buildGoalExercise(target: AIProgrammerTargetContext, catalogueEntry: AIProgrammerValidExerciseContext, cap: number | null, classification: AIWeekReconciliationExerciseProposal['classification']): AIWeekReconciliationExerciseProposal {
+  const authored = catalogueEntry.authoredPrescription!;
+  return {
+    exerciseId: catalogueEntry.exerciseId,
+    role: catalogueEntry.role,
+    targetType: target.targetType,
+    targetId: target.targetId,
+    sets: Math.min(authored.sets, cap ?? Number.POSITIVE_INFINITY),
+    repsMin: authored.repsMin,
+    repsMax: authored.repsMax,
+    rirMin: authored.rirMin,
+    rirMax: authored.rirMax,
+    rationale: [`Added by repair: ${target.targetId} was below its required weekly volume, and this authored exercise was eligible but unused.`],
+    source: 'blueprint',
+    classification,
+  };
+}
+
+/** Goal-completion pass (2026-09-23): the repairs above fix an exercise the
+ * model DID select; they cannot fix a goal that stays short only because
+ * the model never selected enough of its own authored exercises at all. A
+ * live eval investigation found sessions consistently full (10/10
+ * exercises) with the spare slot going to a second non-goal exercise (e.g.
+ * a duplicate oblique exercise) while the goal's own remaining authored
+ * exercises (dip, cable pushdown for triceps) were never added — a real
+ * prescription-selection gap, not an accounting bug (the shared
+ * triceps/triceps-long-head crediting itself was verified correct by hand
+ * against these exact numbers). This never touches creditedTargetKeys or
+ * package-level scope resolution: it only swaps an already-present, safe,
+ * non-goal exercise for a still-unused authored exercise of a deficient
+ * goal, on a day that already trains that goal, re-auditing via the SAME
+ * auditWeeklyVolume the validator itself trusts after every single swap —
+ * never a second, approximate notion of "did this actually help." */
+function completeGoalVolume(days: readonly AIWeekReconciliationDay[], lockedDates: ReadonlySet<string>, context: AIWeekReconciliationRepairContext): { days: AIWeekReconciliationDay[]; notes: string[] } {
+  const current: AIWeekReconciliationDay[] = days.map((d) => (d.session ? { ...d, session: { ...d.session, exercises: [...d.session.exercises] } } : d));
+  const notes: string[] = [];
+
+  for (let iteration = 0; iteration < MAX_GOAL_COMPLETION_ITERATIONS; iteration++) {
+    const audit = auditWeeklyVolume({ days: current }, { targets: context.targets, existingProgram: context.existingProgram, programmingBrief: context.programmingBrief });
+    if (audit.goalShortfalls.length === 0) break;
+
+    let improved = false;
+    for (const row of audit.goalShortfalls) {
+      const target = findTarget(context.targets, row.targetType, row.targetId);
+      if (!target) continue;
+      const cap = directSetsPerExposureCapFor(target);
+
+      for (let i = 0; i < current.length; i++) {
+        const day = current[i]!;
+        if (!day.session || lockedDates.has(day.date)) continue;
+        const exercises = day.session.exercises;
+        const trainedHere = exercises.find((e) => e.targetType === target.targetType && e.targetId === target.targetId);
+        if (!trainedHere) continue; // never introduce a new training day for a goal the model didn't already put there
+
+        const missing = findMissingAuthoredExercise(target, exercises);
+        if (!missing) continue; // no unused authored exercise left for this target on this day
+
+        const displaceable = findDisplaceableExercise(exercises, context.targets);
+        if (!displaceable) continue; // no safe non-goal exercise to give up — leave the goal short rather than risk another target's coverage
+
+        const added = buildGoalExercise(target, missing, cap, trainedHere.classification);
+        const nextExercises = [...exercises];
+        nextExercises[exercises.indexOf(displaceable)] = added;
+        current[i] = { ...day, session: { ...day.session, exercises: nextExercises } };
+        notes.push(`${day.date}: replaced ${displaceable.exerciseId} (${displaceable.targetId}) with ${added.exerciseId} to work toward ${target.targetId}'s required weekly volume.`);
+        improved = true;
+        break; // re-audit before attempting another swap
+      }
+      if (improved) break;
+    }
+    if (!improved) break; // no eligible exercise, or no safe displacement, for any remaining deficient goal
+  }
+
+  return { days: current, notes };
+}
+
 /** Repairs every unlocked day of a whole-week reconciliation with the same
  * routine the single-session path uses. Locked days are never touched, and a
  * day with no session is left alone. */
-export function repairWeekReconciliation(output: AIWeekReconciliationOutput, context: AIReconciliationContext): AIWeekReconciliationOutput {
+export function repairWeekReconciliation(output: AIWeekReconciliationOutput, context: AIWeekReconciliationRepairContext): AIWeekReconciliationOutput {
   const lockedDates = new Set(context.existingProgram.filter((d) => d.locked).map((d) => d.date));
   const notes: string[] = [];
 
@@ -250,5 +376,7 @@ export function repairWeekReconciliation(output: AIWeekReconciliationOutput, con
     return { ...day, session: { ...day.session, exercises: repaired.exercises } };
   });
 
-  return { ...output, days, reconciliation: { ...output.reconciliation, warnings: [...output.reconciliation.warnings, ...notes] } };
+  const completion = completeGoalVolume(days, lockedDates, context);
+
+  return { ...output, days: completion.days, reconciliation: { ...output.reconciliation, warnings: [...output.reconciliation.warnings, ...notes, ...completion.notes] } };
 }

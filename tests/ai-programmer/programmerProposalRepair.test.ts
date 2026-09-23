@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { repairProposal, repairWeekReconciliation } from '../../src/ai-programmer/validation/programmerProposalRepair.js';
+import { auditWeeklyVolume } from '../../src/ai-programmer/validation/weeklyVolumeAudit.js';
 import type { AIWeekReconciliationOutput } from '../../src/ai-programmer/contracts/weekReconciliationTypes.js';
 import type { AIReconciliationContext } from '../../src/ai-programmer/context/reconciliationContextTypes.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../../src/ai-programmer/contracts/programmerTypes.js';
@@ -303,6 +304,115 @@ describe('repairProposal', () => {
       expect(run(true, ['recent overexposure']).days[0]!.session!.exercises[0]!.sets).toBe(2);
       expect(run(true, []).days[0]!.session!.exercises[0]!.sets).toBe(3);
       expect(run(false, []).days[0]!.session!.exercises[0]!.sets).toBe(2);
+    });
+  });
+
+  describe('repairWeekReconciliation — goal-completion pass (2026-09-23)', () => {
+    // Reproduces the exact live-eval failure: the model used only the two
+    // shared overhead exercises (crediting triceps-long-head, which they
+    // fully satisfy) plus close-grip-bench-press, and never added
+    // dip-triceps-biased or cable-pushdown for triceps itself — real
+    // triceps/triceps-long-head Blueprint data (no synthetic brief needed):
+    // triceps requires 24/wk (12/session x 2 push-compatible sessions),
+    // triceps-long-head requires 8/wk (4/session x 2). Session composition
+    // matches the live data exactly: 3 triceps-family exercises + 7 non-goal
+    // filler exercises = 10/10 (the exercise cap), 21 sets/session.
+    const richWeekContext = (targets: AIProgrammerTargetContext[], dates: string[] = ['2026-09-21', '2026-09-23']): AIReconciliationContext =>
+      ({ targets, existingProgram: dates.map((date) => ({ date, locked: false, sessionPurpose: 'push' })) }) as unknown as AIReconciliationContext;
+    const weekOutput = (days: Array<{ date: string; exercises: AIWorkoutExerciseProposal[] }>): AIWeekReconciliationOutput =>
+      ({
+        days: days.map((d) => ({ date: d.date, session: { sessionPurpose: 'push', exercises: d.exercises.map((e) => ({ ...e, classification: 'normal_development' })) } })),
+        reconciliation: { warnings: [] },
+      }) as unknown as AIWeekReconciliationOutput;
+
+    const tricepsTargets = (fillerIsGoal: boolean) => [
+      target({
+        targetId: 'triceps',
+        goalId: 'g-triceps',
+        isSpecialization: true,
+        validExercises: [
+          validExercise({ exerciseId: 'close-grip-bench-press', role: 'primary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 10, rirMin: 1, rirMax: 3 } }),
+          validExercise({ exerciseId: 'dip-triceps-biased', role: 'secondary', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 12, rirMin: 1, rirMax: 3 } }),
+          validExercise({ exerciseId: 'cable-pushdown', role: 'secondary', authoredPrescription: { sets: 2, repsMin: 10, repsMax: 16, rirMin: 1, rirMax: 3 } }),
+        ],
+      }),
+      target({
+        targetId: 'triceps-long-head',
+        goalId: 'g-triceps-long-head',
+        isSpecialization: true,
+        validExercises: [
+          validExercise({ exerciseId: 'overhead-triceps-extension', role: 'primary' }),
+          validExercise({ exerciseId: 'cable-overhead-extension-leaning-forward', role: 'secondary' }),
+        ],
+      }),
+      // Two "doubled" filler targets (2 exercises each, matching the real
+      // run's duplicate oblique exercise) provide exactly the 2 safe
+      // displacement slots needed to add both dip and pushdown; 3 solo
+      // fillers round the session out to exactly 10/10 exercises.
+      target({ targetId: 'filler-double-a', goalId: fillerIsGoal ? 'g-filler' : null, isSpecialization: fillerIsGoal, validExercises: [validExercise({ exerciseId: 'filler-a1', role: 'primary' }), validExercise({ exerciseId: 'filler-a2', role: 'primary' })] }),
+      target({ targetId: 'filler-double-b', goalId: fillerIsGoal ? 'g-filler' : null, isSpecialization: fillerIsGoal, validExercises: [validExercise({ exerciseId: 'filler-b1', role: 'primary' }), validExercise({ exerciseId: 'filler-b2', role: 'primary' })] }),
+      target({ targetId: 'filler-solo-1', goalId: fillerIsGoal ? 'g-filler' : null, isSpecialization: fillerIsGoal, validExercises: [validExercise({ exerciseId: 'filler-c1', role: 'primary' })] }),
+      target({ targetId: 'filler-solo-2', goalId: fillerIsGoal ? 'g-filler' : null, isSpecialization: fillerIsGoal, validExercises: [validExercise({ exerciseId: 'filler-c2', role: 'primary' })] }),
+      target({ targetId: 'filler-solo-3', goalId: fillerIsGoal ? 'g-filler' : null, isSpecialization: fillerIsGoal, validExercises: [validExercise({ exerciseId: 'filler-c3', role: 'primary' })] }),
+    ];
+
+    // 3 triceps-family exercises + 7 filler exercises = 10/10, the exact
+    // exercise cap the live eval's own sessions were sitting at.
+    const daySession = (date: string) => ({
+      date,
+      exercises: [
+        exercise({ exerciseId: 'overhead-triceps-extension', targetId: 'triceps-long-head', sets: 2 }),
+        exercise({ exerciseId: 'cable-overhead-extension-leaning-forward', targetId: 'triceps-long-head', sets: 2 }),
+        exercise({ exerciseId: 'close-grip-bench-press', targetId: 'triceps', sets: 3, repsMin: 6, repsMax: 10 }),
+        exercise({ exerciseId: 'filler-a1', targetId: 'filler-double-a', sets: 2 }),
+        exercise({ exerciseId: 'filler-a2', targetId: 'filler-double-a', sets: 2 }),
+        exercise({ exerciseId: 'filler-b1', targetId: 'filler-double-b', sets: 2 }),
+        exercise({ exerciseId: 'filler-b2', targetId: 'filler-double-b', sets: 2 }),
+        exercise({ exerciseId: 'filler-c1', targetId: 'filler-solo-1', sets: 2 }),
+        exercise({ exerciseId: 'filler-c2', targetId: 'filler-solo-2', sets: 2 }),
+        exercise({ exerciseId: 'filler-c3', targetId: 'filler-solo-3', sets: 2 }),
+      ],
+    });
+
+    // Uses the real auditWeeklyVolume — the exact function the validator and
+    // the eval harness both trust — rather than a hand-rolled sum, so this
+    // test verifies the real shared-exercise credit (an overhead exercise
+    // assigned to triceps-long-head still counts toward triceps too), not a
+    // second, approximate notion of it.
+    const tricepsGeneratedSets = (out: AIWeekReconciliationOutput, targets: AIProgrammerTargetContext[], targetId: string) => {
+      const audit = auditWeeklyVolume(out, { targets, existingProgram: ['2026-09-21', '2026-09-23'].map((date) => ({ date, sessionPurpose: 'push' })) });
+      return audit.rows.find((r) => r.targetId === targetId)?.generatedDirectSets ?? 0;
+    };
+
+    it('replaces non-goal padding with the missing triceps exercises until the 24-set goal is met, leaving triceps-long-head correctly credited', () => {
+      const targets = tricepsTargets(false);
+      const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets));
+
+      expect(tricepsGeneratedSets(out, targets, 'triceps')).toBe(24); // was 14 before completion (7/session: close-grip 3 + shared overhead 2+2)
+      expect(tricepsGeneratedSets(out, targets, 'triceps-long-head')).toBe(8); // unchanged — it was already fully met and had nothing missing
+
+      for (const day of out.days) {
+        const ids = day.session!.exercises.map((e) => e.exerciseId);
+        expect(ids).toContain('dip-triceps-biased');
+        expect(ids).toContain('cable-pushdown');
+        expect(day.session!.exercises).toHaveLength(10); // exercise cap preserved — a replacement, not an addition
+      }
+      expect(out.reconciliation.warnings.some((w) => w.includes('replaced') && w.includes('with dip-triceps-biased'))).toBe(true);
+      expect(out.reconciliation.warnings.some((w) => w.includes('replaced') && w.includes('with cable-pushdown'))).toBe(true);
+    });
+
+    it('never displaces an exercise needed by another active goal, and leaves triceps short rather than making an unsafe swap', () => {
+      const targets = tricepsTargets(true);
+      const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets));
+
+      expect(tricepsGeneratedSets(out, targets, 'triceps')).toBe(14); // unchanged — every non-goal candidate is now itself an active goal
+      for (const day of out.days) {
+        const ids = day.session!.exercises.map((e) => e.exerciseId);
+        expect(ids).not.toContain('dip-triceps-biased');
+        expect(ids).not.toContain('cable-pushdown');
+        expect(day.session!.exercises).toHaveLength(10); // untouched from the model's own output — no swap was safe to make
+      }
+      expect(out.reconciliation.warnings.some((w) => w.includes('replaced'))).toBe(false);
     });
   });
 });
