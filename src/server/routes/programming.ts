@@ -37,7 +37,7 @@ import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { ExercisePreferencesRepo } from '../../repositories/exercisePreferencesRepo.js';
 import { ProfileFactorsRepo } from '../../repositories/profileFactorsRepo.js';
 import { evaluateStructuralAdvisories } from '../../coaching/structuralAdvisories/structuralAdvisoryService.js';
-import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput, type WeekAggregates } from '../../engine/weekProgramReconciliation.js';
+import { ensureWeekProgramGenerated, isDayLocked, reconcileWeekProgram, type FreshDayInput, type WeekAggregates } from '../../engine/weekProgramReconciliation.js';
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
 import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { todayForUser } from '../../lib/userTimezone.js';
@@ -761,6 +761,52 @@ programmingRouter.put('/week/days/:day/activity', (req, res) => {
   const program = reconcileWeekProgram(database, weekStart, days, aggregates, { kind: 'activity_override', dayIndex });
 
   res.json({ ...buildWeekResponse(database, weekStart, program, profile), appliedPrescriptionPolicy: prescriptionPolicy });
+});
+
+/** "Delete any visible program" fix (2026-09-23): removes this week's
+ * persisted deterministic plan for one day — the one remaining case with
+ * no delete path at all before this. A real committed session already
+ * has DELETE /api/workouts/:id; a pending/approved AI proposal already
+ * has its own .../reject; this closes the gap for the plain deterministic
+ * plan itself (the original weekly program, a regenerated day, or a
+ * reconciled-but-not-committed day's own snapshot — all persisted the
+ * same way, in program_sessions). Never touches a locked (completed/
+ * in-progress) day's real history — isDayLocked is the exact same guard
+ * swapDayActivities/moveActivity already use. Leaves the day's own
+ * activity/override completely untouched (still whatever it was, e.g.
+ * Gym, just with nothing programmed) — exactly the same state a Gym day
+ * with no persisted prescription at all already renders as ("No
+ * exercises were placed on this day"); the user can generate a new plan
+ * or change the day's activity separately afterward. */
+programmingRouter.delete('/week/days/:day/plan', (req, res) => {
+  const database = db(req);
+  const day = req.params.day;
+  if (!WEEKDAYS.includes(day as Weekday)) {
+    return res.status(400).json({ error: `day must be one of ${WEEKDAYS.join('|')}` });
+  }
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const profile = new TrainingProfileRepo(database).get(user.id);
+  if (!profile) {
+    return res.status(404).json({ error: 'No training profile exists for this user yet — create one first (PUT /api/training-profile)' });
+  }
+  const date = todayForUser(database);
+  const weekStart = programmingWeekStart(date);
+  const dayIndex = WEEKDAYS.indexOf(day as Weekday);
+  const targetDate = addDays(weekStart, dayIndex);
+
+  if (isDayLocked(database, targetDate)) {
+    return res.status(409).json({ error: `${targetDate} already has a completed or in-progress workout and its plan cannot be deleted.` });
+  }
+
+  const programRepo = new WeeklyProgramRepo(database);
+  const program = programRepo.getByWeekStart(weekStart);
+  if (!program) {
+    return res.status(404).json({ error: `No program exists for this week yet — nothing to delete for ${targetDate}.` });
+  }
+  programRepo.deleteSession(program.id, dayIndex);
+
+  const refreshed = programRepo.getByWeekStart(weekStart)!;
+  res.json(buildWeekResponse(database, weekStart, refreshed, profile));
 });
 
 function weekOperationErrorStatus(code: ScheduleOperationErrorCode): number {

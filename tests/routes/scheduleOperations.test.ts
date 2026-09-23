@@ -1005,3 +1005,81 @@ describe('Phase 6 reproduction: swap with a superseded (AI-committed) session �
     expect(todayRes.body.plannedSession).toEqual(wednesdayAfter.plannedSession);
   });
 });
+
+// "Delete any visible program" fix (2026-09-23): reported live —
+// "irrespective of what program it is... I need a delete button for any
+// and every program that's visible in the app." A real committed session
+// already had DELETE /api/workouts/:id and a pending/approved AI
+// proposal already had its own /reject; this is the one remaining case —
+// the plain deterministic plan itself (original, regenerated, or a
+// reconciled-but-not-committed day's own snapshot) — closing the gap.
+describe('DELETE /api/programming/week/days/:day/plan', () => {
+  it('deletes the persisted plan for a day, leaving its activity untouched but with no exercises', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const before = await getWeek();
+    const thursdayBefore = before.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayBefore.plannedWork.length).toBeGreaterThan(0);
+
+    const res = await request(app).delete('/api/programming/week/days/thursday/plan').expect(200);
+    const thursdayAfter = res.body.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayAfter.activity).toBe('gym'); // untouched
+    expect(thursdayAfter.type).toBe('gym');
+    expect(thursdayAfter.plannedWork).toEqual([]);
+    expect(thursdayAfter.plannedSession).toBeNull();
+
+    const afterRefetch = await getWeek();
+    expect(afterRefetch.days.find((d: any) => d.weekday === 'thursday').plannedWork).toEqual([]);
+  });
+
+  it('rejects deleting a completed day\'s plan (real logged history)', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const before = await getWeek();
+    const thursdayDate = before.days.find((d: any) => d.weekday === 'thursday').date;
+    new WorkoutSessionsRepo(db).createSession({ date: thursdayDate, session_type: 'gym', status: 'completed', duration_minutes: 45 });
+
+    const res = await request(app).delete('/api/programming/week/days/thursday/plan');
+    expect(res.status).toBe(409);
+
+    const after = await getWeek();
+    expect(after.days.find((d: any) => d.weekday === 'thursday').plannedWork.length).toBeGreaterThan(0);
+  });
+
+  it('rejects deleting an in-progress day\'s plan', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const before = await getWeek();
+    const thursdayDate = before.days.find((d: any) => d.weekday === 'thursday').date;
+    new WorkoutSessionsRepo(db).createSession({ date: thursdayDate, session_type: 'gym', status: 'in_progress' });
+
+    const res = await request(app).delete('/api/programming/week/days/thursday/plan');
+    expect(res.status).toBe(409);
+  });
+
+  it('is a harmless no-op for a day with no persisted plan at all', async () => {
+    setupProfile([]); // every day starts Rest, no program row exists for wednesday
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    await getWeek();
+
+    await request(app).delete('/api/programming/week/days/wednesday/plan').expect(200);
+  });
+
+  it('rejects an invalid weekday', async () => {
+    setupProfile(['thursday']);
+    const res = await request(app).delete('/api/programming/week/days/someday/plan');
+    expect(res.status).toBe(400);
+  });
+
+  it('the day is generate-able/regenerate-able again after its plan is deleted', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    await getWeek();
+
+    await request(app).delete('/api/programming/week/days/thursday/plan').expect(200);
+
+    const res = await putActivity('thursday', 'gym', { prescriptionPolicy: 'regenerate' }).expect(200);
+    const thursdayAfter = res.body.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayAfter.plannedWork.length).toBeGreaterThan(0);
+  });
+});
