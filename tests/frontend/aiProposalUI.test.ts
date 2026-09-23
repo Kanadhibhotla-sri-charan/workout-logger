@@ -405,7 +405,7 @@ describe('program.html: AI Workout Proposal section wiring', () => {
   const html = readFile('program.html');
 
   it('calls the real generate/retrieve/approve/commit endpoints, in the retrieve-after-generate pattern', () => {
-    expect(html).toMatch(/aiApi\('\/api\/ai-programmer\/generate-session', \{ method: 'POST', body: \{ targetDate: day\.date \} \}\)/);
+    expect(html).toMatch(/aiApi\('\/api\/ai-programmer\/generate-session', \{\s*\n\s*method: 'POST',\s*\n\s*body: requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \},\s*\n\s*\}\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{generated\.proposalId\}`\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/approve`, \{ method: 'POST' \}\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/commit`, \{/);
@@ -478,6 +478,36 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     const previewBody = html.slice(html.indexOf('async function buildCommittedSessionPreview'), html.indexOf('/** `applied_intensity_technique`'));
     expect(previewBody).toMatch(/Why included/);
     expect(previewBody).toMatch(/rationaleByExerciseId\.get\(ex\.exercise_id\)/);
+  });
+
+  // 2026-09-23 fix: reported live — a rejected proposal kept showing its
+  // full, long-superseded exercise list right alongside the "no longer
+  // active" notice, wasting space and reading as if it were still real.
+  it('clears the full review once a proposal is expired or rejected — the notice alone is shown, not the stale exercise list', () => {
+    const reviewFnBody = html.slice(html.indexOf('function renderReview()', html.indexOf('function buildAiProposalSection(')), html.indexOf('function renderNotice()'));
+    expect(reviewFnBody).toMatch(/state && state\.status !== 'expired' && state\.status !== 'rejected'/);
+  });
+
+  // 2026-09-23 fix: "AI proposal should ask me what it should generate
+  // for the day — push, pull, legs or upper — before generating."
+  describe('"ask what to generate" fix: a session-focus picker before generating', () => {
+    it('offers exactly push/pull/legs/upper plus a no-preference default, and only before a proposal exists', () => {
+      const sectionBody = html.slice(html.indexOf('function buildAiProposalSection('), html.indexOf('const GROUP_ORDER'));
+      expect(sectionBody).toMatch(/function renderPurposePicker\(\)/);
+      expect(sectionBody).toMatch(/\{ value: '', text: 'Let AI decide' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'push', text: 'Push' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'pull', text: 'Pull' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'legs', text: 'Legs' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'upper', text: 'Upper' \}/);
+      const pickerFnBody = sectionBody.slice(sectionBody.indexOf('function renderPurposePicker()'));
+      expect(pickerFnBody).toMatch(/if \(state\) return;/);
+    });
+
+    it('sends the chosen purpose as requestedSessionPurpose only when one was picked', () => {
+      expect(html).toMatch(/let requestedSessionPurpose = null;/);
+      expect(html).toMatch(/requestedSessionPurpose = select\.value \|\| null;/);
+      expect(html).toMatch(/body: requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \}/);
+    });
   });
 
   // 2026-09-23 fix: "if a program is already there I should not be able

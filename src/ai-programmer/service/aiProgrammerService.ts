@@ -13,6 +13,7 @@ import { AIProposalRepo, effectiveStatus, type AIProposalStatus } from '../../re
 import { AIWeekReconciliationRepo, type AIWeekReconciliationStatus } from '../../repositories/aiWeekReconciliationRepo.js';
 import { nowIso } from '../../repositories/ids.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
+import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import type { AIProgrammerContext, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
 import { buildReconciliationContext } from '../context/reconciliationContextBuilder.js';
 import type { AIReconciliationContext } from '../context/reconciliationContextTypes.js';
@@ -95,6 +96,9 @@ export function buildProgrammerSystemInstruction(): string {
 
 export interface GenerateSessionInput {
   targetDate: string;
+  /** "Ask what to generate" fix — see BuildProgrammerContextInput's own
+   * doc comment for the full rationale; passed straight through. */
+  requestedSessionPurpose?: SessionPurpose;
 }
 
 export interface GenerateSessionResult {
@@ -225,7 +229,10 @@ export class AIProgrammerService {
       throw new AIProposalAlreadyPendingError(input.targetDate, existing.id);
     }
 
-    const context: AIProgrammerContext = buildProgrammerContext(this.db, { targetDate: input.targetDate });
+    const context: AIProgrammerContext = buildProgrammerContext(this.db, {
+      targetDate: input.targetDate,
+      requestedSessionPurpose: input.requestedSessionPurpose,
+    });
 
     const requestId = randomUUID();
     const systemInstruction = buildProgrammerSystemInstruction();
