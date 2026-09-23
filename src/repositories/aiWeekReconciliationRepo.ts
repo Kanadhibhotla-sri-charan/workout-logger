@@ -212,6 +212,13 @@ export class AIWeekReconciliationRepo {
     return this.transition(id, ['pending', 'approved'], 'expired', '');
   }
 
+  /** Same explicit-discard addition as AIProposalRepo's own `reject`
+   * (2026-09-23 "duplicate AI programs" fix) — see its doc comment for
+   * the full rationale, identical here at the weekly granularity. */
+  reject(id: string): AIWeekReconciliationRecord | undefined {
+    return this.transition(id, ['pending', 'approved'], 'rejected', ', rejected_at = @rejected_at', { rejected_at: nowIso() });
+  }
+
   recordFailure(id: string, reason: string): AIWeekReconciliationRecord | undefined {
     const existing = this.getById(id);
     if (!existing) return undefined;

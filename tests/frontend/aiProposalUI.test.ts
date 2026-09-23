@@ -454,7 +454,7 @@ describe('program.html: AI Workout Proposal section wiring', () => {
   // point of confusion when a commit conflict pointed at a session the
   // user had no way to preview from the day view.
   it('shows a read-only preview of a superseding session\'s real exercises, from the real endpoint, without fabricating fields the API does not return', () => {
-    expect(html).toMatch(/buildCommittedSessionPreview\(day\.plannedSession\.id, previewEl, modalToken\)/);
+    expect(html).toMatch(/buildCommittedSessionPreview\(day\.plannedSession\.id, day\.date, previewEl, modalToken\)/);
     const previewBody = html.slice(html.indexOf('async function buildCommittedSessionPreview'), html.indexOf('/** `applied_intensity_technique`'));
     expect(previewBody).toMatch(/api\(`\/api\/workouts\/\$\{sessionId\}`\)/);
     expect(previewBody).toMatch(/resolveExerciseDisplayName\(ex\.exercise_id\)/);
@@ -463,6 +463,45 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     // Never invents target_type/target_id/classification — the real
     // reason a full PlannedWorkItem can't be fabricated here.
     expect(previewBody).not.toMatch(/target_type|target_id|classification/);
+  });
+
+  // 2026-09-23 fix: rationale was completely absent from the preview
+  // above (unlike every other exercise card on this page) — recovered
+  // here from the session's own originating proposal/reconciliation.
+  it('recovers rationale for the preview from the session\'s own originating proposal/reconciliation, matched by exercise id', () => {
+    expect(html).toMatch(/function parseAiOriginFromNotes\(notes\)/);
+    expect(html).toMatch(/notes\.match\(\/\^AI-proposed session \\\(proposal \(\[\^\)\]\+\)\\\)\$\//);
+    expect(html).toMatch(/notes\.match\(\/\^AI week-reconciliation session \\\(reconciliation \(\[\^\)\]\+\)\\\)\$\//);
+    const rationaleFnBody = html.slice(html.indexOf('async function fetchAiRationaleByExerciseId'), html.indexOf('async function buildCommittedSessionPreview'));
+    expect(rationaleFnBody).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{origin\.id\}`\)/);
+    expect(rationaleFnBody).toMatch(/aiApi\(`\/api\/ai-programmer\/week-reconciliations\/\$\{origin\.id\}`\)/);
+    const previewBody = html.slice(html.indexOf('async function buildCommittedSessionPreview'), html.indexOf('/** `applied_intensity_technique`'));
+    expect(previewBody).toMatch(/Why included/);
+    expect(previewBody).toMatch(/rationaleByExerciseId\.get\(ex\.exercise_id\)/);
+  });
+
+  // 2026-09-23 fix: "if a program is already there I should not be able
+  // to generate it again without deleting the 1st one" — day.plannedSession
+  // (the same authoritative field the week grid uses) gates generation
+  // here, regardless of which flow created the real session.
+  describe('"duplicate AI programs" fix: generation is blocked while a real session already exists', () => {
+    it('blocks generate/approve/commit and offers to delete the existing workout instead', () => {
+      expect(html).toMatch(/function blockedByRealSession\(\)/);
+      expect(html).toMatch(/return !!day\.plannedSession && !\(state && state\.committedSessionId === day\.plannedSession\.id\);/);
+      const actionsBody = html.slice(html.indexOf('function renderActions()', html.indexOf('function blockedByRealSession()')), html.indexOf('async function discover()'));
+      expect(actionsBody).toMatch(/if \(blockedByRealSession\(\)\)/);
+      expect(actionsBody).toMatch(/onDeleteExistingSession/);
+    });
+
+    it('DELETE /api/workouts/:id is called, never a softer/partial action, to remove the blocking session', () => {
+      const deleteFnBody = html.slice(html.indexOf('async function onDeleteExistingSession'), html.indexOf('async function onCommit'));
+      expect(deleteFnBody).toMatch(/api\(`\/api\/workouts\/\$\{day\.plannedSession\.id\}`, \{ method: 'DELETE' \}\)/);
+    });
+
+    it('a pending/approved (never committed) proposal can be discarded independently via reject', () => {
+      expect(html).toMatch(/async function onReject\(\)/);
+      expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/reject`, \{ method: 'POST' \}\)/);
+    });
   });
 
   it('displays the committed session as an actionable reference, not just a bare id', () => {

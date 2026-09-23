@@ -227,6 +227,19 @@ export class WorkoutSessionsRepo {
     return this.getSession(id);
   }
 
+  /** Whole-session delete (2026-09-23, "duplicate AI programs" fix) —
+   * `workout_exercises`/`workout_sets` cascade via their own FK ON
+   * DELETE CASCADE (schema.sql), and any `ai_program_proposals`/
+   * `ai_week_reconciliation_proposals` row whose `committed_session_id`
+   * pointed here is set to NULL by its own FK (never left dangling). The
+   * caller (the route) is responsible for only ever calling this for a
+   * `planned` session — this method itself does not re-check status, so
+   * it must never be exposed as a way to delete real logged history. */
+  deleteSession(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM workout_sessions WHERE session_id = ?').run(id);
+    return result.changes > 0;
+  }
+
   getSession(id: string): WorkoutSession | undefined {
     const row = this.db.prepare('SELECT * FROM workout_sessions WHERE session_id = ?').get(id) as
       | WorkoutSessionRow

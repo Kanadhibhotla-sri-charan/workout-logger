@@ -188,6 +188,27 @@ describe('program.html: AI Week Reorganization section wiring', () => {
     expect(reviewBody).toMatch(/output\.days\.filter\(\(d\) => d\.changeType !== 'unchanged'\)/);
   });
 
+  // 2026-09-23 fix: "duplicate AI programs" — same fix as
+  // buildAiProposalSection's own blockedByRealSession, applied here too.
+  describe('"duplicate AI programs" fix: reconciling is blocked while a real session already exists on the target day', () => {
+    it('blocks generate/approve/apply and offers to delete the existing workout instead', () => {
+      expect(sectionBody).toMatch(/function blockedByRealSession\(\)/);
+      expect(sectionBody).toMatch(/return !!day\.plannedSession && !\(state && state\.committedSessionId === day\.plannedSession\.id\);/);
+      expect(sectionBody).toMatch(/if \(blockedByRealSession\(\)\)/);
+      expect(sectionBody).toMatch(/onDeleteExistingSession/);
+    });
+
+    it('DELETE /api/workouts/:id removes the blocking session', () => {
+      const deleteFnBody = sectionBody.slice(sectionBody.indexOf('async function onDeleteExistingSession'));
+      expect(deleteFnBody).toMatch(/api\(`\/api\/workouts\/\$\{day\.plannedSession\.id\}`, \{ method: 'DELETE' \}\)/);
+    });
+
+    it('a pending/approved (never committed) reconciliation can be discarded independently via reject', () => {
+      expect(sectionBody).toMatch(/async function onReject\(\)/);
+      expect(sectionBody).toMatch(/aiApi\(`\/api\/ai-programmer\/week-reconciliations\/\$\{state\.reconciliationId\}\/reject`, \{ method: 'POST' \}\)/);
+    });
+  });
+
   it('never renders a raw error field beyond the pre-mapped err.message', () => {
     expect(sectionBody).not.toMatch(/err\.details/);
     expect(sectionBody).not.toMatch(/err\.stack/);

@@ -162,6 +162,31 @@ export function approveProposal(db: Database.Database, proposalId: string): AIPr
   return approved;
 }
 
+/** Explicit user discard (2026-09-23 "duplicate AI programs" fix) — a
+ * pending or approved proposal the user no longer wants (most commonly:
+ * they already have a different, real program for this day and want to
+ * clear the leftover one so "Generate" is offered again). Idempotent on
+ * an already-`rejected` proposal. A `committed` proposal cannot be
+ * rejected here — its real session already exists; discarding it means
+ * DELETE /api/workouts/:id on that session, a deliberately separate
+ * operation on a separate resource (see AIProposalRepo.reject's own doc
+ * comment). An `expired` proposal likewise cannot be rejected (nothing
+ * left to reject — it's already inert). */
+export function rejectProposal(db: Database.Database, proposalId: string): AIProposalRecord {
+  const record = loadCurrent(db, proposalId);
+  if (record.status === 'rejected') return record;
+  if (record.status !== 'pending' && record.status !== 'approved') {
+    throw new AIProposalInvalidStateError(proposalId, record.status, 'rejected');
+  }
+
+  const rejected = new AIProposalRepo(db).reject(proposalId);
+  if (!rejected) {
+    const current = new AIProposalRepo(db).getById(proposalId);
+    throw new AIProposalInvalidStateError(proposalId, current?.status ?? record.status, 'rejected');
+  }
+  return rejected;
+}
+
 export interface CommitAIProposalResult {
   sessionId: string;
   proposal: AIProposalRecord;
