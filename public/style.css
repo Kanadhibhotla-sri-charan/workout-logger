@@ -314,10 +314,28 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transf
 .planned-vs-actual { display: flex; gap: var(--space-4); margin-top: var(--space-2); font-size: 0.85rem; }
 .planned-vs-actual .pva-label { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; display: block; }
 
+/* Phase 7 (2026-09-24): the day-detail/info content (planned duration,
+   plannedSession notice/preview/delete, exercise cards, skipped work) —
+   previously bare paragraphs/cards with no container at all, the one
+   day-scoped block with no visual boundary while every sibling section
+   (.change-activity, .ai-proposal-section, .ai-reconciliation-section)
+   already had one. Same neutral card language as .change-activity —
+   this is informational/day-detail, not itself a distinct workflow, so
+   it gets the plainest of the three treatments, not the accent one
+   week-reconciliation deliberately uses to read as "broader scope." */
+.day-detail-section { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); margin-bottom: var(--space-3); background: var(--surface-muted); }
+.day-detail-section > *:first-child { margin-top: 0; }
+.day-detail-section > *:last-child { margin-bottom: 0; }
+
 /* AI Programmer Proposal Review UI: a clearly separate, additive
    section within an existing panel/modal — never styled to look like
-   part of the deterministic plan above it. */
-.ai-proposal-section { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+   part of the deterministic plan above it. Phase 7 (2026-09-24):
+   normalized to the same boxed treatment every other day/week-scoped
+   section already uses (.change-activity/.day-detail-section's neutral
+   card, .ai-reconciliation-section's accent one) — previously just a
+   top border, the one section that read as "the rest of the page"
+   rather than its own scoped block. */
+.ai-proposal-section { margin-top: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); background: var(--surface-muted); }
 .ai-proposal-panel { border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: var(--space-4); margin: var(--space-3) 0; background: var(--surface-muted); }
 /* Part 7: a week-wide reorganization is a visually distinct workflow
    from single-day generation, not a clone of .ai-proposal-section —
