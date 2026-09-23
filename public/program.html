@@ -940,17 +940,24 @@
       const statusEl = el('div');
       section.append(noticeEl, reviewEl, purposeEl, actionsEl, statusEl);
 
-      /** Only meaningful before a proposal exists — once one is pending/
-       * approved/committed, what it was generated for is fixed (see its
-       * own review's `sessionFocus`), so the picker only ever shows
-       * alongside the FIRST "Generate" action for this day, not the
-       * "Generate a new proposal" retry (state already reflects a real,
-       * specific past choice by then — asking again would suggest it's
-       * still undecided when it isn't, and re-generating with a new
-       * purpose is what starting fresh on a different day is for). */
+      /** 2026-09-23 lifecycle fix: a proposal only has a genuinely FIXED
+       * purpose while it's still live (pending/approved/committed) — see
+       * its own review's `sessionFocus` at that point. A rejected or
+       * expired proposal is exactly as "no proposal yet" as `state ===
+       * null` for every other purpose (aiProposalActionsFor/
+       * aiProposalNoticeFor already treat it identically) and must be
+       * exactly as fresh a generation opportunity here too — the previous
+       * bug hid this picker for ANY non-null state, including rejected/
+       * expired ones, silently reusing whatever purpose (or lack of one)
+       * happened to be selected the first time. `requestedSessionPurpose`
+       * itself is never read from the proposal's own record (only ever
+       * set by this select's own change handler below), so re-showing the
+       * picker here never "reuses the rejected proposal's requested
+       * purpose automatically" — the user genuinely re-decides. */
       function renderPurposePicker() {
         purposeEl.innerHTML = '';
-        if (state) return;
+        const isFreshGenerationOpportunity = !state || state.status === 'expired' || state.status === 'rejected';
+        if (!isFreshGenerationOpportunity) return;
         const label = el('label', { class: 'faint', style: 'display:block;margin-bottom:0.3rem' }, [document.createTextNode(`What should ${formatWeekday(day.weekday)} focus on?`)]);
         const select = el('select', { 'aria-label': `${formatWeekday(day.weekday)}'s session focus` },
           SESSION_PURPOSE_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text }))

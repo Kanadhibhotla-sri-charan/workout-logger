@@ -192,6 +192,51 @@ describe('AIProgrammerService', () => {
       expect(legsTargets).toContain('quads');
       expect(pushTargets).toContain('mid-pec');
     });
+
+    // Real production failure (2026-09-23), reproduced live against the
+    // real qwen model with requestedSessionPurpose: 'push':
+    // AI_OUTPUT_ADEQUACY_INVALID, "physique_target:obliques: 3 sets is
+    // clearly inadequate volume — below 50% of this target's own
+    // deterministic guidance floor". Confirmed NOT a requestedSessionPurpose
+    // wiring defect (the override reaches context.programmingBrief.session
+    // correctly, per the tests above) and NOT a new validator gap — this
+    // exact class of case (push + an under-prescribed UNIVERSAL_PHYSIQUE_
+    // TARGETS member) already has dedicated unit coverage in
+    // programmerAdequacyValidator.test.ts (its own "same case the live
+    // Tuesday test actually hit"). This test closes the one gap those
+    // don't cover: proving the SAME real failure reproduces end to end
+    // through the actual service call a requestedSessionPurpose: 'push'
+    // request makes — i.e. the model intermittently under-delivering
+    // obliques/rectus-abdominis volume when 'push' forces them into
+    // scope, correctly caught by the existing, unchanged adequacy
+    // validator — not a defect to fix in this feature.
+    it('reproduces the real live Push failure end-to-end: inadequate obliques volume is correctly rejected, never silently accepted', async () => {
+      const { date, weekday } = futureRestDate();
+      const provider = new FakeProvider(() =>
+        fakeResponse(
+          validProposalJson({
+            targetDate: date,
+            weekday,
+            sessionFocus: ['push'],
+            exercises: [
+              { ...validProposalJson().exercises[0], exerciseId: 'flat-barbell-bench-press', targetId: 'mid-pec', sets: 8 },
+              { ...validProposalJson().exercises[0], exerciseId: 'cable-pushdown', targetId: 'triceps', sets: 8 },
+              // The exact real shortfall: an obliques exercise given only
+              // 3 sets, well under its own recommended floor — obliques
+              // is UNIVERSAL_PHYSIQUE_TARGETS (engine/config.ts), so
+              // 'push' always expects real coverage of it too.
+              { ...validProposalJson().exercises[0], exerciseId: 'cable-woodchop', targetId: 'obliques', sets: 3 },
+            ],
+          })
+        )
+      );
+      const service = new AIProgrammerService(db, provider);
+
+      await expect(service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' })).rejects.toBeInstanceOf(AIOutputAdequacyInvalidError);
+      // The proposal is never persisted — bad AI output is rejected
+      // outright, never silently accepted as if valid.
+      expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeUndefined();
+    });
   });
 
   it('rejects a second generateSession for the same targetDate while a proposal is still pending, without calling the provider again', async () => {
