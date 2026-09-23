@@ -491,7 +491,7 @@ describe('program.html: AI Workout Proposal section wiring', () => {
   // 2026-09-23 fix: "AI proposal should ask me what it should generate
   // for the day — push, pull, legs or upper — before generating."
   describe('"ask what to generate" fix: a session-focus picker before generating', () => {
-    it('offers exactly push/pull/legs/upper plus a no-preference default, and only before a proposal exists', () => {
+    it('offers exactly push/pull/legs/upper plus a no-preference default', () => {
       const sectionBody = html.slice(html.indexOf('function buildAiProposalSection('), html.indexOf('const GROUP_ORDER'));
       expect(sectionBody).toMatch(/function renderPurposePicker\(\)/);
       expect(sectionBody).toMatch(/\{ value: '', text: 'Let AI decide' \}/);
@@ -499,14 +499,72 @@ describe('program.html: AI Workout Proposal section wiring', () => {
       expect(sectionBody).toMatch(/\{ value: 'pull', text: 'Pull' \}/);
       expect(sectionBody).toMatch(/\{ value: 'legs', text: 'Legs' \}/);
       expect(sectionBody).toMatch(/\{ value: 'upper', text: 'Upper' \}/);
-      const pickerFnBody = sectionBody.slice(sectionBody.indexOf('function renderPurposePicker()'));
-      expect(pickerFnBody).toMatch(/if \(state\) return;/);
     });
 
     it('sends the chosen purpose as requestedSessionPurpose only when one was picked', () => {
       expect(html).toMatch(/let requestedSessionPurpose = null;/);
       expect(html).toMatch(/requestedSessionPurpose = select\.value \|\| null;/);
       expect(html).toMatch(/body: requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \}/);
+    });
+
+    // 2026-09-24 lifecycle fix: `if (state) return;` incorrectly hid the
+    // picker for ANY non-null state, including a rejected/expired
+    // proposal — which must be exactly as fresh a generation opportunity
+    // as no proposal at all (aiProposalActionsFor/aiProposalNoticeFor
+    // already treat the two identically; the picker didn't). Extracted
+    // straight from the real source (not reimplemented) so this is
+    // coupled to the actual shipped condition, not a parallel guess at it.
+    describe('picker visibility across every real proposal lifecycle status', () => {
+      const match = html.match(/const isFreshGenerationOpportunity = (.+);/);
+      const isFreshGenerationOpportunity = match ? (new Function('state', `return ${match[1]};`) as (state: unknown) => boolean) : null;
+
+      it('the real source defines the expected condition', () => {
+        expect(match).not.toBeNull();
+      });
+
+      it('no proposal (state === null) -> picker visible', () => {
+        expect(isFreshGenerationOpportunity!(null)).toBe(true);
+      });
+
+      it('rejected proposal -> picker visible again (a fresh generation opportunity, purpose re-decided each time)', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'rejected' })).toBe(true);
+      });
+
+      it('expired proposal -> picker visible again', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'expired' })).toBe(true);
+      });
+
+      it('pending proposal -> picker hidden (purpose is now fixed)', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'pending' })).toBe(false);
+      });
+
+      it('approved proposal -> picker hidden', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'approved' })).toBe(false);
+      });
+
+      it('committed proposal -> picker hidden', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'committed' })).toBe(false);
+      });
+    });
+
+    // "'Generate a new Thursday proposal' must NOT be a generation path
+    // that bypasses purpose selection" — the retry label (shown whenever
+    // `state` is truthy, i.e. exactly the rejected/expired case) sits
+    // right below the now-visible picker and reads from the very same
+    // `requestedSessionPurpose` onGenerate() sends — never a separate,
+    // picker-free path.
+    it('the "generate a new proposal" retry label uses the same requestedSessionPurpose the picker sets — no separate bypass path', () => {
+      const actionsBody = html.slice(html.indexOf('function renderActions()', html.indexOf('function buildAiProposalSection(')), html.indexOf('async function discover()'));
+      expect(actionsBody).toMatch(/const label = state \? `Generate a new \$\{formatWeekday\(day\.weekday\)\} proposal` : `Generate \$\{formatWeekday\(day\.weekday\)\} with AI`;/);
+      expect(actionsBody).toMatch(/onClick: onGenerate/);
+    });
+
+    it('sends { targetDate, requestedSessionPurpose: "push" } when Push is explicitly selected (extracted from the real onGenerate body construction)', () => {
+      const bodyMatch = html.match(/body: (requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \})/);
+      expect(bodyMatch).not.toBeNull();
+      const buildBody = new Function('requestedSessionPurpose', 'day', `return ${bodyMatch![1]};`) as (p: string | null, d: { date: string }) => unknown;
+      expect(buildBody('push', { date: '2026-09-24' })).toEqual({ targetDate: '2026-09-24', requestedSessionPurpose: 'push' });
+      expect(buildBody(null, { date: '2026-09-24' })).toEqual({ targetDate: '2026-09-24' });
     });
   });
 

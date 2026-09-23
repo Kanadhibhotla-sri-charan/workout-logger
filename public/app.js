@@ -515,6 +515,13 @@ async function aiApi(path, options = {}) {
   }
 
   if (!res.ok || body.ok === false) {
+    // Debugging visibility only (2026-09-23) — the user-facing err.message
+    // stays the safe, pre-mapped string below; this just puts the real
+    // backend code/message/details somewhere a developer can actually see
+    // them (browser console), since body.error itself is never shown in
+    // any rendered UI (see aiProposalUI.test.ts's own "never renders a
+    // raw error field" guard — unaffected, this never touches rendering).
+    console.error('[aiApi]', path, { code: body.error, message: body.message, details: body.details });
     const err = new Error(mapAiErrorCode(body.error));
     err.code = body.error || null;
     throw err;
