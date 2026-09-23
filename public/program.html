@@ -277,6 +277,17 @@
       return section;
     }
 
+    /** Part 9.5: the ONE status computation both the week-overview day
+     * card and the day-detail modal header use — never two independent
+     * derivations of the same real state. `day.status`/`day.type` are
+     * already the single authoritative fields GET /week returns for
+     * this. */
+    function buildDayStatusBadge(day) {
+      const statusWord = day.type === 'gym' ? day.status : day.type;
+      const statusLabel = day.type === 'gym' ? formatSessionType(day.status) : formatSessionType(day.type);
+      return createStatusBadge(statusWord, statusLabel);
+    }
+
     function buildDayCard(day) {
       const isToday = day.date === todayIso();
       const btn = el('button', { class: 'week-day', type: 'button' });
@@ -307,9 +318,7 @@
         head.appendChild(el('div', { class: 'wd-meta', text: meta }));
       }
       btn.appendChild(head);
-      const statusWord = day.type === 'gym' ? day.status : day.type;
-      const statusLabel = day.type === 'gym' ? formatSessionType(day.status) : formatSessionType(day.type);
-      btn.appendChild(createStatusBadge(statusWord, statusLabel));
+      btn.appendChild(buildDayStatusBadge(day));
 
       btn.addEventListener('click', () => openDayModal(day, btn));
       return btn;
@@ -325,22 +334,28 @@
       const header = el('div', { class: 'modal-header' });
       const titleWrap = el('div');
       titleWrap.appendChild(el('div', { class: 'card-subtitle', text: formatDate(day.date, { weekday: 'long' }) }));
-      titleWrap.appendChild(el('h2', { text: day.type === 'gym' ? formatSessionType(day.sessionPurpose || 'gym') : formatSessionType(day.type), style: 'margin:0.1rem 0 0' }));
+      const titleRow = el('div', { class: 'card-row', style: 'margin-top:0.1rem' }, [
+        el('h2', { text: day.type === 'gym' ? formatSessionType(day.sessionPurpose || 'gym') : formatSessionType(day.type), style: 'margin:0' }),
+        // Part 9.5: the exact same status badge the week-overview card
+        // shows for this day — one status representation, seen at both
+        // levels of the hierarchy, never a second derivation of it here.
+        buildDayStatusBadge(day),
+      ]);
+      titleWrap.appendChild(titleRow);
       header.appendChild(titleWrap);
       const closeBtn = el('button', { class: 'modal-close', type: 'button', 'aria-label': 'Close' }, [document.createTextNode('×')]);
       closeBtn.addEventListener('click', closeDayModal);
       header.appendChild(closeBtn);
       panel.appendChild(header);
-      // Fix AI Weekly Reconciliation Review, Finding 3: built (and its
-      // own discovery started) HERE, at modal-open time — independent of
-      // whether the deterministic swap below ever fails — so reopening a
-      // day that already has a pending/approved/committed reconciliation
-      // shows it immediately, never resetting to a blank slate.
-      // buildChangeActivitySection only reveals it early if a swap
-      // attempt during THIS modal session hits generationRequired.
+
+      // Part 6/7/9.3: this day's own information and actions are grouped
+      // together, in one contiguous block, BEFORE the week-scoped
+      // reconciliation block below — reconciliation is built here (so its
+      // own discovery starts immediately, Fix AI Weekly Reconciliation
+      // Review Finding 3) but its element is appended later, in its own
+      // clearly separated "This week" section, never interleaved with
+      // this-day content (Part 6's "don't mix scopes").
       const weekReconciliation = buildWeekReconciliationSection(day, modalToken);
-      panel.appendChild(buildChangeActivitySection(day, weekReconciliation));
-      panel.appendChild(weekReconciliation.element);
 
       if (day.type === 'gym') {
         panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
@@ -363,6 +378,11 @@
         } else if (day.plannedWork.length === 0) {
           panel.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
         }
+        // Part 9.4/9.3: exercises are read-only detail here — each one's
+        // own rationale stays behind its existing "Why included" <details>
+        // (buildExerciseDetailCard), progressive disclosure that was
+        // already correct; nothing about the exercise cards themselves
+        // changes in Phase 7.
         for (const item of day.plannedWork) {
           panel.appendChild(buildExerciseDetailCard(item));
         }
@@ -380,7 +400,22 @@
         panel.appendChild(el('p', { class: 'muted', text: `No gym session planned — ${formatSessionType(day.type).toLowerCase()} day.` }));
       }
 
+      // This-day actions: changing today's activity and generating this
+      // one day with AI are both scoped to exactly this date — grouped
+      // together, directly under this day's own information above.
+      panel.appendChild(buildChangeActivitySection(day, weekReconciliation));
       panel.appendChild(buildAiProposalSection(day, modalToken));
+
+      // Week-scoped action, visually and structurally separated from
+      // everything above: reconciling touches OTHER days too, so it gets
+      // its own labeled section (see its own "This week —" heading)
+      // rather than sitting between this day's own controls (Part 6/7's
+      // explicit "don't mix scopes" requirement). Still hidden by
+      // default (see buildWeekReconciliationSection) — this only fixes
+      // WHERE it renders once shown, not when; the heading lives INSIDE
+      // that same hidden element so it can never show up as an orphan
+      // label with nothing revealed underneath it.
+      panel.appendChild(weekReconciliation.element);
 
       const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
       backdrop.addEventListener('click', (e) => {
@@ -598,6 +633,12 @@
         el('div', { class: 'card-subtitle', text: formatDate(state.targetDate, { weekday: 'long' }) }),
         createStatusBadge(state.status, formatAiProposalStatus(state.status)),
       ]));
+      // Part 9.4: a proposal must never read as if it's already real —
+      // say so explicitly for every pre-commit status, not just via the
+      // (already dashed/muted) panel styling.
+      if (state.status === 'pending' || state.status === 'approved') {
+        wrap.appendChild(el('p', { class: 'faint', text: 'This is a proposal — nothing in your program has changed yet.', style: 'margin:0.2rem 0 0' }));
+      }
       if (state.createdAt) {
         wrap.appendChild(el('p', { class: 'faint', text: `Generated ${formatTimestamp(state.createdAt)}`, style: 'margin:0.2rem 0 0' }));
       }
@@ -625,6 +666,20 @@
       return wrap;
     }
 
+    /** Part 6 / Phase 4: a one-line reminder of what's currently on this
+     * day, shown right where the AI action lives — so scope is obvious
+     * without scrolling back up to the exercise list above. Never
+     * invents a state: mirrors the exact same fields openDayModal itself
+     * reads (day.plannedWork/day.plannedSession/day.type). */
+    function summarizeCurrentProgram(day) {
+      if (day.type !== 'gym') return `Currently a ${formatSessionType(day.type).toLowerCase()} day — no gym session planned.`;
+      if (day.plannedWork.length > 0) {
+        return `Currently planned: ${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} (${formatSessionType(day.sessionPurpose || 'gym')}).`;
+      }
+      if (day.plannedSession) return 'Currently an AI-planned workout — already a real session on your calendar.';
+      return 'Currently nothing planned for this day.';
+    }
+
     /** The Generate -> Review -> Approve -> Commit workflow for one
      * day's modal — now preceded by a discovery step (Discovery/
      * Rehydration spec §4) so a proposal already generated for this date
@@ -647,7 +702,7 @@
      * to (now-detached, but still checked defensively) DOM. */
     function buildAiProposalSection(day, modalToken) {
       const section = el('div', { class: 'ai-proposal-section' });
-      section.appendChild(el('h3', { text: 'AI Workout Proposal' }));
+      section.appendChild(el('h3', { text: `Generate ${formatWeekday(day.weekday)} with AI` }));
 
       const locked = day.status === 'completed' || day.status === 'in_progress';
       if (locked) {
@@ -655,7 +710,8 @@
         return section;
       }
 
-      section.appendChild(el('p', { class: 'faint', text: 'Generate an AI-suggested session for this day. Nothing is added to your program until you explicitly approve and commit it.' }));
+      section.appendChild(el('p', { class: 'muted', text: summarizeCurrentProgram(day), style: 'margin-bottom:0.25rem' }));
+      section.appendChild(el('p', { class: 'faint', text: `This generates ${formatWeekday(day.weekday)} only — the rest of your week stays exactly as planned. Nothing is added to your program until you explicitly approve and commit it.` }));
 
       // AI Activity Alignment / Non-Regenerative Schedule Fixes Part 3:
       // `day.activity` (Gym/Badminton/Both/Rest, from /week's own
@@ -707,7 +763,7 @@
         const actions = aiProposalActionsFor(state ? state.status : null);
 
         if (actions.canGenerate) {
-          const label = state ? 'Generate a new proposal' : 'Generate AI Workout Proposal';
+          const label = state ? `Generate a new ${formatWeekday(day.weekday)} proposal` : `Generate ${formatWeekday(day.weekday)} with AI`;
           actionsEl.appendChild(createButton({ label: inFlight ? 'Generating…' : label, disabled: inFlight, onClick: onGenerate }));
           return;
         }
@@ -837,6 +893,17 @@
           if (!isCurrent()) return;
           state = committed;
           showInlineStatus(statusEl, null, null);
+          // Part 8 (authoritative day object): a commit just changed this
+          // day's REAL activity/plannedWork/plannedSession server-side —
+          // `weekData` (what the week-overview grid behind this modal is
+          // still showing) is now stale until this runs. Never patched
+          // in place here; the one authoritative source is re-fetched,
+          // exactly like every other mutating action on this page
+          // (change-activity, swap, reconcile-week commit) already does.
+          // Runs in the background — the modal itself stays open and
+          // keeps showing `state`'s own fresh "Committed" review, unlike
+          // those other actions, which close the modal outright.
+          loadWeek();
         } catch (err) {
           if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
@@ -872,6 +939,33 @@
       return formatDailyActivity(activity === 'rest' ? 'unselected' : activity);
     }
 
+    /** Part 7's before/after diff: what a changed day currently looks
+     * like, read from the SAME live `weekData.days` that renders the
+     * week grid — never a value invented here, and never re-derived from
+     * the proposal itself (that would just echo "after" back as "before"
+     * for a day the model reports won't actually be reached). Returns
+     * null if the day isn't in the currently loaded week at all (e.g. the
+     * page hasn't loaded yet) rather than guessing. */
+    function summarizeBeforeDay(date) {
+      const before = (weekData && weekData.days || []).find((d) => d.date === date);
+      if (!before) return null;
+      if (before.type !== 'gym') return formatSessionType(before.type);
+      const purpose = before.sessionPurpose ? formatSessionType(before.sessionPurpose) : 'Gym';
+      if (before.plannedWork.length === 0 && before.plannedSession) return `${purpose} (AI-planned)`;
+      return `${purpose} (${before.plannedWork.length} exercise${before.plannedWork.length === 1 ? '' : 's'})`;
+    }
+
+    /** The mirror of summarizeBeforeDay, for the proposal's own "after"
+     * side — same shape of summary, so the two read as a genuine pair. */
+    function summarizeAfterDay(reconciliationDay) {
+      const after = formatReconciliationActivity(reconciliationDay.activity);
+      if (reconciliationDay.session && reconciliationDay.session.exercises.length > 0) {
+        const n = reconciliationDay.session.exercises.length;
+        return `${after} (${n} exercise${n === 1 ? '' : 's'})`;
+      }
+      return after;
+    }
+
     /** Renders the read-only review content for a persisted week-
      * reconciliation record (the shared response shape the reconcile-
      * week/GET/approve/commit routes all return — see
@@ -886,20 +980,32 @@
         el('div', { class: 'card-subtitle', text: 'Proposed week changes' }),
         createStatusBadge(state.status, formatAiProposalStatus(state.status)),
       ]));
+      // Part 9.4/9.4: a week-wide proposal must be even more explicit
+      // than a single-day one that nothing has moved yet — the whole
+      // point of this workflow is reorganizing several days at once.
+      if (state.status === 'pending' || state.status === 'approved') {
+        wrap.appendChild(el('p', { class: 'faint', text: 'This is a proposal — none of these days have changed yet.', style: 'margin:0.2rem 0 0' }));
+      }
       if (output.reconciliation && output.reconciliation.rationale) {
         wrap.appendChild(el('p', { class: 'muted', text: output.reconciliation.rationale, style: 'margin-top:0.5rem' }));
       }
 
+      // Part 7: a real before/after diff, not just the "after" side —
+      // each changed day shows what it currently is next to what this
+      // proposal would make it, so the scope of the reorganization is
+      // legible at a glance before approving anything.
       const changedDays = output.days.filter((d) => d.changeType !== 'unchanged');
       if (changedDays.length > 0) {
         const list = el('div', { class: 'card', style: 'margin-top:0.5rem' });
-        list.appendChild(el('div', { class: 'card-title', text: 'Days affected' }));
+        list.appendChild(el('div', { class: 'card-title', text: `${changedDays.length} day${changedDays.length === 1 ? '' : 's'} affected` }));
         for (const d of changedDays) {
-          list.appendChild(el('p', {
-            class: 'faint',
-            text: `${formatWeekday(d.weekday)} (${formatDate(d.date)}) — ${formatReconciliationActivity(d.activity)}`,
-            style: 'margin:0.2rem 0',
-          }));
+          const before = summarizeBeforeDay(d.date);
+          const row = el('div', { class: 'reconciliation-diff-row' });
+          row.appendChild(el('span', { class: 'muted', text: `${formatWeekday(d.weekday)} (${formatDate(d.date)})`, style: 'min-width:9rem' }));
+          row.appendChild(el('span', { class: 'faint', text: before || 'Currently unknown' }));
+          row.appendChild(el('span', { class: 'faint', text: '→' }));
+          row.appendChild(el('span', { class: 'muted', text: summarizeAfterDay(d) }));
+          list.appendChild(row);
         }
         wrap.appendChild(list);
       }
@@ -938,9 +1044,13 @@
      * was reopened. `modalToken` is the same token `openDayModal`
      * captured for this exact modal instance. */
     function buildWeekReconciliationSection(day, modalToken) {
-      const wrap = el('div', { class: 'ai-proposal-section', hidden: true });
-      wrap.appendChild(el('h3', { text: 'AI Week Reorganization' }));
-      wrap.appendChild(el('p', { class: 'faint', text: 'Ask the AI Programmer to generate a workout for this day and reorganize the rest of the week around it. Nothing changes until you approve and apply it.' }));
+      const wrap = el('div', { class: 'ai-reconciliation-section', hidden: true });
+      // Part 6/7: the scope word lives directly in the heading text
+      // itself, not a separate decorative eyebrow label — this is a
+      // week-wide action, and the heading says so plainly the moment it
+      // becomes visible (never interleaved with this-day-only controls).
+      wrap.appendChild(el('h3', { text: 'This week — reconcile remaining days', style: 'margin-top:0' }));
+      wrap.appendChild(el('p', { class: 'faint', text: `Generates ${formatWeekday(day.weekday)}'s workout and reorganizes the rest of this week around it. Completed and in-progress days are never touched. Nothing changes until you approve and apply it.` }));
 
       let state = null;
       let inFlight = false;
@@ -976,7 +1086,7 @@
         }
         const actions = aiWeekReconciliationActionsFor(state ? state.status : null);
         if (actions.canGenerate) {
-          actionsEl.appendChild(createButton({ label: inFlight ? 'Asking AI…' : 'Ask AI to reorganize this week', variant: 'secondary', disabled: inFlight, onClick: onGenerate }));
+          actionsEl.appendChild(createButton({ label: inFlight ? 'Reconciling…' : 'Reconcile remaining week', variant: 'secondary', disabled: inFlight, onClick: onGenerate }));
           return;
         }
         if (actions.canApprove) {

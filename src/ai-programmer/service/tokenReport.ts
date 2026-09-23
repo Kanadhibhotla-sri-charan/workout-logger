@@ -35,6 +35,11 @@ import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverri
 const RECOMMENDED_TYPICAL_OUTPUT_TOKENS: Record<AIProgrammerMode, number> = {
   generate_session: 2000,
   reconcile_week: 3000,
+  // Not yet wired into this diagnostic tool (buildTokenReport throws for
+  // this mode below, honestly, rather than silently reuse
+  // reconcile_week's own context/instruction) — a placeholder value only
+  // so the Record type is total; never actually read.
+  generate_week: 3000,
 };
 
 /** One model's optional per-million-token prices. Absent fields (not
@@ -262,6 +267,15 @@ export function buildTokenReport(db: Database.Database, input: TokenReportInput)
   let outputSchema: unknown;
   let weekStart: string;
   let contextSummary: TokenReportContextSummary;
+
+  if (input.mode === 'generate_week') {
+    // Deliberately unsupported here rather than silently falling through
+    // to the reconcile_week branch below (wrong context, wrong system
+    // instruction, wrong schema) — this diagnostic CLI has not been
+    // extended for generate_week yet; the real /api/programming/week
+    // path does not depend on it.
+    throw new Error('buildTokenReport does not yet support mode "generate_week" — see aiProgrammerService.ts\'s own generateWeek() for the real request this would need to measure.');
+  }
 
   if (input.mode === 'generate_session') {
     const generateContext = buildProgrammerContext(db, { targetDate: input.targetDate });

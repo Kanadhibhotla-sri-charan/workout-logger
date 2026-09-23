@@ -8,7 +8,7 @@
 // only ever sees systemInstruction/context/outputSchema/requestId, all
 // mode-specific shaping happens above this interface, in the service/
 // context-builder layer.
-export type AIProgrammerMode = 'generate_session' | 'reconcile_week';
+export type AIProgrammerMode = 'generate_session' | 'reconcile_week' | 'generate_week';
 
 export interface AIProgrammerProviderRequest {
   mode: AIProgrammerMode;

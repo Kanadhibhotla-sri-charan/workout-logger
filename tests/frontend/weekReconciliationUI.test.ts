@@ -167,7 +167,10 @@ describe('program.html: AI Week Reorganization section wiring', () => {
   });
 
   it('makes clear nothing changes until the user explicitly approves and applies it', () => {
-    expect(html).toMatch(/Ask the AI Programmer to generate a workout for this day and reorganize the rest of the week around it\. Nothing changes until you approve and apply it\./);
+    // Phase 5 (2026-09-23): reworded to name the specific day and state
+    // the locked-day guarantee explicitly (Part 7) — same "nothing
+    // changes until approve+apply" guarantee, stronger scope statement.
+    expect(html).toMatch(/Generates \$\{formatWeekday\(day\.weekday\)\}'s workout and reorganizes the rest of this week around it\. Completed and in-progress days are never touched\. Nothing changes until you approve and apply it\./);
   });
 
   it('guards every action against duplicate/overlapping submissions', () => {

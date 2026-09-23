@@ -37,7 +37,7 @@ import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { ExercisePreferencesRepo } from '../../repositories/exercisePreferencesRepo.js';
 import { ProfileFactorsRepo } from '../../repositories/profileFactorsRepo.js';
 import { evaluateStructuralAdvisories } from '../../coaching/structuralAdvisories/structuralAdvisoryService.js';
-import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput } from '../../engine/weekProgramReconciliation.js';
+import { ensureWeekProgramGenerated, reconcileWeekProgram, type FreshDayInput, type WeekAggregates } from '../../engine/weekProgramReconciliation.js';
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
 import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { todayForUser } from '../../lib/userTimezone.js';
@@ -45,6 +45,9 @@ import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS } from '../../engine/config.js';
 import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
 import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning } from '../friendlyExplanation.js';
 import type { SkippedTarget } from '../../engine/workoutBuilder.js';
+import { isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
+import { createDefaultAIProgrammerService } from '../../ai-programmer/service/aiProgrammerService.js';
+import { AIProgrammerError } from '../../ai-programmer/errors.js';
 
 export const programmingRouter = Router();
 
@@ -398,6 +401,28 @@ export function computeFreshWeek(
   };
 }
 
+/** generate_week (2026-09-23), Part 3's own architectural requirement:
+ * generate_week AI is now the DEFAULT, primary path for first-time
+ * weekly generation — computeFreshWeek (the deterministic planner)
+ * remains available only as an explicit, operator-controlled fallback
+ * (the already-existing AI_PROGRAMMER_ENABLED flag), never a silent
+ * per-request fallback after an AI failure (constraint: "prefer failing
+ * clearly over hiding an AI failure behind a different programming
+ * system"). When AI is enabled and generateWeek() throws, this
+ * deliberately does NOT catch the error and fall back — it propagates,
+ * and the two callers below (`/week`, `/today`) map it to a clear,
+ * typed error response the same way aiProgrammer.ts's own routes already
+ * do, rather than silently serving a deterministic week the user never
+ * asked for and has no way to know replaced what the AI would have
+ * produced. */
+async function computeFreshWeekOrAI(database: Database.Database, weekStart: string, budgetMinutes: number, date: string): Promise<{ days: FreshDayInput[]; aggregates: WeekAggregates }> {
+  if (isAiProgrammerEnabled()) {
+    const { days, aggregates } = await createDefaultAIProgrammerService(database).generateWeek(weekStart);
+    return { days, aggregates };
+  }
+  return computeFreshWeek(database, weekStart, budgetMinutes, date);
+}
+
 /** Builds every one of the week's 7 day objects PURELY from the
  * persisted program — gym/both days from their persisted snapshot, all
  * days' `type`/`activity`/`status` derived live (cheap — no planner
@@ -554,17 +579,28 @@ function buildWeekResponse(database: Database.Database, weekStart: string, progr
 // ensureWeekProgramGenerated -> computeFreshWeek) the first time this
 // specific week has ever been requested; every later call is a pure
 // read, so repeated GETs never regenerate/change anything by themselves.
-programmingRouter.get('/week', (req, res) => {
+programmingRouter.get('/week', async (req, res, next) => {
   const database = db(req);
   const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
   const budgetMinutes = defaultBudgetMinutes(database);
   const weekStart = programmingWeekStart(date);
 
-  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes, date));
+  try {
+    const program = await ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeekOrAI(database, weekStart, budgetMinutes, date));
 
-  const user = new UsersRepo(database).getOrCreateDefault();
-  const profile = new TrainingProfileRepo(database).get(user.id);
-  res.json(buildWeekResponse(database, weekStart, program, profile));
+    const user = new UsersRepo(database).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(database).get(user.id);
+    res.json(buildWeekResponse(database, weekStart, program, profile));
+  } catch (err) {
+    // generate_week (2026-09-23): a real AI failure surfaces here as a
+    // clear, typed error — never a silent fallback to the deterministic
+    // planner, matching the same status/code/message shape
+    // aiProgrammer.ts's own routes already use for every other AI mode.
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
 });
 
 const PRESCRIPTION_POLICIES = ['reuse', 'regenerate', 'schedule-only'] as const;
@@ -845,61 +881,68 @@ programmingRouter.post('/week/move', (req, res) => {
 // version"). Like /week, this only ever calls the planner
 // (ensureWeekProgramGenerated -> computeFreshWeek) the first time this
 // week has been requested; a normal read is a pure, cheap lookup.
-programmingRouter.get('/today', (req, res) => {
+programmingRouter.get('/today', async (req, res, next) => {
   const database = db(req);
   const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
   const budgetMinutes = defaultBudgetMinutes(database);
   const weekStart = programmingWeekStart(date);
 
-  const program = ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeek(database, weekStart, budgetMinutes, date));
+  try {
+    const program = await ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeekOrAI(database, weekStart, budgetMinutes, date));
 
-  const user = new UsersRepo(database).getOrCreateDefault();
-  const profile = new TrainingProfileRepo(database).get(user.id);
-  const week = buildWeekResponse(database, weekStart, program, profile);
-  const today = week.days.find((d) => d.date === date)!;
+    const user = new UsersRepo(database).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(database).get(user.id);
+    const week = buildWeekResponse(database, weekStart, program, profile);
+    const today = week.days.find((d) => d.date === date)!;
 
-  const status = realSessionStatus(database, date);
-  const loggedSessions = new WorkoutSessionsRepo(database).listSessionsByDate(date);
+    const status = realSessionStatus(database, date);
+    const loggedSessions = new WorkoutSessionsRepo(database).listSessionsByDate(date);
 
-  // Real active_goals only carries goal_id/priority/trend (the engine
-  // has no reason to track goal_type at that layer) — resolved here
-  // straight from the real Goal row so a caller (e.g. "Start workout")
-  // can build a real, correctly-typed GoalContext without guessing.
-  const goalsRepo = new GoalsRepo(database);
-  const activeGoals = (week.activeGoals as Array<{ goal_id: string; priority: number; trend: unknown }>).map((g) => ({
-    ...g,
-    goal_type: goalsRepo.get(g.goal_id)?.goal_type ?? 'aesthetic',
-  }));
+    // Real active_goals only carries goal_id/priority/trend (the engine
+    // has no reason to track goal_type at that layer) — resolved here
+    // straight from the real Goal row so a caller (e.g. "Start workout")
+    // can build a real, correctly-typed GoalContext without guessing.
+    const goalsRepo = new GoalsRepo(database);
+    const activeGoals = (week.activeGoals as Array<{ goal_id: string; priority: number; trend: unknown }>).map((g) => ({
+      ...g,
+      goal_type: goalsRepo.get(g.goal_id)?.goal_type ?? 'aesthetic',
+    }));
 
-  res.json({
-    date: today.date,
-    weekday: today.weekday,
-    sessionPurpose: today.sessionPurpose,
-    sessionType: today.type,
-    activity: today.activity,
-    status: loggedSessions.length > 0 ? status : 'planned',
-    exercises: today.plannedWork.map(toTodayExerciseShape),
-    // Fix 8 / Final AI-Deterministic Precedence Fixes §8: the SAME
-    // fields /week's own day objects carry (built by the same
-    // renderWeekDays/resolveGymDaySelection this route reuses, never a
-    // second independent computation) — lets a gym-day-with-no-
-    // deterministic-`exercises` view (an AI-committed or superseded
-    // day) still say "a planned workout exists" and link to it.
-    plannedSession: today.plannedSession,
-    historicalSession: today.historicalSession,
-    selectedPlannedWorkout: today.selectedPlannedWorkout,
-    selectionConflict: today.selectionConflict,
-    supersedesProgramSessionId: today.supersedesProgramSessionId,
-    estimatedMinutes: today.estimatedMinutes,
-    skippedTargets: today.skipped,
-    activeGoals,
-    resourceAllocation: today.resourceAllocation,
-    // Remediation §16's "equipment/time constraints" — trivial inputs,
-    // never derived from exercise selection, so no planner call is
-    // needed to reconstruct this.
-    constraints: { available_equipment: profile?.available_equipment ?? [], budget_minutes: budgetMinutes },
-    loggedSessions,
-  });
+    res.json({
+      date: today.date,
+      weekday: today.weekday,
+      sessionPurpose: today.sessionPurpose,
+      sessionType: today.type,
+      activity: today.activity,
+      status: loggedSessions.length > 0 ? status : 'planned',
+      exercises: today.plannedWork.map(toTodayExerciseShape),
+      // Fix 8 / Final AI-Deterministic Precedence Fixes §8: the SAME
+      // fields /week's own day objects carry (built by the same
+      // renderWeekDays/resolveGymDaySelection this route reuses, never a
+      // second independent computation) — lets a gym-day-with-no-
+      // deterministic-`exercises` view (an AI-committed or superseded
+      // day) still say "a planned workout exists" and link to it.
+      plannedSession: today.plannedSession,
+      historicalSession: today.historicalSession,
+      selectedPlannedWorkout: today.selectedPlannedWorkout,
+      selectionConflict: today.selectionConflict,
+      supersedesProgramSessionId: today.supersedesProgramSessionId,
+      estimatedMinutes: today.estimatedMinutes,
+      skippedTargets: today.skipped,
+      activeGoals,
+      resourceAllocation: today.resourceAllocation,
+      // Remediation §16's "equipment/time constraints" — trivial inputs,
+      // never derived from exercise selection, so no planner call is
+      // needed to reconstruct this.
+      constraints: { available_equipment: profile?.available_equipment ?? [], budget_minutes: budgetMinutes },
+      loggedSessions,
+    });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
 });
 
 // GET /api/programming/substitutes?target_type=&target_id= — spec §29's
