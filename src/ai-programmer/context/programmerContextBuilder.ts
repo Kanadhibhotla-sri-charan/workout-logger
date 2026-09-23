@@ -509,6 +509,21 @@ export function buildCrossWeekContext(
  * timezone regardless, producing an internally inconsistent context. */
 export interface BuildProgrammerContextInput {
   targetDate: string;
+  /** "Ask what to generate" fix (2026-09-23): an explicit user choice of
+   * which session purpose ('push'|'pull'|'legs'|'upper') to generate,
+   * from the single-day "Generate this day with AI" UI. Only meaningful
+   * (and only ever needed) when the target day has no already-decided
+   * purpose of its own — most commonly a Rest day being converted to
+   * Gym, where the day's real sessionPurpose would otherwise be `null`
+   * and the model was left to pick a focus itself with no fixed
+   * coverage requirement, producing genuinely unpredictable results
+   * (reported live: the same "generate this day" action producing an
+   * upper day one time and a leg day the next, for what the user
+   * intended to be the same request). When provided, it always takes
+   * the already-decided persisted rotation's place — a deliberate,
+   * explicit user choice for what to generate right now outranks the
+   * day's own default rotation slot. */
+  requestedSessionPurpose?: SessionPurpose;
 }
 
 export function buildProgrammerContext(db: Database.Database, input: BuildProgrammerContextInput): AIProgrammerContext {
@@ -631,7 +646,11 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const weekProgramExists = weeklyProgram !== undefined;
   const targetDayIndex = WEEKDAYS.indexOf(targetWeekday);
   const targetDaySessionName = weeklyProgram?.sessions.find((s) => s.day_index === targetDayIndex)?.name;
-  const sessionPurpose = targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null;
+  // "Ask what to generate" fix — see BuildProgrammerContextInput's own
+  // doc comment: an explicit requestedSessionPurpose always takes the
+  // day's own default rotation slot's place, never merely a fallback for
+  // when one is missing.
+  const sessionPurpose = input.requestedSessionPurpose ?? (targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null);
 
   // Rule 6 fix (2026-09-19): the user's confirmed training-experience
   // level, when one exists — read once, before the brief, because the brief's

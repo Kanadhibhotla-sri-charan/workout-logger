@@ -877,19 +877,65 @@
       // whether an active proposal already exists for this date, which
       // is what prevents an accidental duplicate generation (spec §6).
       let discoveryDone = false;
+      // "Ask what to generate" fix (2026-09-23): the day's own already-
+      // decided rotation purpose is unaffected by this — it's only ever
+      // sent as requestedSessionPurpose, and only when the user picks
+      // something other than "Let AI decide" (null). Reported live: the
+      // same "generate this day" action produced an upper day one time
+      // and a leg day another, with no way to ask for a specific one.
+      let requestedSessionPurpose = null;
+      const SESSION_PURPOSE_OPTIONS = [
+        { value: '', text: 'Let AI decide' },
+        { value: 'push', text: 'Push' },
+        { value: 'pull', text: 'Pull' },
+        { value: 'legs', text: 'Legs' },
+        { value: 'upper', text: 'Upper' },
+      ];
       const noticeEl = el('div');
       const reviewEl = el('div');
+      const purposeEl = el('div');
       const actionsEl = el('div');
       const statusEl = el('div');
-      section.append(noticeEl, reviewEl, actionsEl, statusEl);
+      section.append(noticeEl, reviewEl, purposeEl, actionsEl, statusEl);
+
+      /** Only meaningful before a proposal exists — once one is pending/
+       * approved/committed, what it was generated for is fixed (see its
+       * own review's `sessionFocus`), so the picker only ever shows
+       * alongside the FIRST "Generate" action for this day, not the
+       * "Generate a new proposal" retry (state already reflects a real,
+       * specific past choice by then — asking again would suggest it's
+       * still undecided when it isn't, and re-generating with a new
+       * purpose is what starting fresh on a different day is for). */
+      function renderPurposePicker() {
+        purposeEl.innerHTML = '';
+        if (state) return;
+        const label = el('label', { class: 'faint', style: 'display:block;margin-bottom:0.3rem' }, [document.createTextNode(`What should ${formatWeekday(day.weekday)} focus on?`)]);
+        const select = el('select', { 'aria-label': `${formatWeekday(day.weekday)}'s session focus` },
+          SESSION_PURPOSE_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text }))
+        );
+        select.value = requestedSessionPurpose || '';
+        select.addEventListener('change', () => {
+          requestedSessionPurpose = select.value || null;
+        });
+        purposeEl.append(label, select);
+      }
 
       function isCurrent() {
         return isModalTokenCurrent(modalToken);
       }
 
+      /** 2026-09-23 fix: an expired/rejected proposal's full exercise
+       * list is inert, long-superseded content — showing it in full
+       * (previously: for ANY non-null state, regardless of status) is
+       * exactly the "wasted space, confusing" clutter reported live,
+       * doubly so once renderNotice's own "no longer active, generate a
+       * new one" line is sitting right above it. Only a genuinely live
+       * status (pending/approved/committed) still shows the full review;
+       * expired/rejected show nothing here — the notice alone says
+       * enough. */
       function renderReview() {
         reviewEl.innerHTML = '';
-        if (state) reviewEl.appendChild(buildAiProposalReview(state));
+        if (state && state.status !== 'expired' && state.status !== 'rejected') reviewEl.appendChild(buildAiProposalReview(state));
       }
 
       /** Discovery/Rehydration spec §4's "expired/rejected proposal
@@ -994,6 +1040,7 @@
           if (!isCurrent()) return;
           discoveryDone = true;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
@@ -1021,7 +1068,10 @@
         showInlineStatus(statusEl, 'saving', 'Generating…');
         renderActions();
         try {
-          const generated = await aiApi('/api/ai-programmer/generate-session', { method: 'POST', body: { targetDate: day.date } });
+          const generated = await aiApi('/api/ai-programmer/generate-session', {
+            method: 'POST',
+            body: requestedSessionPurpose ? { targetDate: day.date, requestedSessionPurpose } : { targetDate: day.date },
+          });
           const fresh = await aiApi(`/api/ai-programmer/proposals/${generated.proposalId}`);
           if (!isCurrent()) return;
           state = fresh;
@@ -1033,6 +1083,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
@@ -1056,6 +1107,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
@@ -1085,6 +1137,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
@@ -1148,11 +1201,13 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
       }
 
+      renderPurposePicker();
       renderActions(); // shows the "Checking…" placeholder immediately
       discover();
       return section;
@@ -1292,10 +1347,11 @@
       let inFlight = false;
       let discoveryDone = false;
       let swapFailed = false;
+      const noticeEl = el('div');
       const reviewEl = el('div');
       const actionsEl = el('div');
       const statusEl = el('div');
-      wrap.append(reviewEl, actionsEl, statusEl);
+      wrap.append(noticeEl, reviewEl, actionsEl, statusEl);
 
       function isCurrent() {
         return isModalTokenCurrent(modalToken);
@@ -1309,9 +1365,25 @@
         wrap.hidden = !(swapFailed || state !== null);
       }
 
+      /** Same "no stale full content once inert" fix as
+       * buildAiProposalSection's own renderReview — see its doc comment.
+       * An expired/rejected reconciliation shows nothing here; the
+       * section itself stays visible (updateVisibility keys off `state
+       * !== null`, not status) so "Reconcile remaining week" can still
+       * be offered again, just without the old exercise list cluttering
+       * the space above it. */
       function renderReview() {
         reviewEl.innerHTML = '';
-        if (state) reviewEl.appendChild(buildWeekReconciliationReview(state));
+        if (state && state.status !== 'expired' && state.status !== 'rejected') reviewEl.appendChild(buildWeekReconciliationReview(state));
+      }
+
+      /** Reuses aiProposalNoticeFor verbatim (app.js) — its text is
+       * already generic enough to apply here too, and this is the exact
+       * same "no longer active" case, just at the weekly granularity. */
+      function renderNotice() {
+        noticeEl.innerHTML = '';
+        const notice = aiProposalNoticeFor(state ? state.status : null);
+        if (notice) noticeEl.appendChild(el('p', { class: 'faint', text: notice }));
       }
 
       /** Same "duplicate AI programs" fix as buildAiProposalSection's own
@@ -1389,6 +1461,7 @@
           if (!isCurrent()) return;
           discoveryDone = true;
           renderReview();
+          renderNotice();
           renderActions();
           updateVisibility();
         }
@@ -1423,6 +1496,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
           renderActions();
           updateVisibility();
         }
@@ -1445,6 +1519,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
           renderActions();
         }
       }
@@ -1471,6 +1546,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
           renderActions();
         }
       }

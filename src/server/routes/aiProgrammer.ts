@@ -96,8 +96,10 @@ function requireEnabled(): void {
   }
 }
 
+const REQUESTABLE_SESSION_PURPOSES = ['push', 'pull', 'legs', 'upper'] as const;
+
 aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
-  const { targetDate, timezone } = req.body ?? {};
+  const { targetDate, timezone, requestedSessionPurpose } = req.body ?? {};
   if (typeof targetDate !== 'string' || targetDate.trim() === '') {
     return res.status(400).json({ ok: false, error: 'targetDate (string, YYYY-MM-DD) is required' });
   }
@@ -116,13 +118,24 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
       .status(400)
       .json({ ok: false, error: 'timezone is not accepted in the request — the user\'s TrainingProfile.timezone is always authoritative' });
   }
+  // "Ask what to generate" fix (2026-09-23): optional — omitting it keeps
+  // the exact prior behavior (the day's own already-decided rotation
+  // purpose, or the model's own free choice when the day has none). An
+  // explicit value must be one of the four real session purposes this
+  // app recognizes anywhere else (programmerContextBuilder.ts's own
+  // SESSION_PURPOSES) — never silently ignored if present but invalid.
+  if (requestedSessionPurpose !== undefined && !REQUESTABLE_SESSION_PURPOSES.includes(requestedSessionPurpose)) {
+    return res
+      .status(400)
+      .json({ ok: false, error: `requestedSessionPurpose must be one of ${REQUESTABLE_SESSION_PURPOSES.join('|')} (or omitted)` });
+  }
 
   // Express 4 does not automatically forward a rejected promise from an
   // async handler to the error middleware — every path below must
   // resolve via res.json/res.status or explicitly call next(err).
   try {
     const service = createDefaultAIProgrammerService(db(req));
-    const result = await service.generateSession({ targetDate });
+    const result = await service.generateSession({ targetDate, requestedSessionPurpose });
     // Phase 2 §5: the response now also carries the persisted proposal's
     // id/status — proposal.proposalId (echoed in `proposal`) and
     // `proposalId` here are always the exact same string (see

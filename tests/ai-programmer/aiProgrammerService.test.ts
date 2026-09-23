@@ -39,6 +39,20 @@ function futureDate(): { date: string; weekday: string } {
   return { date, weekday: weekdayOfDate(date) };
 }
 
+/** Same real-clock discipline as futureDate(), nudged forward until it
+ * lands on a real Rest day for the training_days seeded below (Mon/Tue/
+ * Thu/Fri) — the "no already-decided sessionPurpose of its own" case the
+ * requestedSessionPurpose tests below specifically need. */
+function futureRestDate(): { date: string; weekday: string } {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 60);
+  while (['monday', 'tuesday', 'thursday', 'friday'].includes(weekdayOfDate(d.toISOString().slice(0, 10)))) {
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  const date = d.toISOString().slice(0, 10);
+  return { date, weekday: weekdayOfDate(date) };
+}
+
 let db: Database.Database;
 
 function validProposalJson(overrides: Record<string, unknown> = {}) {
@@ -132,6 +146,52 @@ describe('AIProgrammerService', () => {
     expect(provider.lastRequest?.mode).toBe('generate_session');
     expect(provider.lastRequest?.systemInstruction).toMatch(/Aesthetics\/physique/i);
     expect((provider.lastRequest?.context as any).targetDate).toBe(SUNDAY);
+  });
+
+  // "Ask what to generate" fix (2026-09-23): Sunday has no training day
+  // of its own (training_days above), so its own default sessionPurpose
+  // is null — exactly the "day has no already-decided purpose" case an
+  // explicit requestedSessionPurpose is for. `provider.lastRequest` is
+  // captured the moment the (fake) provider is called, well before the
+  // response is parsed/validated — these tests only care what CONTEXT
+  // was built and sent, so a fake response that doesn't happen to also
+  // satisfy the real adequacy validator's own volume floors is fine to
+  // ignore (`.catch(() => {})`) rather than needing to be a fully
+  // blueprint-compliant proposal (that's already covered by the domain/
+  // adequacy validator's own dedicated test suites).
+  describe('requestedSessionPurpose — "ask what to generate" fix', () => {
+    it('is null in context.programmingBrief.session.purpose when omitted, for a day with no rotation slot of its own (unchanged prior behavior)', async () => {
+      const { date, weekday } = futureRestDate();
+      const provider = new FakeProvider(() => fakeResponse(validProposalJson({ targetDate: date, weekday })));
+      const service = new AIProgrammerService(db, provider);
+      await service.generateSession({ targetDate: date }).catch(() => {});
+      expect((provider.lastRequest?.context as any).programmingBrief.session.purpose).toBeNull();
+    });
+
+    it('sets context.programmingBrief.session.purpose to the explicit choice when provided', async () => {
+      const { date, weekday } = futureRestDate();
+      const provider = new FakeProvider(() => fakeResponse(validProposalJson({ targetDate: date, weekday, sessionFocus: ['legs'] })));
+      const service = new AIProgrammerService(db, provider);
+      await service.generateSession({ targetDate: date, requestedSessionPurpose: 'legs' }).catch(() => {});
+      expect((provider.lastRequest?.context as any).programmingBrief.session.purpose).toBe('legs');
+    });
+
+    it('a different requested purpose changes the expected coverage targets too, not just the label', async () => {
+      const { date, weekday } = futureRestDate();
+      const legsProvider = new FakeProvider(() => fakeResponse(validProposalJson({ targetDate: date, weekday, sessionFocus: ['legs'] })));
+      const legsService = new AIProgrammerService(db, legsProvider);
+      await legsService.generateSession({ targetDate: date, requestedSessionPurpose: 'legs' }).catch(() => {});
+      const legsTargets = (legsProvider.lastRequest?.context as any).programmingBrief.session.expectedCoverageTargetIds;
+
+      const pushProvider = new FakeProvider(() => fakeResponse(validProposalJson({ targetDate: date, weekday, sessionFocus: ['push'] })));
+      const pushService = new AIProgrammerService(db, pushProvider);
+      await pushService.generateSession({ targetDate: date, requestedSessionPurpose: 'push' }).catch(() => {});
+      const pushTargets = (pushProvider.lastRequest?.context as any).programmingBrief.session.expectedCoverageTargetIds;
+
+      expect(legsTargets).not.toEqual(pushTargets);
+      expect(legsTargets).toContain('quads');
+      expect(pushTargets).toContain('mid-pec');
+    });
   });
 
   it('rejects a second generateSession for the same targetDate while a proposal is still pending, without calling the provider again', async () => {

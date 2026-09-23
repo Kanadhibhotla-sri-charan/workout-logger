@@ -209,6 +209,14 @@ describe('program.html: AI Week Reorganization section wiring', () => {
     });
   });
 
+  // 2026-09-23 fix: same stale-content cleanup as buildAiProposalSection's
+  // own fix, applied here — a rejected/expired reconciliation must not
+  // keep showing its full exercise list.
+  it('clears the full review once a reconciliation is expired or rejected — the notice alone is shown, not the stale exercise list', () => {
+    const reviewFnBody = sectionBody.slice(sectionBody.indexOf('function renderReview()'), sectionBody.indexOf('function renderNotice()'));
+    expect(reviewFnBody).toMatch(/state && state\.status !== 'expired' && state\.status !== 'rejected'/);
+  });
+
   it('never renders a raw error field beyond the pre-mapped err.message', () => {
     expect(sectionBody).not.toMatch(/err\.details/);
     expect(sectionBody).not.toMatch(/err\.stack/);
