@@ -91,6 +91,27 @@ export function approveWeekReconciliation(db: Database.Database, reconciliationI
   return approved;
 }
 
+/** Same explicit-discard addition as aiProposalLifecycle.ts's own
+ * rejectProposal (2026-09-23 "duplicate AI programs" fix) — see its doc
+ * comment for the full rationale, identical here at the weekly
+ * granularity. A committed reconciliation cannot be rejected here — its
+ * real session already exists; discarding it means DELETE
+ * /api/workouts/:id on that session instead. */
+export function rejectWeekReconciliation(db: Database.Database, reconciliationId: string): AIWeekReconciliationRecord {
+  const record = loadCurrent(db, reconciliationId);
+  if (record.status === 'rejected') return record;
+  if (record.status !== 'pending' && record.status !== 'approved') {
+    throw new AIWeekReconciliationInvalidStateError(reconciliationId, record.status, 'rejected');
+  }
+
+  const rejected = new AIWeekReconciliationRepo(db).reject(reconciliationId);
+  if (!rejected) {
+    const current = new AIWeekReconciliationRepo(db).getById(reconciliationId);
+    throw new AIWeekReconciliationInvalidStateError(reconciliationId, current?.status ?? record.status, 'rejected');
+  }
+  return rejected;
+}
+
 export interface CommitWeekReconciliationResult {
   sessionId: string;
   reconciliation: AIWeekReconciliationRecord;

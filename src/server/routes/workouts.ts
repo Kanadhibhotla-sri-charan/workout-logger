@@ -313,3 +313,29 @@ workoutsRouter.delete('/:id/exercises/:exerciseId', (req, res) => {
   repo.deleteExercisePerformance(req.params.exerciseId);
   res.status(204).end();
 });
+
+/** "Duplicate AI programs" fix (2026-09-23): lets the user remove an
+ * unwanted real session outright — e.g. one of two AI-generated programs
+ * that ended up on the same day, or one they simply want to redo. Only
+ * ever a `planned` session may be deleted here — `in_progress`/
+ * `completed` real training history is never deletable through this
+ * route (or any other), matching every other lock rule in this codebase
+ * (schedule swap/move, activity change). The session's own exercises/
+ * sets cascade via the schema's own FK; any proposal/reconciliation that
+ * committed this session has its own committed_session_id nulled by its
+ * FK, never left pointing at a dangling id. */
+workoutsRouter.delete('/:id', (req, res) => {
+  const repo = new WorkoutSessionsRepo(db(req));
+  const session = repo.getSession(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: `No workout session with id "${req.params.id}"` });
+  }
+  if (session.status !== 'planned') {
+    return res.status(409).json({
+      error: `Cannot delete a session that is "${session.status}" — only a planned (not yet started) session can be deleted.`,
+      code: 'WORKOUT_SESSION_NOT_DELETABLE',
+    });
+  }
+  repo.deleteSession(req.params.id);
+  res.status(204).end();
+});

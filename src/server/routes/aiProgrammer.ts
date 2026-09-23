@@ -18,12 +18,14 @@ import {
   commitAIProposalToPlannedSession,
   getLatestProposalForDate,
   getProposal,
+  rejectProposal,
 } from '../../ai-programmer/service/aiProposalLifecycle.js';
 import {
   approveWeekReconciliation,
   commitWeekReconciliation,
   getLatestWeekReconciliationForDate,
   getWeekReconciliation,
+  rejectWeekReconciliation,
 } from '../../ai-programmer/service/weekReconciliationLifecycle.js';
 import { buildTokenReport } from '../../ai-programmer/service/tokenReport.js';
 import { isAiProgrammerEnabled, loadVelonaConfig } from '../../ai-programmer/provider/config.js';
@@ -212,6 +214,24 @@ aiProgrammerRouter.post('/proposals/:proposalId/approve', (req, res, next) => {
   }
 });
 
+/** "Duplicate AI programs" fix (2026-09-23): explicit discard for a
+ * pending/approved proposal the user no longer wants — see
+ * rejectProposal's own doc comment for exactly which states this
+ * accepts and why a committed proposal is out of scope here (that's
+ * DELETE /api/workouts/:id on its real session instead). */
+aiProgrammerRouter.post('/proposals/:proposalId/reject', (req, res, next) => {
+  try {
+    requireEnabled();
+    const record = rejectProposal(db(req), req.params.proposalId);
+    res.json({ ok: true, ...serializeProposal(record) });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
 const AI_COMMIT_INTENTS = ['fill_existing_gym_day', 'replace_day_activity'] as const;
 
 /** The only route that persists an AI proposal into the real
@@ -328,6 +348,19 @@ aiProgrammerRouter.get('/week-reconciliations/:reconciliationId', (req, res, nex
   try {
     requireEnabled();
     const record = getWeekReconciliation(db(req), req.params.reconciliationId);
+    res.json({ ok: true, ...serializeWeekReconciliation(record) });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+aiProgrammerRouter.post('/week-reconciliations/:reconciliationId/reject', (req, res, next) => {
+  try {
+    requireEnabled();
+    const record = rejectWeekReconciliation(db(req), req.params.reconciliationId);
     res.json({ ok: true, ...serializeWeekReconciliation(record) });
   } catch (err) {
     if (err instanceof AIProgrammerError) {
