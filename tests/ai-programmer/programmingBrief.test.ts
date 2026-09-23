@@ -179,4 +179,45 @@ describe('buildProgrammingBrief', () => {
       expect(brief.muscles[0]!.recommendedWeeklyPrimarySets).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('training experience reaches the volume decision in the brief (2026-09-20)', () => {
+    // A goal muscle with no assessment data: the volume engine holds it at its current volume
+    // for everyone except a confirmed advanced trainee, who is allowed to progress.
+    const goals: AIProgrammerActiveGoalContext[] = [
+      { goalId: 'goal-1', goalType: 'aesthetic', blueprintRef: 'triceps-back-depth', displayName: 'Triceps depth', priority: 1, reviewCadenceDays: 14, mostRecentAssessment: null },
+    ];
+    const brief = (currentWeeklyPrimarySets: number, experience: 'novice' | 'intermediate' | 'advanced' | null) =>
+      buildProgrammingBrief([target({ targetId: 'triceps', isSpecialization: true, goalId: 'goal-1', currentWeeklyPrimarySets })], goals, 'push', [], TODAY, 60, { deloadActive: false }, experience).muscles[0]!;
+
+    it('an advanced trainee with no volume yet starts a goal directly at its package reference', () => {
+      const advanced = brief(0, 'advanced');
+      expect(advanced.weeklyDevelopmentReference).toBe(24);
+      expect(advanced.recommendedWeeklyPrimarySets).toBe(24);
+      expect(advanced.volumeAction).toBe('increase');
+    });
+
+    it('a non-advanced trainee with no volume yet still builds up from the conservative starting point', () => {
+      expect(brief(0, 'intermediate').recommendedWeeklyPrimarySets).toBe(8);
+      expect(brief(0, null).recommendedWeeklyPrimarySets).toBe(8);
+    });
+
+    it('an advanced trainee with existing volume and no assessment data progresses by the small step instead of holding forever', () => {
+      const advanced = brief(6, 'advanced');
+      expect(advanced.volumeAction).toBe('increase');
+      expect(advanced.recommendedWeeklyPrimarySets).toBe(8);
+    });
+
+    it('a non-advanced trainee with existing volume and no assessment data still holds the current volume', () => {
+      for (const experience of ['novice', 'intermediate', null] as const) {
+        const held = brief(6, experience);
+        expect(held.volumeAction).toBe('maintain');
+        expect(held.recommendedWeeklyPrimarySets).toBe(6);
+      }
+    });
+
+    it('omitting the argument keeps the previous (non-advanced) behaviour for every existing call site', () => {
+      const omitted = buildProgrammingBrief([target({ targetId: 'triceps', isSpecialization: true, goalId: 'goal-1', currentWeeklyPrimarySets: 6 })], goals, 'push', [], TODAY, 60).muscles[0]!;
+      expect(omitted.recommendedWeeklyPrimarySets).toBe(6);
+    });
+  });
 });

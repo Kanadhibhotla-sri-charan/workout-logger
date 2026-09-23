@@ -93,10 +93,16 @@ describe('correction §2 — authored prescription fidelity', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('rejects altered sets even when it "improves" on the authored value', () => {
-    const result = validateProposalDomain(baseProposal({ exercises: [{ ...baseProposal().exercises[0]!, sets: 2 }] }), context, db);
+  it('accepts fewer sets than the authored maximum when a rationale is given (sets are a ceiling)', () => {
+    const exercise = { ...baseProposal().exercises[0]!, sets: 2, rationale: ['recent overexposure'] };
+    const result = validateProposalDomain(baseProposal({ exercises: [exercise] }), context, db);
+    expect(result.errors.filter((e) => e.includes('.sets'))).toEqual([]);
+  });
+
+  it('rejects more sets than the authored maximum', () => {
+    const result = validateProposalDomain(baseProposal({ exercises: [{ ...baseProposal().exercises[0]!, sets: 4 }] }), context, db);
     expect(result.ok).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/\.sets must equal Blueprint-authored value 3; received 2/);
+    expect(result.errors.join(' ')).toMatch(/\.sets must be an integer from 1 to 3; received 4/);
   });
 
   it('rejects altered repsMin', () => {
@@ -125,12 +131,14 @@ describe('correction §2 — authored prescription fidelity', () => {
 
   it('multiple altered fields each produce their own precise validation issue', () => {
     const result = validateProposalDomain(
-      baseProposal({ exercises: [{ ...baseProposal().exercises[0]!, sets: 2, repsMin: 3, repsMax: 5, rirMin: 0, rirMax: 1 }] }),
+      baseProposal({ exercises: [{ ...baseProposal().exercises[0]!, sets: 4, repsMin: 3, repsMax: 5, rirMin: 0, rirMax: 1 }] }),
       context,
       db
     );
     expect(result.ok).toBe(false);
-    expect(result.errors.filter((e) => e.includes('must equal Blueprint-authored value'))).toHaveLength(5);
+    // reps/RIR stay exact-match (4 issues); sets is a ceiling (1 more, worded differently).
+    expect(result.errors.filter((e) => e.includes('must equal Blueprint-authored value'))).toHaveLength(4);
+    expect(result.errors.filter((e) => e.includes('.sets must be an integer from 1 to 3'))).toHaveLength(1);
   });
 
   it('an exercise with NO authored prescription still follows the existing non-authored rules (generic cap, not exact-match)', () => {

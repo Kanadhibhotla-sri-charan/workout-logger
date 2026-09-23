@@ -29,6 +29,7 @@ export interface DomainValidationResult {
   ok: boolean;
   value?: AIWorkoutSessionProposal;
   errors: string[];
+  warnings: string[];
 }
 
 function findTargetIn(targets: readonly AIProgrammerTargetContext[], targetType: string, targetId: string): AIProgrammerTargetContext | undefined {
@@ -49,7 +50,10 @@ function validateAuthoredPrescription(
   exercise: AIWorkoutExerciseProposal,
   authoredPrescription: NonNullable<AIProgrammerValidExerciseContext['authoredPrescription']>,
   path: string,
-  errors: string[]
+  errors: string[],
+  warnings: string[],
+  isGoal: boolean,
+  directSetsPerExposureCap?: number
 ): void {
   const fields: Array<[keyof AIWorkoutExerciseProposal, keyof typeof authoredPrescription]> = [
     ['sets', 'sets'],
@@ -59,9 +63,20 @@ function validateAuthoredPrescription(
     ['rirMax', 'rirMax'],
   ];
   for (const [proposalField, authoredField] of fields) {
-    const expected = authoredPrescription[authoredField];
+    const expected = proposalField === 'sets' && directSetsPerExposureCap != null
+      ? Math.min(authoredPrescription[authoredField], directSetsPerExposureCap)
+      : authoredPrescription[authoredField];
     const received = exercise[proposalField];
-    if (received !== expected) {
+    if (proposalField === 'sets') {
+      // Authored sets and directSetsPerExposureCap are ceilings.  A coach may
+      // deliberately prescribe fewer sets, but that choice must be auditable.
+      if (typeof received !== 'number' || !Number.isInteger(received) || received < 1 || received > expected) {
+        errors.push(`${path}.${proposalField} must be an integer from 1 to ${expected}; received ${received}`);
+      } else if (received < expected && (!Array.isArray(exercise.rationale) || exercise.rationale.every((entry) => !entry.trim()))) {
+        const message = `${path}.rationale is required when sets are reduced below the allowed maximum ${expected}`;
+        (isGoal ? errors : warnings).push(message);
+      }
+    } else if (received !== expected) {
       errors.push(`${path}.${proposalField} must equal Blueprint-authored value ${expected}; received ${received}`);
     }
   }
@@ -82,7 +97,9 @@ export function validateExerciseAgainstTargets(
   targets: readonly AIProgrammerTargetContext[],
   seen: Set<string>,
   path: string,
-  errors: string[]
+  errors: string[],
+  warnings: string[] = [],
+  directSetsPerExposureCap?: number
 ): void {
   if (seen.has(exercise.exerciseId)) {
     errors.push(`${path}: duplicate exerciseId within this proposal`);
@@ -113,7 +130,7 @@ export function validateExerciseAgainstTargets(
   if (catalogueEntry.authoredPrescription) {
     // Correction pass §2: every authored field is authoritative and
     // must match exactly — not merely stay under a broad ceiling.
-    validateAuthoredPrescription(exercise, catalogueEntry.authoredPrescription, path, errors);
+    validateAuthoredPrescription(exercise, catalogueEntry.authoredPrescription, path, errors, warnings, Boolean(target.goalId), directSetsPerExposureCap);
   } else if (exercise.sets > MAX_SETS_WITHOUT_AUTHORED_CAP) {
     errors.push(`${path}: sets (${exercise.sets}) exceed the application-configured cap of ${MAX_SETS_WITHOUT_AUTHORED_CAP} (no Blueprint-authored prescription exists for this exercise/target pair)`);
   }
@@ -136,6 +153,7 @@ export function validateExerciseAgainstTargets(
  * completed/started between context build and this validation call. */
 export function validateProposalDomain(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext, db?: Database.Database): DomainValidationResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   if (proposal.targetDate !== context.targetDate) {
     errors.push(`targetDate: proposal targets "${proposal.targetDate}" but the request was for "${context.targetDate}"`);
@@ -158,11 +176,22 @@ export function validateProposalDomain(proposal: AIWorkoutSessionProposal, conte
 
   const seenExerciseIds = new Set<string>();
   for (const [index, exercise] of proposal.exercises.entries()) {
-    validateExerciseAgainstTargets(exercise, context.targets, seenExerciseIds, `exercises[${index}] (${exercise.exerciseId})`, errors);
+    const guidance = context.programmingBrief.muscles.find(
+      (m) => m.targetType === exercise.targetType && m.targetId === exercise.targetId
+    );
+    validateExerciseAgainstTargets(
+      exercise,
+      context.targets,
+      seenExerciseIds,
+      `exercises[${index}] (${exercise.exerciseId})`,
+      errors,
+      warnings,
+      guidance?.directSetsPerExposureCap ?? undefined
+    );
   }
 
   if (errors.length > 0) {
-    return { ok: false, errors };
+    return { ok: false, errors, warnings };
   }
-  return { ok: true, errors: [], value: proposal };
+  return { ok: true, errors: [], warnings, value: proposal };
 }
