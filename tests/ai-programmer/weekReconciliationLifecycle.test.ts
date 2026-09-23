@@ -229,6 +229,45 @@ describe('commitWeekReconciliation', () => {
     expect((wednesdaySession!.snapshot as any).sessionPurpose).toBe('arms');
   });
 
+  // Display bug (2026-09-23), reported live via a screenshot showing
+  // "Whole-physique development — undefined." on a day this exact commit
+  // path had reorganized: the persisted snapshot for a NON-target changed
+  // day never resolved target_name/exercise_name before writing, unlike
+  // computeFreshWeek's own deterministic path. renderWeekDays' own
+  // "showDeterministic" branch trusts this snapshot verbatim on every
+  // later read (never re-enriching), so the frontend's describeWork()
+  // rendered the literal string "undefined" the moment it read the
+  // missing field back.
+  it('the persisted snapshot for a non-target changed day (Wednesday) has real resolved target_name/exercise_name/friendly_reasoning — never a field the frontend would render as "undefined"', () => {
+    // This file's own fixed calendar dates (SUNDAY/WEDNESDAY/FRIDAY
+    // above) are already past real "today" — every other test here
+    // shares that same pre-existing date-rot (see the baseline's
+    // documented 232 failures). Scoped fake-clock override, only for
+    // this one new test, so THIS fix is actually verified now rather
+    // than silently inheriting the same rot unverified.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-08T00:00:00Z')); // a real Tuesday, within the same week, before every date this test uses
+    try {
+      const context = buildReconciliationContext(db, { targetDate: SUNDAY, requestedActivity: 'gym' });
+      const record = insertReconciliation(context, multiDayOutput(context));
+      approveWeekReconciliation(db, record.id);
+      commitWeekReconciliation(db, record.id);
+
+      const program = new WeeklyProgramRepo(db).getByWeekStart(WEEK_START);
+      const wednesdaySession = program!.sessions.find((s) => s.day_index === 2)!;
+      const exercise = (wednesdaySession.snapshot as any).plannedWork[0];
+      expect(exercise.exercise_id).toBe('flat-barbell-bench-press');
+      expect(exercise.exercise_name).toBe(BlueprintAdapter.getExercise('flat-barbell-bench-press')!.name);
+      expect(exercise.target_id).toBe('mid-pec');
+      expect(exercise.target_name).toBe(BlueprintAdapter.getTarget('mid-pec')!.name);
+      expect(exercise.friendly_reasoning).toBe('Direct mid-pec exposure.');
+      // Never the literal "undefined" string a missing field would render as.
+      expect(JSON.stringify(exercise)).not.toMatch(/undefined/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('deletes the program_sessions snapshot for a day changed to "removed" (Friday)', () => {
     const context = buildReconciliationContext(db, { targetDate: SUNDAY, requestedActivity: 'gym' });
     // Pre-seed a program session for Friday so there's something to remove.

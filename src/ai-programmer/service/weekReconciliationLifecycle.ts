@@ -130,6 +130,28 @@ function classifyCommitFailure(_err: unknown): string {
  * for a day nobody is training today. This mirrors
  * commitAIProposalToPlannedSession's "session creation only for the one
  * date this commit is actually about" discipline at the weekly scale. */
+/** Real display bug (2026-09-23), reported live via a screenshot showing
+ * "Whole-physique development — undefined." on a day this reconciliation
+ * had reorganized: unlike computeFreshWeek's own deterministic path
+ * (programming.ts's enrichPlannedWork), this snapshot never resolved
+ * target_name/exercise_name before persisting. renderWeekDays' own
+ * "showDeterministic" read path trusts whatever was persisted here
+ * VERBATIM (by design — it never re-enriches on every read), so a
+ * persisted item missing target_name rendered as the literal string
+ * "undefined" the moment the frontend's describeWork() built its
+ * one-line summary from it. Duplicated here (rather than importing
+ * programming.ts's own private resolveTargetName/resolveExerciseName)
+ * to avoid a route-file dependency from a service file — this needs only
+ * BlueprintAdapter, already imported above, no goal/label DB lookups. */
+function resolveTargetName(targetType: 'physique_target' | 'functional_goal', targetId: string): string {
+  const resolved = targetType === 'physique_target' ? BlueprintAdapter.getTarget(targetId) : BlueprintAdapter.getFunctionalGoal(targetId);
+  return resolved?.name ?? targetId;
+}
+
+function resolveExerciseName(exerciseId: string): string {
+  return BlueprintAdapter.getExercise(exerciseId)?.name ?? exerciseId;
+}
+
 function toSnapshot(day: AIWeekReconciliationDay): unknown {
   return {
     sessionPurpose: day.session?.sessionPurpose ?? null,
@@ -137,8 +159,10 @@ function toSnapshot(day: AIWeekReconciliationDay): unknown {
     estimatedMinutes: day.session?.estimatedMinutes ?? 0,
     plannedWork: (day.session?.exercises ?? []).map((e) => ({
       exercise_id: e.exerciseId,
+      exercise_name: resolveExerciseName(e.exerciseId),
       target_type: e.targetType,
       target_id: e.targetId,
+      target_name: resolveTargetName(e.targetType, e.targetId),
       role: e.role,
       classification: e.classification,
       sets: e.sets,
@@ -146,6 +170,14 @@ function toSnapshot(day: AIWeekReconciliationDay): unknown {
       reps_max: e.repsMax,
       rir_min: e.rirMin,
       rir_max: e.rirMax,
+      // The real rationale the model gave for this exercise — genuinely
+      // available (AIWeekReconciliationExerciseProposal already carries
+      // it), never fabricated. describeWork()'s own progression line
+      // stays absent (progression_decision omitted below) rather than
+      // inventing one; friendly_reasoning is what the frontend's
+      // buildExerciseDetailCard actually reads for its "Why included"
+      // expansion.
+      friendly_reasoning: e.rationale && e.rationale.length > 0 ? e.rationale.join(' ') : null,
     })),
     // Deliberately empty — a persisted snapshot's `skipped` entries have
     // their own enrichment shape (renderWeekDays' enrichSkip) this
