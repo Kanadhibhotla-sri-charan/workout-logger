@@ -449,6 +449,22 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     expect(html).toMatch(/formatRestSeconds\(item\.restSeconds\)/);
   });
 
+  // 2026-09-23 fix: a real, superseding session (AI-committed or manual)
+  // used to be visible ONLY by opening the full logger — a reported
+  // point of confusion when a commit conflict pointed at a session the
+  // user had no way to preview from the day view.
+  it('shows a read-only preview of a superseding session\'s real exercises, from the real endpoint, without fabricating fields the API does not return', () => {
+    expect(html).toMatch(/buildCommittedSessionPreview\(day\.plannedSession\.id, previewEl, modalToken\)/);
+    const previewBody = html.slice(html.indexOf('async function buildCommittedSessionPreview'), html.indexOf('/** `applied_intensity_technique`'));
+    expect(previewBody).toMatch(/api\(`\/api\/workouts\/\$\{sessionId\}`\)/);
+    expect(previewBody).toMatch(/resolveExerciseDisplayName\(ex\.exercise_id\)/);
+    expect(previewBody).toMatch(/formatSets\(ex\.target_sets, ex\.target_reps_min, ex\.target_reps_max\)/);
+    expect(previewBody).toMatch(/formatRirRange\(ex\.target_rir_min, ex\.target_rir_max\)/);
+    // Never invents target_type/target_id/classification — the real
+    // reason a full PlannedWorkItem can't be fabricated here.
+    expect(previewBody).not.toMatch(/target_type|target_id|classification/);
+  });
+
   it('displays the committed session as an actionable reference, not just a bare id', () => {
     expect(html).toMatch(/href: `\/logger\.html\?session=\$\{state\.committedSessionId\}`/);
   });
