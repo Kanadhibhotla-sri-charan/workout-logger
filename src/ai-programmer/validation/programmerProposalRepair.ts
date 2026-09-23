@@ -280,6 +280,30 @@ function findMissingAuthoredExercise(target: AIProgrammerTargetContext, dayExerc
   return target.validExercises.find((v) => v.authoredPrescription && !present.has(v.exerciseId)) ?? null;
 }
 
+/** True iff this session has real room to simply ADD one more exercise for
+ * `target`, without exceeding any of sessionRealismCapFor's own limits —
+ * the exercise-count cap, and (only when `target` is itself a leg or abs
+ * target) that category's own share-of-session cap. Never checks the
+ * muscle-count cap: `target` is already present in this session (the
+ * caller only reaches here after confirming that), so adding one more of
+ * its own exercises never adds a new distinct target. This is the
+ * fallback for a lean, honest session that findDisplaceableExercise
+ * correctly refuses to touch (2026-09-23 fresh-slate finding: a session
+ * well under the exercise cap, with no redundant non-goal exercise to
+ * safely give up, previously left a real, cap-legal shortfall unclosed). */
+function hasSpareCapacityFor(dayExercises: readonly AIWeekReconciliationExerciseProposal[], purpose: SessionPurpose | null, target: AIProgrammerTargetContext): boolean {
+  const targetIdsInSession = [...new Set(dayExercises.map((e) => e.targetId))];
+  const caps = sessionRealismCapFor(purpose, targetIdsInSession);
+  if (dayExercises.length >= caps.maxExercises) return false;
+  if (caps.legExerciseShareMax !== null && LEGS_PHYSIQUE_TARGETS.includes(target.targetId)) {
+    if (dayExercises.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length >= caps.legExerciseShareMax) return false;
+  }
+  if (caps.absExerciseShareMax !== null && ABS_PHYSIQUE_TARGETS.includes(target.targetId)) {
+    if (dayExercises.filter((e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)).length >= caps.absExerciseShareMax) return false;
+  }
+  return true;
+}
+
 function buildGoalExercise(target: AIProgrammerTargetContext, catalogueEntry: AIProgrammerValidExerciseContext, cap: number | null, classification: AIWeekReconciliationExerciseProposal['classification']): AIWeekReconciliationExerciseProposal {
   const authored = catalogueEntry.authoredPrescription!;
   return {
@@ -348,16 +372,37 @@ function completeGoalVolume(days: readonly AIWeekReconciliationDay[], lockedDate
         const missing = findMissingAuthoredExercise(target, exercises);
         if (!missing) continue; // no unused authored exercise left for this target on this day
 
+        // Primary path (2026-09-20): displace a safe, redundant non-goal
+        // exercise. Preserved unchanged and tried first.
         const displaceable = findDisplaceableExercise(exercises, context.targets);
-        if (!displaceable) continue; // no safe non-goal exercise to give up — leave the goal short rather than risk another target's coverage
+        if (displaceable) {
+          const added = buildGoalExercise(target, missing, cap, trainedHere.classification);
+          const nextExercises = [...exercises];
+          nextExercises[exercises.indexOf(displaceable)] = added;
+          current[i] = { ...day, session: { ...day.session, exercises: nextExercises } };
+          notes.push(`${day.date}: replaced ${displaceable.exerciseId} (${displaceable.targetId}) with ${added.exerciseId} to work toward ${target.targetId}'s required weekly volume.`);
+          improved = true;
+          break; // re-audit before attempting another swap
+        }
 
-        const added = buildGoalExercise(target, missing, cap, trainedHere.classification);
-        const nextExercises = [...exercises];
-        nextExercises[exercises.indexOf(displaceable)] = added;
-        current[i] = { ...day, session: { ...day.session, exercises: nextExercises } };
-        notes.push(`${day.date}: replaced ${displaceable.exerciseId} (${displaceable.targetId}) with ${added.exerciseId} to work toward ${target.targetId}'s required weekly volume.`);
-        improved = true;
-        break; // re-audit before attempting another swap
+        // Fallback (2026-09-23, fresh-slate finding): no safe exercise to
+        // give up, but the session is nowhere near its own real caps — a
+        // lean, honest session should not be left short just because
+        // nothing else is safe to sacrifice. Add the missing exercise
+        // outright, under the exact same eligibility/authored-ceiling/
+        // session-cap rules as everywhere else in this file; never
+        // invents an exercise (still only ever drawn from `target`'s own
+        // validExercises), and never used when displacement already
+        // worked or when it would exceed any real cap.
+        if (hasSpareCapacityFor(exercises, validPurpose(day.session.sessionPurpose), target)) {
+          const added = buildGoalExercise(target, missing, cap, trainedHere.classification);
+          current[i] = { ...day, session: { ...day.session, exercises: [...exercises, added] } };
+          notes.push(`${day.date}: added ${added.exerciseId} to work toward ${target.targetId}'s required weekly volume (session had spare exercise capacity, no safe exercise to displace).`);
+          improved = true;
+          break; // re-audit before attempting another change
+        }
+        // Neither a safe displacement nor spare capacity exists on this
+        // day for this target — try the next day, or leave it short.
       }
       if (improved) break;
     }

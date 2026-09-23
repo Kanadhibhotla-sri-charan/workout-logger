@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { repairProposal, repairWeekReconciliation } from '../../src/ai-programmer/validation/programmerProposalRepair.js';
 import { auditWeeklyVolume } from '../../src/ai-programmer/validation/weeklyVolumeAudit.js';
+import { directSetsPerExposureCapFor } from '../../src/ai-programmer/validation/setCaps.js';
 import type { AIWeekReconciliationOutput } from '../../src/ai-programmer/contracts/weekReconciliationTypes.js';
 import type { AIReconciliationContext } from '../../src/ai-programmer/context/reconciliationContextTypes.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../../src/ai-programmer/contracts/programmerTypes.js';
@@ -449,6 +450,132 @@ describe('repairProposal', () => {
           expect(ids).toContain('dip-triceps-biased');
           expect(ids).toContain('cable-pushdown');
         }
+      });
+    });
+
+    describe('add-when-capacity fallback (2026-09-23): closes a legitimate gap when nothing is safe to displace', () => {
+      // A lean session: only the goal's own exercise plus solo (non-doubled)
+      // filler exercises, well under the 10-exercise cap, with nothing safe
+      // to displace (every filler is its own target's only exercise).
+      // Reproduces the fresh-slate finding: a real, cap-legal shortfall that
+      // displacement alone could not close.
+      const leanTricepsTargets = (validExercisesOverride?: AIProgrammerTargetContext['validExercises']) => [
+        target({
+          targetId: 'triceps',
+          goalId: 'g-triceps',
+          isSpecialization: true,
+          validExercises: validExercisesOverride ?? [
+            validExercise({ exerciseId: 'close-grip-bench-press', role: 'primary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 10, rirMin: 1, rirMax: 3 } }),
+            validExercise({ exerciseId: 'dip-triceps-biased', role: 'secondary', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 12, rirMin: 1, rirMax: 3 } }),
+            validExercise({ exerciseId: 'cable-pushdown', role: 'secondary', authoredPrescription: { sets: 2, repsMin: 10, repsMax: 16, rirMin: 1, rirMax: 3 } }),
+          ],
+        }),
+        target({ targetId: 'filler-solo-1', validExercises: [validExercise({ exerciseId: 'filler-x1', role: 'primary' })] }),
+        target({ targetId: 'filler-solo-2', validExercises: [validExercise({ exerciseId: 'filler-x2', role: 'primary' })] }),
+      ];
+      const leanDaySession = (date: string) => ({
+        date,
+        exercises: [
+          exercise({ exerciseId: 'close-grip-bench-press', targetId: 'triceps', sets: 3, repsMin: 6, repsMax: 10 }),
+          exercise({ exerciseId: 'filler-x1', targetId: 'filler-solo-1', sets: 2 }),
+          exercise({ exerciseId: 'filler-x2', targetId: 'filler-solo-2', sets: 2 }),
+        ],
+      });
+      const leanBrief = (recommendedWeeklyPrimarySets = 16) => ({ muscles: [{ targetType: 'physique_target', targetId: 'triceps', recommendedWeeklyPrimarySets }] });
+      const leanContext = (targets: AIProgrammerTargetContext[], brief: ReturnType<typeof leanBrief> = leanBrief()) =>
+        ({ targets, existingProgram: ['2026-09-21', '2026-09-23'].map((date) => ({ date, locked: false, sessionPurpose: 'push' })), programmingBrief: brief }) as unknown as AIReconciliationContext;
+
+      it('adds a missing goal exercise when the session has spare capacity and no safe exercise to displace', () => {
+        const targets = leanTricepsTargets();
+        const out = repairWeekReconciliation(weekOutput([leanDaySession('2026-09-21'), leanDaySession('2026-09-23')]), leanContext(targets));
+
+        for (const day of out.days) {
+          const ids = day.session!.exercises.map((e) => e.exerciseId);
+          expect(ids).toContain('dip-triceps-biased');
+          expect(ids).toContain('cable-pushdown');
+          expect(ids).toContain('filler-x1'); // nothing displaced — this is an addition
+          expect(ids).toContain('filler-x2');
+          expect(day.session!.exercises.length).toBe(5); // 3 original + 2 added, still well under the 10-exercise cap
+        }
+        expect(out.reconciliation.warnings.some((w) => w.includes('added dip-triceps-biased') && w.includes('spare exercise capacity'))).toBe(true);
+        expect(out.reconciliation.warnings.some((w) => w.includes('added cable-pushdown') && w.includes('spare exercise capacity'))).toBe(true);
+        expect(out.reconciliation.warnings.some((w) => w.includes('replaced'))).toBe(false); // displacement never triggered
+        expect(tricepsGeneratedSets(out, targets, 'triceps')).toBe(16); // 2 x (3+3+2), matches the brief exactly
+
+        // Re-audited independently — the repair's own bookkeeping is not
+        // trusted; the final state must genuinely show no shortfall.
+        const reaudit = auditWeeklyVolume(out, { targets, existingProgram: ['2026-09-21', '2026-09-23'].map((date) => ({ sessionPurpose: 'push' as string | null, date })), programmingBrief: leanBrief() });
+        expect(reaudit.goalShortfalls).toEqual([]);
+      });
+
+      it('still uses displacement, not addition, when the session is already at the exercise cap', () => {
+        const targets = tricepsTargets(false);
+        const out = repairWeekReconciliation(weekOutput([daySession('2026-09-21'), daySession('2026-09-23')]), richWeekContext(targets, undefined, tricepsBrief));
+        expect(out.reconciliation.warnings.some((w) => w.includes('replaced'))).toBe(true);
+        expect(out.reconciliation.warnings.some((w) => w.includes('added') && w.includes('spare exercise capacity'))).toBe(false);
+        for (const day of out.days) expect(day.session!.exercises).toHaveLength(10); // cap never exceeded
+      });
+
+      it('applies an added exercise at exactly its own authored sets, never above its per-exposure cap (dip-chest-biased on lower-pec, real Blueprint data)', () => {
+        // lower-pec's real per-exposure cap (5, complete level) is, by
+        // construction, the SUM of its own relevant exercises' authored
+        // sets — so no single one of those exercises can ever itself
+        // exceed it (the same reason the displacement path never actually
+        // clamps a real, single authored exercise down either). What this
+        // proves instead: buildGoalExercise's Math.min(authored, cap) is
+        // exercised on the add path with a real cap in scope, the result
+        // is exactly the authored value (never inflated, never invented),
+        // and it never exceeds the real cap — the two properties item 3
+        // of the approved plan actually requires.
+        const targets = [
+          target({
+            targetId: 'lower-pec',
+            goalId: 'g-lower-pec',
+            isSpecialization: true,
+            validExercises: [
+              validExercise({ exerciseId: 'cable-fly', role: 'primary', authoredPrescription: { sets: 2, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+              validExercise({ exerciseId: 'dip-chest-biased', role: 'secondary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 12, rirMin: 1, rirMax: 3 } }),
+            ],
+          }),
+          target({ targetId: 'filler-solo-1', validExercises: [validExercise({ exerciseId: 'filler-x1', role: 'primary' })] }),
+        ];
+        const day = (date: string) => ({
+          date,
+          exercises: [exercise({ exerciseId: 'cable-fly', targetId: 'lower-pec', sets: 2, repsMin: 8, repsMax: 15 }), exercise({ exerciseId: 'filler-x1', targetId: 'filler-solo-1', sets: 2 })],
+        });
+        const context = {
+          targets,
+          existingProgram: ['2026-09-21', '2026-09-23'].map((date) => ({ date, locked: false, sessionPurpose: 'push' })),
+          programmingBrief: { muscles: [{ targetType: 'physique_target', targetId: 'lower-pec', recommendedWeeklyPrimarySets: 8 }] },
+        } as unknown as AIReconciliationContext;
+        const out = repairWeekReconciliation(weekOutput([day('2026-09-21'), day('2026-09-23')]), context);
+
+        const realCap = directSetsPerExposureCapFor(targets[0]!)!;
+        for (const d of out.days) {
+          const dip = d.session!.exercises.find((e) => e.exerciseId === 'dip-chest-biased');
+          expect(dip).toBeDefined();
+          expect(dip!.sets).toBe(3); // exactly its own authored value
+          expect(dip!.sets).toBeLessThanOrEqual(realCap); // and never above the real per-exposure cap
+        }
+      });
+
+      it('safely declines when no eligible authored exercise remains for the target, rather than inventing one', () => {
+        const targets = leanTricepsTargets([validExercise({ exerciseId: 'close-grip-bench-press', role: 'primary', authoredPrescription: { sets: 3, repsMin: 6, repsMax: 10, rirMin: 1, rirMax: 3 } })]);
+        const out = repairWeekReconciliation(weekOutput([leanDaySession('2026-09-21'), leanDaySession('2026-09-23')]), leanContext(targets));
+
+        for (const day of out.days) {
+          const tricepsIds = day.session!.exercises.filter((e) => e.targetId === 'triceps').map((e) => e.exerciseId);
+          expect(tricepsIds).toEqual(['close-grip-bench-press']); // nothing added, nothing invented
+        }
+        expect(out.reconciliation.warnings.some((w) => w.includes('added') || w.includes('replaced'))).toBe(false);
+
+        // Re-audited independently — a real, unresolved shortfall must
+        // never be silently hidden by the repair having "run without error."
+        const reaudit = auditWeeklyVolume(out, { targets, existingProgram: ['2026-09-21', '2026-09-23'].map((date) => ({ sessionPurpose: 'push' as string | null, date })), programmingBrief: leanBrief() });
+        const row = reaudit.rows.find((r) => r.targetId === 'triceps')!;
+        expect(row.generatedDirectSets).toBe(6); // 3 sets x 2 sessions — the only exercise available
+        expect(row.shortfall).toBeGreaterThan(0);
+        expect(reaudit.goalShortfalls.map((r) => r.targetId)).toContain('triceps');
       });
     });
   });
