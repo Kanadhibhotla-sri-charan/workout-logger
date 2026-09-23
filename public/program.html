@@ -370,11 +370,25 @@
         } else if (day.plannedWork.length === 0 && day.plannedSession) {
           // Fix 8: a real planned workout exists (created via an AI
           // proposal replacement) but has no deterministic plannedWork
-          // to list here — say so plainly and link to it, rather than
-          // showing "No exercises were placed on this day," which would
-          // wrongly imply nothing is scheduled.
-          panel.appendChild(el('p', { class: 'muted', text: 'This day\'s workout was created from an AI proposal — open it to see the planned exercises.' }));
+          // to list here — say so plainly, rather than showing "No
+          // exercises were placed on this day," which would wrongly
+          // imply nothing is scheduled.
+          panel.appendChild(el('p', { class: 'muted', text: 'This day\'s workout was created from an AI proposal.' }));
+          const previewEl = el('div');
+          panel.appendChild(previewEl);
           panel.appendChild(el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${day.plannedSession.id}`, text: 'Open planned workout' }));
+          // 2026-09-23 fix: previously the ONLY way to see what this
+          // session actually contains was to open the full logger — a
+          // real, reported point of confusion (a "planned workout
+          // already exists" conflict elsewhere pointed at a session the
+          // user had no way to preview without leaving the day view).
+          // GET /api/workouts/:id already returns each exercise's real
+          // prescription (target_sets/target_reps_*/target_rir_*), so a
+          // lightweight read-only preview is rendered right here —
+          // never a fabricated PlannedWorkItem (still no target_type/
+          // target_id/classification to build one from), just name +
+          // prescription, exactly what's genuinely available.
+          buildCommittedSessionPreview(day.plannedSession.id, previewEl, modalToken);
         } else if (day.plannedWork.length === 0) {
           panel.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
         }
@@ -555,6 +569,44 @@
       card.appendChild(buildIntensityTechniqueNote(item.applied_intensity_technique));
 
       return card;
+    }
+
+    /** Read-only preview of a real, already-committed session's own
+     * exercises — used only for the one case where the day's own
+     * deterministic `plannedWork` is empty because a real session
+     * (AI-committed or manual) superseded it (see openDayModal's call
+     * site). GET /api/workouts/:id already returns each exercise's real
+     * prescription; this never fabricates target_type/target_id/
+     * classification the way a full PlannedWorkItem would need, so it
+     * renders name + prescription only — genuinely available data, no
+     * more. A fetch failure degrades to showing nothing here (never an
+     * error blocking the rest of the day view) — the "Open planned
+     * workout" link the caller already renders above this still works
+     * regardless. */
+    async function buildCommittedSessionPreview(sessionId, container, modalToken) {
+      container.appendChild(el('p', { class: 'faint', text: 'Loading exercises…' }));
+      try {
+        const session = await api(`/api/workouts/${sessionId}`);
+        if (!isModalTokenCurrent(modalToken)) return;
+        container.innerHTML = '';
+        for (const ex of session.exercises || []) {
+          const card = createCard();
+          card.classList.add('exercise-card');
+          const header = el('div', { class: 'exercise-header' });
+          header.appendChild(el('div', { class: 'exercise-name', text: resolveExerciseDisplayName(ex.exercise_id) }));
+          if (ex.target_sets != null) {
+            header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(ex.target_sets, ex.target_reps_min, ex.target_reps_max) }));
+          }
+          card.appendChild(header);
+          if (ex.target_rir_min != null && ex.target_rir_max != null) {
+            card.appendChild(el('p', { class: 'faint', text: formatRirRange(ex.target_rir_min, ex.target_rir_max), style: 'margin:0.25rem 0 0' }));
+          }
+          container.appendChild(card);
+        }
+      } catch (err) {
+        if (!isModalTokenCurrent(modalToken)) return;
+        container.innerHTML = '';
+      }
     }
 
     /** `applied_intensity_technique` (or null) -> the component-level
