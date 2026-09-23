@@ -194,23 +194,34 @@ describe('AIProgrammerService', () => {
     });
 
     // Real production failure (2026-09-23), reproduced live against the
-    // real qwen model with requestedSessionPurpose: 'push':
-    // AI_OUTPUT_ADEQUACY_INVALID, "physique_target:obliques: 3 sets is
-    // clearly inadequate volume — below 50% of this target's own
-    // deterministic guidance floor". Confirmed NOT a requestedSessionPurpose
-    // wiring defect (the override reaches context.programmingBrief.session
-    // correctly, per the tests above) and NOT a new validator gap — this
-    // exact class of case (push + an under-prescribed UNIVERSAL_PHYSIQUE_
-    // TARGETS member) already has dedicated unit coverage in
-    // programmerAdequacyValidator.test.ts (its own "same case the live
-    // Tuesday test actually hit"). This test closes the one gap those
-    // don't cover: proving the SAME real failure reproduces end to end
-    // through the actual service call a requestedSessionPurpose: 'push'
-    // request makes — i.e. the model intermittently under-delivering
-    // obliques/rectus-abdominis volume when 'push' forces them into
-    // scope, correctly caught by the existing, unchanged adequacy
-    // validator — not a defect to fix in this feature.
-    it('reproduces the real live Push failure end-to-end: inadequate obliques volume is correctly rejected, never silently accepted', async () => {
+    // real qwen model with requestedSessionPurpose: 'push', then traced
+    // stage by stage (schema -> repairProposal -> domain -> adequacy)
+    // through the real, UNMODIFIED pipeline with this exact scenario:
+    //
+    //   exercise (target)              model sets -> repaired sets   floor
+    //   flat-barbell-bench-press (mid-pec)   8    ->      3            5
+    //   cable-pushdown (triceps)             8    ->      2            7
+    //   cable-woodchop (obliques)            3    ->      2            8
+    //
+    // The FIRST stage that actually fails is validateProposalAdequacy —
+    // schema and domain validation both pass; repairProposal clamps every
+    // exercise down to its own Blueprint-authored per-exposure ceiling
+    // BEFORE adequacy ever runs (cable-woodchop's own authored ceiling is
+    // only 2 sets — the model's "3" was never the number adequacy actually
+    // saw). Adequacy then correctly flags BOTH triceps (2 of a 7-set
+    // floor, 29%) and obliques (2 of an 8-set floor, 25%) as "clearly
+    // inadequate" (its own <50%-of-floor threshold) — mid-pec's 3-of-5
+    // (60%) does NOT trip it, confirming the threshold is a real band, not
+    // a blanket "any shortfall fails" rule. This is real, verified-AFTER-
+    // repair invalid output — not an assumption, and not something a
+    // validator-rule change would fix: no single Blueprint-authored
+    // obliques/triceps exercise here has a high enough per-exposure
+    // ceiling to reach its own target's recommended floor alone; a valid
+    // proposal needs the model to select MULTIPLE exercises per such
+    // target, which it did not do in this reproduction. No repair rule,
+    // adequacy threshold, or authored ceiling was changed to produce or
+    // explain this result.
+    it('reproduces the real live Push failure end-to-end, matching the exact traced mechanism: repair clamps every exercise to its own authored ceiling, then adequacy correctly flags triceps AND obliques as still below floor', async () => {
       const { date, weekday } = futureRestDate();
       const provider = new FakeProvider(() =>
         fakeResponse(
@@ -221,10 +232,10 @@ describe('AIProgrammerService', () => {
             exercises: [
               { ...validProposalJson().exercises[0], exerciseId: 'flat-barbell-bench-press', targetId: 'mid-pec', sets: 8 },
               { ...validProposalJson().exercises[0], exerciseId: 'cable-pushdown', targetId: 'triceps', sets: 8 },
-              // The exact real shortfall: an obliques exercise given only
-              // 3 sets, well under its own recommended floor — obliques
-              // is UNIVERSAL_PHYSIQUE_TARGETS (engine/config.ts), so
-              // 'push' always expects real coverage of it too.
+              // obliques is UNIVERSAL_PHYSIQUE_TARGETS (engine/config.ts)
+              // — 'push' always expects real coverage of it too. Traced:
+              // cable-woodchop's own authored ceiling is 2 sets, so this
+              // "3" is repaired down to 2 before adequacy ever sees it.
               { ...validProposalJson().exercises[0], exerciseId: 'cable-woodchop', targetId: 'obliques', sets: 3 },
             ],
           })
@@ -232,7 +243,13 @@ describe('AIProgrammerService', () => {
       );
       const service = new AIProgrammerService(db, provider);
 
-      await expect(service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' })).rejects.toBeInstanceOf(AIOutputAdequacyInvalidError);
+      const err = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' }).catch((e) => e);
+      expect(err).toBeInstanceOf(AIOutputAdequacyInvalidError);
+      // Both flagged targets, exactly as traced — not just one.
+      expect(err.details.issues.some((i: string) => i.includes('physique_target:triceps'))).toBe(true);
+      expect(err.details.issues.some((i: string) => i.includes('physique_target:obliques'))).toBe(true);
+      // mid-pec's 3-of-5 (60%) is genuinely fine — never flagged.
+      expect(err.details.issues.some((i: string) => i.includes('physique_target:mid-pec'))).toBe(false);
       // The proposal is never persisted — bad AI output is rejected
       // outright, never silently accepted as if valid.
       expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeUndefined();
