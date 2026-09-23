@@ -194,7 +194,7 @@ button:disabled, .btn[aria-disabled='true'] { opacity: 0.55; cursor: not-allowed
 }
 .card-title { font-weight: 700; font-size: 1rem; margin-bottom: 0.15rem; }
 .card-subtitle { color: var(--text-muted); font-size: 0.85rem; }
-.card-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.card-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .card-clickable { cursor: pointer; }
 .card-clickable:hover { border-color: var(--border-strong); }
 
@@ -319,6 +319,13 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transf
    part of the deterministic plan above it. */
 .ai-proposal-section { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); }
 .ai-proposal-panel { border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: var(--space-4); margin: var(--space-3) 0; background: var(--surface-muted); }
+/* Part 7: a week-wide reorganization is a visually distinct workflow
+   from single-day generation, not a clone of .ai-proposal-section —
+   the accent-colored top border and tinted background read as "broader
+   scope than one day" at a glance, reusing existing tokens only. */
+.ai-reconciliation-section { margin-top: var(--space-5); padding: var(--space-4); border: 1px solid var(--accent-bg); border-top: 3px solid var(--accent); border-radius: var(--radius); background: var(--accent-bg); }
+.reconciliation-diff-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+.reconciliation-diff-row:last-child { border-bottom: none; }
 .card-warning { border-left: 4px solid var(--warning); background: var(--warning-bg); }
 
 /* Small, visually subordinate personal note for a single session —

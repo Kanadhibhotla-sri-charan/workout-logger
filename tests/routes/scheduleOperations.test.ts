@@ -928,3 +928,80 @@ describe('Single-selected-workout precedence: AI/manual session supersedes an ex
     expect(loggerRes.body.exercises).toMatchObject([{ exercise_id: 'flat-barbell-bench-press' }]);
   });
 });
+
+// Phase 6 (2026-09-23): reported symptom — "day titles change but
+// workouts stay attached to the original days" after a swap. Static
+// analysis of swapDayActivities/renderWeekDays found no defect (the
+// deterministic snapshot's sessionPurpose and plannedWork are always two
+// fields of the SAME persisted row, moved by one upsertSession call —
+// structurally impossible to decouple), and the existing "Gym <-> Gym"
+// test above already proves plannedWork itself moves correctly for the
+// plain case. This is a genuinely NEW scenario neither test covers: a
+// gym day whose deterministic prescription is superseded by a real
+// AI-committed session (a second, date-keyed piece of state) swapped
+// with a plain Rest day — the one case where two independently-moved
+// pieces of state (the day_index-keyed snapshot and the date-keyed real
+// session) could plausibly end up paired with the wrong day if either
+// half's move logic disagreed with the other's.
+describe('Phase 6 reproduction: swap with a superseded (AI-committed) session — does the title/session/exercise pairing ever split?', () => {
+  it('the AI session, its real exercises, and the (nulled) deterministic display all move to the new date together — never split across days', async () => {
+    setupProfile(['thursday']);
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'chest-front-width', priority: 1 });
+    const before = await getWeek();
+    const thursday = before.days.find((d: any) => d.weekday === 'thursday');
+    const wednesdayDateBefore = before.days.find((d: any) => d.weekday === 'wednesday').date;
+    expect(thursday.plannedWork.length).toBeGreaterThan(0); // a real deterministic prescription exists pre-supersession
+
+    // Supersede Thursday's deterministic prescription with a real
+    // AI-committed session carrying its own distinct exercise, exactly
+    // as aiProposalLifecycle.ts's 'fill_existing_gym_day' intent does.
+    const sessionsRepo = new WorkoutSessionsRepo(db);
+    const ai = sessionsRepo.createSession({ date: thursday.date, session_type: 'gym', status: 'planned', notes: 'AI-proposed session', source_type: 'ai' });
+    sessionsRepo.addExercisePerformance(ai.session_id, {
+      exercise_id: 'incline-dumbbell-press',
+      order: 0,
+      role: 'primary',
+      sets: [{ set_number: 1, weight: 40, reps: 10, completed: false }],
+    });
+
+    const beforeSwap = await getWeek();
+    const thursdayBeforeSwap = beforeSwap.days.find((d: any) => d.weekday === 'thursday');
+    expect(thursdayBeforeSwap.plannedWork).toEqual([]); // superseded — nulled, not fabricated
+    expect(thursdayBeforeSwap.plannedSession).toMatchObject({ id: ai.session_id, source: 'ai' });
+
+    const res = await swap('wednesday', 'thursday').expect(200);
+    expect(res.body.movedPlannedSessionIds).toContain(ai.session_id);
+
+    const wednesdayAfter = res.body.days.find((d: any) => d.weekday === 'wednesday');
+    const thursdayAfter = res.body.days.find((d: any) => d.weekday === 'thursday');
+
+    // The title (activity/type) and the real session now agree on the
+    // SAME day — Wednesday, never split between the two.
+    expect(wednesdayAfter.activity).toBe('gym');
+    expect(wednesdayAfter.type).toBe('gym');
+    expect(wednesdayAfter.plannedSession).toMatchObject({ id: ai.session_id, source: 'ai', status: 'planned' });
+    expect(wednesdayAfter.plannedWork).toEqual([]); // still nulled (superseded), never a stale Thursday snapshot leaking through
+
+    // Thursday reverts to Wednesday's original (Rest) title, with
+    // neither the real session nor the (now relocated) deterministic
+    // snapshot left behind there.
+    expect(thursdayAfter.activity).toBe('unselected');
+    expect(thursdayAfter.type).toBe('rest');
+    expect(thursdayAfter.plannedSession).toBeNull();
+
+    // The real session's own exercises followed the session itself
+    // (keyed by session_id, never by date) — opening it from its NEW
+    // date shows the exact same real exercise, not the old deterministic
+    // one and not nothing.
+    const openedSession = await request(app).get(`/api/workouts/${ai.session_id}`).expect(200);
+    expect(openedSession.body.exercises).toMatchObject([{ exercise_id: 'incline-dumbbell-press' }]);
+    expect(sessionsRepo.getSession(ai.session_id)!.date).toBe(wednesdayDateBefore);
+
+    // /today, opened for Wednesday's date, agrees with /week exactly —
+    // the same cross-surface consistency check the existing §8/§11.F
+    // suite already runs for the plain (non-superseded) case, now also
+    // proven for the superseded one.
+    const todayRes = await request(app).get('/api/programming/today').query({ date: wednesdayAfter.date }).expect(200);
+    expect(todayRes.body.plannedSession).toEqual(wednesdayAfter.plannedSession);
+  });
+});

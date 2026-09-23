@@ -30,8 +30,10 @@ import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } fro
 import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIWeekReconciliationDay, AIWeekReconciliationExerciseProposal, AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
+import type { AIGenerateWeekDay, AIGenerateWeekExerciseProposal, AIGenerateWeekOutput } from '../contracts/generateWeekTypes.js';
 import type { AIProgrammerContext, AIProgrammerTargetContext, AIProgrammerValidExerciseContext } from '../context/programmerContextTypes.js';
 import type { AIReconciliationContext } from '../context/reconciliationContextTypes.js';
+import type { AIGenerateWeekContext } from '../context/generateWeekContextTypes.js';
 import { directSetsPerExposureCapFor } from './setCaps.js';
 import { auditWeeklyVolume } from './weeklyVolumeAudit.js';
 
@@ -439,4 +441,179 @@ export function repairWeekReconciliation(output: AIWeekReconciliationOutput, con
   const completion = completeGoalVolume(days, lockedDates, context);
 
   return { ...output, days: completion.days, reconciliation: { ...output.reconciliation, warnings: [...output.reconciliation.warnings, ...notes, ...completion.notes] } };
+}
+
+// ---------------------------------------------------------------------
+// generate_week (2026-09-23): the same two repair passes as
+// repairWeekReconciliation above (per-exercise set-ceiling repair, then
+// goal-completion), for a FROM-SCRATCH week instead of a revision of an
+// existing one. repairExerciseList is reused directly (already generic
+// over any AIWorkoutExerciseProposal). The goal-completion pass's own
+// five small helpers are intentionally NOT shared with
+// completeGoalVolume above — they are duplicated here, concretely typed
+// to AIGenerateWeekExerciseProposal/AIGenerateWeekDay, rather than
+// generified under time pressure and risk changing repairWeekReconciliation's
+// own tested behavior. A future pass can unify them once both call
+// sites are stable; see the architecture review's own note on this
+// tradeoff.
+// ---------------------------------------------------------------------
+
+function wouldZeroOutCoverageGW(exercise: AIGenerateWeekExerciseProposal, dayExercises: readonly AIGenerateWeekExerciseProposal[]): boolean {
+  return dayExercises.filter((e) => e.targetType === exercise.targetType && e.targetId === exercise.targetId).length <= 1;
+}
+
+function findDisplaceableExerciseGW(dayExercises: readonly AIGenerateWeekExerciseProposal[], targets: readonly AIProgrammerTargetContext[]): AIGenerateWeekExerciseProposal | null {
+  for (let i = dayExercises.length - 1; i >= 0; i--) {
+    const candidate = dayExercises[i]!;
+    if (isGoalTarget(targets, candidate)) continue;
+    if (wouldZeroOutCoverageGW(candidate, dayExercises)) continue;
+    return candidate;
+  }
+  return null;
+}
+
+function findMissingAuthoredExerciseGW(target: AIProgrammerTargetContext, dayExercises: readonly AIGenerateWeekExerciseProposal[]): AIProgrammerValidExerciseContext | null {
+  const present = new Set(dayExercises.map((e) => e.exerciseId));
+  return target.validExercises.find((v) => v.authoredPrescription && !present.has(v.exerciseId)) ?? null;
+}
+
+function hasSpareCapacityForGW(dayExercises: readonly AIGenerateWeekExerciseProposal[], purpose: SessionPurpose | null, target: AIProgrammerTargetContext): boolean {
+  const targetIdsInSession = [...new Set(dayExercises.map((e) => e.targetId))];
+  const caps = sessionRealismCapFor(purpose, targetIdsInSession);
+  if (dayExercises.length >= caps.maxExercises) return false;
+  if (caps.legExerciseShareMax !== null && LEGS_PHYSIQUE_TARGETS.includes(target.targetId)) {
+    if (dayExercises.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length >= caps.legExerciseShareMax) return false;
+  }
+  if (caps.absExerciseShareMax !== null && ABS_PHYSIQUE_TARGETS.includes(target.targetId)) {
+    if (dayExercises.filter((e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)).length >= caps.absExerciseShareMax) return false;
+  }
+  return true;
+}
+
+function buildGoalExerciseGW(target: AIProgrammerTargetContext, catalogueEntry: AIProgrammerValidExerciseContext, cap: number | null, classification: AIGenerateWeekExerciseProposal['classification']): AIGenerateWeekExerciseProposal {
+  const authored = catalogueEntry.authoredPrescription!;
+  return {
+    exerciseId: catalogueEntry.exerciseId,
+    role: catalogueEntry.role,
+    targetType: target.targetType,
+    targetId: target.targetId,
+    sets: Math.min(authored.sets, cap ?? Number.POSITIVE_INFINITY),
+    repsMin: authored.repsMin,
+    repsMax: authored.repsMax,
+    rirMin: authored.rirMin,
+    rirMax: authored.rirMax,
+    rationale: [`Added by repair: ${target.targetId} was below its required weekly volume, and this authored exercise was eligible but unused.`],
+    source: 'blueprint',
+    classification,
+  };
+}
+
+/** Goal-completion pass for a from-scratch week — identical rules to
+ * completeGoalVolume above (displacement first, add-when-capacity
+ * fallback, never introduces a goal into a day the model didn't already
+ * train it in, never exceeds any real cap), operating on
+ * AIGenerateWeekDay[] instead of AIWeekReconciliationDay[]. There are no
+ * locked days for a from-scratch week (nothing exists yet to lock). */
+function completeGoalVolumeForGenerateWeek(days: readonly AIGenerateWeekDay[], context: AIGenerateWeekContext): { days: AIGenerateWeekDay[]; notes: string[] } {
+  const current: AIGenerateWeekDay[] = days.map((d) => (d.session ? { ...d, session: { ...d.session, exercises: [...d.session.exercises] } } : d));
+  const notes: string[] = [];
+
+  for (let iteration = 0; iteration < MAX_GOAL_COMPLETION_ITERATIONS; iteration++) {
+    // existingProgram here only supplies the date list — there is no
+    // pre-AI-response purpose data for a from-scratch week at all.
+    // auditWeeklyVolume's compatibleSessions fix (2026-09-23) already
+    // prefers the audited week's own real session.sessionPurpose
+    // (`current`, which reflects what the AI actually returned) over
+    // this fallback, so sessionPurpose: null here is never actually used
+    // once the AI has responded.
+    const existingProgramDates = context.routine.week.map((d) => ({ date: d.date, sessionPurpose: null as string | null }));
+    const audit = auditWeeklyVolume({ days: current }, { targets: context.targets, existingProgram: existingProgramDates, programmingBrief: undefined });
+    if (audit.goalShortfalls.length === 0) break;
+
+    let improved = false;
+    for (const row of audit.goalShortfalls) {
+      const target = findTarget(context.targets, row.targetType, row.targetId);
+      if (!target) continue;
+      const cap = directSetsPerExposureCapFor(target);
+
+      for (let i = 0; i < current.length; i++) {
+        const day = current[i]!;
+        if (!day.session) continue;
+        const exercises = day.session.exercises;
+        const trainedHere = exercises.find((e) => e.targetType === target.targetType && e.targetId === target.targetId);
+        if (!trainedHere) continue;
+
+        const missing = findMissingAuthoredExerciseGW(target, exercises);
+        if (!missing) continue;
+
+        const displaceable = findDisplaceableExerciseGW(exercises, context.targets);
+        if (displaceable) {
+          const added = buildGoalExerciseGW(target, missing, cap, trainedHere.classification);
+          const nextExercises = [...exercises];
+          nextExercises[exercises.indexOf(displaceable)] = added;
+          current[i] = { ...day, session: { ...day.session, exercises: nextExercises } };
+          notes.push(`${day.date}: replaced ${displaceable.exerciseId} (${displaceable.targetId}) with ${added.exerciseId} to work toward ${target.targetId}'s required weekly volume.`);
+          improved = true;
+          break;
+        }
+
+        if (hasSpareCapacityForGW(exercises, validPurpose(day.session.sessionPurpose), target)) {
+          const added = buildGoalExerciseGW(target, missing, cap, trainedHere.classification);
+          current[i] = { ...day, session: { ...day.session, exercises: [...exercises, added] } };
+          notes.push(`${day.date}: added ${added.exerciseId} to work toward ${target.targetId}'s required weekly volume (session had spare exercise capacity, no safe exercise to displace).`);
+          improved = true;
+          break;
+        }
+      }
+      if (improved) break;
+    }
+    if (!improved) break;
+  }
+
+  return { days: current, notes };
+}
+
+/** Repairs every day of a from-scratch week with the same routine
+ * repairWeekReconciliation uses for an existing one — no locked days
+ * apply here (there is nothing to lock in a week that never existed
+ * before this call). Requires no programmingBrief: auditWeeklyVolume's
+ * own deliverable fallback (the package's real per-exposure cap x this
+ * week's own compatible-session count, itself derived from
+ * context.routine.week, never a stale snapshot) is exactly the intended
+ * requirement for a first-time week — there is no separate build-up
+ * decision to defer to yet, unlike reconciling an already-running week. */
+export function repairGenerateWeek(output: AIGenerateWeekOutput, context: AIGenerateWeekContext): AIGenerateWeekOutput {
+  const notes: string[] = [];
+
+  const days = output.days.map((day) => {
+    if (!day.session) return day;
+    const scope: RepairScope = {
+      targets: context.targets,
+      purpose: validPurpose(day.session.sessionPurpose),
+      isGoal: (e) => isGoalTarget(context.targets, e),
+      setCapFor: (e) => {
+        const target = findTarget(context.targets, e.targetType, e.targetId);
+        return target ? directSetsPerExposureCapFor(target) : null;
+      },
+      duplicatePriority: (e) => (isGoalTarget(context.targets, e) ? 3 : 0),
+    };
+    const repaired = repairExerciseList(day.session.exercises, scope);
+    for (const note of repaired.notes) notes.push(`${day.date}: ${note}`);
+    return { ...day, session: { ...day.session, exercises: repaired.exercises } };
+  });
+
+  // Goal-completion (completeGoalVolumeForGenerateWeek, defined above) is
+  // deliberately NOT invoked here yet. Flagged as an open architectural
+  // decision rather than decided silently: with no programmingBrief field
+  // in AIGenerateWeekContext (decideVolume's real, conservative per-target
+  // decision is not wired into any week-level context in this codebase
+  // today — see the safety gate on completeGoalVolume/commit 37c8a35 for
+  // why that number, not the package's raw deliverable ceiling, is the
+  // one that should gate completion), running it here would push every
+  // shortfall straight to full physical delivery capacity regardless of
+  // whether decideVolume would actually recommend that much this week —
+  // safe today only by coincidence for an advanced trainee starting a
+  // goal from zero (decideVolume's own cold-start rule happens to agree),
+  // not in general. See Phase 1 report.
+  return { ...output, days, warnings: [...output.warnings, ...notes] };
 }

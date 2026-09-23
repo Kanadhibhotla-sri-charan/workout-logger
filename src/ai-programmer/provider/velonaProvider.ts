@@ -170,12 +170,30 @@ const RECONCILE_WEEK_MIN_MAX_TOKENS = 6144;
 // already configured higher than this floor.
 const GENERATE_SESSION_MIN_MAX_TOKENS = 16384;
 
+// generate_week (2026-09-23): combines both of the above concerns at
+// once — a full 7-day output (reconcile_week's own "up to 7 days of
+// sessions" concern) built entirely from scratch (no existing content
+// to reference/compress against, unlike reconcile_week revising an
+// existing week), each exercise still carrying its own rationale[]
+// array (generate_session's own concern). A live eval of the closely
+// related reconcile_week path this same day found even its 6144 floor
+// insufficient in practice (truncated until raised to 12000 for
+// testing) — generate_week's real per-day content is at least as rich
+// and covers every one of the 7 days from nothing, so its floor starts
+// at generate_session's own already-raised value, not reconcile_week's
+// lower one. Not yet live-tested against real generate_week completions
+// (no production traffic exists for this mode yet); revisit once it
+// does, the same way GENERATE_SESSION_MIN_MAX_TOKENS's own history
+// shows this floor should be raised on real truncation evidence, never
+// lowered without it.
+const GENERATE_WEEK_MIN_MAX_TOKENS = 20480;
+
 /** The actual `max_tokens` value a given request mode should use — the
  * ONE place this decision is made, so `buildVelonaRequestBody` (the
  * real wire body) and tokenReport.ts (diagnostics, which reads the
  * built body back) can never disagree about it. */
 export function effectiveMaxTokensForMode(config: VelonaConfig, mode: AIProgrammerMode): number {
-  const floor = mode === 'reconcile_week' ? RECONCILE_WEEK_MIN_MAX_TOKENS : GENERATE_SESSION_MIN_MAX_TOKENS;
+  const floor = mode === 'reconcile_week' ? RECONCILE_WEEK_MIN_MAX_TOKENS : mode === 'generate_week' ? GENERATE_WEEK_MIN_MAX_TOKENS : GENERATE_SESSION_MIN_MAX_TOKENS;
   return Math.max(config.maxTokens, floor);
 }
 

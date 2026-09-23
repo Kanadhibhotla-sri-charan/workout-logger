@@ -39,7 +39,9 @@ export type AIProgrammerErrorCode =
   | 'AI_WEEK_RECONCILIATION_VALIDATION_FAILED'
   | 'AI_WEEK_RECONCILIATION_COMMIT_FAILED'
   | 'AI_WEEK_RECONCILIATION_OUTPUT_SCHEMA_INVALID'
-  | 'AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID';
+  | 'AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID'
+  | 'AI_GENERATE_WEEK_OUTPUT_SCHEMA_INVALID'
+  | 'AI_GENERATE_WEEK_OUTPUT_DOMAIN_INVALID';
 
 /** Base class for every error this integration throws. `statusCode` is
  * the HTTP status the route layer maps it to; `publicMessage` is what a
@@ -399,6 +401,24 @@ export class AIWeekReconciliationOutputDomainInvalidError extends AIProgrammerEr
   constructor(issues: string[]) {
     const bounded = boundDiagnosticIssues(issues);
     super('AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID', `AI week-reconciliation output failed domain validation: ${bounded.join('; ')}`, 502, {
+      issues: bounded,
+    });
+  }
+}
+
+export class AIGenerateWeekOutputSchemaInvalidError extends AIProgrammerError {
+  constructor(issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_GENERATE_WEEK_OUTPUT_SCHEMA_INVALID', `AI generate-week output failed structural schema validation: ${bounded.join('; ')}`, 502, {
+      issues: bounded,
+    });
+  }
+}
+
+export class AIGenerateWeekOutputDomainInvalidError extends AIProgrammerError {
+  constructor(issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_GENERATE_WEEK_OUTPUT_DOMAIN_INVALID', `AI generate-week output failed domain validation: ${bounded.join('; ')}`, 502, {
       issues: bounded,
     });
   }

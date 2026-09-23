@@ -412,6 +412,20 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     expect(html).toMatch(/method: 'POST',\s*\n\s*body: \{ intent: isGymDay \? 'fill_existing_gym_day' : 'replace_day_activity' \},/);
   });
 
+  // Phase 8 (2026-09-23), authoritative day object: a commit changes
+  // this day's real activity/plannedWork/plannedSession server-side —
+  // the week-overview grid's own `weekData` must be refreshed, never
+  // left showing the pre-commit snapshot until an unrelated reload.
+  // Unlike change-activity/swap/reconcile-week's own commit (which close
+  // the modal), this one keeps the modal open to show the fresh
+  // "Committed" state, so it refreshes in the background rather than via
+  // closeDayModal()+loadWeek().
+  it('refreshes weekData after a successful commit, without closing the modal', () => {
+    const commitBody = html.slice(html.indexOf('async function onCommit()'), html.indexOf('renderActions(); // shows the "Checking…" placeholder immediately'));
+    expect(commitBody).toMatch(/state = committed;[\s\S]*loadWeek\(\);/);
+    expect(commitBody).not.toMatch(/closeDayModal\(\)/);
+  });
+
   it('approve and commit are two distinct functions/actions, never combined into one', () => {
     expect(html).toMatch(/async function onApprove\(\)/);
     expect(html).toMatch(/async function onCommit\(\)/);
