@@ -32,7 +32,11 @@ export interface AuditExercise {
 }
 
 export interface AuditWeek {
-  days?: readonly { date: string; session?: { exercises?: readonly AuditExercise[] } | null }[];
+  /** sessionPurpose is optional so existing week-only fixtures (no purpose
+   * of their own) keep falling back to context.existingProgram's purpose
+   * unchanged — see auditWeeklyVolume's own comment on why this is the
+   * preferred source when present. */
+  days?: readonly { date: string; session?: { sessionPurpose?: string | null; exercises?: readonly AuditExercise[] } | null }[];
 }
 
 export interface AuditContext {
@@ -97,13 +101,35 @@ export function auditWeeklyVolume(week: AuditWeek, context: AuditContext): Weekl
     }
   }
 
+  // compatibleSessions must reflect the sessions the planner is actually
+  // expected to program, not merely what context.existingProgram's
+  // PRE-reconciliation snapshot happened to say. A genuinely blank future
+  // week (every day's own recurring purpose still unassigned) has
+  // sessionPurpose: null on every existingProgram entry even though two of
+  // those days are real, plannable push/upper sessions — reading only that
+  // snapshot silently collapses compatibleSessions (and therefore
+  // deliverable/required) to 0, making weekAdequacy.ok=true regardless of
+  // how little the model actually programmed (confirmed live, 2026-09-23
+  // fresh-slate eval: deliverable:0 for a target with two real compatible
+  // sessions in the week actually being audited). `week` — the same
+  // days/session data the caller is already auditing for generated sets —
+  // is the real, current source of truth for what each day IS being
+  // programmed as; it is preferred here, falling back to
+  // context.existingProgram's purpose only for a day this audit's own
+  // `week` argument says nothing about.
+  const weekPurposeByDate = new Map<string, string>();
+  for (const day of week.days ?? []) {
+    const purpose = day.session?.sessionPurpose;
+    if (purpose) weekPurposeByDate.set(day.date, purpose);
+  }
+
   const rows: WeeklyVolumeRow[] = [];
   for (const target of context.targets) {
     if (target.targetType !== 'physique_target') continue;
     const reference = referenceFor(target);
     if (reference.weekly_direct_set_reference == null) continue;
     const compatibleSessions = context.existingProgram.filter((d) => {
-      const purpose = d.sessionPurpose;
+      const purpose = weekPurposeByDate.get(d.date) ?? d.sessionPurpose;
       return (purpose === 'push' || purpose === 'pull' || purpose === 'legs' || purpose === 'upper') && isTargetCompatibleWithPurpose(target.targetType as TargetType, target.targetId, purpose);
     }).length;
     const cap = reference.direct_sets_per_exposure;

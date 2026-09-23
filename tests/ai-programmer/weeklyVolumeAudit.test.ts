@@ -65,6 +65,39 @@ describe('auditWeeklyVolume — what the week can actually deliver', () => {
   });
 });
 
+describe('auditWeeklyVolume — compatibleSessions reflects the week actually being audited, not a stale pre-reconciliation snapshot', () => {
+  // 2026-09-23 fresh-slate live eval: a genuinely blank future week has
+  // sessionPurpose: null on every existingProgram entry (no purpose ever
+  // assigned yet), even though two of those days are real, plannable
+  // push-compatible sessions in the week actually being audited. Reading
+  // only the pre-reconciliation snapshot silently collapsed
+  // compatibleSessions (and therefore deliverable/required) to 0,
+  // regardless of how little the model actually programmed.
+  const weekWithPurpose = (...perDay: Array<{ purpose: string; exercises: AuditExercise[] }>) => ({
+    days: perDay.map((d, i) => ({ date: `2026-09-2${i}`, session: { sessionPurpose: d.purpose, exercises: d.exercises } })),
+  });
+  const blankExistingProgram = (...dates: string[]) => dates.map((date) => ({ date, sessionPurpose: null }));
+
+  it('does not collapse to deliverable 0 for a blank future week merely because existingProgram has sessionPurpose null everywhere', () => {
+    const targets = [target('triceps', true)];
+    const auditedWeek = weekWithPurpose(
+      { purpose: 'push', exercises: [ex('close-grip-bench-press', 'triceps', 3)] },
+      { purpose: 'push', exercises: [ex('close-grip-bench-press', 'triceps', 3)] }
+    );
+    const result = auditWeeklyVolume(auditedWeek, { targets, existingProgram: blankExistingProgram('2026-09-20', '2026-09-21') });
+    const row = rowFor(result, 'triceps');
+    expect(row.compatibleSessions).toBe(2); // both audited-week days are real push sessions, not 0
+    expect(row.deliverable).toBeGreaterThan(0);
+    expect(row.deliverable).toBe(row.reference); // 2 push-compatible sessions fully deliver the package reference
+  });
+
+  it('still falls back to existingProgram\'s purpose for a day the audited week itself says nothing about (every pre-existing test in this file)', () => {
+    const targets = [target('quads')];
+    const result = auditWeeklyVolume(week([ex('back-squat', 'quads', 3)]), { targets, existingProgram: program('legs') });
+    expect(rowFor(result, 'quads').compatibleSessions).toBe(1);
+  });
+});
+
 describe('auditGoalDeferrals', () => {
   const targets = [target('triceps', true), target('mid-pec')];
   const audit = auditWeeklyVolume(week([]), { targets, existingProgram: program('push') });
