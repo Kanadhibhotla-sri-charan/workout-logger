@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateProposalAdequacy } from '../../src/ai-programmer/validation/programmerAdequacyValidator.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../../src/ai-programmer/contracts/programmerTypes.js';
-import type { AIProgrammerContext, AIProgrammerMuscleGuidance, AIProgrammerProgrammingBrief } from '../../src/ai-programmer/context/programmerContextTypes.js';
+import type { AIProgrammerContext, AIProgrammerMuscleGuidance, AIProgrammerProgrammingBrief, AIProgrammerTargetContext } from '../../src/ai-programmer/context/programmerContextTypes.js';
 
 function guidance(overrides: Partial<AIProgrammerMuscleGuidance> & Pick<AIProgrammerMuscleGuidance, 'targetId'>): AIProgrammerMuscleGuidance {
   return {
@@ -31,8 +31,21 @@ function guidance(overrides: Partial<AIProgrammerMuscleGuidance> & Pick<AIProgra
   };
 }
 
-function contextWith(brief: AIProgrammerProgrammingBrief): AIProgrammerContext {
-  return { programmingBrief: brief } as unknown as AIProgrammerContext;
+/** Push Generation Architectural Fix (2026-09-24): validateProposalAdequacy
+ * now credits an exercise's sets to every target Blueprint's own
+ * sub-target scope says it trains (creditedTargetKeys, not just the
+ * exercise's own literal targetId) — see programmerAdequacyValidator.ts's
+ * own doc comment. That requires `context.targets`, which every test
+ * below auto-derives from `brief.muscles` (targetType/targetId/
+ * isSpecialization are the only fields creditedTargetKeys reads) unless
+ * a test explicitly needs a specific targets array (e.g. to test real
+ * cross-target crediting itself), in which case it passes one directly. */
+function targetContextFor(m: Pick<AIProgrammerMuscleGuidance, 'targetType' | 'targetId' | 'isGoalOriented'>): AIProgrammerTargetContext {
+  return { targetType: m.targetType, targetId: m.targetId, isSpecialization: m.isGoalOriented } as unknown as AIProgrammerTargetContext;
+}
+
+function contextWith(brief: AIProgrammerProgrammingBrief, targets?: readonly AIProgrammerTargetContext[]): AIProgrammerContext {
+  return { programmingBrief: brief, targets: targets ?? brief.muscles.map(targetContextFor) } as unknown as AIProgrammerContext;
 }
 
 function exercise(overrides: Partial<AIWorkoutExerciseProposal> & Pick<AIWorkoutExerciseProposal, 'exerciseId' | 'targetId' | 'sets'>): AIWorkoutExerciseProposal {
@@ -349,5 +362,80 @@ describe('validateProposalAdequacy', () => {
 
     const result = validateProposalAdequacy(p, contextWith(brief));
     expect(result.errors.some((e) => e.includes('exceeds the hard cap') || e.includes('exceeds the leg-day exercise cap'))).toBe(false);
+  });
+
+  // Push Generation Architectural Fix (2026-09-24), priority 1: real
+  // cross-target crediting via creditedTargetKeys (sharedCredit.ts),
+  // reusing weeklyVolumeAudit.ts's own semantic source of truth rather
+  // than a second implementation. These tests exercise the ONE real
+  // shared-credit relationship Blueprint's own authored data defines for
+  // a target pair used elsewhere in this file (triceps/triceps-long-head)
+  // — never a fuzzy or physiologically-inferred one.
+  describe('shared-credit (creditedTargetKeys) — real Blueprint sub-target scope, never a fuzzy inference', () => {
+    it('an exercise Blueprint scopes to BOTH triceps and triceps-long-head credits both targets from a single assignment', () => {
+      const brief: AIProgrammerProgrammingBrief = {
+        session: { purpose: 'push', expectedCoverageTargetIds: ['triceps', 'triceps-long-head'] },
+        muscles: [
+          guidance({ targetId: 'triceps', isGoalOriented: true, recommendedSessionSets: { min: 6, max: 12 } }),
+          guidance({ targetId: 'triceps-long-head', isGoalOriented: true, developmentLevel: 'complete', recommendedSessionSets: { min: 4, max: 4 } }),
+        ],
+        approxSessionSetBudget: 12,
+      };
+      // overhead-triceps-extension is Blueprint-authored (triceps-efficient
+      // AND triceps-complete) to count toward BOTH 'triceps' and
+      // 'triceps-long-head' — assigned here ONLY to triceps-long-head. Real
+      // crediting must still satisfy triceps' own 6-set floor from this
+      // single assignment, with no separate triceps-only exercise present.
+      const p = proposal([exercise({ exerciseId: 'overhead-triceps-extension', targetId: 'triceps-long-head', sets: 6 })]);
+
+      const result = validateProposalAdequacy(p, contextWith(brief));
+      expect(result.ok).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('without real crediting, the same single-assignment case would have failed triceps for "no direct work at all" — proves the fix is load-bearing, not a no-op', () => {
+      // Same fixture as above, but targets deliberately passed as an EMPTY
+      // array — creditedTargetKeys then has nothing to scope through and
+      // falls back to literal-targetId-only credit for every exercise,
+      // reproducing the PRE-FIX behavior exactly (see sharedCredit.ts's own
+      // "credited.length > 0 ? credited : [literal key]" fallback).
+      const brief: AIProgrammerProgrammingBrief = {
+        session: { purpose: 'push', expectedCoverageTargetIds: ['triceps', 'triceps-long-head'] },
+        muscles: [
+          guidance({ targetId: 'triceps', isGoalOriented: true, recommendedSessionSets: { min: 6, max: 12 } }),
+          guidance({ targetId: 'triceps-long-head', isGoalOriented: true, developmentLevel: 'complete', recommendedSessionSets: { min: 4, max: 4 } }),
+        ],
+        approxSessionSetBudget: 12,
+      };
+      const p = proposal([exercise({ exerciseId: 'overhead-triceps-extension', targetId: 'triceps-long-head', sets: 6 })]);
+
+      const result = validateProposalAdequacy(p, contextWith(brief, []));
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => e.startsWith('physique_target:triceps:') && e.includes('no direct work'))).toBe(true);
+    });
+
+    it('documents that obliques and rectus-abdominis have NO shared Blueprint sub-target scope entry today — an ab exercise credits only its own literally-assigned target, never inferred from physiological similarity', () => {
+      const brief: AIProgrammerProgrammingBrief = {
+        session: { purpose: 'push', expectedCoverageTargetIds: ['obliques', 'rectus-abdominis'] },
+        muscles: [
+          guidance({ targetId: 'obliques', recommendedSessionSets: { min: 8, max: 8 } }),
+          guidance({ targetId: 'rectus-abdominis', recommendedSessionSets: { min: 8, max: 8 } }),
+        ],
+        approxSessionSetBudget: 16,
+      };
+      // cable-crunch is a REAL Blueprint core-package exercise, authored
+      // ONLY toward rectus-abdominis per its own contribution text
+      // ("direct rectus-abdominis mass") — assigned here to rectus-abdominis.
+      // If any cross-target inference existed for this pair, obliques
+      // (0 direct sets, non-goal) would still legitimately pass (omission
+      // is allowed for a non-goal target) — this test instead proves
+      // rectus-abdominis' OWN total is exactly the literal 3, never
+      // inflated by a same-named "abs" grouping.
+      const p = proposal([exercise({ exerciseId: 'cable-crunch', targetId: 'rectus-abdominis', sets: 3 })]);
+
+      const result = validateProposalAdequacy(p, contextWith(brief));
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => e.startsWith('physique_target:rectus-abdominis:') && e.includes('clearly inadequate'))).toBe(true);
+    });
   });
 });

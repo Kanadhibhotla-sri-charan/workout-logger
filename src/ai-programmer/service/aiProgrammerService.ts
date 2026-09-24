@@ -43,6 +43,7 @@ import { isLikelyTruncatedOutput, VelonaProvider } from '../provider/velonaProvi
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
 import { validateProposalAdequacy } from '../validation/programmerAdequacyValidator.js';
 import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
+import { completeProposalAdequacy } from '../validation/programmerAdequacyCompletion.js';
 import { validateProposalSchema } from '../validation/programmerOutputValidator.js';
 import { repairProposal, repairWeekReconciliation, repairGenerateWeek } from '../validation/programmerProposalRepair.js';
 import { validateWeekReconciliationDomain } from '../validation/weekReconciliationDomainValidator.js';
@@ -98,7 +99,7 @@ export function buildProgrammerSystemInstruction(): string {
     // "reproduces the real live Push failure" test). Reworded to remove
     // that implicit one-more-and-stop ceiling — every other constraint in
     // this sub-point, and every other rule in this list, is unchanged.
-    '12. Assigning sets, in this exact order: (1) among eligible muscles, give each active-goal (isGoalOriented=true) muscle you choose to train a set count within its own recommendedSessionSets {min, max}; (2) then give each eligible maintenance (isGoalOriented=false) muscle you choose to train a set count within its own recommendedSessionSets {min, max}, from whatever of approxSessionSetBudget remains; (3) a chosen muscle\'s sets should fall within its own recommendedSessionSets range when feasible, but a lower exercise set count is allowed when recent exposure, recovery, or session capacity supports it; (4) when reducing an exercise below its authored/cap maximum, put one short concrete reason in that exercise\'s rationale array and state the same decision in programmingRationale when it materially affects the session; (5) cut supporting maintenance muscles before an active-goal muscle when capacity is genuinely constrained; (6) if one exercise\'s authored sets do not reach a muscle\'s own recommendedSessionSets minimum, add additional valid exercises for that muscle as needed, without exceeding any individual exercise\'s authored sets or per-exposure ceiling, until the muscle\'s recommended minimum is reached or the realistic valid exercise options are exhausted — never inflating any one exercise beyond its own ceiling to avoid adding another.',
+    '12. Assigning sets, in this exact order: (1) among eligible muscles, give each active-goal (isGoalOriented=true) muscle you choose to train a set count within its own recommendedSessionSets {min, max}; (2) then give each eligible maintenance (isGoalOriented=false) muscle you choose to train a set count within its own recommendedSessionSets {min, max}, from whatever of approxSessionSetBudget remains; (3) a chosen muscle\'s sets should fall within its own recommendedSessionSets range when feasible, but a lower exercise set count is allowed when recent exposure, recovery, or session capacity supports it; (4) when reducing an exercise below its authored/cap maximum, put one short concrete reason in that exercise\'s rationale array and state the same decision in programmingRationale when it materially affects the session; (5) cut supporting maintenance muscles before an active-goal muscle when capacity is genuinely constrained; (6) if one exercise\'s authored sets do not reach a muscle\'s own recommendedSessionSets minimum, add additional valid exercises for that muscle as needed, without exceeding any individual exercise\'s authored sets or per-exposure ceiling, until the muscle\'s recommended minimum is reached or the realistic valid exercise options are exhausted — never inflating any one exercise beyond its own ceiling to avoid adding another. That muscle\'s own context.programmingBrief.muscles[].feasibility, when present, already tells you exactly this: whether one exercise is enough, the real minimum number required, and at least one concrete, already-valid combination that reaches it — read it and use it directly rather than working this out yourself; when feasibility.isFeasible is false, no real combination exists and adding more exercises for that muscle cannot fix it. context.programmingBrief.feasibilityWarnings, when non-empty, identifies muscles that cannot BOTH be given adequate coverage in the same session under the real caps below — treat that as permission to fully cover one and legitimately omit the other, never as a reason to spread thin across both.',
     "13. Today's session is built around a fixed set of muscles (context.programmingBrief.session.expectedCoverageTargetIds). Covering the maximum number of them is not automatically the better session — only aim for the full count when the real data genuinely supports quality work across all of them; otherwise, give fewer muscles real, meaningful, result-oriented coverage rather than spreading thin across more. A muscle left out today is not lost — it gets real work at its own next real session. A muscle marked ineligible for today (context.programmingBrief.muscles[].eligibleForThisSession=false) does not belong in this session at all, no matter how much it seems to need training — it gets real work on a day that fits it. Skipping an eligible, expected muscle is allowed only with a specific, cited reason from the actual data (e.g. that muscle's own currentWeeklyDirectSets/exerciseHistory showing genuinely recent heavy direct exposure, or an explicit user note) named in programmingRationale by target id — never a vague impression, and never \"deload\" alone (a deload changes volume per rule 10, it never removes a muscle from today's expected coverage on its own).",
     '14. Missed or skipped sets during a workout don\'t create extra required sets in a future session — the app doesn\'t add make-up volume for a shortfall.',
     '15. This request is self-contained — there is no earlier conversation or memory to rely on; everything you need is already here.',
@@ -300,13 +301,27 @@ export class AIProgrammerService {
       throw new AIOutputDomainInvalidError(domain.errors);
     }
 
+    // Push Generation Architectural Fix (2026-09-24), priority 3:
+    // deterministic completion runs here — AFTER repair and domain
+    // validation (operating on the FINAL, structurally-legitimate
+    // effective exercise/set values, never the raw AI output), and
+    // BEFORE adequacy validation (whose real, unmodified check still
+    // decides pass/fail on this function's output — completion has no
+    // authority of its own and never bypasses it). See
+    // programmerAdequacyCompletion.ts's own header comment for the full
+    // contract: it only ever adds the minimum real, already-feasible
+    // coverage a target the AI already represented is still short of —
+    // never a redesign, never an invented exercise, never a forced pass.
+    const completed = completeProposalAdequacy(domain.value, context);
+
     // Repair: structural/domain validity says nothing about whether the
     // session is a programmatically ADEQUATE workout — see
     // programmerAdequacyValidator.ts's own header comment. Checked here,
-    // after domain validation and before persistence, so an inadequate
-    // proposal is never stored as pending (same "no persistence on
-    // validation failure" guarantee domain validation already has).
-    const adequacy = validateProposalAdequacy(domain.value, context);
+    // after domain validation (and deterministic completion) and before
+    // persistence, so an inadequate proposal is never stored as pending
+    // (same "no persistence on validation failure" guarantee domain
+    // validation already has).
+    const adequacy = validateProposalAdequacy(completed.proposal, context);
     if (!adequacy.ok) {
       throw new AIOutputAdequacyInvalidError(adequacy.errors);
     }
@@ -315,7 +330,11 @@ export class AIProgrammerService {
     // trusted from the model. Whatever value the provider returned is
     // discarded here — it was only used (if at all) for the provider's
     // own internal bookkeeping, never as this proposal's real identity.
-    const proposal: AIWorkoutSessionProposal = { ...domain.value, proposalId: randomUUID() };
+    // Uses completed.proposal (never domain.value directly) — the
+    // COMPLETED proposal, not the pre-completion one, is what proceeds
+    // through persistence, so a real deterministic top-up is never
+    // silently discarded after the fact.
+    const proposal: AIWorkoutSessionProposal = { ...completed.proposal, proposalId: randomUUID() };
 
     // Phase 2 §5: only a proposal that has passed BOTH structural and
     // domain validation is ever persisted — a provider failure or a

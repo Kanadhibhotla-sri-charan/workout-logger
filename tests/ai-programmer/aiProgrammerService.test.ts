@@ -222,7 +222,18 @@ describe('AIProgrammerService', () => {
     // target, which it did not do in this reproduction. No repair rule,
     // adequacy threshold, or authored ceiling was changed to produce or
     // explain this result.
-    it('reproduces the real live Push failure end-to-end, matching the exact traced mechanism: repair clamps every exercise to its own authored ceiling, then adequacy correctly flags triceps AND obliques as still below floor', async () => {
+    //
+    // UPDATED (Push Generation Architectural Fix, priority 3, 2026-09-24):
+    // this exact reproduction is the canonical case deterministic
+    // completion was built to solve. Both triceps and obliques are
+    // represented (nonzero credited work) and feasible (each has a real,
+    // unused, authored candidate that closes its own remaining gap), so
+    // completion now closes both deterministically and the proposal
+    // succeeds. The historical trace above remains accurate — it
+    // documents the mechanism that made pre-completion generation fail;
+    // this test now documents that the SAME mechanism, once identified,
+    // is exactly what completion targets.
+    it('the real live Push failure scenario is now deterministically completed rather than rejected — the exact case completion was built to solve', async () => {
       const { date, weekday } = futureRestDate();
       const provider = new FakeProvider(() =>
         fakeResponse(
@@ -244,16 +255,18 @@ describe('AIProgrammerService', () => {
       );
       const service = new AIProgrammerService(db, provider);
 
-      const err = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' }).catch((e) => e);
-      expect(err).toBeInstanceOf(AIOutputAdequacyInvalidError);
-      // Both flagged targets, exactly as traced — not just one.
-      expect(err.details.issues.some((i: string) => i.includes('physique_target:triceps'))).toBe(true);
-      expect(err.details.issues.some((i: string) => i.includes('physique_target:obliques'))).toBe(true);
-      // mid-pec's 3-of-5 (60%) is genuinely fine — never flagged.
-      expect(err.details.issues.some((i: string) => i.includes('physique_target:mid-pec'))).toBe(false);
-      // The proposal is never persisted — bad AI output is rejected
-      // outright, never silently accepted as if valid.
-      expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeUndefined();
+      // Both previously-flagged targets are now deterministically
+      // completed — the proposal succeeds, and the persisted proposal is
+      // the COMPLETED one (verified via the repo lookup below), never the
+      // pre-completion one silently discarded.
+      const result = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' });
+      expect(result.proposal.exercises.some((e) => e.targetId === 'triceps')).toBe(true);
+      expect(result.proposal.exercises.some((e) => e.targetId === 'obliques')).toBe(true);
+      expect(result.proposal.warnings.some((w) => w.includes('Deterministic completion') && w.includes('triceps'))).toBe(true);
+      expect(result.proposal.warnings.some((w) => w.includes('Deterministic completion') && w.includes('obliques'))).toBe(true);
+      const persisted = new AIProposalRepo(db).findLatestForTargetDate(date);
+      expect(persisted).toBeDefined();
+      expect(persisted!.proposal.exercises.some((e) => e.targetId === 'triceps' && e.exerciseId !== 'cable-pushdown')).toBe(true);
     });
   });
 
@@ -345,19 +358,25 @@ describe('AIProgrammerService', () => {
       expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeDefined();
     });
 
-    // Shared-credit "preserved" means, precisely: the ADEQUACY VALIDATOR's
-    // own per-target check is completely unchanged by either fix — it
-    // still sums sets strictly by each exercise's own literal targetId,
-    // with NO cross-target crediting logic anywhere (verified directly
-    // against programmerAdequacyValidator.ts's own setsByTarget(), which
-    // groups only by `${ex.targetType}:${ex.targetId}`). Rule 7 is
-    // information for the MODEL's own reasoning about what remains
-    // unmet; it does not, and was never asked to, change what the
-    // validator itself requires. This test proves that boundary holds:
-    // sets given only under the sub-target (triceps-long-head) do NOT
-    // satisfy the broader target's (triceps) own floor at the validator
-    // level, exactly as before either fix.
-    it('shared-credit is a prompt-level instruction only — the validator still requires a GOAL-ORIENTED target\'s OWN literal sets, with no automatic crediting from a shared sub-target exercise', async () => {
+    // UPDATED (Push Generation Architectural Fix, 2026-09-24): this test's
+    // ORIGINAL premise — "the adequacy validator sums sets strictly by
+    // literal targetId, with no cross-target crediting" — is no longer
+    // true, and was itself identified as the root of a real production
+    // Push-generation failure (side-delt/obliques/rectus-abdominis-style
+    // under-prescription reproduced 8/8 times against the real provider
+    // even with this exact rule-7 prompt wording in place). The validator
+    // now reuses the SAME real crediting weeklyVolumeAudit.ts already
+    // used (creditedTargetKeys/sharedCredit.ts) — never a fuzzy or
+    // physiologically-inferred one, only Blueprint's own exact
+    // exerciseId/package sub-target scope. This test now proves the
+    // OPPOSITE of its original name: sets given only under the sub-target
+    // (triceps-long-head) DO now credit the broader goal target
+    // (triceps) — 2 sets, correctly still short of triceps' own 8-set
+    // floor (2 < 50% of 8), so this exact case still correctly fails
+    // adequacy, but for the RIGHT reason (a genuine, credited shortfall)
+    // instead of the WRONG one (as if the shared work counted for
+    // nothing at all).
+    it('shared-credit is now REAL at the validator level — sets under a shared sub-target correctly credit the broader goal target, and deterministic completion closes a genuine remaining shortfall', async () => {
       // triceps-back-depth's primary_targets is ['triceps'] (Blueprint) —
       // makes context.targets.find('triceps').isGoalOriented === true, so
       // the validator's own "an active-goal target...received no direct
@@ -386,19 +405,39 @@ describe('AIProgrammerService', () => {
       );
       const service = new AIProgrammerService(db, provider);
 
-      const err = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' }).catch((e) => e);
-      expect(err).toBeInstanceOf(AIOutputAdequacyInvalidError);
-      // triceps itself received zero directly-targeted sets — still
-      // flagged, exactly as it would have been before either fix. Shared
-      // credit never suppresses this check; it is prompt-only guidance
-      // for the model's own reasoning about how much MORE it still needs
-      // to add, never a change to what the validator itself requires.
-      expect(err.details.issues.some((i: string) => i.includes('physique_target:triceps:') && i.includes('no direct work at all'))).toBe(true);
+      // triceps now correctly receives the credited 2 sets (not zero —
+      // the pre-crediting-fix "no direct work at all" case), and its
+      // genuine remaining shortfall against its own 50% threshold is then
+      // deterministically completed (Push Generation Architectural Fix,
+      // priority 3) with a real, unused, authored triceps candidate —
+      // never the same overhead-triceps-extension already present under
+      // triceps-long-head. The proposal succeeds.
+      const result = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' });
+      const tricepsExercises = result.proposal.exercises.filter((e) => e.targetId === 'triceps');
+      expect(tricepsExercises.length).toBeGreaterThan(0);
+      expect(result.proposal.warnings.some((w) => w.includes('Deterministic completion') && w.includes('triceps'))).toBe(true);
     });
 
-    // The pre-existing, unrelated allowance the test above depends on —
-    // confirmed directly so its own premise is documented, not assumed.
-    it('(pre-existing, unrelated behavior, confirmed for context) a non-goal target left at zero direct sets is a legitimate omission, not flagged — unaffected by either fix', async () => {
+    // UPDATED (Push Generation Architectural Fix, 2026-09-24): this
+    // fixture's ORIGINAL premise — "triceps (non-goal here) is left at
+    // zero, so it's a legitimate omission" — is no longer accurate for
+    // this exact fixture: overhead-triceps-extension's 2 sets, assigned
+    // to triceps-long-head, now correctly credit triceps too (Blueprint's
+    // own scope says so), so triceps is no longer "left at zero" — it
+    // has real, credited, non-goal-target coverage of 2 sets, still
+    // below 50% of its own 7-set floor. Previously this fixture could
+    // hide token sub-target work from ever being checked against the
+    // broader target's own floor at all — a real loophole the crediting
+    // fix closes.
+    //
+    // UPDATED AGAIN (Push Generation Architectural Fix, priority 3,
+    // 2026-09-24): deterministic completion now runs between domain and
+    // adequacy validation. triceps is represented (2 credited sets, not
+    // zero) and feasible (a real, unused, authored triceps candidate
+    // exists), so completion closes the gap deterministically — the
+    // proposal now SUCCEEDS, with the completion recorded in warnings.
+    // This is the intended end-to-end effect of priorities 1-3 together.
+    it('a non-goal target that receives real CREDITED (not just literal) coverage under a shared sub-target, still below floor, is deterministically completed rather than rejected', async () => {
       const { date, weekday } = futureRestDate();
       const provider = new FakeProvider(() =>
         fakeResponse(
@@ -414,6 +453,45 @@ describe('AIProgrammerService', () => {
         )
       );
       const service = new AIProgrammerService(db, provider); // no goal seeded — triceps is non-goal here
+
+      const result = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' });
+      // A new, real, authored triceps exercise was added (never the same
+      // overhead-triceps-extension already present under triceps-long-head).
+      const tricepsExercises = result.proposal.exercises.filter((e) => e.targetId === 'triceps');
+      expect(tricepsExercises.length).toBeGreaterThan(0);
+      expect(result.proposal.warnings.some((w) => w.includes('Deterministic completion') && w.includes('triceps'))).toBe(true);
+    });
+
+    // The genuinely-unaffected case: a target that receives NO credited
+    // work at all (no exercise anywhere in the session shares an
+    // exerciseId with its own Blueprint sub-target scope) remains a
+    // legitimate omission for a non-goal target, exactly as before this
+    // fix — crediting only ever ADDS recognition of real shared work, it
+    // never invents work that was never actually done.
+    it('a non-goal target with genuinely NO credited work anywhere in the session remains a legitimate omission, unaffected by the crediting fix', async () => {
+      const { date, weekday } = futureRestDate();
+      const provider = new FakeProvider(() =>
+        fakeResponse(
+          validProposalJson({
+            targetDate: date,
+            weekday,
+            sessionFocus: ['push'],
+            // Two OTHER Push targets covered (mid-pec, upper-pec) — neither
+            // touches triceps or triceps-long-head at all — so the
+            // pre-existing, unrelated "session identity expects >= 2
+            // covered targets" rule is satisfied without involving the
+            // one thing this test is actually about. incline-dumbbell-press
+            // has no authored per-exercise ceiling (repair's generic
+            // 6-set application cap applies instead), avoiding any
+            // interaction with a tight per-exercise Blueprint ceiling.
+            exercises: [
+              { ...validProposalJson().exercises[0], exerciseId: 'flat-barbell-bench-press', targetId: 'mid-pec', sets: 3 },
+              { ...validProposalJson().exercises[0], exerciseId: 'incline-dumbbell-press', targetId: 'upper-pec', sets: 5 },
+            ],
+          })
+        )
+      );
+      const service = new AIProgrammerService(db, provider); // no goal seeded — triceps is non-goal here; no exercise touches it or its sub-target at all
 
       const result = await service.generateSession({ targetDate: date, requestedSessionPurpose: 'push' });
       expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeDefined();
@@ -484,17 +562,28 @@ describe('AIProgrammerService', () => {
     expect(second.proposalId).not.toBe(first.proposalId);
   });
 
-  it('rejects a structurally/domain-valid but programmatically INADEQUATE proposal (exceeds the target\'s deterministic volume cap), and persists nothing', async () => {
+  // UPDATED (Aggregate Target-Cap Repair Fix, 2026-09-24): this test's
+  // ORIGINAL premise — "repair only clamps each exercise individually, so
+  // only the adequacy check catches an aggregate that's over the target's
+  // real cap" — was itself the exact real gap discovered live on Legs
+  // ("gluteus-maximus: total proposed sets (9) exceed cap (6)" / "quads:
+  // (9) exceed cap (8)") and is now closed one layer earlier: repair's
+  // new trimToTargetCaps step (programmerProposalRepair.ts) reduces this
+  // exact aggregate BEFORE adequacy ever sees it, using the real
+  // Blueprint upper-pec cap (5, per src/blueprint/snapshot/
+  // programming.json's current chest-efficient package — the file's own
+  // prior "8" comment was stale). The proposal now SUCCEEDS, with the
+  // repair recorded in warnings, instead of being rejected.
+  it('a structurally/domain-valid proposal whose aggregate exceeds the target\'s real per-exposure cap is now repaired one layer earlier, not rejected', async () => {
     const { date, weekday } = futureDate();
     // incline-dumbbell-press has no Blueprint-authored prescription for
     // upper-pec (freely settable, capped only by the generic 6-set
     // ceiling), while incline-barbell-press does (exactly 3 sets/6-12
     // reps/1-3 RIR in the real Efficient chest package) — together they
-    // sum to 9 direct sets for upper-pec, one more than that muscle's
-    // real Efficient per-exposure cap of 8 (src/blueprint/snapshot/
-    // programming.json: chest efficient package = 8 sets/session).
-    // Structurally/domain-valid (every individual rule still holds);
-    // only the NEW adequacy check should catch the aggregate.
+    // sum to 9 direct sets for upper-pec, well over that muscle's real
+    // Efficient per-exposure cap (5). Structurally/domain-valid (every
+    // individual rule still holds); repair's new aggregate-cap trim now
+    // catches this before adequacy validation ever runs.
     const provider = new FakeProvider(() =>
       fakeResponse(
         validProposalJson({
@@ -535,9 +624,11 @@ describe('AIProgrammerService', () => {
     const before = new AIProposalRepo(db).findLatestForTargetDate(date);
     expect(before).toBeUndefined();
 
-    await expect(service.generateSession({ targetDate: date })).rejects.toBeInstanceOf(AIOutputAdequacyInvalidError);
-
-    expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeUndefined(); // nothing persisted
+    const result = await service.generateSession({ targetDate: date });
+    const upperPecTotal = result.proposal.exercises.filter((e) => e.targetId === 'upper-pec').reduce((sum, e) => sum + e.sets, 0);
+    expect(upperPecTotal).toBeLessThanOrEqual(5);
+    expect(result.proposal.warnings.some((w) => w.includes('Aggregate target-cap trim') && w.includes('upper-pec'))).toBe(true);
+    expect(new AIProposalRepo(db).findLatestForTargetDate(date)).toBeDefined(); // persisted — the repaired proposal is valid
   });
 
   it('rejects invalid (schema-level) provider output and never returns a proposal', async () => {

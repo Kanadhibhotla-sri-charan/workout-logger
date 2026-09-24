@@ -19,8 +19,9 @@
 // chosen, only how much total volume landed on which target.
 
 import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
-import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
+import type { AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
+import { creditedSetsByTarget, creditedTargetKeys } from './sharedCredit.js';
 
 export interface AdequacyValidationResult {
   ok: boolean;
@@ -65,16 +66,7 @@ const MAX_TOTAL_SETS_BUDGET_MULTIPLIER = 2;
  * maintenance target, preserving the AI's freedom to skip a target
  * entirely (rule 10: "omission never implies invalidity") rather than
  * being forced to half-cover everything. [DEFAULT]. */
-const UNDER_PRESCRIPTION_TOLERANCE = 0.5;
-
-function setsByTarget(exercises: readonly AIWorkoutExerciseProposal[]): Map<string, number> {
-  const totals = new Map<string, number>();
-  for (const ex of exercises) {
-    const key = `${ex.targetType}:${ex.targetId}`;
-    totals.set(key, (totals.get(key) ?? 0) + ex.sets);
-  }
-  return totals;
-}
+export const UNDER_PRESCRIPTION_TOLERANCE = 0.5;
 
 function guidanceKey(g: Pick<AIProgrammerMuscleGuidance, 'targetType' | 'targetId'>): string {
   return `${g.targetType}:${g.targetId}`;
@@ -91,7 +83,7 @@ function guidanceKey(g: Pick<AIProgrammerMuscleGuidance, 'targetType' | 'targetI
 export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext): AdequacyValidationResult {
   const errors: string[] = [];
   const brief = context.programmingBrief;
-  const totals = setsByTarget(proposal.exercises);
+  const totals = creditedSetsByTarget(proposal.exercises, context.targets);
   const totalSessionSets = proposal.exercises.reduce((sum, ex) => sum + ex.sets, 0);
 
   // --- Per-muscle set bounds (hard: directSetsPerExposureCap is a real
@@ -153,10 +145,22 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
   }
 
   // --- Session-identity coverage: the session must remain recognizable
-  // as its requested purpose. ---
+  // as its requested purpose. "Covered" must use the SAME real crediting
+  // as `totals` above (Push Generation Architectural Fix, 2026-09-24) —
+  // an exercise assigned to triceps-long-head that Blueprint's own scope
+  // also credits to triceps genuinely covers triceps for this purpose,
+  // not just the target it was literally assigned to. Previously this
+  // checked ex.targetId === targetId directly, so a real, correctly-
+  // credited target could still fail "coverage" purely because no
+  // exercise happened to be literally assigned to it. ---
   if (brief.session.purpose !== null && brief.session.expectedCoverageTargetIds.length > 0) {
+    const creditedKeysWithRealWork = new Set<string>();
+    for (const ex of proposal.exercises) {
+      if (ex.sets < 1) continue;
+      for (const key of creditedTargetKeys(ex, context.targets)) creditedKeysWithRealWork.add(key);
+    }
     const coveredExpected = brief.session.expectedCoverageTargetIds.filter((targetId) => {
-      const covered = proposal.exercises.some((ex) => ex.targetId === targetId && ex.sets >= 1);
+      const covered = [...creditedKeysWithRealWork].some((key) => key.endsWith(`:${targetId}`));
       const totalForTarget = [...totals.entries()].find(([key]) => key.endsWith(`:${targetId}`))?.[1] ?? 0;
       return covered && totalForTarget >= MEANINGFUL_COVERAGE_MIN_SETS;
     });

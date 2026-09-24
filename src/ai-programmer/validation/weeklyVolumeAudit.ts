@@ -18,11 +18,11 @@
 //     that followed the brief exactly. With no brief supplied, the deliverable
 //     figure is used.
 
-import { getSubTargetExerciseIds } from '../../blueprint/subTargetExerciseScope.js';
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import { isTargetCompatibleWithPurpose } from '../../engine/sessionPurpose.js';
 import type { AIProgrammerMuscleGuidance, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
+import { creditedTargetKeys, keyOf } from './sharedCredit.js';
 
 export interface AuditExercise {
   exerciseId: string;
@@ -74,23 +74,8 @@ export function isGoalTarget(target: Pick<AIProgrammerTargetContext, 'goalId' | 
   return Boolean(target?.goalId) || Boolean(target?.isSpecialization);
 }
 
-const keyOf = (targetType: string, targetId: string) => `${targetType}:${targetId}`;
-
 function referenceFor(target: AIProgrammerTargetContext) {
   return getDevelopmentReference(target.targetType as TargetType, target.targetId, developmentPackageLevelFor(target.isSpecialization));
-}
-
-/** Every target whose own scoped exercise list contains `exerciseId`; the
- * assigned target when none does. */
-function creditedTargetKeys(exercise: AuditExercise, targets: readonly AIProgrammerTargetContext[]): string[] {
-  const credited: string[] = [];
-  for (const target of targets) {
-    if (target.targetType !== 'physique_target') continue;
-    const packageId = referenceFor(target).package_id;
-    if (!packageId) continue;
-    if (getSubTargetExerciseIds(packageId, target.targetId)?.includes(exercise.exerciseId)) credited.push(keyOf(target.targetType, target.targetId));
-  }
-  return credited.length > 0 ? credited : [keyOf(exercise.targetType, exercise.targetId)];
 }
 
 export function auditWeeklyVolume(week: AuditWeek, context: AuditContext): WeeklyVolumeAudit {

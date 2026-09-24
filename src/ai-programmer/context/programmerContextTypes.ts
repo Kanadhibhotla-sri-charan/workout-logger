@@ -207,6 +207,65 @@ export interface AIProgrammerMuscleGuidance {
    * work today are natural antagonist-superset candidates — real
    * judgment (rule 12), never a requirement. */
   antagonistGroup: 'push' | 'pull' | null;
+  /** Push Generation Architectural Fix (2026-09-24), priority 2: a real,
+   * deterministic answer to the exact arithmetic real-provider testing
+   * showed the model is unreliable at solving live — "can one exercise
+   * reach this target's own adequacy floor, and if not, what's the
+   * smallest real combination that can?" Computed purely from this
+   * target's own real candidate list (validExercises) and its own
+   * recommendedSessionSets/directSetsPerExposureCap — the exact same
+   * ingredients the deterministic planner's own day-construction loop
+   * (workoutBuilder.ts) already uses for its own path, and the exact
+   * same UNDER_PRESCRIPTION_TOLERANCE the adequacy validator itself
+   * checks against, so this can never silently drift from what actually
+   * gets validated. Never invents a combination that couldn't really
+   * pass; `isFeasible: false` is reported explicitly rather than
+   * pretending a plan exists (see targetFeasibility.ts). */
+  /** Optional (rather than required) so the many existing fixtures across
+   * this codebase's test suites that construct an AIProgrammerMuscleGuidance
+   * literal without it keep typechecking unchanged — only
+   * programmerContextBuilder.ts's own real construction path is required
+   * to populate it. */
+  feasibility?: AIProgrammerTargetFeasibility;
+}
+
+/** See AIProgrammerMuscleGuidance.feasibility's own doc comment. */
+export interface AIProgrammerTargetFeasibility {
+  /** guidance.recommendedSessionSets.min, carried alongside for a
+   * consumer that only has this object in hand. */
+  recommendedMinimum: number;
+  /** recommendedMinimum * UNDER_PRESCRIPTION_TOLERANCE (the exact same
+   * constant programmerAdequacyValidator.ts checks against) — the real
+   * number a target's total credited sets must clear once it receives
+   * ANY direct work this session. */
+  adequacyThreshold: number;
+  /** True when this target's own single best real candidate (by
+   * effective ceiling — min(authored sets, directSetsPerExposureCap))
+   * already clears `adequacyThreshold` alone. */
+  singleExerciseSufficient: boolean;
+  /** The smallest number of this target's own real candidates whose
+   * combined effective ceilings clear `adequacyThreshold` — null only
+   * when `isFeasible` is false (no real combination, using every
+   * candidate, can reach it). */
+  minimumExerciseCount: number | null;
+  /** Up to a small number of concrete, already-cap-respecting example
+   * combinations (each an array of real exerciseIds) that clear
+   * `adequacyThreshold` — never fabricated, always drawn from this
+   * target's own real validExercises. Empty when `isFeasible` is false. */
+  feasibleCombinations: readonly (readonly BlueprintId[])[];
+  /** False only when even every real candidate combined cannot reach
+   * `adequacyThreshold` — reported explicitly (never silently hidden or
+   * papered over with an invented combination) so a genuine Blueprint
+   * data gap is visible rather than assumed away. */
+  isFeasible: boolean;
+  /** Other target keys ("targetType:targetId") that share at least one
+   * EXACT exerciseId with this target in Blueprint's own authored
+   * sub-target scope (creditedTargetKeys/sharedCredit.ts) — never a
+   * fuzzy or physiologically-inferred relationship. Empty when this
+   * target's muscle_group has no scope entry, or shares no exercise with
+   * any other target in scope (e.g. obliques/rectus-abdominis today —
+   * see sharedCredit.ts's own header comment for why). */
+  sharedCreditWith: readonly string[];
 }
 
 export interface AIProgrammerSessionIdentityContext {
@@ -238,6 +297,20 @@ export interface AIProgrammerProgrammingBrief {
    * every eligible priority target's own floor still requires more
    * time than this budget suggests. */
   approxSessionSetBudget: number;
+  /** Push Generation Architectural Fix (2026-09-24): deterministic,
+   * plain-language notes about a real, session-wide constraint that
+   * makes it mathematically impossible for two or more eligible targets
+   * to each independently reach their own adequacy threshold at once —
+   * e.g. two targets that both need >=2 exercises of their own to pass,
+   * but together are capped at fewer total exercises than that by a real
+   * session-wide rule (ABS_SESSION_EXERCISE_SHARE_MAX today). Pure
+   * arithmetic over real, already-known caps and candidates — never a
+   * fuzzy inference and never a suggestion to change any cap or
+   * threshold. Empty when no such collision exists. */
+  /** Optional for the same reason as AIProgrammerMuscleGuidance.feasibility
+   * above — only programmerContextBuilder.ts's real construction path is
+   * required to populate it. */
+  feasibilityWarnings?: readonly string[];
 }
 
 /** Cross-Week Programming Intelligence Fix: the bounded, read-only

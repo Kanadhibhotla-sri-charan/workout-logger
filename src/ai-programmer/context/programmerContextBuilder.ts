@@ -40,7 +40,9 @@ import {
 } from '../../engine/workoutBuilder.js';
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
 import { classifyAestheticTrend, decideVolume } from '../../engine/volumeEngine.js';
-import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, PULL_PHYSIQUE_TARGETS, PUSH_PHYSIQUE_TARGETS, SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
+import { ABS_PHYSIQUE_TARGETS, ABS_SESSION_EXERCISE_SHARE_MAX, DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, PULL_PHYSIQUE_TARGETS, PUSH_PHYSIQUE_TARGETS, SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
+import { UNDER_PRESCRIPTION_TOLERANCE } from '../validation/programmerAdequacyValidator.js';
+import { computeTargetFeasibility } from './targetFeasibility.js';
 import { applyDeloadSetVolumeReduction, DELOAD_REP_RANGE_BIAS } from '../../coaching/periodization/deloadPolicy.js';
 import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
 import { isTargetCompatibleWithPurpose, type SessionPurpose } from '../../engine/sessionPurpose.js';
@@ -410,8 +412,37 @@ export function buildProgrammingBrief(
       eligibleForThisSession,
       reasoning: volumeDecision.reasoning,
       antagonistGroup,
+      // Push Generation Architectural Fix (2026-09-24), priority 2: the
+      // real deterministic answer to "can one exercise reach this
+      // target's own adequacy floor, and if not, what's the smallest
+      // real combination that can" — see targetFeasibility.ts's own doc
+      // comment. Computed for every target, not only eligible ones, so a
+      // consumer never has to guess why it's missing.
+      feasibility: computeTargetFeasibility(t, targets, min, developmentReference.direct_sets_per_exposure, UNDER_PRESCRIPTION_TOLERANCE),
     };
   });
+
+  // Push Generation Architectural Fix (2026-09-24): a real, session-wide
+  // collision check — two or more eligible targets that each genuinely
+  // need >=2 of their OWN exercises to individually clear their own
+  // adequacy threshold, but together share a real session-wide exercise-
+  // count cap smaller than their combined need. Today this applies only
+  // to ABS_PHYSIQUE_TARGETS (obliques/rectus-abdominis) against
+  // ABS_SESSION_EXERCISE_SHARE_MAX, on any non-legs purpose (a legs day's
+  // own abs room is governed by a different rule — sessionRealismCapFor's
+  // own legs branch). Pure arithmetic over already-known real caps and
+  // per-target feasibility — never a suggestion to change any of them,
+  // and never invented for a target pair with no such real constraint. */
+  const feasibilityWarnings: string[] = [];
+  if (sessionPurpose !== 'legs') {
+    const absMuscles = muscles.filter((m) => ABS_PHYSIQUE_TARGETS.includes(m.targetId) && m.eligibleForThisSession);
+    const combinedMinimumExercises = absMuscles.reduce((sum, m) => sum + (m.feasibility?.minimumExerciseCount ?? 0), 0);
+    if (absMuscles.length > 1 && combinedMinimumExercises > ABS_SESSION_EXERCISE_SHARE_MAX) {
+      feasibilityWarnings.push(
+        `${absMuscles.map((m) => m.targetId).join(' and ')} together need at least ${combinedMinimumExercises} exercises to each independently reach their own adequacy floor, but this session's abs-exercise cap allows only ${ABS_SESSION_EXERCISE_SHARE_MAX} total — no exercise selection can adequately cover both at once under current rules; choosing to fully cover one and omit the other is a legitimate choice.`
+      );
+    }
+  }
 
   // estimateMinutes(sets) is workoutBuilder.ts's own real per-set time
   // model — reused, never re-derived, to check whether the sum of every
@@ -434,6 +465,7 @@ export function buildProgrammingBrief(
     session: { purpose: sessionPurpose, expectedCoverageTargetIds },
     muscles,
     approxSessionSetBudget,
+    feasibilityWarnings,
   };
 }
 

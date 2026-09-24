@@ -36,10 +36,14 @@ import type { AIReconciliationContext } from '../context/reconciliationContextTy
 import type { AIGenerateWeekContext } from '../context/generateWeekContextTypes.js';
 import { directSetsPerExposureCapFor } from './setCaps.js';
 import { auditWeeklyVolume } from './weeklyVolumeAudit.js';
+import { creditedSetsByTarget, creditedTargetKeys } from './sharedCredit.js';
 
 /** Same value the domain validator applies to an exercise with no authored
- * prescription. */
-const MAX_SETS_WITHOUT_AUTHORED_CAP = 6;
+ * prescription. Exported (2026-09-24, Push Generation Architectural Fix)
+ * so targetFeasibility.ts's and programmerAdequacyCompletion.ts's own
+ * "effective ceiling" calculations use this exact same number rather
+ * than a second, independently-copied constant. */
+export const MAX_SETS_WITHOUT_AUTHORED_CAP = 6;
 
 function findTarget(targets: readonly AIProgrammerTargetContext[], targetType: string, targetId: string): AIProgrammerTargetContext | undefined {
   return targets.find((t) => t.targetType === targetType && t.targetId === targetId);
@@ -194,12 +198,137 @@ function trimToSessionCaps<T extends AIWorkoutExerciseProposal>(exercises: reado
   return { exercises: result, notes };
 }
 
+/** "physique_target:side-delt" -> ["physique_target", "side-delt"] — the
+ * inverse of sharedCredit.ts's own keyOf, splitting on the first colon
+ * only (a targetId is always a plain kebab-case Blueprint id, never
+ * itself containing one). */
+function parseTargetKey(key: string): [string, string] {
+  const i = key.indexOf(':');
+  return [key.slice(0, i), key.slice(i + 1)];
+}
+
+/** Whether `exercise` has a real Blueprint catalogue entry for its own
+ * literal target — the exact same check repairExercise() makes before
+ * touching anything. An unknown exercise/target pair is deliberately
+ * left untouched by every repair rule in this file (domain validation
+ * rejects it); trimToTargetCaps must honor that too, never trimming an
+ * exercise repair has no real data to reason about. */
+function hasKnownCatalogueEntry(exercise: AIWorkoutExerciseProposal, targets: readonly AIProgrammerTargetContext[]): boolean {
+  const target = findTarget(targets, exercise.targetType, exercise.targetId);
+  return Boolean(target?.validExercises.find((v) => v.exerciseId === exercise.exerciseId));
+}
+
+/** Aggregate Target-Cap Repair Fix (2026-09-24): repairExercise() above
+ * clamps each INDIVIDUAL exercise to at most min(authored sets, the
+ * target's own directSetsPerExposureCap) — but the model can legitimately
+ * assign MULTIPLE different exercises to the same target, each
+ * individually within its own per-exercise ceiling, whose SUM still
+ * exceeds that target's real, hard Blueprint per-exposure cap. Verified
+ * live (Legs, real-provider testing): "gluteus-maximus: total proposed
+ * sets (9) exceed cap (6)" / "quads: (9) exceed cap (8)" — both slipped
+ * through this file's own per-exercise clamp and were only ever caught
+ * downstream, at adequacy validation. This closes that gap at repair
+ * time, for all three AI modes that share repairExerciseList
+ * (generate_session, reconcile_week, generate_week) — never a
+ * mode-specific fix.
+ *
+ * Uses creditedSetsByTarget/creditedTargetKeys (sharedCredit.ts) — the
+ * SAME real crediting adequacy validation itself checks — never a
+ * literal-targetId-only sum, so a shared-credit overage (one exercise's
+ * sets counting toward two targets at once) is caught exactly as
+ * adequacy would catch it, never under-caught by a weaker sum.
+ *
+ * The per-target directSetsPerExposureCap is a HARD constraint here —
+ * unlike repairSets' own per-exercise clamp (which restores an
+ * unexplained goal-muscle reduction back UP to that exercise's own
+ * ceiling), this pass only ever reduces, and a goal-oriented target's
+ * aggregate is never restored back above its own hard cap. In practice
+ * repairSets' restoration branch cannot even fire from a call made here:
+ * every reduction requested below is a REDUCTION from the exercise's own
+ * current, already-repaired sets value, so `given` is always >=
+ * `maxSets`, and repairSets' `sets = min(maxSets, ...)` can only end up
+ * below `maxSets` when `given` itself already was — which never happens
+ * when this function is the one lowering the ceiling. Documented
+ * explicitly (never left as an implicit accident of repairSets' own
+ * logic) per this task's own "goal-oriented protection only while
+ * compatible with the hard aggregate cap" requirement. */
+function trimToTargetCaps<T extends AIWorkoutExerciseProposal>(exercises: readonly T[], scope: RepairScope, notes: string[]): T[] {
+  let result = [...exercises];
+
+  // Every distinct credited target key present at all, in a stable,
+  // first-seen order — computed once, up front, so processing order
+  // never depends on how later reductions reshuffle credited totals.
+  const targetKeysSeen = new Set<string>();
+  for (const ex of result) {
+    for (const key of creditedTargetKeys(ex, scope.targets)) targetKeysSeen.add(key);
+  }
+
+  for (const targetKey of targetKeysSeen) {
+    const [targetType, targetId] = parseTargetKey(targetKey);
+    const target = scope.targets.find((t) => t.targetType === targetType && t.targetId === targetId);
+    if (!target) continue;
+    const cap = directSetsPerExposureCapFor(target);
+    if (cap == null) continue; // no hard cap for this target — nothing to enforce
+
+    // Reduction phase: the exercise with the largest CURRENT set count
+    // among this target's real credited contributors, tie-broken by
+    // exerciseId ascending — recomputed fresh every iteration, so
+    // "largest" always reflects the current state, never a stale sort,
+    // and a shared-credit exercise reduced here correctly reduces every
+    // target it credits, not just this one.
+    let total = creditedSetsByTarget(result, scope.targets).get(targetKey) ?? 0;
+    while (total > cap) {
+      const contributors = result.filter(
+        (e) => e.sets > 1 && hasKnownCatalogueEntry(e, scope.targets) && creditedTargetKeys(e, scope.targets).includes(targetKey)
+      );
+      if (contributors.length === 0) break; // every contributor already at the 1-set floor
+      contributors.sort((a, b) => b.sets - a.sets || a.exerciseId.localeCompare(b.exerciseId));
+      const victim = contributors[0]!;
+      const excess = total - cap;
+      const before = victim.sets;
+      const after = Math.max(1, before - excess);
+      result = result.map((e) => (e === victim ? { ...e, sets: after } : e));
+      notes.push(
+        `Aggregate target-cap trim: reduced ${victim.exerciseId} (credits ${targetKey}) from ${before} to ${after} sets — this target's combined credited sets exceeded its hard per-exposure cap of ${cap}.`
+      );
+      total = creditedSetsByTarget(result, scope.targets).get(targetKey) ?? 0;
+    }
+
+    // Removal phase: every contributor is already at the 1-set floor and
+    // the aggregate is STILL over cap — remove entire exercises, never a
+    // goal-oriented one, reusing the exact same removeLastNonGoalMatching
+    // convention trimToSessionCaps already uses elsewhere in this file.
+    // If only goal-oriented contributors remain, removeLastNonGoalMatching
+    // returns null and the loop stops — the residual overage is left for
+    // adequacy validation to catch, the same "genuine judgment failure"
+    // philosophy trimToSessionCaps' own escalation limit already follows.
+    while (total > cap) {
+      const removed = removeLastNonGoalMatching(
+        result,
+        scope,
+        (e) => hasKnownCatalogueEntry(e, scope.targets) && creditedTargetKeys(e, scope.targets).includes(targetKey)
+      );
+      if (!removed) break;
+      const removedExercise = result.find((e) => !removed.includes(e))!;
+      notes.push(
+        `Aggregate target-cap trim: removed ${removedExercise.exerciseId} (credited ${targetKey}) entirely — every contributing exercise was already at its 1-set floor and the aggregate still exceeded the hard cap of ${cap}.`
+      );
+      result = removed;
+      total = creditedSetsByTarget(result, scope.targets).get(targetKey) ?? 0;
+    }
+  }
+
+  return result;
+}
+
 function repairExerciseList<T extends AIWorkoutExerciseProposal>(exercises: readonly T[], scope: RepairScope): { exercises: T[]; notes: string[] } {
   const notes: string[] = [];
   const perExercise = exercises.map((exercise) => repairExercise(exercise, scope, notes));
   const deduped = repairDuplicateExercises(perExercise, scope);
-  const capped = trimToSessionCaps(deduped.exercises, scope);
-  return { exercises: capped.exercises, notes: [...notes, ...deduped.notes, ...capped.notes] };
+  const targetCapNotes: string[] = [];
+  const targetCapped = trimToTargetCaps(deduped.exercises, scope, targetCapNotes);
+  const capped = trimToSessionCaps(targetCapped, scope);
+  return { exercises: capped.exercises, notes: [...notes, ...deduped.notes, ...targetCapNotes, ...capped.notes] };
 }
 
 function isGoalTarget(targets: readonly AIProgrammerTargetContext[], exercise: AIWorkoutExerciseProposal): boolean {
