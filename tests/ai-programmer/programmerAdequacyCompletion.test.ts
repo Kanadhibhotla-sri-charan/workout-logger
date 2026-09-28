@@ -345,4 +345,193 @@ describe('completeProposalAdequacy', () => {
     const adequacyOnCompleted = validateProposalAdequacy(completed, ctx);
     expect(adequacyOnCompleted.ok).toBe(true);
   });
+
+  // Cross-Target Candidate Contention Fix (2026-09-28): completion used to
+  // process targets in fixed declaration order, so one target's own
+  // greedy pick could permanently consume a candidate a still-pending
+  // target had no alternative for — even when a joint legal allocation
+  // existed for both. These tests cover the most-constrained-target-first
+  // scheduler that replaced that fixed order.
+
+  it('12. regression: two targets sharing one candidate, each with a viable alternative, both reach adequacy via the correct joint allocation', () => {
+    // lat-width has TWO remaining candidates once its own existing
+    // exercise is at cap (shared-candidate, own-alternative); back-
+    // thickness has only ONE (shared-candidate). Declaration order below
+    // lists lat-width FIRST — the exact ordering that reproduced the real
+    // bug (the old fixed-order pass would let lat-width greedily claim
+    // shared-candidate first, starving back-thickness). The new
+    // most-constrained-first scheduler must process back-thickness first
+    // regardless of declaration order.
+    const latWidth = target('lat-width', [
+      validExercise({ exerciseId: 'lat-own-exercise', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'lat-own-alternative', authoredPrescription: { sets: 2, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const backThickness = target('back-thickness', [
+      validExercise({ exerciseId: 'back-own-exercise', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const allTargets = [latWidth, backThickness];
+    const gLatWidth = guidance(latWidth, allTargets, 8, 8); // threshold 4
+    const gBackThickness = guidance(backThickness, allTargets, 8, 8); // threshold 4
+    const ctx = contextWith(allTargets, [gLatWidth, gBackThickness]);
+    // Both already at their own exercise's ceiling (3) — each needs
+    // exactly 1 more set, and only `shared-candidate` is unused by both.
+    const p = proposal([
+      exercise({ exerciseId: 'lat-own-exercise', targetId: 'lat-width', sets: 3 }),
+      exercise({ exerciseId: 'back-own-exercise', targetId: 'back-thickness', sets: 3 }),
+    ]);
+
+    const { proposal: completed } = completeProposalAdequacy(p, ctx);
+
+    const latWidthExercises = completed.exercises.filter((e) => e.targetId === 'lat-width');
+    const backThicknessExercises = completed.exercises.filter((e) => e.targetId === 'back-thickness');
+    // back-thickness (the more constrained target) gets the shared
+    // candidate; lat-width falls back to its own alternative — never the
+    // reverse (which is what the old bug produced).
+    expect(backThicknessExercises.map((e) => e.exerciseId)).toContain('shared-candidate');
+    expect(latWidthExercises.map((e) => e.exerciseId)).toContain('lat-own-alternative');
+    expect(latWidthExercises.map((e) => e.exerciseId)).not.toContain('shared-candidate');
+
+    const adequacy = validateProposalAdequacy(completed, ctx);
+    expect(adequacy.ok).toBe(true); // both targets reach adequacy — the joint legal allocation is found
+  });
+
+  it('13. three-way contention: two of three deficient targets are completed deterministically; the third is left correctly under-threshold, never forced', () => {
+    // back-thickness can only use candidate X; biceps can only use
+    // candidate Y; lat-width could use either X or Y. Only two exercises'
+    // worth of shared capacity exist for three needs — lat-width, the
+    // most flexible (least constrained) target, is the one left short.
+    const backThickness = target('back-thickness', [
+      validExercise({ exerciseId: 'back-filler', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-x', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const latWidth = target('lat-width', [
+      validExercise({ exerciseId: 'lat-filler', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-x', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-y', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const biceps = target('biceps', [
+      validExercise({ exerciseId: 'bicep-filler', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-y', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const allTargets = [backThickness, latWidth, biceps];
+    const gBackThickness = guidance(backThickness, allTargets, 8, 8);
+    const gLatWidth = guidance(latWidth, allTargets, 8, 8);
+    const gBiceps = guidance(biceps, allTargets, 8, 8);
+    const ctx = contextWith(allTargets, [gLatWidth, gBackThickness, gBiceps]);
+    const p = proposal([
+      exercise({ exerciseId: 'back-filler', targetId: 'back-thickness', sets: 3 }),
+      exercise({ exerciseId: 'lat-filler', targetId: 'lat-width', sets: 3 }),
+      exercise({ exerciseId: 'bicep-filler', targetId: 'biceps', sets: 3 }),
+    ]);
+
+    const { proposal: completed } = completeProposalAdequacy(p, ctx);
+    const adequacy = validateProposalAdequacy(completed, ctx);
+
+    // back-thickness and biceps — each with exactly one exclusive
+    // candidate — are always completed; lat-width, the only target with
+    // two options, is deterministically the one left short once both
+    // exclusive claims are honored first.
+    expect(adequacy.errors.some((e) => e.includes('back-thickness'))).toBe(false);
+    expect(adequacy.errors.some((e) => e.includes('biceps'))).toBe(false);
+    expect(adequacy.errors.some((e) => e.includes('lat-width'))).toBe(true);
+    expect(completed.exercises.filter((e) => e.targetId === 'lat-width').map((e) => e.exerciseId)).not.toContain('shared-x');
+    expect(completed.exercises.filter((e) => e.targetId === 'lat-width').map((e) => e.exerciseId)).not.toContain('shared-y');
+  });
+
+  it('14. genuine infeasibility: two targets sharing exactly one candidate — only one can legally consume it, the other correctly remains inadequate (never forced, never duplicated)', () => {
+    const backThickness = target('back-thickness', [
+      validExercise({ exerciseId: 'back-filler', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'only-shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const latWidth = target('lat-width', [
+      validExercise({ exerciseId: 'lat-filler', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'only-shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const allTargets = [backThickness, latWidth];
+    const gBackThickness = guidance(backThickness, allTargets, 8, 8);
+    const gLatWidth = guidance(latWidth, allTargets, 8, 8);
+    const ctx = contextWith(allTargets, [gLatWidth, gBackThickness]);
+    const p = proposal([
+      exercise({ exerciseId: 'back-filler', targetId: 'back-thickness', sets: 3 }),
+      exercise({ exerciseId: 'lat-filler', targetId: 'lat-width', sets: 3 }),
+    ]);
+
+    const { proposal: completed } = completeProposalAdequacy(p, ctx);
+    const sharedUsers = completed.exercises.filter((e) => e.exerciseId === 'only-shared-candidate');
+    expect(sharedUsers.length).toBe(1); // never assigned to both — an exerciseId can only carry one targetId
+
+    const adequacy = validateProposalAdequacy(completed, ctx);
+    expect(adequacy.ok).toBe(false); // no legal joint solution exists — correctly rejected, nothing forced
+    const exerciseIds = completed.exercises.map((e) => e.exerciseId);
+    expect(exerciseIds.length).toBe(new Set(exerciseIds).size); // still no duplicate exerciseId anywhere
+  });
+
+  it('15. determinism: the same contended input produces byte-identical completion output across repeated runs', () => {
+    const latWidth = target('lat-width', [
+      validExercise({ exerciseId: 'lat-own-exercise', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'lat-own-alternative', authoredPrescription: { sets: 2, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const backThickness = target('back-thickness', [
+      validExercise({ exerciseId: 'back-own-exercise', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const allTargets = [latWidth, backThickness];
+    const gLatWidth = guidance(latWidth, allTargets, 8, 8);
+    const gBackThickness = guidance(backThickness, allTargets, 8, 8);
+    const ctx = contextWith(allTargets, [gLatWidth, gBackThickness]);
+    const p = proposal([
+      exercise({ exerciseId: 'lat-own-exercise', targetId: 'lat-width', sets: 3 }),
+      exercise({ exerciseId: 'back-own-exercise', targetId: 'back-thickness', sets: 3 }),
+    ]);
+
+    const run1 = completeProposalAdequacy(p, ctx);
+    const run2 = completeProposalAdequacy(p, ctx);
+    expect(run1.proposal.exercises).toEqual(run2.proposal.exercises);
+    expect(run1.notes).toEqual(run2.notes);
+  });
+
+  it('16. a target completable by Step-1 bump alone is unaffected by, and never interferes with, a separate contended pair in the same proposal', () => {
+    // triceps has real headroom on its own already-present exercise — no
+    // new candidate needed at all, so it never competes for anything.
+    const triceps = target('triceps', [
+      validExercise({ exerciseId: 'triceps-own-exercise', authoredPrescription: { sets: 5, repsMin: 6, repsMax: 12, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const backThickness = target('back-thickness', [
+      validExercise({ exerciseId: 'back-filler', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'only-shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const latWidth = target('lat-width', [
+      validExercise({ exerciseId: 'lat-filler', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+      validExercise({ exerciseId: 'only-shared-candidate', authoredPrescription: { sets: 3, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 } }),
+    ]);
+    const allTargets = [triceps, backThickness, latWidth];
+    const gTriceps = guidance(triceps, allTargets, 8, 12); // threshold 4; existing 3 sets, ceiling 5 -> bump alone closes it
+    const gBackThickness = guidance(backThickness, allTargets, 8, 8);
+    const gLatWidth = guidance(latWidth, allTargets, 8, 8);
+    const ctx = contextWith(allTargets, [gTriceps, gBackThickness, gLatWidth]);
+    const p = proposal([
+      exercise({ exerciseId: 'triceps-own-exercise', targetId: 'triceps', sets: 3 }),
+      exercise({ exerciseId: 'back-filler', targetId: 'back-thickness', sets: 3 }),
+      exercise({ exerciseId: 'lat-filler', targetId: 'lat-width', sets: 3 }),
+    ]);
+
+    const { proposal: completed } = completeProposalAdequacy(p, ctx);
+
+    // triceps: bumped in place, no new exercise, unaffected by the
+    // separate contention elsewhere in the same proposal.
+    const tricepsExercises = completed.exercises.filter((e) => e.targetId === 'triceps');
+    expect(tricepsExercises.length).toBe(1);
+    expect(tricepsExercises[0]!.sets).toBe(4);
+
+    // The separate back-thickness/lat-width contention still resolves
+    // exactly as test 14 — triceps never consumes or blocks their shared
+    // candidate.
+    const sharedUsers = completed.exercises.filter((e) => e.exerciseId === 'only-shared-candidate');
+    expect(sharedUsers.length).toBe(1);
+    const adequacy = validateProposalAdequacy(completed, ctx);
+    expect(adequacy.errors.some((e) => e.includes('triceps'))).toBe(false);
+  });
 });

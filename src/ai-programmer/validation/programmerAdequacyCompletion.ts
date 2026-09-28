@@ -82,6 +82,70 @@ function sortCandidates(candidates: readonly { exerciseId: string; ceiling: numb
   return [...candidates].sort((a, b) => b.ceiling - a.ceiling || a.exerciseId.localeCompare(b.exerciseId));
 }
 
+/** Cross-Target Candidate Contention Fix (2026-09-28): the ONE place
+ * that computes a target's remaining usable authored candidates for a
+ * brand-new exercise — real Blueprint-authored candidates, not already
+ * present anywhere in the CURRENT proposal, with real positive headroom
+ * under their own effective ceiling. Used both to RANK targets by
+ * scarcity (completeProposalAdequacy's own scheduler, below) and, inside
+ * completeOneTarget's Step 2, to actually SELECT a candidate — sharing
+ * this one function guarantees the two can never disagree about which
+ * candidates are still available. */
+function remainingUsableCandidates(
+  exercises: readonly AIWorkoutExerciseProposal[],
+  target: AIProgrammerTargetContext,
+  directSetsPerExposureCap: number | null
+): { exerciseId: string; ceiling: number; catalogueEntry: AIProgrammerValidExerciseContext }[] {
+  const presentIds = new Set(exercises.map((e) => e.exerciseId));
+  return target.validExercises
+    .filter((v) => v.authoredPrescription !== null && !presentIds.has(v.exerciseId))
+    .map((v) => ({ exerciseId: v.exerciseId, ceiling: effectiveCeiling(v, directSetsPerExposureCap), catalogueEntry: v }))
+    .filter((c) => c.ceiling > 0);
+}
+
+/** Cross-Target Candidate Contention Fix (2026-09-28): real remaining
+ * headroom under `target`'s OWN already-present exercise(s) — exactly
+ * the same ceiling-minus-current-sets arithmetic completeOneTarget's own
+ * Step 1 bump performs, extracted so the scheduler can tell, before ever
+ * calling completeOneTarget, whether this target can be fully closed by
+ * bumping alone (in which case it never competes for a shared candidate
+ * with any other target, and its processing order is irrelevant to
+ * every other target's outcome). */
+function ownBumpHeadroom(exercises: readonly AIWorkoutExerciseProposal[], target: AIProgrammerTargetContext, directSetsPerExposureCap: number | null): number {
+  const ownExisting = exercises.filter((e) => e.targetType === target.targetType && e.targetId === target.targetId);
+  let total = 0;
+  for (const e of ownExisting) {
+    const catalogueEntry = target.validExercises.find((v) => v.exerciseId === e.exerciseId);
+    const ceiling = catalogueEntry ? effectiveCeiling(catalogueEntry, directSetsPerExposureCap) : e.sets;
+    total += Math.max(0, ceiling - e.sets);
+  }
+  return total;
+}
+
+/** Cross-Target Candidate Contention Fix (2026-09-28): a target's real
+ * contention rank for the scheduler below — lower goes first.
+ * `Infinity` for a target bump-alone can fully close (see
+ * ownBumpHeadroom's own doc comment: it never touches a shared
+ * candidate, so its position is always safe last); otherwise the real
+ * count of remaining usable authored candidates — a target with FEWER
+ * real options is more likely to be starved by a more flexible target
+ * consuming its only option first, so it goes first (most-constrained-
+ * first — the same principle that resolves the reproduced Pull
+ * lat-width/back-thickness contention: back-thickness had exactly one
+ * remaining candidate (chest-supported-row) while lat-width had two
+ * (chest-supported-row, straight-arm-pulldown); processing back-thickness
+ * first lets lat-width fall back to its own second option instead of
+ * leaving back-thickness with nothing). */
+function contentionRank(
+  exercises: readonly AIWorkoutExerciseProposal[],
+  target: AIProgrammerTargetContext,
+  directSetsPerExposureCap: number | null,
+  missing: number
+): number {
+  if (ownBumpHeadroom(exercises, target, directSetsPerExposureCap) >= missing) return Number.POSITIVE_INFINITY;
+  return remainingUsableCandidates(exercises, target, directSetsPerExposureCap).length;
+}
+
 /** Whether adding one more exercise, for `targetId`, to `exercises` would
  * stay within every real session-wide cap sessionRealismCapFor defines —
  * the SAME function repair's own trimToSessionCaps and adequacy
@@ -124,7 +188,6 @@ function completeOneTarget(
   let missing = Math.ceil(threshold - currentTotal);
   if (missing <= 0) return;
 
-  const presentIds = new Set(exercises.map((e) => e.exerciseId));
   const cap = guidance.directSetsPerExposureCap;
 
   // Step 1: bump this target's OWN already-present exercise(s) up to
@@ -158,10 +221,12 @@ function completeOneTarget(
   // Step 2: add a brand-new exercise — only a real, authored candidate
   // (never one requiring an invented rep/RIR range), not already present
   // anywhere in the proposal, and only while every real session-wide cap
-  // still allows one more exercise for this target.
-  const newCandidates = target.validExercises
-    .filter((v) => v.authoredPrescription !== null && !presentIds.has(v.exerciseId))
-    .map((v) => ({ exerciseId: v.exerciseId, ceiling: effectiveCeiling(v, cap), catalogueEntry: v }));
+  // still allows one more exercise for this target. Uses the SAME
+  // remainingUsableCandidates helper the scheduler's own contentionRank
+  // ranks targets with (Cross-Target Candidate Contention Fix,
+  // 2026-09-28) — selection can never see a candidate ranking didn't
+  // already know about, or vice versa.
+  const newCandidates = remainingUsableCandidates(exercises, target, cap);
   for (const candidate of sortCandidates(newCandidates)) {
     if (missing <= 0) break;
     if (!canAddOneMoreExerciseFor(exercises, target.targetId, purpose)) {
@@ -189,7 +254,6 @@ function completeOneTarget(
       ],
       source: 'blueprint',
     });
-    presentIds.add(catalogueEntry.exerciseId);
     missing -= addSets;
     notes.push(`Deterministic completion: added ${catalogueEntry.exerciseId} for ${target.targetId} at ${addSets} sets to close the remaining shortfall.`);
   }
@@ -207,28 +271,73 @@ export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, con
   const purpose = context.programmingBrief.session.purpose;
   const expectedCoverageSet = new Set(context.programmingBrief.session.expectedCoverageTargetIds);
 
-  // Same deterministic order every time: the order targets/muscles were
-  // built in (never re-sorted by "who needs the most"), so two runs over
-  // identical input always process targets in the same order.
-  for (const guidance of context.programmingBrief.muscles) {
-    if (!guidance.feasibility) continue; // only real construction-path guidance has this — never invented here
-    if (!guidance.eligibleForThisSession) continue;
-    if (guidance.recoveryAdjustment === 'avoid') continue;
+  // Static eligibility filter — never changes as `exercises` mutates
+  // below (unlike currentTotal, which must be recomputed fresh every
+  // time a completion action changes the credited totals).
+  const eligibleGuidances = context.programmingBrief.muscles.filter((guidance) => {
+    if (!guidance.feasibility) return false; // only real construction-path guidance has this — never invented here
+    if (!guidance.eligibleForThisSession) return false;
+    if (guidance.recoveryAdjustment === 'avoid') return false;
     const isPriorityOrExpected = guidance.isGoalOriented || expectedCoverageSet.has(guidance.targetId);
-    if (!isPriorityOrExpected) continue;
-    if (!guidance.feasibility.isFeasible) continue; // no real completion exists — never force one
+    if (!isPriorityOrExpected) return false;
+    if (!guidance.feasibility.isFeasible) return false; // no real completion exists — never force one
+    return true;
+  });
 
+  // Cross-Target Candidate Contention Fix (2026-09-28): deterministic
+  // most-constrained-target-first scheduling, recomputed after every
+  // completion action — replaces the old fixed declaration-order single
+  // pass, which let one target's own greedy pick permanently starve a
+  // still-pending target of its only remaining authored candidate even
+  // when a joint legal allocation existed for both (a real, reproduced
+  // Pull bug: lat-width and back-thickness both needed the shared
+  // candidate `chest-supported-row`; declaration order let lat-width
+  // claim it first, leaving back-thickness with nothing, even though
+  // lat-width's own second-best candidate alone would have covered its
+  // own gap). completeOneTarget's own per-target logic is UNCHANGED —
+  // only WHICH target goes next each iteration changes, and each target
+  // is still processed at most once (a target that makes no progress —
+  // no candidates left, or a real session-wide cap reached — is never
+  // revisited; candidate availability only shrinks over time, so this
+  // loop always terminates in at most `pending.size` iterations). See
+  // contentionRank's own doc comment for the ranking rule and tie-break.
+  const pending = new Set(eligibleGuidances.map((g) => guidanceKey(g)));
+  while (pending.size > 0) {
     const totals = creditedSetsByTarget(exercises, context.targets);
-    const currentTotal = totals.get(guidanceKey(guidance)) ?? 0;
-    // Rule: only a target the AI already represented (nonzero credited
-    // work) is ever completed. A complete omission remains the AI's own
-    // legitimate choice (rule 10) — never force-added here.
-    if (currentTotal === 0) continue;
-    if (currentTotal >= guidance.feasibility.adequacyThreshold) continue; // already adequate — no-op
+    let best: { guidance: AIProgrammerMuscleGuidance; target: AIProgrammerTargetContext; currentTotal: number; rank: number } | null = null;
 
-    const target = findTarget(context.targets, guidance.targetType, guidance.targetId);
-    if (!target) continue;
-    completeOneTarget(exercises, target, guidance, currentTotal, purpose, notes);
+    for (const guidance of eligibleGuidances) {
+      const key = guidanceKey(guidance);
+      if (!pending.has(key)) continue;
+
+      const currentTotal = totals.get(key) ?? 0;
+      // Rule: only a target the AI already represented (nonzero credited
+      // work) is ever completed. A complete omission remains the AI's
+      // own legitimate choice (rule 10) — never force-added here.
+      if (currentTotal === 0 || currentTotal >= guidance.feasibility!.adequacyThreshold) {
+        pending.delete(key); // already adequate, or the AI omitted it entirely — nothing to do, never revisit
+        continue;
+      }
+
+      const target = findTarget(context.targets, guidance.targetType, guidance.targetId);
+      if (!target) {
+        pending.delete(key);
+        continue;
+      }
+
+      const missing = Math.ceil(guidance.feasibility!.adequacyThreshold - currentTotal);
+      const rank = contentionRank(exercises, target, guidance.directSetsPerExposureCap, missing);
+      // Deterministic tie-break: alphabetical by targetId (never object
+      // insertion order or randomness).
+      if (!best || rank < best.rank || (rank === best.rank && guidance.targetId < best.guidance.targetId)) {
+        best = { guidance, target, currentTotal, rank };
+      }
+    }
+
+    if (!best) break; // nothing left needs attention this pass
+
+    completeOneTarget(exercises, best.target, best.guidance, best.currentTotal, purpose, notes);
+    pending.delete(guidanceKey(best.guidance)); // processed exactly once, regardless of outcome
   }
 
   if (notes.length === 0) {
