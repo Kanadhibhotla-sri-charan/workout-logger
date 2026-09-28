@@ -136,14 +136,19 @@ describe('POST /api/ai-programmer/generate-session', () => {
     expect(res.body.error).toBe('AI_OUTPUT_SCHEMA_INVALID');
   });
 
-  it('a structurally/domain-valid but programmatically INADEQUATE proposal (exceeds a target\'s deterministic volume cap) returns 502 AI_OUTPUT_ADEQUACY_INVALID, persisting nothing', async () => {
+  // UPDATED (Aggregate Target-Cap Repair Fix, 2026-09-24): repair's new
+  // trimToTargetCaps step now catches this exact aggregate overage BEFORE
+  // adequacy validation ever runs (see aiProgrammerService.test.ts's own
+  // updated sibling test for the full rationale and the corrected real
+  // cap value — 5, not the file's prior stale "8" comment). The route now
+  // returns 200 with the repaired proposal persisted, not a 502.
+  it('a structurally/domain-valid proposal whose aggregate exceeds a target\'s real per-exposure cap is now repaired one layer earlier, not rejected', async () => {
     process.env.AI_PROGRAMMER_ENABLED = 'true';
     const { date, weekday } = futureDate();
-    // Same real-Blueprint-numbers scenario as the service-level test:
     // incline-dumbbell-press (no authored cap, freely up to 6) +
     // incline-barbell-press (authored exactly 3 sets) sum to 9 direct
-    // sets for upper-pec, 1 over that muscle's real Efficient
-    // per-exposure cap of 8.
+    // sets for upper-pec, well over that muscle's real Efficient
+    // per-exposure cap (5).
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, {
         data: {
@@ -161,15 +166,14 @@ describe('POST /api/ai-programmer/generate-session', () => {
       })
     );
 
-    const before = new WorkoutSessionsRepo(db).listSessions().length;
     const res = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
-    expect(res.status).toBe(502);
-    expect(res.body.ok).toBe(false);
-    expect(res.body.error).toBe('AI_OUTPUT_ADEQUACY_INVALID');
-    expect(new WorkoutSessionsRepo(db).listSessions().length).toBe(before);
+    expect(res.status).toBe(200);
+    const upperPecTotal = res.body.proposal.exercises.filter((e: { targetId: string }) => e.targetId === 'upper-pec').reduce((sum: number, e: { sets: number }) => sum + e.sets, 0);
+    expect(upperPecTotal).toBeLessThanOrEqual(5);
+    expect(res.body.proposal.warnings.some((w: string) => w.includes('Aggregate target-cap trim') && w.includes('upper-pec'))).toBe(true);
 
     const latest = await request(app).get('/api/ai-programmer/proposals/latest').query({ targetDate: date });
-    expect(latest.body.found).toBe(false); // no proposal persisted
+    expect(latest.body.found).toBe(true); // the repaired, valid proposal was persisted
   });
 
   it('provider failure (5xx exhausting retries) is handled safely with a typed error, no crash', async () => {

@@ -54,16 +54,18 @@ function weeklyInput(overrides: Partial<BuildWorkoutInput> = {}): BuildWorkoutIn
 
 describe('Coaching Depth Batch 3 — periodization context reaches the real generated workout', () => {
   it('an active deload reduces the real generated total sets for a target relative to the same target with no deload', () => {
-    const target = baseTarget({ target_id: 'gastrocnemius' });
+    // Quads, not gastrocnemius: gastrocnemius's Efficient reference is now a single 3-set exercise, and a
+    // deload can't reduce below an exercise's authored sets (repair clamps to Blueprint) — so it can't show a reduction.
+    const target = baseTarget({ target_id: 'quads' });
 
     const normal = buildWorkout(weeklyInput({ targets: [target] }));
-    const normalSets = normal.exercises.filter((e) => e.target_id === 'gastrocnemius').reduce((sum, e) => sum + (e.target_sets ?? 0), 0);
+    const normalSets = normal.exercises.filter((e) => e.target_id === 'quads').reduce((sum, e) => sum + (e.target_sets ?? 0), 0);
     expect(normalSets).toBeGreaterThan(0);
 
     const deloaded = buildWorkout(
       weeklyInput({ targets: [target], periodizationContext: { deloadActive: true, setVolumeMultiplier: 0.5, deloadRepRangeBias: 'lower' } })
     );
-    const deloadedSets = deloaded.exercises.filter((e) => e.target_id === 'gastrocnemius').reduce((sum, e) => sum + (e.target_sets ?? 0), 0);
+    const deloadedSets = deloaded.exercises.filter((e) => e.target_id === 'quads').reduce((sum, e) => sum + (e.target_sets ?? 0), 0);
 
     expect(deloadedSets).toBeLessThan(normalSets);
     expect(deloadedSets).toBeGreaterThan(0); // never eliminated entirely

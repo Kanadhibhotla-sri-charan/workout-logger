@@ -16,6 +16,7 @@ export type AIProgrammerErrorCode =
   | 'AI_PROVIDER_RATE_LIMITED'
   | 'AI_PROVIDER_UNAVAILABLE'
   | 'AI_PROVIDER_INVALID_RESPONSE'
+  | 'AI_PROVIDER_OUTPUT_TRUNCATED'
   | 'AI_OUTPUT_SCHEMA_INVALID'
   | 'AI_OUTPUT_DOMAIN_INVALID'
   | 'AI_OUTPUT_ADEQUACY_INVALID'
@@ -38,7 +39,9 @@ export type AIProgrammerErrorCode =
   | 'AI_WEEK_RECONCILIATION_VALIDATION_FAILED'
   | 'AI_WEEK_RECONCILIATION_COMMIT_FAILED'
   | 'AI_WEEK_RECONCILIATION_OUTPUT_SCHEMA_INVALID'
-  | 'AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID';
+  | 'AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID'
+  | 'AI_GENERATE_WEEK_OUTPUT_SCHEMA_INVALID'
+  | 'AI_GENERATE_WEEK_OUTPUT_DOMAIN_INVALID';
 
 /** Base class for every error this integration throws. `statusCode` is
  * the HTTP status the route layer maps it to; `publicMessage` is what a
@@ -101,6 +104,32 @@ export class AIProviderUnavailableError extends AIProgrammerError {
 export class AIProviderInvalidResponseError extends AIProgrammerError {
   constructor(message: string, details?: unknown) {
     super('AI_PROVIDER_INVALID_RESPONSE', message, 502, details);
+  }
+}
+
+/** Coaching Depth follow-up fix: distinguishes "the provider stopped
+ * emitting output because it hit its own configured output-token limit"
+ * from a generic malformed/invalid response. Detected by comparing the
+ * provider's reported completion-token usage (or its `finish`/
+ * `finishReason` field, when the provider supplies a recognized value)
+ * against the max_tokens actually sent on the request — see
+ * `isLikelyTruncatedOutput` in velonaProvider.ts, the one place this
+ * decision is made. Never auto-retried (same convention as
+ * AIOutputSchemaInvalidError: a content-quality problem, not a
+ * transient infra failure) and never treated as a valid proposal —
+ * thrown before JSON.parse/schema validation ever runs against
+ * incomplete or null content. `publicMessage` is safe to show as-is;
+ * `details` carries the diagnostic facts (never raw provider payload
+ * or prompt content). */
+export class AIProviderOutputTruncatedError extends AIProgrammerError {
+  constructor(details: { mode: string; finishReason?: string; completionTokens?: number; configuredMaxOutputTokens?: number }) {
+    super(
+      'AI_PROVIDER_OUTPUT_TRUNCATED',
+      `The AI provider stopped generating before completing its response (finishReason=${details.finishReason ?? 'unknown'}, completionTokens=${details.completionTokens ?? 'unknown'}, configuredMaxOutputTokens=${details.configuredMaxOutputTokens ?? 'unknown'}).`,
+      502,
+      details,
+      'The AI model reached its output limit before completing the proposal. Please try again.'
+    );
   }
 }
 
@@ -372,6 +401,24 @@ export class AIWeekReconciliationOutputDomainInvalidError extends AIProgrammerEr
   constructor(issues: string[]) {
     const bounded = boundDiagnosticIssues(issues);
     super('AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID', `AI week-reconciliation output failed domain validation: ${bounded.join('; ')}`, 502, {
+      issues: bounded,
+    });
+  }
+}
+
+export class AIGenerateWeekOutputSchemaInvalidError extends AIProgrammerError {
+  constructor(issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_GENERATE_WEEK_OUTPUT_SCHEMA_INVALID', `AI generate-week output failed structural schema validation: ${bounded.join('; ')}`, 502, {
+      issues: bounded,
+    });
+  }
+}
+
+export class AIGenerateWeekOutputDomainInvalidError extends AIProgrammerError {
+  constructor(issues: string[]) {
+    const bounded = boundDiagnosticIssues(issues);
+    super('AI_GENERATE_WEEK_OUTPUT_DOMAIN_INVALID', `AI generate-week output failed domain validation: ${bounded.join('; ')}`, 502, {
       issues: bounded,
     });
   }

@@ -469,7 +469,10 @@ describe('Final Programming-Engine Pass §25: required end-to-end tests', () => 
       // subject) reliably gets its own session slot regardless of
       // badminton intensity.
       const seedSessionsRepo = new WorkoutSessionsRepo(fixtureDb);
-      for (const exerciseId of ['cable-crunch', 'cable-woodchop', 'standing-calf-raise', 'seated-calf-raise']) {
+      // Fractional need ranking (2026-09-19): hamstrings (alphabetically ahead of quads) is seeded
+      // as already-covered so rotation-ordered ties don't displace quads; other leg exercises
+      // are not seeded because a real leg exposure Tuesday makes quads 'not due' Thursday.
+      for (const exerciseId of ['cable-crunch', 'cable-woodchop', 'standing-calf-raise', 'seated-calf-raise', 'seated-leg-curl']) {
         const s = seedSessionsRepo.createSession({ date: TUESDAY, session_type: 'gym', status: 'completed' });
         seedSessionsRepo.addExercisePerformance(s.session_id, {
           exercise_id: exerciseId,

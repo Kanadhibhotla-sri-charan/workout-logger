@@ -290,6 +290,16 @@ export class AIProposalRepo {
     return this.transition(id, ['pending', 'approved'], 'expired', '');
   }
 
+  /** (pending|approved) -> rejected — an explicit user discard (2026-09-23
+   * "duplicate AI programs" fix), distinct from `markExpired`'s own
+   * time-based transition. Never `committed`: once a proposal is
+   * committed, discarding it means deleting the real session it created
+   * (DELETE /api/workouts/:id), not rejecting the proposal record — the
+   * two are deliberately separate operations on separate resources. */
+  reject(id: string): AIProposalRecord | undefined {
+    return this.transition(id, ['pending', 'approved'], 'rejected', ', rejected_at = @rejected_at', { rejected_at: nowIso() });
+  }
+
   /** Records why a commit attempt failed without changing `status` —
    * the proposal stays `approved` (still eligible for a future commit
    * retry once the underlying condition is fixed, e.g. a transient DB

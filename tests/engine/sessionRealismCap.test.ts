@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildWeeklyProgrammingPlan, type TargetBuildContext, type WeeklyPlanInput } from '../../src/engine/workoutBuilder.js';
-import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../src/engine/config.js';
+import { LEGS_SESSION_MAX_EXERCISES, LEGS_SESSION_MAX_TARGETS, LEGS_WITH_ABS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../src/engine/config.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 
@@ -58,12 +58,14 @@ function weeklyInput(overrides: Partial<WeeklyPlanInput> = {}): WeeklyPlanInput 
 // (proving the cap is a real count limit, never a time-derived one).
 const SIX_PUSH_TARGET_IDS = ['mid-pec', 'upper-pec', 'lower-pec', 'side-delt', 'obliques', 'triceps'];
 
-// Nine real push/universal-compatible targets — more than the raised
-// maxTargetsPerSession (7) — used specifically to prove the RAISED
+// All nine real push/universal-compatible targets that exist at all
+// (the 7 PUSH_PHYSIQUE_TARGETS plus the 2 remaining UNIVERSAL_PHYSIQUE_TARGETS
+// now that neck-thickness has been removed) — more than the raised
+// maxTargetsPerSession (8) — used specifically to prove the RAISED
 // ceiling: strictly more than 4 (the old limit) may now share a
-// session, while the new 7-muscle ceiling (and the unchanged 9-exercise
+// session, while the new 8-muscle ceiling (and the raised 10-exercise
 // ceiling) still both hold.
-const NINE_TARGET_IDS = ['mid-pec', 'upper-pec', 'lower-pec', 'side-delt', 'obliques', 'triceps', 'triceps-long-head', 'rectus-abdominis', 'neck-thickness'];
+const NINE_TARGET_IDS = ['mid-pec', 'upper-pec', 'lower-pec', 'front-delt', 'side-delt', 'triceps', 'triceps-long-head', 'obliques', 'rectus-abdominis'];
 
 describe('Session Realism Cap — a real session never exceeds the hard exercise/muscle limits', () => {
   it('the raised muscle ceiling (7, was 4) actually lets more than 4 real muscles share a session, while both hard caps still hold', () => {
@@ -96,31 +98,15 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
   });
 
   it('Exercise-Slot-Consumption Starvation Fix: a legitimate top-N muscle whose own full exercise count no longer fits the remaining budget still gets SOME real work, never zero', () => {
-    // current_weekly_primary_sets: 0 is deliberately the "untouched,
-    // needs real volume" case that previously made several targets each
-    // need multiple exercises, exhausting the 9-exercise budget before
-    // every offered target got its turn — the exact scenario that,
-    // before this fix, could exclude a legitimate, correctly-ranked
-    // muscle (like the real triceps-long-head starvation case this fix
-    // was diagnosed from) ENTIRELY, rather than giving it a fair,
-    // reduced share.
-    //
-    // Coaching Depth Batch 2 wires obliques'/rectus-abdominis' own
-    // curated preferred frequency into their weekly reference, which
-    // shifted this exact fixture's boundary so 'rectus-abdominis' at
-    // current_weekly_primary_sets: 0 now lands on an exact multiple of
-    // the 9-exercise budget (no partial trim at all). Giving
-    // rectus-abdominis a small non-zero starting volume (4, still a
-    // real, large deficit against its own 32-set weekly reference)
-    // shifts its own exercise count enough to genuinely misalign the
-    // boundary again — empirically (verified via direct instrumentation
-    // against this exact fixture), 'mid-pec' is now the target whose
-    // own full need doesn't fit what's left of the 9-exercise budget
-    // once 'obliques', 'rectus-abdominis', and 'lower-pec' are placed
-    // ahead of it.
-    const targets = NINE_TARGET_IDS.map((id) =>
-      normalDevTarget({ target_id: id, current_weekly_primary_sets: id === 'rectus-abdominis' ? 4 : 0 })
-    );
+    // Re-derived twice (2026-09-19): once for Sub-Target Exercise Scope, then for the
+    // fractional need ranking (untouched non-goal muscles now tie at 100% unmet and the
+    // rotation ring orders them). Under the current rules every offered target starts
+    // untouched, and 'triceps' (uncapped need 3 exercises) is the target whose full need
+    // does not fit what is left of the 10-exercise budget once the targets ranked ahead
+    // of it are placed. Verified stable: it is trimmed to 2 of 3 with every other target
+    // at 0 sets AND under every single-target head-start from 1-12 sets tried, so this
+    // is not a precisely-tuned boundary.
+    const targets = NINE_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 0 }));
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ targets }));
     const monday = plan.sessions.find((s) => s.date === '2026-08-31')!;
 
@@ -131,28 +117,28 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
     // this test would prove nothing).
     expect(monday.plannedWork.length).toBe(SESSION_REALISM_CAP.maxExercisesPerSession);
 
-    // The real proof: 'mid-pec' got SOME real work here...
-    const midPecExercisesInCappedSession = monday.plannedWork.filter((w) => w.target_id === 'mid-pec').length;
-    expect(midPecExercisesInCappedSession).toBeGreaterThan(0);
+    // The real proof: 'triceps' got SOME real work here...
+    const tricepsExercisesInCappedSession = monday.plannedWork.filter((w) => w.target_id === 'triceps').length;
+    expect(tricepsExercisesInCappedSession).toBeGreaterThan(0);
 
     // ...strictly fewer than its own natural, uncapped need (proving
     // this is a genuine partial trim, not a coincidence of it only ever
     // needing one exercise) — checked by building the exact same target
-    // alone, with the full 9-exercise budget entirely to itself.
-    const isolatedPlan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [normalDevTarget({ target_id: 'mid-pec', current_weekly_primary_sets: 0 })] }));
-    const midPecExercisesUncapped = isolatedPlan.sessions.find((s) => s.date === '2026-08-31')!.plannedWork.length;
-    expect(midPecExercisesUncapped).toBeGreaterThan(midPecExercisesInCappedSession);
+    // alone, with the full exercise budget entirely to itself.
+    const isolatedPlan = buildWeeklyProgrammingPlan(weeklyInput({ targets: [normalDevTarget({ target_id: 'triceps', current_weekly_primary_sets: 0 })] }));
+    const tricepsExercisesUncapped = isolatedPlan.sessions.find((s) => s.date === '2026-08-31')!.plannedWork.length;
+    expect(tricepsExercisesUncapped).toBeGreaterThan(tricepsExercisesInCappedSession);
 
     // A partially-trimmed target must never ALSO carry a
     // session_realism_cap skip (assertNoContradictoryProgramState's own
     // invariant) — it already has real plannedWork.
-    expect(capSkips.some((s) => s.target_id === 'mid-pec')).toBe(false);
+    expect(capSkips.some((s) => s.target_id === 'triceps')).toBe(false);
 
     // Its reduced (not zero, not full) delivered volume is real and
     // traceable, exactly like any other under-delivered target.
-    const midPecAllocation = plan.targetAllocations.find((a) => a.target_id === 'mid-pec')!;
-    expect(midPecAllocation.deliveredDirectSets).toBeGreaterThan(0);
-    expect(midPecAllocation.unmetDirectSets).toBeGreaterThan(0);
+    const tricepsAllocation = plan.targetAllocations.find((a) => a.target_id === 'triceps')!;
+    expect(tricepsAllocation.deliveredDirectSets).toBeGreaterThan(0);
+    expect(tricepsAllocation.unmetDirectSets).toBeGreaterThan(0);
 
     // Every target that DOES have real plannedWork also has real,
     // non-zero delivered volume, and is never simultaneously reported
@@ -280,5 +266,53 @@ describe('Session Realism Cap — a real session never exceeds the hard exercise
     expect(monday.sessionPurpose).toBe('push');
     expect(monday.plannedWork.length).toBeGreaterThan(LEGS_SESSION_MAX_EXERCISES);
     expect(monday.plannedWork.length).toBeLessThanOrEqual(SESSION_REALISM_CAP.maxExercisesPerSession);
+  });
+
+  // Fix (2026-09-19), explicit user request: a leg day's own muscle
+  // ceiling is now tighter (5) than the general cap (7) too, not just
+  // its exercise ceiling.
+  it('Leg+Abs Session Cap fix: a real legs-purpose session never exceeds 5 distinct muscles, even with all 7 real leg-region targets eligible', () => {
+    const SEVEN_LEG_TARGET_IDS = ['quads', 'hamstrings', 'gluteus-maximus', 'gluteus-medius-minimus', 'adductors', 'gastrocnemius', 'soleus'];
+    // current_weekly_primary_sets: 3 (near-adequate) isolates the
+    // muscle-count dimension from the exercise-count one, matching the
+    // same isolation technique the general-cap test above uses.
+    const targets = SEVEN_LEG_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 3 }));
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({ targets, available_training_days: ['monday', 'tuesday', 'thursday'] })
+    );
+    const thursday = plan.sessions.find((s) => s.date === '2026-09-03')!;
+    expect(thursday.sessionPurpose).toBe('legs');
+
+    const distinctTargetsInSession = new Set(thursday.plannedWork.map((w) => w.target_id));
+    expect(distinctTargetsInSession.size).toBeLessThanOrEqual(LEGS_SESSION_MAX_TARGETS);
+    expect(LEGS_SESSION_MAX_TARGETS).toBeLessThan(SESSION_REALISM_CAP.maxTargetsPerSession);
+
+    const capSkips = thursday.skipped.filter((s) => s.reason_code === 'session_realism_cap');
+    expect(capSkips.length).toBeGreaterThan(0);
+  });
+
+  it('Leg+Abs Session Cap fix: abs work alongside legs raises the exercise ceiling to 8, but leg exercises themselves stay capped at 5', () => {
+    const SEVEN_LEG_TARGET_IDS = ['quads', 'hamstrings', 'gluteus-maximus', 'gluteus-medius-minimus', 'adductors', 'gastrocnemius', 'soleus'];
+    const targets = [
+      ...SEVEN_LEG_TARGET_IDS.map((id) => normalDevTarget({ target_id: id, current_weekly_primary_sets: 0 })),
+      normalDevTarget({ target_id: 'obliques', current_weekly_primary_sets: 0 }),
+      normalDevTarget({ target_id: 'rectus-abdominis', current_weekly_primary_sets: 0 }),
+    ];
+    const plan = buildWeeklyProgrammingPlan(
+      weeklyInput({ targets, available_training_days: ['monday', 'tuesday', 'thursday'] })
+    );
+    const thursday = plan.sessions.find((s) => s.date === '2026-09-03')!;
+    expect(thursday.sessionPurpose).toBe('legs');
+
+    const legExercises = thursday.plannedWork.filter((w) => SEVEN_LEG_TARGET_IDS.includes(w.target_id));
+    expect(legExercises.length).toBeLessThanOrEqual(LEGS_SESSION_MAX_EXERCISES);
+    expect(thursday.plannedWork.length).toBeLessThanOrEqual(LEGS_WITH_ABS_SESSION_MAX_EXERCISES);
+
+    // The whole point: real room for abs beyond the leg-only 5-exercise
+    // ceiling, genuinely used in this fixture (otherwise this test would
+    // prove nothing about the +3 exception actually engaging).
+    const absExercises = thursday.plannedWork.filter((w) => w.target_id === 'obliques' || w.target_id === 'rectus-abdominis');
+    expect(absExercises.length).toBeGreaterThan(0);
+    expect(thursday.plannedWork.length).toBeGreaterThan(LEGS_SESSION_MAX_EXERCISES);
   });
 });

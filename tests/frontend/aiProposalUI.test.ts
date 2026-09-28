@@ -421,11 +421,25 @@ describe('program.html: AI Workout Proposal section wiring', () => {
   const html = readFile('program.html');
 
   it('calls the real generate/retrieve/approve/commit endpoints, in the retrieve-after-generate pattern', () => {
-    expect(html).toMatch(/aiApi\('\/api\/ai-programmer\/generate-session', \{ method: 'POST', body: \{ targetDate: day\.date \} \}\)/);
+    expect(html).toMatch(/aiApi\('\/api\/ai-programmer\/generate-session', \{\s*\n\s*method: 'POST',\s*\n\s*body: requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \},\s*\n\s*\}\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{generated\.proposalId\}`\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/approve`, \{ method: 'POST' \}\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/commit`, \{/);
     expect(html).toMatch(/method: 'POST',\s*\n\s*body: \{ intent: isGymDay \? 'fill_existing_gym_day' : 'replace_day_activity' \},/);
+  });
+
+  // Phase 8 (2026-09-23), authoritative day object: a commit changes
+  // this day's real activity/plannedWork/plannedSession server-side —
+  // the week-overview grid's own `weekData` must be refreshed, never
+  // left showing the pre-commit snapshot until an unrelated reload.
+  // Unlike change-activity/swap/reconcile-week's own commit (which close
+  // the modal), this one keeps the modal open to show the fresh
+  // "Committed" state, so it refreshes in the background rather than via
+  // closeDayModal()+loadWeek().
+  it('refreshes weekData after a successful commit, without closing the modal', () => {
+    const commitBody = html.slice(html.indexOf('async function onCommit()'), html.indexOf('renderActions(); // shows the "Checking…" placeholder immediately'));
+    expect(commitBody).toMatch(/state = committed;[\s\S]*loadWeek\(\);/);
+    expect(commitBody).not.toMatch(/closeDayModal\(\)/);
   });
 
   it('approve and commit are two distinct functions/actions, never combined into one', () => {
@@ -449,6 +463,149 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     expect(html).toMatch(/formatSets\(item\.sets, item\.repsMin, item\.repsMax\)/);
     expect(html).toMatch(/formatRirRange\(item\.rirMin, item\.rirMax\)/);
     expect(html).toMatch(/formatRestSeconds\(item\.restSeconds\)/);
+  });
+
+  // 2026-09-23 fix: a real, superseding session (AI-committed or manual)
+  // used to be visible ONLY by opening the full logger — a reported
+  // point of confusion when a commit conflict pointed at a session the
+  // user had no way to preview from the day view.
+  it('shows a read-only preview of a superseding session\'s real exercises, from the real endpoint, without fabricating fields the API does not return', () => {
+    expect(html).toMatch(/buildCommittedSessionPreview\(day\.plannedSession\.id, day\.date, previewEl, modalToken\)/);
+    const previewBody = html.slice(html.indexOf('async function buildCommittedSessionPreview'), html.indexOf('/** `applied_intensity_technique`'));
+    expect(previewBody).toMatch(/api\(`\/api\/workouts\/\$\{sessionId\}`\)/);
+    expect(previewBody).toMatch(/resolveExerciseDisplayName\(ex\.exercise_id\)/);
+    expect(previewBody).toMatch(/formatSets\(ex\.target_sets, ex\.target_reps_min, ex\.target_reps_max\)/);
+    expect(previewBody).toMatch(/formatRirRange\(ex\.target_rir_min, ex\.target_rir_max\)/);
+    // Never invents target_type/target_id/classification — the real
+    // reason a full PlannedWorkItem can't be fabricated here.
+    expect(previewBody).not.toMatch(/target_type|target_id|classification/);
+  });
+
+  // 2026-09-23 fix: rationale was completely absent from the preview
+  // above (unlike every other exercise card on this page) — recovered
+  // here from the session's own originating proposal/reconciliation.
+  it('recovers rationale for the preview from the session\'s own originating proposal/reconciliation, matched by exercise id', () => {
+    expect(html).toMatch(/function parseAiOriginFromNotes\(notes\)/);
+    expect(html).toMatch(/notes\.match\(\/\^AI-proposed session \\\(proposal \(\[\^\)\]\+\)\\\)\$\//);
+    expect(html).toMatch(/notes\.match\(\/\^AI week-reconciliation session \\\(reconciliation \(\[\^\)\]\+\)\\\)\$\//);
+    const rationaleFnBody = html.slice(html.indexOf('async function fetchAiRationaleByExerciseId'), html.indexOf('async function buildCommittedSessionPreview'));
+    expect(rationaleFnBody).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{origin\.id\}`\)/);
+    expect(rationaleFnBody).toMatch(/aiApi\(`\/api\/ai-programmer\/week-reconciliations\/\$\{origin\.id\}`\)/);
+    const previewBody = html.slice(html.indexOf('async function buildCommittedSessionPreview'), html.indexOf('/** `applied_intensity_technique`'));
+    expect(previewBody).toMatch(/Why included/);
+    expect(previewBody).toMatch(/rationaleByExerciseId\.get\(ex\.exercise_id\)/);
+  });
+
+  // 2026-09-23 fix: reported live — a rejected proposal kept showing its
+  // full, long-superseded exercise list right alongside the "no longer
+  // active" notice, wasting space and reading as if it were still real.
+  it('clears the full review once a proposal is expired or rejected — the notice alone is shown, not the stale exercise list', () => {
+    const reviewFnBody = html.slice(html.indexOf('function renderReview()', html.indexOf('function buildAiProposalSection(')), html.indexOf('function renderNotice()'));
+    expect(reviewFnBody).toMatch(/state && state\.status !== 'expired' && state\.status !== 'rejected'/);
+  });
+
+  // 2026-09-23 fix: "AI proposal should ask me what it should generate
+  // for the day — push, pull, legs or upper — before generating."
+  describe('"ask what to generate" fix: a session-focus picker before generating', () => {
+    it('offers exactly push/pull/legs/upper plus a no-preference default', () => {
+      const sectionBody = html.slice(html.indexOf('function buildAiProposalSection('), html.indexOf('const GROUP_ORDER'));
+      expect(sectionBody).toMatch(/function renderPurposePicker\(\)/);
+      expect(sectionBody).toMatch(/\{ value: '', text: 'Let AI decide' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'push', text: 'Push' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'pull', text: 'Pull' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'legs', text: 'Legs' \}/);
+      expect(sectionBody).toMatch(/\{ value: 'upper', text: 'Upper' \}/);
+    });
+
+    it('sends the chosen purpose as requestedSessionPurpose only when one was picked', () => {
+      expect(html).toMatch(/let requestedSessionPurpose = null;/);
+      expect(html).toMatch(/requestedSessionPurpose = select\.value \|\| null;/);
+      expect(html).toMatch(/body: requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \}/);
+    });
+
+    // 2026-09-24 lifecycle fix: `if (state) return;` incorrectly hid the
+    // picker for ANY non-null state, including a rejected/expired
+    // proposal — which must be exactly as fresh a generation opportunity
+    // as no proposal at all (aiProposalActionsFor/aiProposalNoticeFor
+    // already treat the two identically; the picker didn't). Extracted
+    // straight from the real source (not reimplemented) so this is
+    // coupled to the actual shipped condition, not a parallel guess at it.
+    describe('picker visibility across every real proposal lifecycle status', () => {
+      const match = html.match(/const isFreshGenerationOpportunity = (.+);/);
+      const isFreshGenerationOpportunity = match ? (new Function('state', `return ${match[1]};`) as (state: unknown) => boolean) : null;
+
+      it('the real source defines the expected condition', () => {
+        expect(match).not.toBeNull();
+      });
+
+      it('no proposal (state === null) -> picker visible', () => {
+        expect(isFreshGenerationOpportunity!(null)).toBe(true);
+      });
+
+      it('rejected proposal -> picker visible again (a fresh generation opportunity, purpose re-decided each time)', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'rejected' })).toBe(true);
+      });
+
+      it('expired proposal -> picker visible again', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'expired' })).toBe(true);
+      });
+
+      it('pending proposal -> picker hidden (purpose is now fixed)', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'pending' })).toBe(false);
+      });
+
+      it('approved proposal -> picker hidden', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'approved' })).toBe(false);
+      });
+
+      it('committed proposal -> picker hidden', () => {
+        expect(isFreshGenerationOpportunity!({ status: 'committed' })).toBe(false);
+      });
+    });
+
+    // "'Generate a new Thursday proposal' must NOT be a generation path
+    // that bypasses purpose selection" — the retry label (shown whenever
+    // `state` is truthy, i.e. exactly the rejected/expired case) sits
+    // right below the now-visible picker and reads from the very same
+    // `requestedSessionPurpose` onGenerate() sends — never a separate,
+    // picker-free path.
+    it('the "generate a new proposal" retry label uses the same requestedSessionPurpose the picker sets — no separate bypass path', () => {
+      const actionsBody = html.slice(html.indexOf('function renderActions()', html.indexOf('function buildAiProposalSection(')), html.indexOf('async function discover()'));
+      expect(actionsBody).toMatch(/const label = state \? `Generate a new \$\{formatWeekday\(day\.weekday\)\} proposal` : `Generate \$\{formatWeekday\(day\.weekday\)\} with AI`;/);
+      expect(actionsBody).toMatch(/onClick: onGenerate/);
+    });
+
+    it('sends { targetDate, requestedSessionPurpose: "push" } when Push is explicitly selected (extracted from the real onGenerate body construction)', () => {
+      const bodyMatch = html.match(/body: (requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \})/);
+      expect(bodyMatch).not.toBeNull();
+      const buildBody = new Function('requestedSessionPurpose', 'day', `return ${bodyMatch![1]};`) as (p: string | null, d: { date: string }) => unknown;
+      expect(buildBody('push', { date: '2026-09-24' })).toEqual({ targetDate: '2026-09-24', requestedSessionPurpose: 'push' });
+      expect(buildBody(null, { date: '2026-09-24' })).toEqual({ targetDate: '2026-09-24' });
+    });
+  });
+
+  // 2026-09-23 fix: "if a program is already there I should not be able
+  // to generate it again without deleting the 1st one" — day.plannedSession
+  // (the same authoritative field the week grid uses) gates generation
+  // here, regardless of which flow created the real session.
+  describe('"duplicate AI programs" fix: generation is blocked while a real session already exists', () => {
+    it('blocks generate/approve/commit and offers to delete the existing workout instead', () => {
+      expect(html).toMatch(/function blockedByRealSession\(\)/);
+      expect(html).toMatch(/return !!day\.plannedSession && !\(state && state\.committedSessionId === day\.plannedSession\.id\);/);
+      const actionsBody = html.slice(html.indexOf('function renderActions()', html.indexOf('function blockedByRealSession()')), html.indexOf('async function discover()'));
+      expect(actionsBody).toMatch(/if \(blockedByRealSession\(\)\)/);
+      expect(actionsBody).toMatch(/onDeleteExistingSession/);
+    });
+
+    it('DELETE /api/workouts/:id is called, never a softer/partial action, to remove the blocking session', () => {
+      const deleteFnBody = html.slice(html.indexOf('async function onDeleteExistingSession'), html.indexOf('async function onCommit'));
+      expect(deleteFnBody).toMatch(/api\(`\/api\/workouts\/\$\{day\.plannedSession\.id\}`, \{ method: 'DELETE' \}\)/);
+    });
+
+    it('a pending/approved (never committed) proposal can be discarded independently via reject', () => {
+      expect(html).toMatch(/async function onReject\(\)/);
+      expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/reject`, \{ method: 'POST' \}\)/);
+    });
   });
 
   it('displays the committed session as an actionable reference, not just a bare id', () => {

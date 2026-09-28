@@ -34,6 +34,7 @@
 // model, §6, §25).
 
 import { getPackageForTarget } from '../blueprint/developmentPackages.js';
+import { getSubTargetExerciseIds } from '../blueprint/subTargetExerciseScope.js';
 import { getPreferredFrequencyReference } from '../coaching/profiles/muscleProfileService.js';
 import type { BlueprintId } from '../contracts/types.js';
 import type { TargetType } from './goalResolver.js';
@@ -116,7 +117,19 @@ export function getDevelopmentReference(targetType: TargetType, targetId: Bluepr
     };
   }
 
-  const totalSetsPerSession = pkg.exercises.reduce((sum, e) => sum + e.sets, 0);
+  // Sub-Target Exercise Scope (2026-09-19): some muscle_groups (e.g.
+  // "triceps": [triceps, triceps-long-head]; "chest" has no general
+  // member at all — [upper-pec, mid-pec, lower-pec] are three co-equal
+  // slices) share ONE package across multiple target_ids. Blueprint's
+  // package sets are authored assuming the whole package is trained
+  // together; a target that is only one slice of that package must not
+  // be credited with sets from exercises that don't actually train it.
+  // getSubTargetExerciseIds returns null when this target's muscle_group
+  // has only one member (the package was never shared in the first
+  // place), in which case every exercise counts exactly as before.
+  const scopedExerciseIds = getSubTargetExerciseIds(pkg.id, targetId);
+  const relevantExercises = scopedExerciseIds ? pkg.exercises.filter((e) => scopedExerciseIds.includes(e.exercise_id)) : pkg.exercises;
+  const totalSetsPerSession = relevantExercises.reduce((sum, e) => sum + e.sets, 0);
   // Coaching Depth Batch 2: this target's own curated muscle programming
   // profile (src/coaching/profiles/) may override Blueprint's package
   // frequency with a preferred weekly frequency reference — the profile
@@ -134,7 +147,7 @@ export function getDevelopmentReference(targetType: TargetType, targetId: Bluepr
     weekly_direct_set_reference: totalSetsPerSession * sessionsPerWeek,
     direct_sets_per_exposure: totalSetsPerSession,
     sessions_per_week_reference: sessionsPerWeek,
-    coverage: { muscle_group_id: pkg.muscle_group, exercise_count: pkg.exercises.length },
+    coverage: { muscle_group_id: pkg.muscle_group, exercise_count: relevantExercises.length },
   };
 }
 

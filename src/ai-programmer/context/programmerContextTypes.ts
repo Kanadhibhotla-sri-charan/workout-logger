@@ -9,6 +9,8 @@ import type { BlueprintId, GoalType, Weekday } from '../../contracts/types.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import type { RecoveryConstraintResult } from '../../engine/recoveryEngine.js';
 import type { CoachingFoundationContext } from '../../coaching/foundationContext.js';
+import type { TrainingExperienceLevel } from '../../engine/intensityTechniques.js';
+import type { StructuralAdvisory } from '../../coaching/structuralAdvisories/structuralAdvisoryService.js';
 
 export const AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION = 'ai-programmer-context.v1' as const;
 
@@ -46,6 +48,39 @@ export interface AIProgrammerValidExerciseContext {
     rirMin: number;
     rirMax: number;
   } | null;
+  /** Rule 6 fix (2026-09-19): repsMin/repsMax here already reflect this
+   * muscle's own curated rep-range bias (a real coaching preference —
+   * e.g. calves/abs leaning toward higher reps) and, on a deload week,
+   * the deload's own low-fatigue bias — applied the exact same way
+   * deload set-volume already is. Never re-derived or second-guessed by
+   * the AI; these are the final numbers. `null` when no authored
+   * prescription exists for this exercise at all. */
+  /** Real, already-authored Blueprint guidance on whether an intensity
+   * technique (drop-set/rest-pause/myo-reps/etc.) is a plausible fit for
+   * THIS exercise — Blueprint's own suitability criteria (exercise type,
+   * fatigue/skill/stability demand), never a fabricated suggestion.
+   * Empty when no technique's authored criteria match this exercise.
+   * This is informational, not a directive — whether applying one is
+   * actually a good idea today is a real judgment call (rule 12).
+   *
+   * IDs only — the full what/whenToUse/whenNotToUse/fatigueImplications
+   * text for each id lives exactly once in
+   * `AIProgrammerContext.intensityTechniqueCatalogue`, never repeated
+   * per exercise. (Context-bloat fix, 2026-09-18: the prior shape
+   * embedded the full text on every suitable exercise entry — with only
+   * 3 real techniques in the catalogue but 324 suitability matches
+   * across a real session's targets, that was 75% of the entire
+   * context's size, all of it byte-identical duplication.) */
+  plausibleIntensityTechniques: readonly string[];
+  /** How many of this target's own most recent real sessions (up to 4)
+   * used this exact exercise, consecutively counting back from the most
+   * recent — derived from the same `exerciseHistory` already on
+   * AIProgrammerTargetContext, never a second tracking mechanism. A
+   * real, informational signal for deliberate rotation (a different
+   * angle on the same muscle, avoiding staleness) — never a requirement
+   * to swap; an exercise still being effective is reason enough to keep
+   * it. */
+  recentConsecutiveSessionsUsed: number;
 }
 
 export interface AIProgrammerTargetContext {
@@ -165,6 +200,72 @@ export interface AIProgrammerMuscleGuidance {
    * recommendation back to the deterministic decision that produced
    * it. */
   reasoning: string;
+  /** 'push' or 'pull' when this target is classified as one (the same
+   * PUSH_PHYSIQUE_TARGETS/PULL_PHYSIQUE_TARGETS classification the
+   * deterministic engine's own antagonist-pairing logic uses), else
+   * null. A push target and a pull target both receiving real direct
+   * work today are natural antagonist-superset candidates — real
+   * judgment (rule 12), never a requirement. */
+  antagonistGroup: 'push' | 'pull' | null;
+  /** Push Generation Architectural Fix (2026-09-24), priority 2: a real,
+   * deterministic answer to the exact arithmetic real-provider testing
+   * showed the model is unreliable at solving live — "can one exercise
+   * reach this target's own adequacy floor, and if not, what's the
+   * smallest real combination that can?" Computed purely from this
+   * target's own real candidate list (validExercises) and its own
+   * recommendedSessionSets/directSetsPerExposureCap — the exact same
+   * ingredients the deterministic planner's own day-construction loop
+   * (workoutBuilder.ts) already uses for its own path, and the exact
+   * same UNDER_PRESCRIPTION_TOLERANCE the adequacy validator itself
+   * checks against, so this can never silently drift from what actually
+   * gets validated. Never invents a combination that couldn't really
+   * pass; `isFeasible: false` is reported explicitly rather than
+   * pretending a plan exists (see targetFeasibility.ts). */
+  /** Optional (rather than required) so the many existing fixtures across
+   * this codebase's test suites that construct an AIProgrammerMuscleGuidance
+   * literal without it keep typechecking unchanged — only
+   * programmerContextBuilder.ts's own real construction path is required
+   * to populate it. */
+  feasibility?: AIProgrammerTargetFeasibility;
+}
+
+/** See AIProgrammerMuscleGuidance.feasibility's own doc comment. */
+export interface AIProgrammerTargetFeasibility {
+  /** guidance.recommendedSessionSets.min, carried alongside for a
+   * consumer that only has this object in hand. */
+  recommendedMinimum: number;
+  /** recommendedMinimum * UNDER_PRESCRIPTION_TOLERANCE (the exact same
+   * constant programmerAdequacyValidator.ts checks against) — the real
+   * number a target's total credited sets must clear once it receives
+   * ANY direct work this session. */
+  adequacyThreshold: number;
+  /** True when this target's own single best real candidate (by
+   * effective ceiling — min(authored sets, directSetsPerExposureCap))
+   * already clears `adequacyThreshold` alone. */
+  singleExerciseSufficient: boolean;
+  /** The smallest number of this target's own real candidates whose
+   * combined effective ceilings clear `adequacyThreshold` — null only
+   * when `isFeasible` is false (no real combination, using every
+   * candidate, can reach it). */
+  minimumExerciseCount: number | null;
+  /** Up to a small number of concrete, already-cap-respecting example
+   * combinations (each an array of real exerciseIds) that clear
+   * `adequacyThreshold` — never fabricated, always drawn from this
+   * target's own real validExercises. Empty when `isFeasible` is false. */
+  feasibleCombinations: readonly (readonly BlueprintId[])[];
+  /** False only when even every real candidate combined cannot reach
+   * `adequacyThreshold` — reported explicitly (never silently hidden or
+   * papered over with an invented combination) so a genuine Blueprint
+   * data gap is visible rather than assumed away. */
+  isFeasible: boolean;
+  /** Other target keys ("targetType:targetId") that share at least one
+   * EXACT exerciseId with this target in Blueprint's own authored
+   * sub-target scope (creditedTargetKeys/sharedCredit.ts) — never a
+   * fuzzy or physiologically-inferred relationship. Empty when this
+   * target's muscle_group has no scope entry, or shares no exercise with
+   * any other target in scope (e.g. obliques/rectus-abdominis today —
+   * see sharedCredit.ts's own header comment for why). */
+  sharedCreditWith: readonly string[];
 }
 
 export interface AIProgrammerSessionIdentityContext {
@@ -196,6 +297,20 @@ export interface AIProgrammerProgrammingBrief {
    * every eligible priority target's own floor still requires more
    * time than this budget suggests. */
   approxSessionSetBudget: number;
+  /** Push Generation Architectural Fix (2026-09-24): deterministic,
+   * plain-language notes about a real, session-wide constraint that
+   * makes it mathematically impossible for two or more eligible targets
+   * to each independently reach their own adequacy threshold at once —
+   * e.g. two targets that both need >=2 exercises of their own to pass,
+   * but together are capped at fewer total exercises than that by a real
+   * session-wide rule (ABS_SESSION_EXERCISE_SHARE_MAX today). Pure
+   * arithmetic over real, already-known caps and candidates — never a
+   * fuzzy inference and never a suggestion to change any cap or
+   * threshold. Empty when no such collision exists. */
+  /** Optional for the same reason as AIProgrammerMuscleGuidance.feasibility
+   * above — only programmerContextBuilder.ts's real construction path is
+   * required to populate it. */
+  feasibilityWarnings?: readonly string[];
 }
 
 /** Cross-Week Programming Intelligence Fix: the bounded, read-only
@@ -318,9 +433,6 @@ export interface AIProgrammerContext {
     defaultSessionDurationMinutes: number;
     minimumSessionDurationMinutes: number;
     maximumSessionDurationMinutes: number;
-    /** Informational only — see executionContext below; never a
-     * normal-generation eligibility filter (rule 11). */
-    availableEquipment: readonly string[];
   };
 
   objectives: {
@@ -360,10 +472,39 @@ export interface AIProgrammerContext {
    * src/coaching/foundationContext.ts's own doc comment. */
   coachingFoundation: CoachingFoundationContext;
 
-  executionContext: {
-    programmingFilteringAllowed: false;
-    note: string;
-  };
+  /** Rule 6 fix (2026-09-19): the user's confirmed training-experience
+   * level, when one exists — real coaching judgment (how aggressively
+   * to progress volume/intensity over time) is genuinely different for
+   * a beginner vs. an advanced lifter. Null when no confirmed value
+   * exists (never guessed). */
+  trainingExperience: TrainingExperienceLevel | null;
+
+  /** Rule 6 fix (2026-09-19): real, already-computed structural-balance
+   * advisories (e.g. a push/pull volume imbalance) — see
+   * structuralAdvisoryService.ts. Purely informational; never a
+   * directive to auto-adjust anything (this batch's own design: an
+   * advisory is evidence to weigh, not an instruction to obey). Empty
+   * when nothing is currently flagged. */
+  structuralAdvisories: readonly StructuralAdvisory[];
+
+  /** Context-bloat fix (2026-09-18): the full text for every intensity
+   * technique referenced anywhere in `targets[].validExercises[].plausibleIntensityTechniques`,
+   * keyed by id, sent exactly once regardless of how many exercises are
+   * suitable for it. Rule 19 tells the model to look a technique up here
+   * by id. */
+  intensityTechniqueCatalogue: Readonly<
+    Record<
+      string,
+      {
+        id: string;
+        name: string;
+        what: string;
+        whenToUse: string;
+        whenNotToUse: string;
+        fatigueImplications: string;
+      }
+    >
+  >;
 
   outputRequirements: {
     outputSchemaVersion: string;

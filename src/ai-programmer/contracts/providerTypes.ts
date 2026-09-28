@@ -8,7 +8,7 @@
 // only ever sees systemInstruction/context/outputSchema/requestId, all
 // mode-specific shaping happens above this interface, in the service/
 // context-builder layer.
-export type AIProgrammerMode = 'generate_session' | 'reconcile_week';
+export type AIProgrammerMode = 'generate_session' | 'reconcile_week' | 'generate_week';
 
 export interface AIProgrammerProviderRequest {
   mode: AIProgrammerMode;
@@ -24,6 +24,14 @@ export interface AIProgrammerProviderResponse {
   requestId: string;
   rawText: string;
   parsedJson?: unknown;
+  /** The provider's own reported completion-stop reason (Velona's
+   * `data.finish`, e.g. `"stop"` on a normal completion) — passed
+   * through verbatim, never normalized/guessed, so callers that DO
+   * recognize a given provider's vocabulary (see
+   * `isLikelyTruncatedOutput` in velonaProvider.ts) can use it, and it
+   * is always safe to log. Absent when the provider does not report
+   * one. */
+  finishReason?: string;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;

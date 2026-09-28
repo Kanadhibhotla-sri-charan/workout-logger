@@ -114,6 +114,10 @@ export interface AddExercisePerformanceInput {
   target_rir_min?: number | null;
   target_rir_max?: number | null;
   target_rest_seconds?: number | null;
+  /** Optional Blueprint target this exercise was prescribed for — see
+   * ExercisePerformance's own doc comment. */
+  target_type?: 'physique_target' | 'functional_goal' | null;
+  target_id?: string | null;
 }
 
 export interface UpdateWorkoutSessionInput {
@@ -223,6 +227,19 @@ export class WorkoutSessionsRepo {
     return this.getSession(id);
   }
 
+  /** Whole-session delete (2026-09-23, "duplicate AI programs" fix) —
+   * `workout_exercises`/`workout_sets` cascade via their own FK ON
+   * DELETE CASCADE (schema.sql), and any `ai_program_proposals`/
+   * `ai_week_reconciliation_proposals` row whose `committed_session_id`
+   * pointed here is set to NULL by its own FK (never left dangling). The
+   * caller (the route) is responsible for only ever calling this for a
+   * `planned` session — this method itself does not re-check status, so
+   * it must never be exposed as a way to delete real logged history. */
+  deleteSession(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM workout_sessions WHERE session_id = ?').run(id);
+    return result.changes > 0;
+  }
+
   getSession(id: string): WorkoutSession | undefined {
     const row = this.db.prepare('SELECT * FROM workout_sessions WHERE session_id = ?').get(id) as
       | WorkoutSessionRow
@@ -268,10 +285,12 @@ export class WorkoutSessionsRepo {
     const insertExercise = this.db.prepare(
       `INSERT INTO workout_exercises
          (id, workout_session_id, exercise_id, order_index, role,
-          target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds)
+          target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds,
+          target_type, target_id)
        VALUES
          (@id, @workout_session_id, @exercise_id, @order_index, @role,
-          @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds)`
+          @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds,
+          @target_type, @target_id)`
     );
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
@@ -287,6 +306,8 @@ export class WorkoutSessionsRepo {
       target_rir_min: input.target_rir_min ?? null,
       target_rir_max: input.target_rir_max ?? null,
       target_rest_seconds: input.target_rest_seconds ?? null,
+      target_type: input.target_type ?? null,
+      target_id: input.target_id ?? null,
     };
 
     const tx = this.db.transaction(() => {
@@ -326,6 +347,101 @@ export class WorkoutSessionsRepo {
       ...prescription,
       sets,
     };
+  }
+
+  /** Fix: an AI-committed session's exercises are pre-created (with
+   * empty, uncompleted sets) at commit time by
+   * commitAIProposalToPlannedSession — unlike the deterministic
+   * "generated preview" flow, where addExercisePerformance() above is
+   * the FIRST time an exercise's row ever exists. There was previously
+   * no way to fill in weight/reps for an already-existing exercise row,
+   * so an AI-committed session could never actually be logged against.
+   * This replaces one exercise's own sets wholesale (matching the
+   * frontend's own array-shaped set-editor state) rather than patching
+   * individual set rows by id — simpler, and set identity within one
+   * exercise was never meaningful beyond set_number order. Returns
+   * undefined if workoutExerciseId doesn't exist. */
+  updateExercisePerformanceSets(workoutExerciseId: string, sets: Array<Partial<Set> & { set_number: number }>): ExercisePerformance | undefined {
+    const exerciseRow = this.db.prepare('SELECT * FROM workout_exercises WHERE id = ?').get(workoutExerciseId) as
+      | {
+          id: string;
+          workout_session_id: string;
+          exercise_id: string;
+          order_index: number;
+          role: string;
+          target_sets: number | null;
+          target_reps_min: number | null;
+          target_reps_max: number | null;
+          target_rir_min: number | null;
+          target_rir_max: number | null;
+          target_rest_seconds: number | null;
+          target_type: 'physique_target' | 'functional_goal' | null;
+          target_id: string | null;
+        }
+      | undefined;
+    if (!exerciseRow) return undefined;
+
+    const normalizedSets: Set[] = sets
+      .slice()
+      .sort((a, b) => a.set_number - b.set_number)
+      .map((s) => ({ ...DEFAULT_SET, ...s }));
+
+    const deleteSets = this.db.prepare('DELETE FROM workout_sets WHERE workout_exercise_id = ?');
+    const insertSet = this.db.prepare(
+      `INSERT INTO workout_sets
+         (id, workout_exercise_id, set_number, weight, reps, completed, rir, rpe, rest_seconds, technique, tempo, notes)
+       VALUES
+         (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes)`
+    );
+
+    const tx = this.db.transaction(() => {
+      deleteSets.run(workoutExerciseId);
+      for (const set of normalizedSets) {
+        insertSet.run({
+          id: newId('set'),
+          workout_exercise_id: workoutExerciseId,
+          set_number: set.set_number,
+          weight: set.weight,
+          reps: set.reps,
+          completed: set.completed ? 1 : 0,
+          rir: set.rir,
+          rpe: set.rpe,
+          rest_seconds: set.rest_seconds,
+          technique: set.technique,
+          tempo: set.tempo,
+          notes: set.notes,
+        });
+      }
+    });
+    tx();
+
+    return {
+      id: exerciseRow.id,
+      workout_session_id: exerciseRow.workout_session_id,
+      exercise_id: exerciseRow.exercise_id,
+      order: exerciseRow.order_index,
+      role: exerciseRow.role,
+      target_sets: exerciseRow.target_sets,
+      target_reps_min: exerciseRow.target_reps_min,
+      target_reps_max: exerciseRow.target_reps_max,
+      target_rir_min: exerciseRow.target_rir_min,
+      target_rir_max: exerciseRow.target_rir_max,
+      target_rest_seconds: exerciseRow.target_rest_seconds,
+      target_type: exerciseRow.target_type,
+      target_id: exerciseRow.target_id,
+      sets: normalizedSets,
+    };
+  }
+
+  /** Fix: the counterpart to `addExercisePerformance` for removing an
+   * exercise row outright (e.g. "Skip" on an already-persisted, not-yet-
+   * logged AI-committed exercise, or the first half of a Substitute:
+   * delete then re-add with the new exercise_id — see logger.html).
+   * `ON DELETE CASCADE` on workout_sets.workout_exercise_id removes its
+   * sets automatically. Returns false if no such row existed. */
+  deleteExercisePerformance(workoutExerciseId: string): boolean {
+    const result = this.db.prepare('DELETE FROM workout_exercises WHERE id = ?').run(workoutExerciseId);
+    return result.changes > 0;
   }
 
   /** UI Build Phase §35: every real performance of one exact exercise,
@@ -382,6 +498,8 @@ export class WorkoutSessionsRepo {
       target_rir_min: number | null;
       target_rir_max: number | null;
       target_rest_seconds: number | null;
+      target_type: 'physique_target' | 'functional_goal' | null;
+      target_id: string | null;
     }>;
 
     const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
@@ -411,6 +529,8 @@ export class WorkoutSessionsRepo {
         target_rir_min: row.target_rir_min,
         target_rir_max: row.target_rir_max,
         target_rest_seconds: row.target_rest_seconds,
+        target_type: row.target_type,
+        target_id: row.target_id,
         sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
       };
     });

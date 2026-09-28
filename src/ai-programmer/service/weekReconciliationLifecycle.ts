@@ -55,7 +55,23 @@ export function getLatestWeekReconciliationForDate(db: Database.Database, target
   const repo = new AIWeekReconciliationRepo(db);
   const record = repo.findLatestForTargetDate(targetDate);
   if (!record) return undefined;
-  return expireIfNeeded(repo, record);
+  const current = expireIfNeeded(repo, record);
+  if (isCommittedSessionElsewhereNow(db, current, targetDate)) return undefined;
+  return current;
+}
+
+/** Same schedule swap/move bugfix as aiProposalLifecycle.ts's own
+ * isCommittedSessionElsewhereNow — see its doc comment for the full
+ * rationale and the real production incident that surfaced this. A
+ * committed reconciliation's `target_date` is likewise never updated by
+ * a later swap/move, so its frozen commit-time content must stop being
+ * reported as "the active reconciliation for this date" once its real
+ * session has moved elsewhere (or been deleted). */
+function isCommittedSessionElsewhereNow(db: Database.Database, record: AIWeekReconciliationRecord, targetDate: string): boolean {
+  if (record.status !== 'committed') return false;
+  if (!record.committedSessionId) return true;
+  const session = new WorkoutSessionsRepo(db).getSession(record.committedSessionId);
+  return !session || session.date !== targetDate;
 }
 
 /** Explicit approval only — never commits, never mutates the proposal's
@@ -73,6 +89,27 @@ export function approveWeekReconciliation(db: Database.Database, reconciliationI
     throw new AIWeekReconciliationInvalidStateError(reconciliationId, current?.status ?? record.status, 'approved');
   }
   return approved;
+}
+
+/** Same explicit-discard addition as aiProposalLifecycle.ts's own
+ * rejectProposal (2026-09-23 "duplicate AI programs" fix) — see its doc
+ * comment for the full rationale, identical here at the weekly
+ * granularity. A committed reconciliation cannot be rejected here — its
+ * real session already exists; discarding it means DELETE
+ * /api/workouts/:id on that session instead. */
+export function rejectWeekReconciliation(db: Database.Database, reconciliationId: string): AIWeekReconciliationRecord {
+  const record = loadCurrent(db, reconciliationId);
+  if (record.status === 'rejected') return record;
+  if (record.status !== 'pending' && record.status !== 'approved') {
+    throw new AIWeekReconciliationInvalidStateError(reconciliationId, record.status, 'rejected');
+  }
+
+  const rejected = new AIWeekReconciliationRepo(db).reject(reconciliationId);
+  if (!rejected) {
+    const current = new AIWeekReconciliationRepo(db).getById(reconciliationId);
+    throw new AIWeekReconciliationInvalidStateError(reconciliationId, current?.status ?? record.status, 'rejected');
+  }
+  return rejected;
 }
 
 export interface CommitWeekReconciliationResult {
@@ -93,6 +130,28 @@ function classifyCommitFailure(_err: unknown): string {
  * for a day nobody is training today. This mirrors
  * commitAIProposalToPlannedSession's "session creation only for the one
  * date this commit is actually about" discipline at the weekly scale. */
+/** Real display bug (2026-09-23), reported live via a screenshot showing
+ * "Whole-physique development — undefined." on a day this reconciliation
+ * had reorganized: unlike computeFreshWeek's own deterministic path
+ * (programming.ts's enrichPlannedWork), this snapshot never resolved
+ * target_name/exercise_name before persisting. renderWeekDays' own
+ * "showDeterministic" read path trusts whatever was persisted here
+ * VERBATIM (by design — it never re-enriches on every read), so a
+ * persisted item missing target_name rendered as the literal string
+ * "undefined" the moment the frontend's describeWork() built its
+ * one-line summary from it. Duplicated here (rather than importing
+ * programming.ts's own private resolveTargetName/resolveExerciseName)
+ * to avoid a route-file dependency from a service file — this needs only
+ * BlueprintAdapter, already imported above, no goal/label DB lookups. */
+function resolveTargetName(targetType: 'physique_target' | 'functional_goal', targetId: string): string {
+  const resolved = targetType === 'physique_target' ? BlueprintAdapter.getTarget(targetId) : BlueprintAdapter.getFunctionalGoal(targetId);
+  return resolved?.name ?? targetId;
+}
+
+function resolveExerciseName(exerciseId: string): string {
+  return BlueprintAdapter.getExercise(exerciseId)?.name ?? exerciseId;
+}
+
 function toSnapshot(day: AIWeekReconciliationDay): unknown {
   return {
     sessionPurpose: day.session?.sessionPurpose ?? null,
@@ -100,8 +159,10 @@ function toSnapshot(day: AIWeekReconciliationDay): unknown {
     estimatedMinutes: day.session?.estimatedMinutes ?? 0,
     plannedWork: (day.session?.exercises ?? []).map((e) => ({
       exercise_id: e.exerciseId,
+      exercise_name: resolveExerciseName(e.exerciseId),
       target_type: e.targetType,
       target_id: e.targetId,
+      target_name: resolveTargetName(e.targetType, e.targetId),
       role: e.role,
       classification: e.classification,
       sets: e.sets,
@@ -109,6 +170,14 @@ function toSnapshot(day: AIWeekReconciliationDay): unknown {
       reps_max: e.repsMax,
       rir_min: e.rirMin,
       rir_max: e.rirMax,
+      // The real rationale the model gave for this exercise — genuinely
+      // available (AIWeekReconciliationExerciseProposal already carries
+      // it), never fabricated. describeWork()'s own progression line
+      // stays absent (progression_decision omitted below) rather than
+      // inventing one; friendly_reasoning is what the frontend's
+      // buildExerciseDetailCard actually reads for its "Why included"
+      // expansion.
+      friendly_reasoning: e.rationale && e.rationale.length > 0 ? e.rationale.join(' ') : null,
     })),
     // Deliberately empty — a persisted snapshot's `skipped` entries have
     // their own enrichment shape (renderWeekDays' enrichSkip) this

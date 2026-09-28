@@ -239,12 +239,28 @@ export function reconcileWeekProgram(
 /** A pure read if `weekStart` already has a persisted program (spec
  * §18: a plain GET must never blindly regenerate) — `computeFresh` is
  * NOT called in that case. Only calls `computeFresh` (which runs the
- * planner) the first time this week has ever been requested. */
-export function ensureWeekProgramGenerated(db: Database.Database, weekStart: string, computeFresh: () => { days: FreshDayInput[]; aggregates: WeekAggregates }): PersistedWeekProgram {
+ * planner) the first time this week has ever been requested.
+ *
+ * generate_week (2026-09-23): `computeFresh` may now be async — the
+ * AI path (AIProgrammerService.generateWeek) makes a real provider
+ * call, which the previous synchronous-only signature could not
+ * represent without an awkward, forced-synchronous wrapper. Adapted the
+ * boundary itself (this function, and its two callers in
+ * programming.ts) to `async`/`Promise` rather than force the async AI
+ * call through a sync callback shape. The deterministic path
+ * (computeFreshWeek) is still a plain synchronous function — a synchronous
+ * return value is automatically wrapped in a resolved Promise by
+ * `await`, so this is a strict superset of the old contract, not a
+ * breaking change to what a caller may pass. */
+export async function ensureWeekProgramGenerated(
+  db: Database.Database,
+  weekStart: string,
+  computeFresh: () => { days: FreshDayInput[]; aggregates: WeekAggregates } | Promise<{ days: FreshDayInput[]; aggregates: WeekAggregates }>
+): Promise<PersistedWeekProgram> {
   const repo = new WeeklyProgramRepo(db);
   const existing = repo.getByWeekStart(weekStart);
   if (existing) return existing;
-  const { days, aggregates } = computeFresh();
+  const { days, aggregates } = await computeFresh();
   return reconcileWeekProgram(db, weekStart, days, aggregates);
 }
 

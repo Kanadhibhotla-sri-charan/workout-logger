@@ -6,17 +6,19 @@
 // already has) rather than a second, drifting copy.
 
 import type Database from 'better-sqlite3';
-import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../engine/config.js';
+import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import type { AIWeekReconciliationOutput } from '../contracts/weekReconciliationTypes.js';
 import type { AIReconciliationContext } from '../context/reconciliationContextTypes.js';
 import { validateExerciseAgainstTargets } from './programmerDomainValidator.js';
+import { directSetsPerExposureCapFor } from './setCaps.js';
 
 export interface WeekReconciliationDomainValidationResult {
   ok: boolean;
   value?: AIWeekReconciliationOutput;
   errors: string[];
+  warnings: string[];
 }
 
 /** `db` is optional for the same reason `validateProposalDomain`'s is:
@@ -29,6 +31,7 @@ export function validateWeekReconciliationDomain(
   db?: Database.Database
 ): WeekReconciliationDomainValidationResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   if (output.targetDate !== context.request.targetDate) {
     errors.push(`targetDate: output targets "${output.targetDate}" but the request was for "${context.request.targetDate}"`);
@@ -96,7 +99,9 @@ export function validateWeekReconciliationDomain(
     if (day.session) {
       const seen = new Set<string>();
       for (const [exIndex, exercise] of day.session.exercises.entries()) {
-        validateExerciseAgainstTargets(exercise, context.targets, seen, `${path}.session.exercises[${exIndex}] (${exercise.exerciseId})`, errors);
+        const exerciseTarget = context.targets.find((t) => t.targetType === exercise.targetType && t.targetId === exercise.targetId);
+        const setCap = exerciseTarget ? directSetsPerExposureCapFor(exerciseTarget) : null;
+        validateExerciseAgainstTargets(exercise, context.targets, seen, `${path}.session.exercises[${exIndex}] (${exercise.exerciseId})`, errors, warnings, setCap ?? undefined);
       }
 
       // Session Realism Cap (Programming Advisor Fix, 2026-09-14): the
@@ -105,16 +110,34 @@ export function validateWeekReconciliationDomain(
       // real (unlocked) day, since a week reconciliation can rewrite
       // several days at once.
       const distinctTargets = new Set(day.session.exercises.map((ex) => `${ex.targetType}:${ex.targetId}`));
-      if (distinctTargets.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
-        errors.push(`${path}.session: ${distinctTargets.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
+      const targetIdsInSession = [...new Set(day.session.exercises.map((ex) => ex.targetId))];
+      const purpose = day.session.sessionPurpose;
+      const validatedPurpose = purpose === 'push' || purpose === 'pull' || purpose === 'legs' || purpose === 'upper' ? purpose : null;
+      const caps = sessionRealismCapFor(validatedPurpose, targetIdsInSession);
+      if (distinctTargets.size > caps.maxTargets) {
+        errors.push(`${path}.session: ${distinctTargets.size} distinct targets — exceeds the hard cap of ${caps.maxTargets} targets per session`);
       }
-      // Legs-Session Exercise Cap (2026-09-16), explicit user request: a
-      // 'legs'-purpose day's own exercise ceiling is tighter (5) than the
-      // general cap (9) — same LEGS_SESSION_MAX_EXERCISES constant the
-      // deterministic engine (workoutBuilder.ts) enforces.
-      const maxExercisesForThisSession = day.session.sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
-      if (day.session.exercises.length > maxExercisesForThisSession) {
-        errors.push(`${path}.session: ${day.session.exercises.length} total exercises — exceeds the hard cap of ${maxExercisesForThisSession} exercises per session`);
+      // Legs-Session Exercise Cap (2026-09-16, tightened 2026-09-19),
+      // explicit user request: sessionRealismCapFor (config.ts, the one
+      // shared source of truth every caller reads) decides the same
+      // muscle/exercise ceilings the deterministic engine enforces,
+      // including the leg+abs exception.
+      if (day.session.exercises.length > caps.maxExercises) {
+        errors.push(`${path}.session: ${day.session.exercises.length} total exercises — exceeds the hard cap of ${caps.maxExercises} exercises per session`);
+      }
+      if (caps.legExerciseShareMax !== null) {
+        const legExerciseCount = day.session.exercises.filter((ex) => LEGS_PHYSIQUE_TARGETS.includes(ex.targetId)).length;
+        if (legExerciseCount > caps.legExerciseShareMax) {
+          errors.push(`${path}.session: ${legExerciseCount} leg exercises — exceeds the leg-day exercise cap of ${caps.legExerciseShareMax} (extra room in an abs-paired leg day is for abs, not more leg work)`);
+        }
+      }
+      // Abs Session Exercise Share Cap (2026-09-19), explicit user
+      // request: general (non-legs) mirror of the leg-day check above.
+      if (caps.absExerciseShareMax !== null) {
+        const absExerciseCount = day.session.exercises.filter((ex) => ABS_PHYSIQUE_TARGETS.includes(ex.targetId)).length;
+        if (absExerciseCount > caps.absExerciseShareMax) {
+          errors.push(`${path}.session: ${absExerciseCount} abs exercises — exceeds the abs-exercise share cap of ${caps.absExerciseShareMax} for this session`);
+        }
       }
     }
   }
@@ -139,7 +162,7 @@ export function validateWeekReconciliationDomain(
   }
 
   if (errors.length > 0) {
-    return { ok: false, errors };
+    return { ok: false, errors, warnings };
   }
-  return { ok: true, errors: [], value: output };
+  return { ok: true, errors: [], warnings, value: output };
 }

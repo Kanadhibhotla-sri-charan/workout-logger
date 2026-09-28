@@ -18,9 +18,10 @@
 // remains fully eligible, and nothing here inspects WHICH exercise was
 // chosen, only how much total volume landed on which target.
 
-import { LEGS_SESSION_MAX_EXERCISES, SESSION_REALISM_CAP } from '../../engine/config.js';
-import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
+import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
+import type { AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
+import { creditedSetsByTarget, creditedTargetKeys } from './sharedCredit.js';
 
 export interface AdequacyValidationResult {
   ok: boolean;
@@ -65,16 +66,7 @@ const MAX_TOTAL_SETS_BUDGET_MULTIPLIER = 2;
  * maintenance target, preserving the AI's freedom to skip a target
  * entirely (rule 10: "omission never implies invalidity") rather than
  * being forced to half-cover everything. [DEFAULT]. */
-const UNDER_PRESCRIPTION_TOLERANCE = 0.5;
-
-function setsByTarget(exercises: readonly AIWorkoutExerciseProposal[]): Map<string, number> {
-  const totals = new Map<string, number>();
-  for (const ex of exercises) {
-    const key = `${ex.targetType}:${ex.targetId}`;
-    totals.set(key, (totals.get(key) ?? 0) + ex.sets);
-  }
-  return totals;
-}
+export const UNDER_PRESCRIPTION_TOLERANCE = 0.5;
 
 function guidanceKey(g: Pick<AIProgrammerMuscleGuidance, 'targetType' | 'targetId'>): string {
   return `${g.targetType}:${g.targetId}`;
@@ -91,7 +83,7 @@ function guidanceKey(g: Pick<AIProgrammerMuscleGuidance, 'targetType' | 'targetI
 export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext): AdequacyValidationResult {
   const errors: string[] = [];
   const brief = context.programmingBrief;
-  const totals = setsByTarget(proposal.exercises);
+  const totals = creditedSetsByTarget(proposal.exercises, context.targets);
   const totalSessionSets = proposal.exercises.reduce((sum, ex) => sum + ex.sets, 0);
 
   // --- Per-muscle set bounds (hard: directSetsPerExposureCap is a real
@@ -153,10 +145,22 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
   }
 
   // --- Session-identity coverage: the session must remain recognizable
-  // as its requested purpose. ---
+  // as its requested purpose. "Covered" must use the SAME real crediting
+  // as `totals` above (Push Generation Architectural Fix, 2026-09-24) —
+  // an exercise assigned to triceps-long-head that Blueprint's own scope
+  // also credits to triceps genuinely covers triceps for this purpose,
+  // not just the target it was literally assigned to. Previously this
+  // checked ex.targetId === targetId directly, so a real, correctly-
+  // credited target could still fail "coverage" purely because no
+  // exercise happened to be literally assigned to it. ---
   if (brief.session.purpose !== null && brief.session.expectedCoverageTargetIds.length > 0) {
+    const creditedKeysWithRealWork = new Set<string>();
+    for (const ex of proposal.exercises) {
+      if (ex.sets < 1) continue;
+      for (const key of creditedTargetKeys(ex, context.targets)) creditedKeysWithRealWork.add(key);
+    }
     const coveredExpected = brief.session.expectedCoverageTargetIds.filter((targetId) => {
-      const covered = proposal.exercises.some((ex) => ex.targetId === targetId && ex.sets >= 1);
+      const covered = [...creditedKeysWithRealWork].some((key) => key.endsWith(`:${targetId}`));
       const totalForTarget = [...totals.entries()].find(([key]) => key.endsWith(`:${targetId}`))?.[1] ?? 0;
       return covered && totalForTarget >= MEANINGFUL_COVERAGE_MIN_SETS;
     });
@@ -175,16 +179,35 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
   // (workoutBuilder.ts) and what the system instruction itself already
   // told the model (rule 26) — this is the check that actually holds
   // the model to it, exactly like every other adequacy check here. ---
-  if (totals.size > SESSION_REALISM_CAP.maxTargetsPerSession) {
-    errors.push(`session has ${totals.size} distinct targets — exceeds the hard cap of ${SESSION_REALISM_CAP.maxTargetsPerSession} targets per session`);
+  const targetIdsInSession = [...new Set(proposal.exercises.map((e) => e.targetId))];
+  const caps = sessionRealismCapFor(brief.session.purpose, targetIdsInSession);
+  if (totals.size > caps.maxTargets) {
+    errors.push(`session has ${totals.size} distinct targets — exceeds the hard cap of ${caps.maxTargets} targets per session`);
   }
-  // Legs-Session Exercise Cap (2026-09-16), explicit user request: a
-  // 'legs'-purpose session's own exercise ceiling is tighter (5) than
-  // the general cap (9) — same LEGS_SESSION_MAX_EXERCISES constant the
-  // deterministic engine (workoutBuilder.ts) enforces.
-  const maxExercisesForThisSession = brief.session.purpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
-  if (proposal.exercises.length > maxExercisesForThisSession) {
-    errors.push(`session has ${proposal.exercises.length} total exercises — exceeds the hard cap of ${maxExercisesForThisSession} exercises per session`);
+  // Legs-Session Exercise Cap (2026-09-16, tightened 2026-09-19),
+  // explicit user request: sessionRealismCapFor (config.ts, the one
+  // shared source of truth every caller reads) decides the same
+  // muscle/exercise ceilings the deterministic engine enforces,
+  // including the leg+abs exception.
+  if (proposal.exercises.length > caps.maxExercises) {
+    errors.push(`session has ${proposal.exercises.length} total exercises — exceeds the hard cap of ${caps.maxExercises} exercises per session`);
+  }
+  if (caps.legExerciseShareMax !== null) {
+    const legExerciseCount = proposal.exercises.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length;
+    if (legExerciseCount > caps.legExerciseShareMax) {
+      errors.push(`session has ${legExerciseCount} leg exercises — exceeds the leg-day exercise cap of ${caps.legExerciseShareMax} (extra room in an abs-paired leg day is for abs, not more leg work)`);
+    }
+  }
+  // Abs Session Exercise Share Cap (2026-09-19), explicit user request:
+  // the general (non-legs) mirror of the leg-day check above — abs
+  // exercises never eat more than absExerciseShareMax of the session's
+  // total exercise budget, regardless of how many abs targets are
+  // eligible today.
+  if (caps.absExerciseShareMax !== null) {
+    const absExerciseCount = proposal.exercises.filter((e) => ABS_PHYSIQUE_TARGETS.includes(e.targetId)).length;
+    if (absExerciseCount > caps.absExerciseShareMax) {
+      errors.push(`session has ${absExerciseCount} abs exercises — exceeds the abs-exercise share cap of ${caps.absExerciseShareMax} for this session`);
+    }
   }
 
   // --- No single target dominating the whole session. ---

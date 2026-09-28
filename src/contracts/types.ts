@@ -291,6 +291,13 @@ export interface ExercisePerformance {
   target_rir_min: number | null;
   target_rir_max: number | null;
   target_rest_seconds: number | null;
+  /** Fix: which Blueprint target this exercise was prescribed for — null
+   * unless the exercise was created with one (see the repo's own comment
+   * on the `target_type`/`target_id` columns). Needed for Substitute
+   * (`GET /api/programming/substitutes`) to work against an
+   * already-persisted exercise, not just a deterministic-preview one. */
+  target_type: 'physique_target' | 'functional_goal' | null;
+  target_id: string | null;
   sets: Set[];
 }
 

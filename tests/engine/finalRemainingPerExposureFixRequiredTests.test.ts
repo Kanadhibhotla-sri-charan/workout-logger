@@ -205,13 +205,13 @@ describe('Final Remaining Corrective Fix §17 Test D — a low-volume establishe
     // package's full 8-set per-exposure figure on either exposure, and
     // never larger on the second real day than the first merely because
     // it comes later.
-    const developmentReference = getDevelopmentReference('physique_target', 'gluteus-medius-minimus', 'efficient');
+    const developmentReference = getDevelopmentReference('physique_target', 'gluteus-maximus', 'efficient');
     const sessionCap = developmentReference.direct_sets_per_exposure!;
-    const target = gmmTarget({ current_weekly_primary_sets: 6, weekly_exposure_units: 6 });
+    const target = normalDevTarget('gluteus-maximus', { most_recent_assessment: { rating: 3, date: '2026-08-20' }, current_weekly_primary_sets: 6, weekly_exposure_units: 6 });
 
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ available_training_days: [...ALL_DAYS], targets: [target] }));
-    const wedSets = setsFor(plan, WEDNESDAY_DATE, 'gluteus-medius-minimus');
-    const sunSets = setsFor(plan, SUNDAY_DATE, 'gluteus-medius-minimus');
+    const wedSets = setsFor(plan, WEDNESDAY_DATE, 'gluteus-maximus');
+    const sunSets = setsFor(plan, SUNDAY_DATE, 'gluteus-maximus');
 
     expect(wedSets).toBeGreaterThan(0);
     expect(sunSets).toBe(wedSets);
@@ -221,21 +221,28 @@ describe('Final Remaining Corrective Fix §17 Test D — a low-volume establishe
 });
 
 describe('Final Remaining Corrective Fix §17 Test E — package-sharing regression under the stable per-exposure model', () => {
-  it('two sibling targets sharing one Blueprint package still split its weekly reference correctly across their own (now multi-exposure) real due days, never multiplying the shared total', () => {
+  it('two sibling targets sharing one Blueprint package each get their own (now multi-exposure) real due days sized off their own, already-scoped reference — never multiplying either one', () => {
     // mid-pec and upper-pec both map to the same "chest-efficient"
-    // package (weekly_direct_set_reference=16). Both start at zero real
-    // volume (decideVolume's zero-branch -> package-sharing scope
-    // applies, Post-v2 Corrective Fix v2 §12, unchanged this phase).
+    // package, but Sub-Target Exercise Scope (2026-09-19) means each
+    // already has its own distinct, non-overlapping reference derived
+    // from only the exercises that actually train it (mid-pec: flat
+    // bench + the shared fly; upper-pec: incline press + the shared
+    // fly) — the old "split one shared package total between siblings"
+    // pooling (Post-v2 Corrective Fix v2 §12) no longer applies once a
+    // package is scope-tagged (see workoutBuilder.ts's
+    // isAlreadyScopedToThisTarget), because there is no longer a single
+    // shared total to split: each sibling's own reference already
+    // excludes the other's exercises. Both start at zero real volume.
     // Across a full 7-day week, mid-pec (push+upper compatible) gets 2
     // real due exposures this run, each now independently sized via the
-    // new stable per-exposure prescription rather than a depleting
-    // per-day bucket — the genuine NEW risk this test protects against
-    // is that removing the mutable bucket could let a target with
-    // multiple real due exposures re-claim its own already-capped fair
-    // share on EACH exposure, multiplying the shared package total.
+    // stable per-exposure prescription rather than a depleting per-day
+    // bucket — the genuine risk this test protects against is a target
+    // with multiple real due exposures re-claiming its own already-
+    // capped fair share on EACH exposure, multiplying ITS OWN reference.
     const midPec = normalDevTarget('mid-pec', { goal_priority: 1 });
     const upperPec = normalDevTarget('upper-pec', { goal_priority: 2 });
-    const packageWeeklyReference = getDevelopmentReference('physique_target', 'mid-pec', 'efficient').weekly_direct_set_reference!;
+    const midPecReference = getDevelopmentReference('physique_target', 'mid-pec', 'efficient').weekly_direct_set_reference!;
+    const upperPecReference = getDevelopmentReference('physique_target', 'upper-pec', 'efficient').weekly_direct_set_reference!;
 
     const plan = buildWeeklyProgrammingPlan(weeklyInput({ available_training_days: [...ALL_DAYS], targets: [midPec, upperPec] }));
 
@@ -252,10 +259,12 @@ describe('Final Remaining Corrective Fix §17 Test E — package-sharing regress
     expect(upperPecTotal).toBeGreaterThan(0);
     expect(midPecTotal).toBe(8);
     expect(upperPecTotal).toBe(8);
-    // The shared package's own weekly reference is the real ceiling on
-    // the COMBINED total across every sibling target sharing it — never
-    // multiplied merely because either sibling now spans more than one
-    // real due exposure this week.
-    expect(midPecTotal + upperPecTotal).toBe(packageWeeklyReference);
+    // Each sibling's own (already-scoped) reference is the real ceiling
+    // on ITS OWN total — never multiplied merely because it spans more
+    // than one real due exposure this week, and never reduced by the
+    // OTHER sibling's unrelated claim (there is nothing shared left to
+    // subtract once each has its own exclusive scope).
+    expect(midPecTotal).toBeLessThanOrEqual(midPecReference);
+    expect(upperPecTotal).toBeLessThanOrEqual(upperPecReference);
   });
 });

@@ -34,10 +34,9 @@ export function getProgrammerOutputSchema(): unknown {
         type: 'array',
         items: {
           type: 'object',
-          required: ['exerciseId', 'role', 'targetType', 'targetId', 'sets', 'repsMin', 'repsMax', 'rirMin', 'rirMax', 'rationale', 'source'],
+          required: ['exerciseId', 'targetType', 'targetId', 'sets', 'repsMin', 'repsMax', 'rirMin', 'rirMax', 'rationale', 'source'],
           properties: {
             exerciseId: { type: 'string', description: 'Must be an exact id from the supplied validExercises catalogue.' },
-            role: { enum: ['primary', 'secondary', 'accessory', 'isolation', 'conditioning'] },
             targetType: { enum: ['physique_target', 'functional_goal'] },
             targetId: { type: 'string', description: 'Must be one of the target IDs supplied in context.targets.' },
             sets: { type: 'integer', minimum: 1 },

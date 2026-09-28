@@ -127,22 +127,47 @@ describe('Post-v2 Corrective Fix v2 §24.A/§24.G — minimum spacing is NOT the
     // its own minimum-spacing check (1 day since Thursday) would pass.
     expect(friday.length).toBe(0);
 
+    // Abs Session Exercise Share Cap (2026-09-19): on a non-legs day,
+    // obliques' own exercises are capped at ABS_SESSION_EXERCISE_SHARE_MAX
+    // (2), so a real single exposure now delivers less than sessionCap
+    // (the raw, uncapped Blueprint per-exposure reference) on push/pull/
+    // upper days — but NOT on a legs day, which has its own separate,
+    // uncapped abs handling. Monday(push)/Tuesday(pull)/Thursday(upper)
+    // are all non-legs and must match each other; Wednesday(legs) is
+    // deliberately excluded from that comparison since it's genuinely
+    // allowed to differ. Verified against the real Monday exposure
+    // itself rather than hardcoded, so this stays correct regardless of
+    // exactly how many sets those 2 exercises carry.
+    const mondaySets = monday.reduce((sum, e) => sum + e.sets, 0);
+    expect(mondaySets).toBeLessThan(sessionCap); // confirms the abs cap, not Blueprint's own reference, is now binding here on this non-legs day
+    for (const day of [tuesday, thursday]) {
+      expect(day.reduce((sum, e) => sum + e.sets, 0)).toBe(mondaySets);
+    }
+
     const allocation = plan.targetAllocations.find((a) => a.target_id === 'obliques')!;
-    // Exactly four exposures' worth delivered (Monday-Thursday), never
-    // a fifth crammed in — and never silently written off as "unmet"
+    // Exactly the sum of the four real exposures delivered (Monday-
+    // Thursday; Wednesday's own legs-day amount included as-is, since
+    // it's genuinely allowed to differ from the other three), never a
+    // fifth crammed in — and never silently written off as "unmet"
     // either, since the target simply isn't due yet for it.
-    expect(allocation.deliveredDirectSets).toBe(sessionCap * 4);
+    const wednesdaySets = wednesday.reduce((sum, e) => sum + e.sets, 0);
+    expect(allocation.deliveredDirectSets).toBe(mondaySets * 3 + wednesdaySets);
   });
 });
 
 describe('Post-v2 Corrective Fix v2 §24.B — one real compatible session per calendar week, across several real weeks, never cramming or debt', () => {
   it('week 1 Thursday, week 2 Thursday, week 3 Thursday (only Thursday ever available) each deliver exactly one honest exposure, never doubled and never carrying debt forward', () => {
-    const developmentReference = getDevelopmentReference('physique_target', 'obliques', 'efficient');
-    const sessionCap = developmentReference.direct_sets_per_exposure!;
-
     let lastExposureDate: string | null = null;
     let history: string[] = [];
     const thursdays = ['2026-09-03', '2026-09-10', '2026-09-17']; // three real, separate calendar weeks
+    // Abs Session Exercise Share Cap (2026-09-19): the real per-exposure
+    // delivered amount is now capped by ABS_SESSION_EXERCISE_SHARE_MAX
+    // (2 exercises), not Blueprint's own raw per-exposure reference —
+    // captured from week 1's own real result below rather than hardcoded,
+    // so this test verifies what actually matters here (every week
+    // delivers the SAME honest amount, never doubled, never debt-
+    // inflated) without depending on the cap's exact numeric effect.
+    let referenceSets: number | null = null;
 
     for (const date of thursdays) {
       const result = buildWorkout({
@@ -159,7 +184,11 @@ describe('Post-v2 Corrective Fix v2 §24.B — one real compatible session per c
       // Exactly one exposure's worth every single real week — never
       // doubled to "make up" for the other 6 days having no compatible
       // session, and never a debt-inflated amount.
-      expect(totalSets).toBe(sessionCap);
+      if (referenceSets === null) {
+        referenceSets = totalSets;
+      } else {
+        expect(totalSets).toBe(referenceSets);
+      }
       lastExposureDate = date;
       history = [...history, date];
     }
@@ -196,9 +225,29 @@ describe('Post-v2 Corrective Fix v2 §24.C — a real exposure near a calendar-w
 });
 
 describe("Post-v2 Corrective Fix v2 §24.L — a shared Blueprint package's aggregate is never duplicated as every covered target's own complete objective", () => {
-  it('three chest sub-targets (upper-pec/mid-pec/lower-pec) sharing the same "chest-efficient" package never together deliver more than that package\'s own real weekly aggregate', () => {
-    const packageRef = getDevelopmentReference('physique_target', 'mid-pec', 'efficient');
-    expect(packageRef.package_id).toBe('chest-efficient');
+  it('three chest sub-targets (upper-pec/mid-pec/lower-pec) sharing the same "chest-efficient" package each deliver up to their own (already scope-exclusive) reference, never a shared pool', () => {
+    // Sub-Target Exercise Scope (2026-09-19): upper-pec/mid-pec/lower-pec
+    // share one Blueprint package, but each now has its OWN distinct
+    // weekly reference derived only from the exercises that actually
+    // train it (upper-pec: incline press + the shared fly; mid-pec: flat
+    // bench + the shared fly; lower-pec: just the shared fly at the
+    // Efficient level — no lower-pec-specific exercise exists below
+    // Complete). Those three references no longer overlap, so there is
+    // no shared aggregate left to duplicate — the old "combined total
+    // never exceeds one package-wide number" invariant this test used to
+    // check no longer applies (see workoutBuilder.ts's
+    // isAlreadyScopedToThisTarget, which now bypasses package-sharing
+    // pooling for exactly this reason). What must still hold: each
+    // sibling is independently bounded by its OWN reference.
+    const upperPecRef = getDevelopmentReference('physique_target', 'upper-pec', 'efficient');
+    const midPecRef = getDevelopmentReference('physique_target', 'mid-pec', 'efficient');
+    const lowerPecRef = getDevelopmentReference('physique_target', 'lower-pec', 'efficient');
+    expect(upperPecRef.package_id).toBe('chest-efficient');
+    const references: Record<string, number> = {
+      'upper-pec': upperPecRef.weekly_direct_set_reference!,
+      'mid-pec': midPecRef.weekly_direct_set_reference!,
+      'lower-pec': lowerPecRef.weekly_direct_set_reference!,
+    };
     const targetIds = ['upper-pec', 'mid-pec', 'lower-pec'];
 
     const plan = buildWeeklyProgrammingPlan(
@@ -208,24 +257,20 @@ describe("Post-v2 Corrective Fix v2 §24.L — a shared Blueprint package's aggr
       })
     );
 
-    const totalDelivered = targetIds.reduce((sum, id) => sum + (plan.targetAllocations.find((a) => a.target_id === id)?.deliveredDirectSets ?? 0), 0);
-    // The core invariant: three sibling targets sharing one package never
-    // combine to exceed that package's own real weekly reference — never
-    // 3x (or even 2x) the package's own intended total, which is exactly
-    // what independently duplicating the full aggregate to each target
-    // would produce.
-    expect(totalDelivered).toBeLessThanOrEqual(packageRef.weekly_direct_set_reference!);
-    expect(totalDelivered).toBeGreaterThan(0);
-
-    // At least one sibling is honestly reported as covered by its
-    // package-mates' own work, rather than silently receiving nothing
-    // with no explanation, or being mislabeled a data-integrity gap.
-    const packageSharingSkips = plan.sessions.flatMap((s) => s.skipped).filter((s) => targetIds.includes(s.target_id) && s.reason_code === 'adequately_covered');
-    expect(packageSharingSkips.length).toBeGreaterThan(0);
-    for (const skip of packageSharingSkips) {
-      expect(skip.reason).toContain('chest-efficient');
-      expect(skip.scope).toBe('exposure');
+    let anyDelivered = false;
+    for (const id of targetIds) {
+      const delivered = plan.targetAllocations.find((a) => a.target_id === id)?.deliveredDirectSets ?? 0;
+      expect(delivered).toBeLessThanOrEqual(references[id]!);
+      if (delivered > 0) anyDelivered = true;
     }
+    expect(anyDelivered).toBe(true);
+
+    // No sibling is skipped merely because a package-mate already
+    // claimed a SHARED chest-efficient budget — that pooling is bypassed
+    // once a package's sub-targets are scope-tagged, since each already
+    // owns an exclusive slice with nothing left to duplicate.
+    const packageSharingSkips = plan.sessions.flatMap((s) => s.skipped).filter((s) => targetIds.includes(s.target_id) && s.reason_code === 'adequately_covered' && s.reason.includes('chest-efficient'));
+    expect(packageSharingSkips.length).toBe(0);
   });
 
   it('a target with genuinely maintained real volume above its own package reference is never suppressed by the package-sharing cap when it has no active sibling this run', () => {

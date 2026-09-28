@@ -1,0 +1,347 @@
+// Option B eval — "reason, then commit" two-call pipeline for the 6
+// genuine-judgment rules (18-23: training experience, intensity
+// techniques, antagonist pairing, exercise rotation, structural
+// advisories, historical trend). Sibling to scripts/modelEval.mjs (same
+// safety discipline: reuses real, already-compiled production code,
+// never writes to the database, never persists a proposal) but adds a
+// first "reasoning" call with NO output-schema constraint — the point is
+// to test whether separating "think about the judgment calls" from
+// "produce schema-conformant JSON" gets a cheaper/non-reasoning-tuned
+// model to actually engage with rules 18-23 instead of defaulting them
+// away under schema pressure, and whether it avoids the structured-output
+// token-bloat pattern GPT-5.6 Luna Pro showed (which is why Luna Pro is
+// excluded from this batch — this eval is specifically about whether
+// CHEAPER models do better under this setup, not about re-confirming
+// Luna Pro's known bloat behavior).
+//
+// The commit step's system instruction is the REAL, unmodified
+// buildProgrammerSystemInstruction() output plus exactly one extra rule
+// (rule 24, added only for this eval, never shipped to production)
+// telling the model to apply step 1's reasoning faithfully. Everything
+// else — context, schema, validators — is byte-identical to what
+// production actually sends, so a "success" here means the real
+// validators the app already enforces would accept it.
+//
+// Usage: node scripts/modelEvalTwoStep.mjs
+// Reads VELONA_API_KEY from the environment (same one the real app
+// uses) — run this on the production VM where that's already set via
+// the systemd EnvironmentFile, never with a key pasted inline here.
+
+import { openDb } from '../dist/db/client.js';
+import { buildProgrammerContext } from '../dist/ai-programmer/context/programmerContextBuilder.js';
+import { buildProgrammerSystemInstruction } from '../dist/ai-programmer/service/aiProgrammerService.js';
+import { getProgrammerOutputSchema } from '../dist/ai-programmer/contracts/programmerOutputSchema.js';
+import { validateProposalSchema } from '../dist/ai-programmer/validation/programmerOutputValidator.js';
+import { validateProposalDomain } from '../dist/ai-programmer/validation/programmerDomainValidator.js';
+import { validateProposalAdequacy } from '../dist/ai-programmer/validation/programmerAdequacyValidator.js';
+import { repairProposal } from '../dist/ai-programmer/validation/programmerProposalRepair.js';
+import { VelonaProvider, isLikelyTruncatedOutput } from '../dist/ai-programmer/provider/velonaProvider.js';
+import { loadVelonaConfig } from '../dist/ai-programmer/provider/config.js';
+import { todayForUser } from '../dist/lib/userTimezone.js';
+import { weekdayOfDate } from '../dist/engine/workoutBuilder.js';
+import { addDays } from '../dist/engine/dateMath.js';
+import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+
+const FULL_RESULTS_PATH = process.env.EVAL_FULL_RESULTS_PATH || '/tmp/twoStepEvalFull.json';
+
+const DB_PATH = process.env.DB_PATH || '/home/ubuntu/workout-logger/data/workout-logger.sqlite';
+const REPS_PER_MODEL = Number(process.env.EVAL_REPS || 5);
+const CONCURRENCY = Number(process.env.EVAL_CONCURRENCY || 4);
+
+// USD per 1M tokens — Velona's live /models catalog, fetched
+// 2026-09-18. This batch: Qwen3 Next 80B A3B Instruct alone, re-run
+// against the redesigned reasoning-step prompt/schema (sessionWideReasoning
+// now required) to test whether the training-experience/antagonist-pairing
+// gap found in its earlier run was a prompt-structure problem, not a
+// capability ceiling.
+const CANDIDATES = [{ model: 'qwen/qwen3-next-80b-a3b-instruct', label: 'Qwen3 Next 80B A3B Instruct', inputPer1M: 0.09, outputPer1M: 1.1 }];
+
+// A real, deliberately small schema for the reasoning step — NOT `null`
+// and not the full session-proposal schema. buildVelonaUserTurnContent
+// always sends output:{format:'json'} plus a fixed "conforming to
+// outputSchema" instruction regardless of what's passed, so `null` would
+// produce a confusing, technically-malformed request ("conforming to
+// null"). This tests the actual hypothesis under test — a small,
+// task-shaped schema vs. the big session-proposal one — without an
+// untested/unsupported null-schema edge case.
+// Redesigned 2026-09-19: the original single muscleNotes-only shape let
+// two of the six judgment calls (training experience, antagonist
+// pairing) have no dedicated place to answer — both scored 0-1/5 real
+// engagement across a real model eval, not because the model couldn't
+// reason about them, but because a per-muscle-only schema made both
+// trivially easy to silently skip. sessionWideReasoning gives those two
+// their own REQUIRED fields so skipping isn't an option; the other four
+// (genuinely per-muscle) stay in muscleNotes.
+const REASONING_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sessionWideReasoning', 'muscleNotes'],
+  properties: {
+    sessionWideReasoning: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['trainingExperience', 'antagonistPairing'],
+      description:
+        'Two judgment calls that apply to the whole session, not any one muscle — both fields are mandatory every time. A real, reasoned answer is required even when the conclusion is that nothing applies today; a one-line dismissal with no cited reason is not acceptable.',
+      properties: {
+        trainingExperience: {
+          type: 'string',
+          description:
+            'Reason through context.trainingExperience against what today\'s session is actually asking of the lifter. State your conclusion AND the specific data point behind it — including when your conclusion is "nothing unusual today," which still needs a stated reason, not just a restatement of the experience level.',
+        },
+        antagonistPairing: {
+          type: 'string',
+          description:
+            'Reason through every eligible-today muscle\'s antagonistGroup and decide whether a genuine antagonist-superset opportunity exists. State your conclusion AND which muscles you actually checked — including when your conclusion is "no real pairing opportunity," which still needs a stated reason (e.g. every eligible muscle today shares the same group).',
+        },
+      },
+    },
+    muscleNotes: {
+      type: 'object',
+      description:
+        'Keyed by targetId, for the remaining four judgment calls (intensity technique, exercise rotation, structural advisories, historical trend) — genuinely per-muscle, unlike the two above. Include an entry only for a muscle where you reached an actual, evidence-backed conclusion on one of these four; omitting a muscle means these four points genuinely changed nothing for it, not that you skipped considering it.',
+      additionalProperties: { type: 'string', description: '2-4 sentences. Work through the specific real data point(s) and state your conclusion — never a bare label or a restated fact with no judgment attached.' },
+    },
+  },
+};
+
+function buildReasoningSystemInstruction() {
+  return [
+    'You are a fitness coach doing ONLY a reasoning pass before another step writes the final session — you are not producing the session itself, and you must not mention sets/reps/RIR numbers at all (those are already fixed elsewhere and not your concern here).',
+    '',
+    'You will be given the same real JSON context a workout-programming step would use. Your job is to REASON THROUGH six real judgment calls, one at a time, using the actual data in context — not to pick a plausible-sounding answer off a menu. A judgment call is not complete until you have looked at the specific real number, date, or flag behind it and stated what it actually tells you.',
+    '',
+    'Two of these six apply to the WHOLE SESSION, not any one muscle, and go in sessionWideReasoning — both are required every time, with no exception:',
+    '(a) context.trainingExperience — work through what today\'s session is actually asking of the lifter at this experience level, and say whether anything is unusually demanding. If nothing is, say so and say why not (e.g. no intensity techniques are in play, or every exercise is already familiar) — do not just restate the experience level and move on.',
+    '(b) Every eligible-today muscle\'s antagonistGroup — check ALL of them against each other and decide whether a genuine antagonist-superset opportunity exists (e.g. a push muscle and a pull muscle both eligible today). If none exists, say so and say why not (e.g. every eligible muscle today shares the same group) — never skip this just because the answer happens to be "no."',
+    '',
+    'The remaining four are genuinely per-muscle and go in muscleNotes, keyed by targetId — reason through each for every muscle where the real data actually gives you something to say:',
+    '(c) Each exercise\'s plausibleIntensityTechniques (ids — resolve full text via context.intensityTechniqueCatalogue) — is one genuinely worth using today, on which exercise, and why, or is none of them appropriate right now?',
+    '(d) Each exercise\'s recentConsecutiveSessionsUsed — has it actually been used enough in a row to be worth rotating away from today? A single recent use is not the same as overuse — judge genuine staleness from the real count; do not treat "has been used before at all" as automatic grounds to rotate.',
+    '(e) context.structuralAdvisories — does any flagged imbalance genuinely change how you\'d weigh an eligible muscle today, or is it not actionable right now?',
+    '(f) Recent trend data (context.targets[].exerciseHistory, context.coachingFoundation.historicalSummaries) — does a stalling/declining trend argue for a different exercise or angle today?',
+    '',
+    'For every point — session-wide or per-muscle — ground your conclusion in a REAL, SPECIFIC data value from the context (an exact number, date, or flag) and state your actual conclusion, never just a restatement of the data. Never invent a technique/exercise/id not present in the context. Omitting a muscle from muscleNotes means these four points genuinely gave you nothing to say for it — not that you skipped considering it.',
+  ].join('\n');
+}
+
+function buildCommitSystemInstruction() {
+  return (
+    buildProgrammerSystemInstruction() +
+    '\n24. context.priorReasoning.muscleNotes contains your own reasoning, already worked out in a prior step, about rules 18-23 for today\'s eligible muscles. Apply it faithfully — it is not a suggestion from someone else, it is your own prior conclusion. You may deviate from it only if the data in this context clearly contradicts it, and if you do, say why in programmingRationale.' +
+    '\n25. [Eval-only rule, never shipped to production] Also return a top-level programJustification field: a genuine, multi-sentence brief (not a one-liner, not a bullet list) explaining the WHOLE session\'s real strategy, in your own words, as if explaining your reasoning to the person you programmed it for. It must specifically address: (a) how each active-goal muscle (isGoalOriented=true) was treated and why that\'s the right amount of attention for a goal muscle specifically, citing its real recommendedSessionSets range and what you actually gave it; (b) which muscles you left out entirely and the real data reason; (c) any judgment call from rules 18-23 you actually acted on. Write it as real prose a coach would say out loud, not a restatement of the JSON you already produced.'
+  );
+}
+
+// Eval-only (2026-09-19): getProgrammerOutputSchema() plus one extra
+// required field (programJustification) requesting the whole-session
+// brief rule 25 above asks for. The real structural validator
+// (programmerOutputValidator.ts) never rejects unknown extra top-level
+// keys, so this stays fully compatible with the real validation
+// pipeline — the extra field is simply read separately, never fed into
+// AIWorkoutSessionProposal itself.
+function buildEvalOnlyOutputSchema() {
+  const base = getProgrammerOutputSchema();
+  return {
+    ...base,
+    required: [...base.required, 'programJustification'],
+    properties: {
+      ...base.properties,
+      programJustification: {
+        type: 'string',
+        description:
+          'Eval-only field. A genuine multi-sentence brief explaining the whole session\'s real strategy in your own words — not a one-liner, not a restatement of the JSON. Must address how each active-goal muscle was treated and why that matches its real recommendedSessionSets range, which muscles were left out and why, and any rules-18-23 judgment call actually acted on.',
+      },
+    },
+  };
+}
+
+function nextMonday(today) {
+  let d = today;
+  while (weekdayOfDate(d) !== 'monday') d = addDays(d, 1);
+  return d;
+}
+
+function costUsd(usage, candidate) {
+  if (!usage?.inputTokens || usage.outputTokens === undefined) return 0;
+  return (usage.inputTokens / 1_000_000) * candidate.inputPer1M + (usage.outputTokens / 1_000_000) * candidate.outputPer1M;
+}
+
+async function runOnce(db, config, reasoningSystemInstruction, commitSystemInstruction, context, outputSchema, candidate) {
+  const provider = new VelonaProvider(config);
+  const started = Date.now();
+
+  // --- Step 1: reason, no output schema constraint ---
+  let reasoningResponse;
+  try {
+    reasoningResponse = await provider.generate({
+      mode: 'generate_session',
+      systemInstruction: reasoningSystemInstruction,
+      context,
+      outputSchema: REASONING_OUTPUT_SCHEMA, // small, task-shaped — not the big session-proposal schema
+      requestId: randomUUID(),
+    });
+  } catch (err) {
+    return { outcome: 'reasoning_provider_error', detail: err.message, latencyMs: Date.now() - started };
+  }
+
+  let reasoning;
+  try {
+    reasoning = JSON.parse(reasoningResponse.rawText);
+  } catch {
+    const truncated = isLikelyTruncatedOutput(reasoningResponse.finishReason, reasoningResponse.usage?.outputTokens, reasoningResponse.requestDiagnostics?.configuredMaxOutputTokens);
+    return { outcome: truncated ? 'reasoning_truncated' : 'reasoning_invalid_json', detail: reasoningResponse.rawText?.slice(0, 300), latencyMs: Date.now() - started, reasoningUsage: reasoningResponse.usage };
+  }
+
+  // --- Step 2: commit, real schema, real validators ---
+  const commitContext = { ...context, priorReasoning: reasoning };
+  const requestId = randomUUID();
+  let commitResponse;
+  try {
+    commitResponse = await provider.generate({ mode: 'generate_session', systemInstruction: commitSystemInstruction, context: commitContext, outputSchema, requestId });
+  } catch (err) {
+    return { outcome: 'commit_provider_error', detail: err.message, latencyMs: Date.now() - started, reasoningUsage: reasoningResponse.usage, reasoning };
+  }
+  const latencyMs = Date.now() - started;
+  const totalCostUsd = costUsd(reasoningResponse.usage, candidate) + costUsd(commitResponse.usage, candidate);
+
+  let parsedJson;
+  try {
+    parsedJson = JSON.parse(commitResponse.rawText);
+  } catch {
+    const truncated = isLikelyTruncatedOutput(commitResponse.finishReason, commitResponse.usage?.outputTokens, commitResponse.requestDiagnostics?.configuredMaxOutputTokens);
+    return { outcome: truncated ? 'truncated' : 'invalid_json', latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawCommitText: commitResponse.rawText?.slice(0, 2000), reasoning };
+  }
+
+  // The raw, as-produced program — kept on every outcome from here on
+  // (even a rejected one) so a disqualified attempt's actual proposed
+  // workout can be inspected, not just the validator's error strings.
+  const rawProgram = {
+    sessionPurpose: parsedJson.sessionPurpose,
+    exercises: parsedJson.exercises,
+    programmingRationale: parsedJson.programmingRationale,
+    goalAlignment: parsedJson.goalAlignment,
+    recoveryConsiderations: parsedJson.recoveryConsiderations,
+    warnings: parsedJson.warnings,
+    programJustification: parsedJson.programJustification, // eval-only field, rule 25
+  };
+
+  const structural = validateProposalSchema(parsedJson);
+  if (!structural.ok || !structural.value) {
+    return { outcome: 'schema_invalid', detail: structural.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, reasoning };
+  }
+
+  const repaired = repairProposal(structural.value, context);
+  const domain = validateProposalDomain(repaired, context, db);
+  if (!domain.ok || !domain.value) {
+    return { outcome: 'domain_invalid', detail: domain.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, repairedExercises: repaired.exercises, reasoning };
+  }
+
+  const adequacy = validateProposalAdequacy(domain.value, context);
+  if (!adequacy.ok) {
+    return { outcome: 'adequacy_invalid', detail: adequacy.errors, latencyMs, reasoningUsage: reasoningResponse.usage, commitUsage: commitResponse.usage, totalCostUsd, rawProgram, repairedExercises: repaired.exercises, reasoning };
+  }
+
+  // How many judgment-call rules (18-23) actually got a citable mention
+  // in the final rationale — a rough, log-only signal of whether the
+  // reasoning step's conclusions actually made it into the final output,
+  // never used as a pass/fail gate.
+  const rationaleText = JSON.stringify(domain.value.programmingRationale ?? []);
+  const reasoningNoteCount = Object.keys(reasoning.muscleNotes ?? {}).length;
+
+  return {
+    outcome: 'success',
+    latencyMs,
+    reasoningUsage: reasoningResponse.usage,
+    commitUsage: commitResponse.usage,
+    totalCostUsd,
+    exerciseCount: domain.value.exercises.length,
+    reasoningNoteCount,
+    rationaleLength: rationaleText.length,
+    rawProgram,
+    reasoning,
+  };
+}
+
+async function runWithConcurrency(tasks, limit) {
+  const results = [];
+  let cursor = 0;
+  async function worker() {
+    while (cursor < tasks.length) {
+      const i = cursor++;
+      results[i] = await tasks[i]();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
+async function main() {
+  const db = openDb(DB_PATH);
+  const today = todayForUser(db);
+  const targetDate = process.env.EVAL_TARGET_DATE || nextMonday(today);
+  console.log(`[modelEvalTwoStep] today=${today}, targetDate=${targetDate}`);
+
+  const context = buildProgrammerContext(db, { targetDate });
+  const reasoningSystemInstruction = buildReasoningSystemInstruction();
+  const commitSystemInstruction = buildCommitSystemInstruction();
+  const outputSchema = buildEvalOnlyOutputSchema();
+  const baseConfig = loadVelonaConfig();
+  console.log(`[modelEvalTwoStep] real context built (${JSON.stringify(context).length} chars). reps per model=${REPS_PER_MODEL}, concurrency=${CONCURRENCY}\n`);
+
+  const summary = [];
+  const allResults = [];
+
+  for (const candidate of CANDIDATES) {
+    const config = { ...baseConfig, model: candidate.model };
+    const tasks = Array.from({ length: REPS_PER_MODEL }, () => () => runOnce(db, config, reasoningSystemInstruction, commitSystemInstruction, context, outputSchema, candidate));
+    console.log(`[modelEvalTwoStep] running ${candidate.label} (${candidate.model}) x${REPS_PER_MODEL}...`);
+    const results = await runWithConcurrency(tasks, CONCURRENCY);
+    results.forEach((r, i) => allResults.push({ model: candidate.model, label: candidate.label, rep: i, ...r }));
+
+    const outcomeCounts = {};
+    let totalLatency = 0;
+    let totalCostUsd = 0;
+    let totalReasoningNotes = 0;
+    let successCount = 0;
+
+    for (const r of results) {
+      outcomeCounts[r.outcome] = (outcomeCounts[r.outcome] ?? 0) + 1;
+      totalLatency += r.latencyMs ?? 0;
+      totalCostUsd += r.totalCostUsd ?? 0;
+      if (r.outcome === 'success') {
+        totalReasoningNotes += r.reasoningNoteCount ?? 0;
+        successCount++;
+      }
+    }
+
+    const successRate = (successCount / REPS_PER_MODEL) * 100;
+    const avgLatencyS = (totalLatency / REPS_PER_MODEL / 1000).toFixed(1);
+    const avgCostUsd = (totalCostUsd / REPS_PER_MODEL).toFixed(6);
+    const avgReasoningNotes = successCount ? (totalReasoningNotes / successCount).toFixed(1) : 'n/a';
+
+    console.log(`  outcomes: ${JSON.stringify(outcomeCounts)}`);
+    console.log(`  successRate=${successRate.toFixed(0)}%  avgLatency=${avgLatencyS}s  avgTotalCostUsd(2 calls)=$${avgCostUsd}  avgReasoningNotesUsed=${avgReasoningNotes}`);
+    const sampleFailure = results.find((r) => r.outcome !== 'success' && r.detail);
+    if (sampleFailure) console.log(`  sample failure (${sampleFailure.outcome}): ${JSON.stringify(sampleFailure.detail).slice(0, 300)}... (full detail + actual program in ${FULL_RESULTS_PATH})`);
+    console.log('');
+
+    summary.push({ model: candidate.model, label: candidate.label, successRate, avgLatencyS: Number(avgLatencyS), avgCostUsd, avgReasoningNotes });
+  }
+
+  console.log('==== SUMMARY (two-step / Option B — sorted by success rate) ====');
+  summary
+    .sort((a, b) => b.successRate - a.successRate)
+    .forEach((s) => console.log(`${s.successRate.toFixed(0)}%  ${s.avgLatencyS}s  $${s.avgCostUsd}  avgReasoningNotesUsed=${s.avgReasoningNotes}  ${s.label} (${s.model})`));
+
+  writeFileSync(FULL_RESULTS_PATH, JSON.stringify(allResults, null, 2));
+  console.log(`\n[modelEvalTwoStep] full per-attempt results (including every disqualified attempt's actual proposed program) written to ${FULL_RESULTS_PATH}`);
+
+  db.close();
+}
+
+main().catch((err) => {
+  console.error('[modelEvalTwoStep] fatal error:', err);
+  process.exit(1);
+});

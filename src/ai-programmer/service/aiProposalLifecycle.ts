@@ -105,7 +105,40 @@ export function getLatestProposalForDate(db: Database.Database, targetDate: stri
   const repo = new AIProposalRepo(db);
   const record = repo.findLatestForTargetDate(targetDate);
   if (!record) return undefined;
-  return expireIfNeeded(repo, record);
+  const current = expireIfNeeded(repo, record);
+  if (isCommittedSessionElsewhereNow(db, current, targetDate)) return undefined;
+  return current;
+}
+
+/** Schedule swap/move bugfix (2026-09-23): `target_date` is written once,
+ * at generation time, and is never updated by swapDayActivities/
+ * moveActivity — those only ever move the real `workout_sessions.date`
+ * column (by design; see scheduleOperations.ts's own doc comments —
+ * this fix does not, and should not, touch that). Left unguarded, a
+ * COMMITTED proposal/reconciliation whose real session has since been
+ * relocated to a different date by a later swap/move keeps being
+ * reported as "the active proposal for `targetDate`" forever — showing
+ * its frozen, commit-time content (a stale exercise list) on a day
+ * whose real workout has actually moved elsewhere, alongside whatever
+ * genuinely belongs to that day now. Verified against real production
+ * data: a single-day proposal and a week-reconciliation, both originally
+ * committed for the same date, ended up on two different dates after a
+ * swap — but only one had actually moved, and the other's still-`target_
+ * date`-matching record kept surfacing its own long-superseded content on
+ * the original day. Detecting and hiding that stale case here (read-time,
+ * self-healing on the very next discovery call) is far safer than trying
+ * to keep target_date in sync from inside every current and future
+ * schedule operation. A committed record whose session no longer exists
+ * at all (e.g. deleted) is treated the same way — nothing real is left
+ * to show for this date either. */
+function isCommittedSessionElsewhereNow(db: Database.Database, record: AIProposalRecord, targetDate: string): boolean {
+  if (record.status !== 'committed') return false;
+  // No committedSessionId at all (the FK's own ON DELETE SET NULL, once
+  // its session row is gone) is the same "nothing real left to show"
+  // case as a session that moved to a different date.
+  if (!record.committedSessionId) return true;
+  const session = new WorkoutSessionsRepo(db).getSession(record.committedSessionId);
+  return !session || session.date !== targetDate;
 }
 
 /** Explicit approval only — never commits, never mutates the proposal's
@@ -127,6 +160,31 @@ export function approveProposal(db: Database.Database, proposalId: string): AIPr
     throw new AIProposalInvalidStateError(proposalId, current?.status ?? record.status, 'approved');
   }
   return approved;
+}
+
+/** Explicit user discard (2026-09-23 "duplicate AI programs" fix) — a
+ * pending or approved proposal the user no longer wants (most commonly:
+ * they already have a different, real program for this day and want to
+ * clear the leftover one so "Generate" is offered again). Idempotent on
+ * an already-`rejected` proposal. A `committed` proposal cannot be
+ * rejected here — its real session already exists; discarding it means
+ * DELETE /api/workouts/:id on that session, a deliberately separate
+ * operation on a separate resource (see AIProposalRepo.reject's own doc
+ * comment). An `expired` proposal likewise cannot be rejected (nothing
+ * left to reject — it's already inert). */
+export function rejectProposal(db: Database.Database, proposalId: string): AIProposalRecord {
+  const record = loadCurrent(db, proposalId);
+  if (record.status === 'rejected') return record;
+  if (record.status !== 'pending' && record.status !== 'approved') {
+    throw new AIProposalInvalidStateError(proposalId, record.status, 'rejected');
+  }
+
+  const rejected = new AIProposalRepo(db).reject(proposalId);
+  if (!rejected) {
+    const current = new AIProposalRepo(db).getById(proposalId);
+    throw new AIProposalInvalidStateError(proposalId, current?.status ?? record.status, 'rejected');
+  }
+  return rejected;
 }
 
 export interface CommitAIProposalResult {
@@ -373,6 +431,11 @@ export function commitAIProposalToPlannedSession(
           target_rir_min: exercise.rirMin,
           target_rir_max: exercise.rirMax,
           target_rest_seconds: exercise.restSeconds ?? null,
+          // Fix: persisted so an already-committed exercise can still
+          // offer "Substitute" in the logger UI, which needs the exact
+          // target_type/target_id pair to query feasible alternatives.
+          target_type: exercise.targetType,
+          target_id: exercise.targetId,
           sets: Array.from({ length: exercise.sets }, (_, setIndex) => ({
             set_number: setIndex + 1,
             weight: null,

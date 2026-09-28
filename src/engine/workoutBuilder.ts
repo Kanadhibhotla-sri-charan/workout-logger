@@ -42,10 +42,11 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../blueprint/developmentPackages.js';
+import { getSubTargetExerciseIds } from '../blueprint/subTargetExerciseScope.js';
 import { getProfile, applyRepRangeBias } from '../coaching/profiles/muscleProfileService.js';
 import type { BadmintonIntensity, BlueprintId, Set as LoggedSet, Weekday } from '../contracts/types.js';
 import { WEEKDAYS } from '../contracts/types.js';
-import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_SESSION_MAX_EXERCISES, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, TIME_ESTIMATION } from './config.js';
+import { ABS_PHYSIQUE_TARGETS, DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEFFICIENTS, LEGS_PHYSIQUE_TARGETS, REVIEW_CADENCE_DEFAULT_DAYS, SESSION_REALISM_CAP, sessionRealismCapFor, TIME_ESTIMATION } from './config.js';
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
@@ -844,7 +845,13 @@ function rankTarget(
   const recoveryNeed = recovery.priority_adjustment === 'avoid' ? 2 : recovery.priority_adjustment === 'reduce' ? 1 : 0;
   if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0, recoveryNeed, rotationTieBreak: 0 };
   const threshold = developmentReference?.weekly_direct_set_reference ?? startingPointMin;
-  const needDeficit = Math.max(0, threshold - target.weekly_exposure_units);
+  // Fractional need (2026-09-19): share of THIS target's own reference still unmet,
+  // not the raw set count. With per-target references now differing (chest 10, delts
+  // 14, one-leg-day legs 2-8), an absolute deficit made the same big-reference muscles
+  // win every week and starved the small-reference ones; fractions tie at 1.0 for every
+  // untouched muscle so the non-goal rotation ring (not reference size) decides.
+  const rawDeficit = Math.max(0, threshold - target.weekly_exposure_units);
+  const needDeficit = threshold > 0 ? Math.round((rawDeficit / threshold) * 1e6) / 1e6 : rawDeficit;
   return { target, classification: needDeficit > 0 ? 'normal_development' : 'maintenance', needDeficit, recoveryNeed, rotationTieBreak };
 }
 
@@ -1217,6 +1224,9 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       // classification, so decideVolume's starting-point/ceiling and
       // rankTarget's/classification's threshold can never disagree.
       development_reference: developmentReference,
+      // Assessment-Gate Workaround (2026-09-19) — see volumeEngine.ts's
+      // own doc comment on VolumeDecisionInput.training_experience.
+      training_experience: input.trainingExperience,
     });
     log.push(`${target.target_type} "${target.target_id}": ${volumeDecision.reasoning}`);
 
@@ -1292,14 +1302,31 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     // risk this fix targets is specifically several simultaneously-
     // untrained sibling targets each independently adopting the same
     // package's own recommended starting point.
+    //
+    // Sub-Target Exercise Scope (2026-09-19): this pooling exists ONLY to
+    // guard against several sibling target_ids each separately being
+    // credited with the SAME whole-package total. For a package with a
+    // real scope entry (getSubTargetExerciseIds returns non-null), that
+    // duplication can no longer happen — developmentReferenceEngine.ts
+    // already scoped `packageWeeklyReference` down to only the exercises
+    // that count toward THIS target specifically, so siblings' own
+    // references are already mutually exclusive (e.g. mid-pec's 5
+    // per-exposure sets and upper-pec's own 7 don't overlap). Pooling
+    // them under one package-wide budget in that case would double-
+    // discount and incorrectly starve a later sibling. This guard applies
+    // only to still-untagged multi-target_id muscle_groups, where the
+    // whole-package duplication risk this fix was built for still exists.
     const isPackageDerivedRecommendation = target.current_weekly_primary_sets === 0 && volumeDecision.action === 'increase';
     const packageId = developmentReference?.package_id ?? null;
     const packageWeeklyReference = developmentReference?.weekly_direct_set_reference ?? null;
+    const isAlreadyScopedToThisTarget = packageId !== null && getSubTargetExerciseIds(packageId, target.target_id) !== null;
     const alreadyClaimedForPackage = packageId ? (plannedDirectSetsByPackage.get(packageId) ?? 0) : 0;
     const packageRemainingBudget =
-      packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation ? Math.max(0, packageWeeklyReference - alreadyClaimedForPackage) : Number.POSITIVE_INFINITY;
+      packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation && !isAlreadyScopedToThisTarget
+        ? Math.max(0, packageWeeklyReference - alreadyClaimedForPackage)
+        : Number.POSITIVE_INFINITY;
 
-    if (packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation && packageRemainingBudget <= 0) {
+    if (packageId && packageWeeklyReference !== null && isPackageDerivedRecommendation && !isAlreadyScopedToThisTarget && packageRemainingBudget <= 0) {
       weekLevelSkips.push({
         target_type: target.target_type,
         scope: 'exposure' as const,
@@ -2019,14 +2046,20 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * also what keeps `assertNoContradictoryProgramState` satisfied (a
    * target cannot be both programmed and marked skipped).
    *
-   * Legs-Session Exercise Cap (2026-09-16): `maxExercisesForThisSession`
-   * is `LEGS_SESSION_MAX_EXERCISES` (5) on a 'legs'-purpose day, the
-   * general `SESSION_REALISM_CAP.maxExercisesPerSession` (9) otherwise —
-   * explicit user request. The muscle-count ceiling
-   * (`maxTargetsPerSession`) is unchanged for every purpose, legs
-   * included. */
+   * Legs-Session Exercise Cap (2026-09-16, tightened 2026-09-19):
+   * `sessionRealismCapFor` (config.ts, the one shared source of truth
+   * every caller — deterministic and both AI validators — reads) decides
+   * both ceilings for a 'legs'-purpose day: 5 muscles/5 exercises alone,
+   * or 5 muscles/8 exercises when abs is also part of THIS session (the
+   * extra 3 slots are for abs specifically — `legExerciseShareMax` keeps
+   * leg work itself capped at 5 even then, enforced below via
+   * `legExerciseCountKept`). Every other purpose keeps the general
+   * 8-target/10-exercise cap (raised 2026-09-19), with abs itself capped
+   * at `absExerciseShareMax` (2) of that total — enforced below via
+   * `absExerciseCountKept`, mirroring the leg-day mechanism exactly. */
   function applySessionRealismCap(dayCandidates: typeof candidates, sessionPurpose: SessionPurpose | null): { kept: typeof candidates; deferred: typeof candidates } {
-    const maxExercisesForThisSession = sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
+    const targetIdsInSession = [...new Set(dayCandidates.map((c) => c.planned.target_id))];
+    const caps = sessionRealismCapFor(sessionPurpose, targetIdsInSession);
 
     // Group by target first (order preserved — dayCandidates already
     // arrives priority-ordered) so a target's own multiple exercise
@@ -2048,16 +2081,24 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
     const kept: typeof candidates = [];
     const deferred: typeof candidates = [];
     let keptTargetCount = 0;
+    let legExerciseCountKept = 0;
+    let absExerciseCountKept = 0;
     for (const key of order) {
       const group = byTarget.get(key)!;
-      if (keptTargetCount >= SESSION_REALISM_CAP.maxTargetsPerSession) {
+      if (keptTargetCount >= caps.maxTargets) {
         // Muscle-count ceiling already reached — a wholly new target
         // cannot claim a slot no matter how much exercise budget
         // remains; fully deferred.
         deferred.push(...group);
         continue;
       }
-      const remainingExerciseSlots = maxExercisesForThisSession - kept.length;
+      const isLegGroup = caps.legExerciseShareMax !== null && LEGS_PHYSIQUE_TARGETS.includes(group[0]!.planned.target_id);
+      const isAbsGroup = caps.absExerciseShareMax !== null && ABS_PHYSIQUE_TARGETS.includes(group[0]!.planned.target_id);
+      const remainingExerciseSlots = isLegGroup
+        ? Math.min(caps.maxExercises - kept.length, caps.legExerciseShareMax! - legExerciseCountKept)
+        : isAbsGroup
+          ? Math.min(caps.maxExercises - kept.length, caps.absExerciseShareMax! - absExerciseCountKept)
+          : caps.maxExercises - kept.length;
       if (remainingExerciseSlots <= 0) {
         deferred.push(...group);
         continue;
@@ -2065,6 +2106,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       if (group.length <= remainingExerciseSlots) {
         kept.push(...group);
         keptTargetCount++;
+        if (isLegGroup) legExerciseCountKept += group.length;
+        if (isAbsGroup) absExerciseCountKept += group.length;
       } else {
         // The starvation fix itself: this target's own full exercise
         // count doesn't fit what's left, but SOME of it does — keep
@@ -2072,6 +2115,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         kept.push(...group.slice(0, remainingExerciseSlots));
         deferred.push(...group.slice(remainingExerciseSlots));
         keptTargetCount++;
+        if (isLegGroup) legExerciseCountKept += remainingExerciseSlots;
+        if (isAbsGroup) absExerciseCountKept += remainingExerciseSlots;
       }
     }
     return { kept, deferred };
@@ -2089,7 +2134,8 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
    * separate skip needed, exactly like any other under-delivered
    * target. */
   function sessionRealismSkipsFor(deferred: typeof candidates, kept: typeof candidates, sessionPurpose: SessionPurpose | null): SkippedTarget[] {
-    const maxExercisesForThisSession = sessionPurpose === 'legs' ? LEGS_SESSION_MAX_EXERCISES : SESSION_REALISM_CAP.maxExercisesPerSession;
+    const targetIdsInSession = [...new Set([...deferred, ...kept].map((c) => c.planned.target_id))];
+    const caps = sessionRealismCapFor(sessionPurpose, targetIdsInSession);
     const keptKeys = new Set(kept.map((c) => targetKey(c.planned)));
     const seen = new Set<string>();
     const skips: SkippedTarget[] = [];
@@ -2104,7 +2150,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
         classification: c.planned.classification,
         scope: 'session',
         reason_code: 'session_realism_cap',
-        reason: `This session already reached the ${SESSION_REALISM_CAP.maxTargetsPerSession}-target/${maxExercisesForThisSession}-exercise session realism cap before this target's own turn — deferred, not dropped; it remains available for this target's next real exposure.`,
+        reason: `This session already reached the ${caps.maxTargets}-target/${caps.maxExercises}-exercise session realism cap before this target's own turn — deferred, not dropped; it remains available for this target's next real exposure.`,
         decision: c.planned.decision,
       });
     }

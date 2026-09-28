@@ -167,7 +167,10 @@ describe('program.html: AI Week Reorganization section wiring', () => {
   });
 
   it('makes clear nothing changes until the user explicitly approves and applies it', () => {
-    expect(html).toMatch(/Ask the AI Programmer to generate a workout for this day and reorganize the rest of the week around it\. Nothing changes until you approve and apply it\./);
+    // Phase 5 (2026-09-23): reworded to name the specific day and state
+    // the locked-day guarantee explicitly (Part 7) — same "nothing
+    // changes until approve+apply" guarantee, stronger scope statement.
+    expect(html).toMatch(/Generates \$\{formatWeekday\(day\.weekday\)\}'s workout and reorganizes the rest of this week around it\. Completed and in-progress days are never touched\. Nothing changes until you approve and apply it\./);
   });
 
   it('guards every action against duplicate/overlapping submissions', () => {
@@ -183,6 +186,35 @@ describe('program.html: AI Week Reorganization section wiring', () => {
   it('shows which other days changed, from the real output.days field only', () => {
     const reviewBody = html.slice(html.indexOf('function buildWeekReconciliationReview('), html.indexOf('function buildWeekReconciliationSection('));
     expect(reviewBody).toMatch(/output\.days\.filter\(\(d\) => d\.changeType !== 'unchanged'\)/);
+  });
+
+  // 2026-09-23 fix: "duplicate AI programs" — same fix as
+  // buildAiProposalSection's own blockedByRealSession, applied here too.
+  describe('"duplicate AI programs" fix: reconciling is blocked while a real session already exists on the target day', () => {
+    it('blocks generate/approve/apply and offers to delete the existing workout instead', () => {
+      expect(sectionBody).toMatch(/function blockedByRealSession\(\)/);
+      expect(sectionBody).toMatch(/return !!day\.plannedSession && !\(state && state\.committedSessionId === day\.plannedSession\.id\);/);
+      expect(sectionBody).toMatch(/if \(blockedByRealSession\(\)\)/);
+      expect(sectionBody).toMatch(/onDeleteExistingSession/);
+    });
+
+    it('DELETE /api/workouts/:id removes the blocking session', () => {
+      const deleteFnBody = sectionBody.slice(sectionBody.indexOf('async function onDeleteExistingSession'));
+      expect(deleteFnBody).toMatch(/api\(`\/api\/workouts\/\$\{day\.plannedSession\.id\}`, \{ method: 'DELETE' \}\)/);
+    });
+
+    it('a pending/approved (never committed) reconciliation can be discarded independently via reject', () => {
+      expect(sectionBody).toMatch(/async function onReject\(\)/);
+      expect(sectionBody).toMatch(/aiApi\(`\/api\/ai-programmer\/week-reconciliations\/\$\{state\.reconciliationId\}\/reject`, \{ method: 'POST' \}\)/);
+    });
+  });
+
+  // 2026-09-23 fix: same stale-content cleanup as buildAiProposalSection's
+  // own fix, applied here — a rejected/expired reconciliation must not
+  // keep showing its full exercise list.
+  it('clears the full review once a reconciliation is expired or rejected — the notice alone is shown, not the stale exercise list', () => {
+    const reviewFnBody = sectionBody.slice(sectionBody.indexOf('function renderReview()'), sectionBody.indexOf('function renderNotice()'));
+    expect(reviewFnBody).toMatch(/state && state\.status !== 'expired' && state\.status !== 'rejected'/);
   });
 
   it('never renders a raw error field beyond the pre-mapped err.message', () => {

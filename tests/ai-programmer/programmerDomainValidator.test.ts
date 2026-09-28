@@ -126,10 +126,10 @@ describe('AI Programmer domain validator', () => {
     expect(result.errors.join(' ')).toMatch(/valid exercise library/);
   });
 
-  it('rejects a set count that differs from the authored value (not just "above a cap")', () => {
+  it('rejects a set count above the authored maximum', () => {
     const result = validateProposalDomain(baseProposal({ exercises: [{ ...baseProposal().exercises[0]!, sets: 8 }] }), context, db);
     expect(result.ok).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/sets must equal Blueprint-authored value 3; received 8/);
+    expect(result.errors.join(' ')).toMatch(/sets must be an integer from 1 to 3; received 8/);
   });
 
   it('rejects an invalid rep range (repsMin > repsMax already caught upstream, but repsMax over the safety ceiling here)', () => {
@@ -165,10 +165,9 @@ describe('AI Programmer domain validator', () => {
     expect(result.errors.join(' ')).toMatch(/locked/);
   });
 
-  it('rejects a proposal whose declared role contradicts Blueprint\'s own primary/secondary resolution', () => {
+  it('role repair (2026-09-18): a mismatched declared role is no longer checked at all — programmerProposalRepair.ts always overwrites it with Blueprint\'s own truth before this validator ever runs', () => {
     const result = validateProposalDomain(baseProposal({ exercises: [{ ...baseProposal().exercises[0]!, role: 'secondary' }] }), context, db);
-    expect(result.ok).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/does not match Blueprint's own primary\/secondary role/);
+    expect(result.ok).toBe(true);
   });
 
   it('rejects an outside-Blueprint-style source value (this milestone accepts only "blueprint")', () => {

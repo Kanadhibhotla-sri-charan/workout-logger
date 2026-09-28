@@ -15,6 +15,7 @@ import type { AIProgrammerMode, AIProgrammerProvider, AIProgrammerProviderReques
 import {
   AIProviderAuthenticationError,
   AIProviderInvalidResponseError,
+  AIProviderOutputTruncatedError,
   AIProviderRateLimitedError,
   AIProviderTimeoutError,
   AIProviderUnavailableError,
@@ -148,12 +149,78 @@ export interface VelonaPayloadBuildResult {
 // already configured higher than this floor.
 const RECONCILE_WEEK_MIN_MAX_TOKENS = 6144;
 
+// Coaching Depth follow-up fix: production logs after the Coaching
+// Depth rollout showed `generate_session` — previously assumed to have
+// "its own much smaller real need" (see comment above) — now regularly
+// exhausting the shared 4096-token default and getting its JSON
+// response truncated (`actualOutputTokens` landing exactly on the
+// configured `max_tokens`, repeatedly, in production). The output
+// SCHEMA itself is unchanged; the richer `programmingBrief`/
+// `coachingFoundation` context now supplied (periodization state,
+// muscle profiles, historical trends, structural-balance advisories)
+// gives the model materially more to justify, and it spends that in the
+// existing free-text `rationale`/`programmingRationale` arrays. An
+// initial 8192 floor was live-tested against production and still
+// truncated on 2 of ~4 real completions (again landing exactly at the
+// cap) — raised to 16384 for real headroom. Raising this floor costs
+// nothing on its own: a completion is billed for tokens actually
+// generated, never for the configured ceiling. Same targeted,
+// mode-specific floor pattern as RECONCILE_WEEK_MIN_MAX_TOKENS — an
+// operator's own explicit VELONA_MAX_TOKENS still wins whenever it is
+// already configured higher than this floor.
+const GENERATE_SESSION_MIN_MAX_TOKENS = 16384;
+
+// generate_week (2026-09-23): combines both of the above concerns at
+// once — a full 7-day output (reconcile_week's own "up to 7 days of
+// sessions" concern) built entirely from scratch (no existing content
+// to reference/compress against, unlike reconcile_week revising an
+// existing week), each exercise still carrying its own rationale[]
+// array (generate_session's own concern). A live eval of the closely
+// related reconcile_week path this same day found even its 6144 floor
+// insufficient in practice (truncated until raised to 12000 for
+// testing) — generate_week's real per-day content is at least as rich
+// and covers every one of the 7 days from nothing, so its floor starts
+// at generate_session's own already-raised value, not reconcile_week's
+// lower one. Not yet live-tested against real generate_week completions
+// (no production traffic exists for this mode yet); revisit once it
+// does, the same way GENERATE_SESSION_MIN_MAX_TOKENS's own history
+// shows this floor should be raised on real truncation evidence, never
+// lowered without it.
+const GENERATE_WEEK_MIN_MAX_TOKENS = 20480;
+
 /** The actual `max_tokens` value a given request mode should use — the
  * ONE place this decision is made, so `buildVelonaRequestBody` (the
  * real wire body) and tokenReport.ts (diagnostics, which reads the
  * built body back) can never disagree about it. */
 export function effectiveMaxTokensForMode(config: VelonaConfig, mode: AIProgrammerMode): number {
-  return mode === 'reconcile_week' ? Math.max(config.maxTokens, RECONCILE_WEEK_MIN_MAX_TOKENS) : config.maxTokens;
+  const floor = mode === 'reconcile_week' ? RECONCILE_WEEK_MIN_MAX_TOKENS : mode === 'generate_week' ? GENERATE_WEEK_MIN_MAX_TOKENS : GENERATE_SESSION_MIN_MAX_TOKENS;
+  return Math.max(config.maxTokens, floor);
+}
+
+// Velona does not document a fixed vocabulary for `data.finish` beyond
+// the "stop" example in its own integration spec, so a recognized
+// truncation string is treated as a strong signal when present, but the
+// authoritative signal is numeric: a provider that reports completion
+// usage landing at or above the exact max_tokens it was just sent is,
+// by construction, a response that was cut off mid-generation —
+// verified live against this deployment's own production logs (two
+// consecutive failures both showed `actualOutputTokens` exactly equal
+// to `configuredMaxOutputTokens`).
+const KNOWN_TRUNCATION_FINISH_REASONS = new Set(['length', 'max_tokens', 'max_output_tokens', 'model_length']);
+
+/** Pure, exported so both `attemptOnce` (the null/empty-output case,
+ * before any usage-shaped response object exists) and callers holding a
+ * full `AIProgrammerProviderResponse` (the non-null-but-incomplete-JSON
+ * case, checked in aiProgrammerService.ts) can make the identical
+ * truncation decision without duplicating the logic. */
+export function isLikelyTruncatedOutput(finishReason: string | undefined, completionTokens: number | undefined, configuredMaxOutputTokens: number | undefined): boolean {
+  if (finishReason && KNOWN_TRUNCATION_FINISH_REASONS.has(finishReason.toLowerCase())) {
+    return true;
+  }
+  if (typeof completionTokens === 'number' && typeof configuredMaxOutputTokens === 'number') {
+    return completionTokens >= configuredMaxOutputTokens;
+  }
+  return false;
 }
 
 /** Fix AI Weekly Reconciliation Review, Finding 2 / Real Dry-Run Token
@@ -192,7 +259,7 @@ export class VelonaProvider implements AIProgrammerProvider {
     for (;;) {
       attempt++;
       try {
-        const result = await this.attemptOnce(body, request.requestId);
+        const result = await this.attemptOnce(body, request.requestId, request.mode);
         // Deployment §2.10: how to inspect logs for provider-call
         // success/failure. safeLogFields never includes the API key or
         // raw context/prompt content.
@@ -225,7 +292,7 @@ export class VelonaProvider implements AIProgrammerProvider {
     }
   }
 
-  private async attemptOnce(body: unknown, requestId: string): Promise<AIProgrammerProviderResponse> {
+  private async attemptOnce(body: VelonaRequestBody, requestId: string, mode: AIProgrammerMode): Promise<AIProgrammerProviderResponse> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
@@ -294,6 +361,11 @@ export class VelonaProvider implements AIProgrammerProvider {
 
     const rawOutput = payload.data?.output;
     if (rawOutput === undefined || rawOutput === null) {
+      const completionTokens = payload.data?.usage?.completion_tokens;
+      const configuredMaxOutputTokens = body.config.max_tokens;
+      if (isLikelyTruncatedOutput(payload.data?.finish, completionTokens, configuredMaxOutputTokens)) {
+        throw new AIProviderOutputTruncatedError({ mode, finishReason: payload.data?.finish, completionTokens, configuredMaxOutputTokens });
+      }
       throw new AIProviderInvalidResponseError('Velona response did not contain data.output.');
     }
     const rawText = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
@@ -303,6 +375,7 @@ export class VelonaProvider implements AIProgrammerProvider {
       model: payload.data?.model ?? this.config.model,
       requestId,
       rawText,
+      finishReason: payload.data?.finish,
       usage: payload.data?.usage
         ? {
             inputTokens: payload.data.usage.prompt_tokens,

@@ -40,7 +40,11 @@ import {
 } from '../../engine/workoutBuilder.js';
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
 import { classifyAestheticTrend, decideVolume } from '../../engine/volumeEngine.js';
-import { SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
+import { ABS_PHYSIQUE_TARGETS, ABS_SESSION_EXERCISE_SHARE_MAX, DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, PULL_PHYSIQUE_TARGETS, PUSH_PHYSIQUE_TARGETS, SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
+import { UNDER_PRESCRIPTION_TOLERANCE } from '../validation/programmerAdequacyValidator.js';
+import { computeTargetFeasibility } from './targetFeasibility.js';
+import { applyDeloadSetVolumeReduction, DELOAD_REP_RANGE_BIAS } from '../../coaching/periodization/deloadPolicy.js';
+import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
 import { isTargetCompatibleWithPurpose, type SessionPurpose } from '../../engine/sessionPurpose.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { AestheticAssessmentsRepo } from '../../repositories/aestheticAssessmentsRepo.js';
@@ -53,6 +57,11 @@ import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { AIContextIncompleteError, AITargetNotEditableError } from '../errors.js';
 import { hashContext } from './programmerContextDiagnostics.js';
 import { buildCoachingFoundationContext } from '../../coaching/foundationContext.js';
+import { getProfile } from '../../coaching/profiles/muscleProfiles.js';
+import { applyRepRangeBias } from '../../coaching/profiles/muscleProfileService.js';
+import { isExerciseSuitable } from '../../engine/intensityTechniques.js';
+import { ProfileFactorsRepo } from '../../repositories/profileFactorsRepo.js';
+import { evaluateStructuralAdvisories, type StructuralAdvisoryTargetInput } from '../../coaching/structuralAdvisories/structuralAdvisoryService.js';
 import {
   AI_PROGRAMMER_CONTEXT_SCHEMA_VERSION,
   type AICrossWeekContext,
@@ -97,6 +106,39 @@ export function activityTypesForDailyActivity(activity: 'gym' | 'badminton' | 'b
   return activity === 'badminton' || activity === 'both' ? ['badminton'] : [];
 }
 
+/** Context-bloat fix (2026-09-18): every technique id actually
+ * referenced by any of `targets[].validExercises[].plausibleIntensityTechniques`,
+ * deduplicated, resolved to its full text exactly once — shared by both
+ * `buildProgrammerContext` and `buildReconciliationContext` so neither
+ * mode re-embeds the same handful of technique definitions once per
+ * suitable exercise (a real measured bug: 3 real techniques, 324
+ * suitability matches in one realistic single-session context, 75% of
+ * that context's entire size before this fix). */
+export function buildIntensityTechniqueCatalogue(targets: readonly AIProgrammerTargetContext[]): AIProgrammerContext['intensityTechniqueCatalogue'] {
+  const referencedTechniqueIds = new Set<string>();
+  for (const t of targets) {
+    for (const ex of t.validExercises) {
+      for (const id of ex.plausibleIntensityTechniques) referencedTechniqueIds.add(id);
+    }
+  }
+  return Object.fromEntries(
+    [...referencedTechniqueIds].map((id) => {
+      const technique = BlueprintAdapter.getIntensityTechnique(id)!;
+      return [
+        id,
+        {
+          id: technique.id,
+          name: technique.name,
+          what: technique.what,
+          whenToUse: technique.when_it_may_help,
+          whenNotToUse: technique.when_not_to_use,
+          fatigueImplications: technique.fatigue_time_implications,
+        },
+      ];
+    })
+  );
+}
+
 /** Shapes `assembleWeeklyPlanInput`'s per-target output into
  * `AIProgrammerTargetContext[]` — the exact per-target exposure/
  * history/recovery/valid-exercise shaping every AI context (single-
@@ -113,7 +155,15 @@ export function buildTargetContexts(
   planInput: { targets: readonly TargetBuildContext[] },
   evaluationDate: string,
   otherActivityToday: ActivityType[],
-  missingData: string[]
+  missingData: string[],
+  // Rule 6 fix (2026-09-19): whether a deload is currently active — the
+  // SAME real signal getPeriodizationContext already computes for
+  // buildProgrammingBrief, reused here (never a second, independently
+  // read deload flag) so rep-range bias can be baked into
+  // authoredPrescription the exact same deterministic way deload
+  // set-volume already is. Defaults to false so every existing call
+  // site (tests) keeps its prior behavior.
+  deloadActive = false
 ): AIProgrammerTargetContext[] {
   return planInput.targets.map((t: TargetBuildContext) => {
     const targetLabel = t.target_type === 'physique_target' ? BlueprintAdapter.getTarget(t.target_id) : BlueprintAdapter.getFunctionalGoal(t.target_id);
@@ -141,6 +191,21 @@ export function buildTargetContexts(
       }));
     }
 
+    // Rule 6 fix (2026-09-19): deload's own bias overrides this muscle's
+    // curated preference while active — the exact same precedence
+    // workoutBuilder.ts's own rep-range-bias call site uses (never a
+    // second, independently-decided precedence rule).
+    const effectiveRepRangeBias = deloadActive ? DELOAD_REP_RANGE_BIAS : (getProfile(t.target_id).repRangeBias ?? 'standard');
+
+    // Rule 6 fix: a flattened, most-recent-first timeline of every real
+    // logged use of ANY exercise for this target — built once per
+    // target, reused by every one of its exercises below — so
+    // "recentConsecutiveSessionsUsed" reflects genuine session-to-
+    // session sequence, never just a per-exercise entry count.
+    const targetTimelineMostRecentFirst = Object.entries(t.exercise_history)
+      .flatMap(([exId, entries]) => entries.map((e) => ({ exerciseId: exId, date: e.date })))
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
     const validExercises: AIProgrammerValidExerciseContext[] = exercisesTrainingTarget(t.target_type, t.target_id).map((exerciseId) => {
       const exercise = BlueprintAdapter.getExercise(exerciseId);
       const prescriptionEntry = lookupExercisePrescriptionAnyLevel(t.target_id, exerciseId);
@@ -149,17 +214,36 @@ export function buildTargetContexts(
         try {
           const reps = parseRange(prescriptionEntry.reps);
           const rir = parseRange(prescriptionEntry.rir);
-          authoredPrescription = { sets: prescriptionEntry.sets, repsMin: reps.min, repsMax: reps.max, rirMin: rir.min, rirMax: rir.max };
+          const biasedReps = applyRepRangeBias(reps.min, reps.max, effectiveRepRangeBias);
+          authoredPrescription = { sets: prescriptionEntry.sets, repsMin: biasedReps.min, repsMax: biasedReps.max, rirMin: rir.min, rirMax: rir.max };
         } catch {
           missingData.push(`exercise ${exerciseId} for target ${t.target_id}: malformed authored reps/rir range — omitted, not guessed`);
         }
       }
+
+      // IDs only — see AIProgrammerContext.intensityTechniqueCatalogue's
+      // own doc comment for why (2026-09-18 context-bloat fix: the full
+      // text used to be repeated per suitable exercise).
+      const plausibleIntensityTechniques = exercise
+        ? BlueprintAdapter.listIntensityTechniques()
+            .filter((technique) => isExerciseSuitable(exerciseId, technique))
+            .map((technique) => technique.id)
+        : [];
+
+      let recentConsecutiveSessionsUsed = 0;
+      for (const entry of targetTimelineMostRecentFirst) {
+        if (entry.exerciseId !== exerciseId) break;
+        recentConsecutiveSessionsUsed++;
+      }
+
       return {
         exerciseId,
         name: exercise?.name ?? exerciseId,
         role: roleFor(exerciseId, t.target_type, t.target_id) as 'primary' | 'secondary',
         equipment: exercise?.equipment ?? [],
         authoredPrescription,
+        plausibleIntensityTechniques,
+        recentConsecutiveSessionsUsed,
       };
     });
 
@@ -211,13 +295,40 @@ export function buildTargetContexts(
  * — see docs from the read-only investigation) without duplicating that
  * function's cross-target running-state bookkeeping, which a single
  * one-session generation does not need. */
+/** The user's confirmed, non-expired training-experience level, or null. The
+ * one read every caller shares: the AI brief's volume decision must see the
+ * same value the deterministic engine's own decision does. */
+export function readTrainingExperience(db: Database.Database, userId: string, asOfDate: string): 'novice' | 'intermediate' | 'advanced' | null {
+  const raw = new ProfileFactorsRepo(db).effectiveValue(userId, 'training_experience', asOfDate);
+  return raw === 'novice' || raw === 'intermediate' || raw === 'advanced' ? raw : null;
+}
+
 export function buildProgrammingBrief(
   targets: readonly AIProgrammerTargetContext[],
   activeGoals: readonly AIProgrammerActiveGoalContext[],
   sessionPurpose: SessionPurpose | null,
   weeklyProgramSessions: readonly Pick<PersistedWeekSession, 'name'>[],
   asOfDate: string,
-  budgetMinutes: number
+  budgetMinutes: number,
+  // Fix: deload's set-volume reduction was previously never applied
+  // here at all — `recommendedWeeklyPrimarySets`/`recommendedSessionSets`
+  // were always the FULL, non-deload numbers, leaving the AI to notice
+  // "we're in a deload" (from coachingFoundation.programState) and guess
+  // its own reduction, entirely unchecked. `applyDeloadSetVolumeReduction`
+  // is the exact same function/formula workoutBuilder.ts's own
+  // deterministic path already applies at this exact point (weekly,
+  // before the per-session floor/cap math below) — never a second,
+  // independently-derived reduction. Defaults to inactive so every
+  // existing call site (tests, programmerAdequacyValidator.ts's own
+  // comment reference) that doesn't pass this keeps its prior behavior.
+  periodization: { deloadActive: boolean } = { deloadActive: false },
+  // The volume decision's own advanced-trainee path (Assessment-Gate
+  // Workaround): a confirmed advanced trainee starts a goal with no volume
+  // directly at its package reference and, with no assessment data, takes the
+  // same small +step the deterministic engine takes instead of holding the
+  // current volume forever. Was never passed here, so the AI brief always used
+  // the novice path. Null keeps the previous behaviour.
+  trainingExperience: 'novice' | 'intermediate' | 'advanced' | null = null
 ): AIProgrammerProgrammingBrief {
   const expectedCoverageTargetIds: readonly BlueprintId[] = sessionPurpose
     ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS]
@@ -247,9 +358,21 @@ export function buildProgrammingBrief(
       // pipeline cannot verify the §11 introspection checklist either.
       introspection_confirmed_no_other_explanation: false,
       development_reference: developmentReference,
+      training_experience: trainingExperience,
     });
 
-    const recommendedWeeklyPrimarySets = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : t.currentWeeklyPrimarySets;
+    const recommendedWeeklyPrimarySetsBeforeDeload = volumeDecision.action === 'increase' ? volumeDecision.recommended_weekly_primary_sets : t.currentWeeklyPrimarySets;
+    // Fix: the ONE place this deload reduction is applied — exactly once,
+    // before any downstream floor/cap/min/max math reads it (matching
+    // workoutBuilder.ts's own "avoid applying deload reduction twice"
+    // discipline for its analogous `desiredWeekly`). volumeDecision's own
+    // methodology is untouched — this reduces the OUTCOME, never the
+    // decision logic. The AI's system instruction (rule 13) states this
+    // number already reflects any active deload — the AI must never
+    // apply a second reduction of its own on top of it.
+    const recommendedWeeklyPrimarySets = periodization.deloadActive
+      ? applyDeloadSetVolumeReduction(recommendedWeeklyPrimarySetsBeforeDeload)
+      : recommendedWeeklyPrimarySetsBeforeDeload;
 
     const daysThisWeek = compatibleGymDaysThisWeek(t.targetType, t.targetId);
     const perExposureFloor = Math.max(0, Math.ceil(recommendedWeeklyPrimarySets / daysThisWeek));
@@ -259,6 +382,19 @@ export function buildProgrammingBrief(
 
     const eligibleForThisSession =
       sessionPurpose === null || t.targetType !== 'physique_target' || isTargetCompatibleWithPurpose(t.targetType, t.targetId, sessionPurpose);
+
+    // Rule 6 fix (2026-09-19): the exact same push/pull classification
+    // the deterministic engine's own antagonist-pairing logic uses
+    // (exercisePairing.ts's antagonistGroup) — never a second,
+    // independently-derived taxonomy.
+    const antagonistGroup: 'push' | 'pull' | null =
+      t.targetType === 'physique_target'
+        ? PUSH_PHYSIQUE_TARGETS.includes(t.targetId)
+          ? 'push'
+          : PULL_PHYSIQUE_TARGETS.includes(t.targetId)
+            ? 'pull'
+            : null
+        : null;
 
     return {
       targetType: t.targetType,
@@ -275,8 +411,38 @@ export function buildProgrammingBrief(
       recoveryAdjustment: t.recovery.priority_adjustment,
       eligibleForThisSession,
       reasoning: volumeDecision.reasoning,
+      antagonistGroup,
+      // Push Generation Architectural Fix (2026-09-24), priority 2: the
+      // real deterministic answer to "can one exercise reach this
+      // target's own adequacy floor, and if not, what's the smallest
+      // real combination that can" — see targetFeasibility.ts's own doc
+      // comment. Computed for every target, not only eligible ones, so a
+      // consumer never has to guess why it's missing.
+      feasibility: computeTargetFeasibility(t, targets, min, developmentReference.direct_sets_per_exposure, UNDER_PRESCRIPTION_TOLERANCE),
     };
   });
+
+  // Push Generation Architectural Fix (2026-09-24): a real, session-wide
+  // collision check — two or more eligible targets that each genuinely
+  // need >=2 of their OWN exercises to individually clear their own
+  // adequacy threshold, but together share a real session-wide exercise-
+  // count cap smaller than their combined need. Today this applies only
+  // to ABS_PHYSIQUE_TARGETS (obliques/rectus-abdominis) against
+  // ABS_SESSION_EXERCISE_SHARE_MAX, on any non-legs purpose (a legs day's
+  // own abs room is governed by a different rule — sessionRealismCapFor's
+  // own legs branch). Pure arithmetic over already-known real caps and
+  // per-target feasibility — never a suggestion to change any of them,
+  // and never invented for a target pair with no such real constraint. */
+  const feasibilityWarnings: string[] = [];
+  if (sessionPurpose !== 'legs') {
+    const absMuscles = muscles.filter((m) => ABS_PHYSIQUE_TARGETS.includes(m.targetId) && m.eligibleForThisSession);
+    const combinedMinimumExercises = absMuscles.reduce((sum, m) => sum + (m.feasibility?.minimumExerciseCount ?? 0), 0);
+    if (absMuscles.length > 1 && combinedMinimumExercises > ABS_SESSION_EXERCISE_SHARE_MAX) {
+      feasibilityWarnings.push(
+        `${absMuscles.map((m) => m.targetId).join(' and ')} together need at least ${combinedMinimumExercises} exercises to each independently reach their own adequacy floor, but this session's abs-exercise cap allows only ${ABS_SESSION_EXERCISE_SHARE_MAX} total — no exercise selection can adequately cover both at once under current rules; choosing to fully cover one and omit the other is a legitimate choice.`
+      );
+    }
+  }
 
   // estimateMinutes(sets) is workoutBuilder.ts's own real per-set time
   // model — reused, never re-derived, to check whether the sum of every
@@ -299,6 +465,7 @@ export function buildProgrammingBrief(
     session: { purpose: sessionPurpose, expectedCoverageTargetIds },
     muscles,
     approxSessionSetBudget,
+    feasibilityWarnings,
   };
 }
 
@@ -374,6 +541,21 @@ export function buildCrossWeekContext(
  * timezone regardless, producing an internally inconsistent context. */
 export interface BuildProgrammerContextInput {
   targetDate: string;
+  /** "Ask what to generate" fix (2026-09-23): an explicit user choice of
+   * which session purpose ('push'|'pull'|'legs'|'upper') to generate,
+   * from the single-day "Generate this day with AI" UI. Only meaningful
+   * (and only ever needed) when the target day has no already-decided
+   * purpose of its own — most commonly a Rest day being converted to
+   * Gym, where the day's real sessionPurpose would otherwise be `null`
+   * and the model was left to pick a focus itself with no fixed
+   * coverage requirement, producing genuinely unpredictable results
+   * (reported live: the same "generate this day" action producing an
+   * upper day one time and a leg day the next, for what the user
+   * intended to be the same request). When provided, it always takes
+   * the already-decided persisted rotation's place — a deliberate,
+   * explicit user choice for what to generate right now outranks the
+   * day's own default rotation slot. */
+  requestedSessionPurpose?: SessionPurpose;
 }
 
 export function buildProgrammerContext(db: Database.Database, input: BuildProgrammerContextInput): AIProgrammerContext {
@@ -458,7 +640,32 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const planInput = assembleWeeklyPlanInput(db, weekStart, budgetMinutes, currentDate);
   const otherActivityToday = activityTypesForDailyActivity(targetDateActivity);
 
-  const targets: AIProgrammerTargetContext[] = buildTargetContexts(planInput, input.targetDate, otherActivityToday, missingData);
+  // Fix: the same real periodization read every other planner call site
+  // (workoutBuilder.ts, and per periodizationService.ts's own doc
+  // comment, this "AI foundation context" too) already goes through —
+  // needed so both buildTargetContexts (rep-range bias) and
+  // buildProgrammingBrief (set-volume reduction) can apply the exact
+  // same deload adjustments the deterministic engine applies, rather
+  // than leaving either to the AI's own unchecked judgment. Moved
+  // before buildTargetContexts (Rule 6 fix, 2026-09-19) specifically so
+  // rep-range bias has it available. Safe to call on every generation
+  // attempt (including a retried one) — a fresh reactive-trend
+  // evaluation is itself rate-limited to once per real calendar day; a
+  // same-day re-read never re-evaluates.
+  const periodization = getPeriodizationContext(db, {
+    programId: user.id,
+    referenceDate: currentDate,
+    weekBoundary: profile.week_start_day,
+    defaultBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
+  });
+
+  const targets: AIProgrammerTargetContext[] = buildTargetContexts(
+    planInput,
+    input.targetDate,
+    otherActivityToday,
+    missingData,
+    periodization.deloadActive
+  );
 
   // Session identity (repair): read the day's ALREADY-DECIDED purpose
   // from the persisted WeeklyProgramRepo row — `name` is exactly the
@@ -471,10 +678,44 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const weekProgramExists = weeklyProgram !== undefined;
   const targetDayIndex = WEEKDAYS.indexOf(targetWeekday);
   const targetDaySessionName = weeklyProgram?.sessions.find((s) => s.day_index === targetDayIndex)?.name;
-  const sessionPurpose = targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null;
+  // "Ask what to generate" fix — see BuildProgrammerContextInput's own
+  // doc comment: an explicit requestedSessionPurpose always takes the
+  // day's own default rotation slot's place, never merely a fallback for
+  // when one is missing.
+  const sessionPurpose = input.requestedSessionPurpose ?? (targetDaySessionName && isSessionPurpose(targetDaySessionName) ? targetDaySessionName : null);
 
-  const programmingBrief = buildProgrammingBrief(targets, activeGoals, sessionPurpose, weeklyProgram?.sessions ?? [], currentDate, budgetMinutes);
+  // Rule 6 fix (2026-09-19): the user's confirmed training-experience
+  // level, when one exists — read once, before the brief, because the brief's
+  // own volume decision needs it as well as the context.
+  const trainingExperience = readTrainingExperience(db, user.id, currentDate);
+
+  const programmingBrief = buildProgrammingBrief(
+    targets,
+    activeGoals,
+    sessionPurpose,
+    weeklyProgram?.sessions ?? [],
+    currentDate,
+    budgetMinutes,
+    { deloadActive: periodization.deloadActive },
+    trainingExperience
+  );
   const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
+
+  // Rule 6 fix: real, already-computed structural-balance advisories —
+  // the exact same evaluateStructuralAdvisories the deterministic
+  // planner uses, fed the same real per-target facts already gathered
+  // in `targets` above (never a second, independently-derived notion of
+  // "how much has this target really been trained").
+  const structuralAdvisoryInputs: StructuralAdvisoryTargetInput[] = targets.map((t) => ({
+    target_type: t.targetType,
+    target_id: t.targetId,
+    is_specialization: t.isSpecialization,
+    rolling_exposure_units: t.rollingExposureUnits,
+    rolling_window_days: t.rollingWindowDays,
+  }));
+  const structuralAdvisories = evaluateStructuralAdvisories(structuralAdvisoryInputs, currentDate);
+
+  const intensityTechniqueCatalogue = buildIntensityTechniqueCatalogue(targets);
 
   // Coaching Depth Batch 1 §7: read-only foundation data, scoped to
   // exactly the same targets this context already covers — never a
@@ -501,7 +742,6 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
       defaultSessionDurationMinutes: profile.default_session_duration_minutes,
       minimumSessionDurationMinutes: profile.minimum_session_duration_minutes,
       maximumSessionDurationMinutes: profile.maximum_session_duration_minutes,
-      availableEquipment: profile.available_equipment,
     },
     objectives: {
       primaryObjective:
@@ -515,10 +755,9 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     crossWeek,
     coachingFoundation,
     currentProgram: { weekProgramExists, targetDateLocked: false, lockReason: null },
-    executionContext: {
-      programmingFilteringAllowed: false as const,
-      note: 'The user handles equipment/time substitutions and session truncation manually — this field is informational only, never a selection filter.',
-    },
+    trainingExperience,
+    structuralAdvisories,
+    intensityTechniqueCatalogue,
     outputRequirements: {
       outputSchemaVersion: 'ai-workout-session-proposal.v1',
       forbiddenBehaviors: FORBIDDEN_BEHAVIORS,

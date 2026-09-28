@@ -64,6 +64,84 @@ describe('decideVolume — spec §8-13', () => {
     expect(result.action).toBe('maintain');
   });
 
+  describe('Assessment-Gate Workaround (2026-09-19) — training_experience: "advanced" only', () => {
+    const developmentReference = {
+      target_type: 'physique_target' as const,
+      target_id: 'triceps',
+      level: 'complete' as const,
+      package_id: 'triceps-complete',
+      weekly_direct_set_reference: 24,
+      direct_sets_per_exposure: 12,
+      sessions_per_week_reference: 2,
+      coverage: { muscle_group_id: 'triceps', exercise_count: 5 },
+    };
+
+    it('§9 starting volume: an advanced trainee starts directly at the real package reference, skipping the conservative universal minimum', () => {
+      const { starting_point_sets } = BlueprintAdapter.getGlobalPrinciples().weekly_volume;
+      const result = decideVolume({ ...BASE, current_weekly_primary_sets: 0, training_experience: 'advanced', development_reference: developmentReference });
+      expect(result.recommended_weekly_primary_sets).toBe(24);
+      expect(result.recommended_weekly_primary_sets).not.toBe(Math.min(starting_point_sets[0], 24));
+    });
+
+    it('§9 starting volume: a non-advanced (or unspecified) trainee is unaffected — still the conservative minimum', () => {
+      const { starting_point_sets } = BlueprintAdapter.getGlobalPrinciples().weekly_volume;
+      const result = decideVolume({ ...BASE, current_weekly_primary_sets: 0, development_reference: developmentReference });
+      expect(result.recommended_weekly_primary_sets).toBe(Math.min(starting_point_sets[0], 24));
+    });
+
+    it('insufficient_data: an advanced trainee with acceptable recovery gets a bounded increase toward the reference ceiling instead of being stuck at maintain forever', () => {
+      const result = decideVolume({
+        ...BASE,
+        current_weekly_primary_sets: 8,
+        aesthetic_progress_trend: 'insufficient_data',
+        recovery_ok: true,
+        training_experience: 'advanced',
+        development_reference: developmentReference,
+      });
+      expect(result.action).toBe('increase');
+      expect(result.recommended_weekly_primary_sets).toBe(8 + PROGRESSION_INCREMENTS.weeklyExposureUnits);
+      expect(result.recommended_weekly_primary_sets).toBeLessThanOrEqual(24);
+    });
+
+    it('insufficient_data: an advanced trainee is capped at the reference ceiling, never exceeding it', () => {
+      const result = decideVolume({
+        ...BASE,
+        current_weekly_primary_sets: 23,
+        aesthetic_progress_trend: 'insufficient_data',
+        recovery_ok: true,
+        training_experience: 'advanced',
+        development_reference: developmentReference,
+      });
+      expect(result.recommended_weekly_primary_sets).toBe(24);
+    });
+
+    it('insufficient_data: an advanced trainee with recovery flagged still just maintains — the workaround never overrides recovery caution', () => {
+      const result = decideVolume({
+        ...BASE,
+        current_weekly_primary_sets: 8,
+        aesthetic_progress_trend: 'insufficient_data',
+        recovery_ok: false,
+        training_experience: 'advanced',
+        development_reference: developmentReference,
+      });
+      expect(result.action).toBe('maintain');
+      expect(result.recommended_weekly_primary_sets).toBe(8);
+    });
+
+    it('insufficient_data: a non-advanced trainee is completely unaffected by the workaround — still plain maintain', () => {
+      const result = decideVolume({
+        ...BASE,
+        current_weekly_primary_sets: 8,
+        aesthetic_progress_trend: 'insufficient_data',
+        recovery_ok: true,
+        training_experience: 'intermediate',
+        development_reference: developmentReference,
+      });
+      expect(result.action).toBe('maintain');
+      expect(result.recommended_weekly_primary_sets).toBe(8);
+    });
+  });
+
   it('§11: stagnation requires introspection before any volume increase (required test 8)', () => {
     const result = decideVolume({ ...BASE, aesthetic_progress_trend: 'stagnant' });
     expect(result.action).toBe('introspect_needed');

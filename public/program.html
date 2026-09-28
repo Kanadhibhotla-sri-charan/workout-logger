@@ -381,6 +381,17 @@
       return section;
     }
 
+    /** Part 9.5: the ONE status computation both the week-overview day
+     * card and the day-detail modal header use — never two independent
+     * derivations of the same real state. `day.status`/`day.type` are
+     * already the single authoritative fields GET /week returns for
+     * this. */
+    function buildDayStatusBadge(day) {
+      const statusWord = day.type === 'gym' ? day.status : day.type;
+      const statusLabel = day.type === 'gym' ? formatSessionType(day.status) : formatSessionType(day.type);
+      return createStatusBadge(statusWord, statusLabel);
+    }
+
     function buildDayCard(day) {
       const isToday = day.date === todayIso();
       const btn = el('button', { class: 'week-day', type: 'button' });
@@ -411,9 +422,7 @@
         head.appendChild(el('div', { class: 'wd-meta', text: meta }));
       }
       btn.appendChild(head);
-      const statusWord = day.type === 'gym' ? day.status : day.type;
-      const statusLabel = day.type === 'gym' ? formatSessionType(day.status) : formatSessionType(day.type);
-      btn.appendChild(createStatusBadge(statusWord, statusLabel));
+      btn.appendChild(buildDayStatusBadge(day));
 
       btn.addEventListener('click', () => openDayModal(day, btn));
       return btn;
@@ -429,62 +438,119 @@
       const header = el('div', { class: 'modal-header' });
       const titleWrap = el('div');
       titleWrap.appendChild(el('div', { class: 'card-subtitle', text: formatDate(day.date, { weekday: 'long' }) }));
-      titleWrap.appendChild(el('h2', { text: day.type === 'gym' ? formatSessionType(day.sessionPurpose || 'gym') : formatSessionType(day.type), style: 'margin:0.1rem 0 0' }));
+      const titleRow = el('div', { class: 'card-row', style: 'margin-top:0.1rem' }, [
+        el('h2', { text: day.type === 'gym' ? formatSessionType(day.sessionPurpose || 'gym') : formatSessionType(day.type), style: 'margin:0' }),
+        // Part 9.5: the exact same status badge the week-overview card
+        // shows for this day — one status representation, seen at both
+        // levels of the hierarchy, never a second derivation of it here.
+        buildDayStatusBadge(day),
+      ]);
+      titleWrap.appendChild(titleRow);
       header.appendChild(titleWrap);
       const closeBtn = el('button', { class: 'modal-close', type: 'button', 'aria-label': 'Close' }, [document.createTextNode('×')]);
       closeBtn.addEventListener('click', closeDayModal);
       header.appendChild(closeBtn);
       panel.appendChild(header);
-      // Fix AI Weekly Reconciliation Review, Finding 3: built (and its
-      // own discovery started) HERE, at modal-open time — independent of
-      // whether the deterministic swap below ever fails — so reopening a
-      // day that already has a pending/approved/committed reconciliation
-      // shows it immediately, never resetting to a blank slate.
-      // buildChangeActivitySection only reveals it early if a swap
-      // attempt during THIS modal session hits generationRequired.
+
+      // Part 6/7/9.3: this day's own information and actions are grouped
+      // together, in one contiguous block, BEFORE the week-scoped
+      // reconciliation block below — reconciliation is built here (so its
+      // own discovery starts immediately, Fix AI Weekly Reconciliation
+      // Review Finding 3) but its element is appended later, in its own
+      // clearly separated "This week" section, never interleaved with
+      // this-day content (Part 6's "don't mix scopes").
       const weekReconciliation = buildWeekReconciliationSection(day, modalToken);
-      panel.appendChild(buildChangeActivitySection(day, weekReconciliation));
-      panel.appendChild(weekReconciliation.element);
 
       if (day.type === 'gym') {
-        panel.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
+        // Phase 7 (2026-09-24): this day's own detail content (planned
+        // duration, plannedSession notice/preview/delete, exercises,
+        // skipped work) — previously bare paragraphs/cards appended
+        // directly to the modal panel with no visual boundary of their
+        // own, unlike every sibling section below it. Wrapped in one
+        // container now; exact same content and behavior, nothing
+        // removed or reordered within it.
+        const dayDetail = el('div', { class: 'day-detail-section' });
+        panel.appendChild(dayDetail);
+
+        dayDetail.appendChild(el('p', { class: 'faint', text: `Planned duration: ${formatDuration(day.estimatedMinutes)} of ${formatDuration(day.availableMinutes)} available` }));
 
         if (day.selectionConflict) {
           // Final Actionable vs Historical Session Resolution Fixes
           // §9/§10: more than one active planned session exists for
           // this date — show a clear recovery/error state rather than
           // opening an arbitrary one of them.
-          panel.appendChild(el('p', { class: 'muted', text: day.selectionConflict.message }));
-          panel.appendChild(el('p', { class: 'faint', text: `Conflicting session ids: ${day.selectionConflict.sessionIds.join(', ')}` }));
+          dayDetail.appendChild(el('p', { class: 'muted', text: day.selectionConflict.message }));
+          dayDetail.appendChild(el('p', { class: 'faint', text: `Conflicting session ids: ${day.selectionConflict.sessionIds.join(', ')}` }));
         } else if (day.plannedWork.length === 0 && day.plannedSession) {
           // Fix 8: a real planned workout exists (created via an AI
           // proposal replacement) but has no deterministic plannedWork
-          // to list here — say so plainly and link to it, rather than
-          // showing "No exercises were placed on this day," which would
-          // wrongly imply nothing is scheduled.
-          panel.appendChild(el('p', { class: 'muted', text: 'This day\'s workout was created from an AI proposal — open it to see the planned exercises.' }));
-          panel.appendChild(el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${day.plannedSession.id}`, text: 'Open planned workout' }));
+          // to list here — say so plainly, rather than showing "No
+          // exercises were placed on this day," which would wrongly
+          // imply nothing is scheduled.
+          dayDetail.appendChild(el('p', { class: 'muted', text: 'This day\'s workout was created from an AI proposal.' }));
+          const previewEl = el('div');
+          dayDetail.appendChild(previewEl);
+          const sessionActionsEl = el('div');
+          const sessionStatusEl = el('div');
+          dayDetail.append(sessionActionsEl, sessionStatusEl);
+          // 2026-09-23 fix: previously the ONLY way to see what this
+          // session actually contains was to open the full logger — a
+          // real, reported point of confusion (a "planned workout
+          // already exists" conflict elsewhere pointed at a session the
+          // user had no way to preview without leaving the day view).
+          // GET /api/workouts/:id already returns each exercise's real
+          // prescription (target_sets/target_reps_*/target_rir_*), so a
+          // lightweight read-only preview is rendered right here —
+          // never a fabricated PlannedWorkItem (still no target_type/
+          // target_id/classification to build one from), just name +
+          // prescription, exactly what's genuinely available.
+          buildCommittedSessionPreview(day.plannedSession.id, day.date, previewEl, modalToken);
+          renderSessionActions(day, sessionActionsEl, sessionStatusEl, modalToken);
         } else if (day.plannedWork.length === 0) {
-          panel.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
+          dayDetail.appendChild(el('p', { class: 'muted', text: 'No exercises were placed on this day.' }));
         }
+        // Part 9.4/9.3: exercises are read-only detail here — each one's
+        // own rationale stays behind its existing "Why included" <details>
+        // (buildExerciseDetailCard), progressive disclosure that was
+        // already correct; nothing about the exercise cards themselves
+        // changes in Phase 7.
         for (const item of day.plannedWork) {
-          panel.appendChild(buildExerciseDetailCard(item));
+          dayDetail.appendChild(buildExerciseDetailCard(item));
         }
+        const planDeleteEl = el('div');
+        const planDeleteStatusEl = el('div');
+        dayDetail.append(planDeleteEl, planDeleteStatusEl);
+        renderPlanDeleteAction(day, planDeleteEl, planDeleteStatusEl);
         if (day.skipped && day.skipped.length > 0) {
-          panel.appendChild(el('h3', { text: 'Unmet / dropped work' }));
+          dayDetail.appendChild(el('h3', { text: 'Unmet / dropped work' }));
           for (const s of day.skipped) {
             const card = createCard([
               el('div', { class: 'card-title', text: s.target_name || s.target_id }),
               el('div', { class: 'card-subtitle', text: s.friendly_reason || s.reason }),
             ]);
-            panel.appendChild(card);
+            dayDetail.appendChild(card);
           }
         }
       } else {
         panel.appendChild(el('p', { class: 'muted', text: `No gym session planned — ${formatSessionType(day.type).toLowerCase()} day.` }));
       }
 
+      // This-day actions: changing today's activity and generating this
+      // one day with AI are both scoped to exactly this date — grouped
+      // together, directly under this day's own information above.
+      panel.appendChild(buildChangeActivitySection(day, weekReconciliation));
       panel.appendChild(buildAiProposalSection(day, modalToken));
+
+      // Week-scoped action, visually and structurally separated from
+      // everything above: reconciling touches OTHER days too, so it gets
+      // its own labeled section (see its own "This week —" heading)
+      // rather than sitting between this day's own controls (Part 6/7's
+      // explicit "don't mix scopes" requirement). Still hidden by
+      // default (see buildWeekReconciliationSection) — this only fixes
+      // WHERE it renders once shown, not when; the heading lives INSIDE
+      // that same hidden element so it can never show up as an orphan
+      // label with nothing revealed underneath it.
+      panel.appendChild(weekReconciliation.element);
 
       const backdrop = el('div', { class: 'modal-backdrop' }, [panel]);
       backdrop.addEventListener('click', (e) => {
@@ -626,6 +692,175 @@
       return card;
     }
 
+    /** A committed session's own `notes` field encodes exactly which
+     * proposal or reconciliation created it — see aiProposalLifecycle.ts/
+     * weekReconciliationLifecycle.ts's own commit code for the two exact
+     * literal formats this matches. Returns null for a manually-created
+     * session (no AI origin to look rationale up from). */
+    function parseAiOriginFromNotes(notes) {
+      if (!notes) return null;
+      const proposalMatch = notes.match(/^AI-proposed session \(proposal ([^)]+)\)$/);
+      if (proposalMatch) return { kind: 'proposal', id: proposalMatch[1] };
+      const reconciliationMatch = notes.match(/^AI week-reconciliation session \(reconciliation ([^)]+)\)$/);
+      if (reconciliationMatch) return { kind: 'reconciliation', id: reconciliationMatch[1] };
+      return null;
+    }
+
+    /** Fetches the originating proposal/reconciliation and returns a
+     * `Map<exerciseId, rationale[]>` built from ITS OWN stored exercise
+     * list — the same real rationale `buildAiExerciseCard` already shows
+     * for a not-yet-committed proposal, now also surfaced for one that
+     * HAS been committed. Returns an empty map on any failure (unknown
+     * origin, record gone, mismatched shape) — a missing "why" is a
+     * silently smaller preview, never a broken one. */
+    async function fetchAiRationaleByExerciseId(origin, targetDate) {
+      const map = new Map();
+      if (!origin) return map;
+      try {
+        if (origin.kind === 'proposal') {
+          const record = await aiApi(`/api/ai-programmer/proposals/${origin.id}`);
+          for (const ex of record.proposal.exercises) map.set(ex.exerciseId, ex.rationale);
+        } else {
+          const record = await aiApi(`/api/ai-programmer/week-reconciliations/${origin.id}`);
+          const day = record.output.days.find((d) => d.date === targetDate);
+          for (const ex of (day && day.session && day.session.exercises) || []) map.set(ex.exerciseId, ex.rationale);
+        }
+      } catch (err) {
+        /* degrade to no rationale — the preview itself still renders */
+      }
+      return map;
+    }
+
+    /** "Duplicate AI programs" fix (2026-09-23): the "Open planned
+     * workout" link plus an explicit "Delete this workout" action —
+     * available here regardless of the session's origin (AI-committed or
+     * manual), unlike the AI section's own delete button, which only
+     * shows up when THAT section's own discovery happens to own this
+     * exact session. This is the one delete path guaranteed to be
+     * reachable for every real session a day can have. DELETE
+     * /api/workouts/:id itself 409s server-side for anything other than
+     * `planned`, so this is never offered a way to touch real logged
+     * history — day.plannedSession only ever reports a locked
+     * (completed/in_progress) session outside this branch anyway (see
+     * openDayModal's own showDeterministic/supersession logic). */
+    function renderSessionActions(day, actionsEl, statusEl, modalToken) {
+      let inFlight = false;
+      function render() {
+        actionsEl.innerHTML = '';
+        actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+          el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${day.plannedSession.id}`, text: 'Open planned workout' }),
+          createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'ghost', disabled: inFlight, onClick: onDelete }),
+        ]));
+      }
+      async function onDelete() {
+        if (inFlight) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Deleting…');
+        render();
+        try {
+          await api(`/api/workouts/${day.plannedSession.id}`, { method: 'DELETE' });
+          if (!isModalTokenCurrent(modalToken)) return;
+          closeDayModal();
+          await loadWeek();
+        } catch (err) {
+          if (!isModalTokenCurrent(modalToken)) return;
+          showInlineStatus(statusEl, 'error', err.message);
+          inFlight = false;
+          render();
+        }
+      }
+      render();
+    }
+
+    /** "Delete any visible program" fix (2026-09-23): reported live —
+     * "irrespective of what program it is... I need a delete button for
+     * any and every program that's visible in the app." Covers the one
+     * remaining case: the plain deterministic plan itself (the day's
+     * original weekly program, a regenerated day, or a reconciled-but-
+     * not-committed day's own snapshot) — never a real session (that's
+     * renderSessionActions' own job) or a not-yet-committed proposal
+     * (that's each AI section's own Discard). DELETE
+     * /api/programming/week/days/:day/plan itself 409s server-side for a
+     * locked (completed/in-progress) day, so this is never offered a way
+     * to touch real logged history — mirrored here too so the button
+     * never even renders for a day it could never work on anyway. */
+    function renderPlanDeleteAction(day, container, statusEl) {
+      if (day.plannedWork.length === 0) return; // nothing persisted to delete
+      if (day.status === 'completed' || day.status === 'in_progress') return; // real history — never deletable
+      let inFlight = false;
+      function render() {
+        container.innerHTML = '';
+        container.appendChild(createButton({ label: inFlight ? 'Deleting…' : `Delete ${formatWeekday(day.weekday)}'s plan`, variant: 'ghost', disabled: inFlight, onClick: onDelete }));
+      }
+      async function onDelete() {
+        if (inFlight) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Deleting…');
+        render();
+        try {
+          await api(`/api/programming/week/days/${day.weekday}/plan`, { method: 'DELETE' });
+          closeDayModal();
+          await loadWeek();
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+          inFlight = false;
+          render();
+        }
+      }
+      render();
+    }
+
+    /** Read-only preview of a real, already-committed session's own
+     * exercises — used only for the one case where the day's own
+     * deterministic `plannedWork` is empty because a real session
+     * (AI-committed or manual) superseded it (see openDayModal's call
+     * site). GET /api/workouts/:id already returns each exercise's real
+     * prescription; rationale (2026-09-23 fix — previously absent here,
+     * unlike every other exercise card on this page) is recovered from
+     * the session's own originating proposal/reconciliation when one
+     * exists, via parseAiOriginFromNotes/fetchAiRationaleByExerciseId
+     * above. This still never fabricates target_type/target_id/
+     * classification (not present on a real workout_exercises row), so
+     * a full PlannedWorkItem still can't be built — only name,
+     * prescription, and (when recoverable) rationale. A fetch failure
+     * degrades to showing nothing here (never an error blocking the rest
+     * of the day view) — the "Open planned workout" link the caller
+     * already renders above this still works regardless. */
+    async function buildCommittedSessionPreview(sessionId, targetDate, container, modalToken) {
+      container.appendChild(el('p', { class: 'faint', text: 'Loading exercises…' }));
+      try {
+        const session = await api(`/api/workouts/${sessionId}`);
+        if (!isModalTokenCurrent(modalToken)) return;
+        const rationaleByExerciseId = await fetchAiRationaleByExerciseId(parseAiOriginFromNotes(session.notes), targetDate);
+        if (!isModalTokenCurrent(modalToken)) return;
+        container.innerHTML = '';
+        for (const ex of session.exercises || []) {
+          const card = createCard();
+          card.classList.add('exercise-card');
+          const header = el('div', { class: 'exercise-header' });
+          header.appendChild(el('div', { class: 'exercise-name', text: resolveExerciseDisplayName(ex.exercise_id) }));
+          if (ex.target_sets != null) {
+            header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(ex.target_sets, ex.target_reps_min, ex.target_reps_max) }));
+          }
+          card.appendChild(header);
+          if (ex.target_rir_min != null && ex.target_rir_max != null) {
+            card.appendChild(el('p', { class: 'faint', text: formatRirRange(ex.target_rir_min, ex.target_rir_max), style: 'margin:0.25rem 0 0' }));
+          }
+          const rationale = rationaleByExerciseId.get(ex.exercise_id);
+          if (rationale && rationale.length > 0) {
+            const explain = el('details', { class: 'exercise-explanation' });
+            explain.appendChild(el('summary', { text: 'Why included' }));
+            for (const r of rationale) explain.appendChild(el('p', { text: r, style: 'margin:0.2rem 0' }));
+            card.appendChild(explain);
+          }
+          container.appendChild(card);
+        }
+      } catch (err) {
+        if (!isModalTokenCurrent(modalToken)) return;
+        container.innerHTML = '';
+      }
+    }
+
     /** `applied_intensity_technique` (or null) -> the component-level
      * intensity-technique block (data contract §2) — name, instruction,
      * extra fatigue note and which working set, or the exact required
@@ -702,6 +937,12 @@
         el('div', { class: 'card-subtitle', text: formatDate(state.targetDate, { weekday: 'long' }) }),
         createStatusBadge(state.status, formatAiProposalStatus(state.status)),
       ]));
+      // Part 9.4: a proposal must never read as if it's already real —
+      // say so explicitly for every pre-commit status, not just via the
+      // (already dashed/muted) panel styling.
+      if (state.status === 'pending' || state.status === 'approved') {
+        wrap.appendChild(el('p', { class: 'faint', text: 'This is a proposal — nothing in your program has changed yet.', style: 'margin:0.2rem 0 0' }));
+      }
       if (state.createdAt) {
         wrap.appendChild(el('p', { class: 'faint', text: `Generated ${formatTimestamp(state.createdAt)}`, style: 'margin:0.2rem 0 0' }));
       }
@@ -729,6 +970,20 @@
       return wrap;
     }
 
+    /** Part 6 / Phase 4: a one-line reminder of what's currently on this
+     * day, shown right where the AI action lives — so scope is obvious
+     * without scrolling back up to the exercise list above. Never
+     * invents a state: mirrors the exact same fields openDayModal itself
+     * reads (day.plannedWork/day.plannedSession/day.type). */
+    function summarizeCurrentProgram(day) {
+      if (day.type !== 'gym') return `Currently a ${formatSessionType(day.type).toLowerCase()} day — no gym session planned.`;
+      if (day.plannedWork.length > 0) {
+        return `Currently planned: ${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} (${formatSessionType(day.sessionPurpose || 'gym')}).`;
+      }
+      if (day.plannedSession) return 'Currently an AI-planned workout — already a real session on your calendar.';
+      return 'Currently nothing planned for this day.';
+    }
+
     /** The Generate -> Review -> Approve -> Commit workflow for one
      * day's modal — now preceded by a discovery step (Discovery/
      * Rehydration spec §4) so a proposal already generated for this date
@@ -751,7 +1006,7 @@
      * to (now-detached, but still checked defensively) DOM. */
     function buildAiProposalSection(day, modalToken) {
       const section = el('div', { class: 'ai-proposal-section' });
-      section.appendChild(el('h3', { text: 'AI Workout Proposal' }));
+      section.appendChild(el('h3', { text: `Generate ${formatWeekday(day.weekday)} with AI` }));
 
       const locked = day.status === 'completed' || day.status === 'in_progress';
       if (locked) {
@@ -759,7 +1014,8 @@
         return section;
       }
 
-      section.appendChild(el('p', { class: 'faint', text: 'Generate an AI-suggested session for this day. Nothing is added to your program until you explicitly approve and commit it.' }));
+      section.appendChild(el('p', { class: 'muted', text: summarizeCurrentProgram(day), style: 'margin-bottom:0.25rem' }));
+      section.appendChild(el('p', { class: 'faint', text: `This generates ${formatWeekday(day.weekday)} only — the rest of your week stays exactly as planned. Nothing is added to your program until you explicitly approve and commit it.` }));
 
       // AI Activity Alignment / Non-Regenerative Schedule Fixes Part 3:
       // `day.activity` (Gym/Badminton/Both/Rest, from /week's own
@@ -777,19 +1033,72 @@
       // whether an active proposal already exists for this date, which
       // is what prevents an accidental duplicate generation (spec §6).
       let discoveryDone = false;
+      // "Ask what to generate" fix (2026-09-23): the day's own already-
+      // decided rotation purpose is unaffected by this — it's only ever
+      // sent as requestedSessionPurpose, and only when the user picks
+      // something other than "Let AI decide" (null). Reported live: the
+      // same "generate this day" action produced an upper day one time
+      // and a leg day another, with no way to ask for a specific one.
+      let requestedSessionPurpose = null;
+      const SESSION_PURPOSE_OPTIONS = [
+        { value: '', text: 'Let AI decide' },
+        { value: 'push', text: 'Push' },
+        { value: 'pull', text: 'Pull' },
+        { value: 'legs', text: 'Legs' },
+        { value: 'upper', text: 'Upper' },
+      ];
       const noticeEl = el('div');
       const reviewEl = el('div');
+      const purposeEl = el('div');
       const actionsEl = el('div');
       const statusEl = el('div');
-      section.append(noticeEl, reviewEl, actionsEl, statusEl);
+      section.append(noticeEl, reviewEl, purposeEl, actionsEl, statusEl);
+
+      /** 2026-09-23 lifecycle fix: a proposal only has a genuinely FIXED
+       * purpose while it's still live (pending/approved/committed) — see
+       * its own review's `sessionFocus` at that point. A rejected or
+       * expired proposal is exactly as "no proposal yet" as `state ===
+       * null` for every other purpose (aiProposalActionsFor/
+       * aiProposalNoticeFor already treat it identically) and must be
+       * exactly as fresh a generation opportunity here too — the previous
+       * bug hid this picker for ANY non-null state, including rejected/
+       * expired ones, silently reusing whatever purpose (or lack of one)
+       * happened to be selected the first time. `requestedSessionPurpose`
+       * itself is never read from the proposal's own record (only ever
+       * set by this select's own change handler below), so re-showing the
+       * picker here never "reuses the rejected proposal's requested
+       * purpose automatically" — the user genuinely re-decides. */
+      function renderPurposePicker() {
+        purposeEl.innerHTML = '';
+        const isFreshGenerationOpportunity = !state || state.status === 'expired' || state.status === 'rejected';
+        if (!isFreshGenerationOpportunity) return;
+        const label = el('label', { class: 'faint', style: 'display:block;margin-bottom:0.3rem' }, [document.createTextNode(`What should ${formatWeekday(day.weekday)} focus on?`)]);
+        const select = el('select', { 'aria-label': `${formatWeekday(day.weekday)}'s session focus` },
+          SESSION_PURPOSE_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text }))
+        );
+        select.value = requestedSessionPurpose || '';
+        select.addEventListener('change', () => {
+          requestedSessionPurpose = select.value || null;
+        });
+        purposeEl.append(label, select);
+      }
 
       function isCurrent() {
         return isModalTokenCurrent(modalToken);
       }
 
+      /** 2026-09-23 fix: an expired/rejected proposal's full exercise
+       * list is inert, long-superseded content — showing it in full
+       * (previously: for ANY non-null state, regardless of status) is
+       * exactly the "wasted space, confusing" clutter reported live,
+       * doubly so once renderNotice's own "no longer active, generate a
+       * new one" line is sitting right above it. Only a genuinely live
+       * status (pending/approved/committed) still shows the full review;
+       * expired/rejected show nothing here — the notice alone says
+       * enough. */
       function renderReview() {
         reviewEl.innerHTML = '';
-        if (state) reviewEl.appendChild(buildAiProposalReview(state));
+        if (state && state.status !== 'expired' && state.status !== 'rejected') reviewEl.appendChild(buildAiProposalReview(state));
       }
 
       /** Discovery/Rehydration spec §4's "expired/rejected proposal
@@ -802,22 +1111,51 @@
         if (notice) noticeEl.appendChild(el('p', { class: 'faint', text: notice }));
       }
 
+      /** "Duplicate AI programs" fix (2026-09-23): `day.plannedSession`
+       * (the SAME authoritative field the week grid and openDayModal's
+       * own preview already use — never a second, independently-derived
+       * check) is the one true "does a real workout already exist here"
+       * signal, regardless of which flow created it (this section, week
+       * reconciliation, or a manual log). If one exists and it ISN'T the
+       * one this exact proposal itself committed, every generate/approve/
+       * commit action here would either be a pointless duplicate or fail
+       * outright against the backend's own AI_PROPOSAL_CONFLICT guard —
+       * blocked here explicitly, with a real way out, rather than letting
+       * the user hit that failure blind. */
+      function blockedByRealSession() {
+        return !!day.plannedSession && !(state && state.committedSessionId === day.plannedSession.id);
+      }
+
       function renderActions() {
         actionsEl.innerHTML = '';
         if (!discoveryDone) {
           actionsEl.appendChild(el('p', { class: 'faint', text: 'Checking for an existing proposal…' }));
           return;
         }
+
+        if (blockedByRealSession()) {
+          actionsEl.appendChild(el('p', { class: 'muted', text: 'This day already has a real workout — delete it first if you want to generate a new one.' }));
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+            createButton({ label: inFlight ? 'Deleting…' : 'Delete existing workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }),
+          ]));
+          if (state && (state.status === 'pending' || state.status === 'approved')) {
+            actionsEl.appendChild(el('p', { class: 'faint', text: 'You also have a separate, not-yet-committed proposal for this day.', style: 'margin-top:0.5rem' }));
+            actionsEl.appendChild(createButton({ label: inFlight ? 'Discarding…' : 'Discard this proposal instead', variant: 'ghost', disabled: inFlight, onClick: onReject }));
+          }
+          return;
+        }
+
         const actions = aiProposalActionsFor(state ? state.status : null);
 
         if (actions.canGenerate) {
-          const label = state ? 'Generate a new proposal' : 'Generate AI Workout Proposal';
+          const label = state ? `Generate a new ${formatWeekday(day.weekday)} proposal` : `Generate ${formatWeekday(day.weekday)} with AI`;
           actionsEl.appendChild(createButton({ label: inFlight ? 'Generating…' : label, disabled: inFlight, onClick: onGenerate }));
           return;
         }
         if (actions.canApprove) {
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
             createButton({ label: inFlight ? 'Approving…' : 'Approve Proposal', variant: 'secondary', disabled: inFlight, onClick: onApprove }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
           ]));
           return;
         }
@@ -830,13 +1168,17 @@
           }
           actionsEl.appendChild(el('div', { class: 'btn-row' }, [
             createButton({ label: inFlight ? 'Committing…' : 'Commit to Planned Workout', disabled: inFlight, onClick: onCommit }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
           ]));
           return;
         }
         if (actions.isCommitted) {
           actionsEl.appendChild(el('p', { class: 'muted', text: 'Committed — this is now a real planned workout.' }));
           if (state.committedSessionId) {
-            actionsEl.appendChild(el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${state.committedSessionId}`, text: 'Open planned workout' }));
+            actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+              el('a', { class: 'btn btn-secondary', href: `/logger.html?session=${state.committedSessionId}`, text: 'Open planned workout' }),
+              createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }),
+            ]));
           }
         }
       }
@@ -861,6 +1203,7 @@
           if (!isCurrent()) return;
           discoveryDone = true;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
@@ -888,7 +1231,10 @@
         showInlineStatus(statusEl, 'saving', 'Generating…');
         renderActions();
         try {
-          const generated = await aiApi('/api/ai-programmer/generate-session', { method: 'POST', body: { targetDate: day.date } });
+          const generated = await aiApi('/api/ai-programmer/generate-session', {
+            method: 'POST',
+            body: requestedSessionPurpose ? { targetDate: day.date, requestedSessionPurpose } : { targetDate: day.date },
+          });
           const fresh = await aiApi(`/api/ai-programmer/proposals/${generated.proposalId}`);
           if (!isCurrent()) return;
           state = fresh;
@@ -900,6 +1246,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
@@ -923,7 +1270,64 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderPurposePicker();
           renderNotice();
+          renderActions();
+        }
+      }
+
+      /** "Duplicate AI programs" fix (2026-09-23): explicit discard for a
+       * pending/approved proposal the user no longer wants — never
+       * offered once committed (that's onDeleteExistingSession's job, on
+       * the real session it created). Re-enables Generate immediately:
+       * aiProposalActionsFor('rejected') already returns canGenerate:
+       * true, exactly like an expired proposal. */
+      async function onReject() {
+        if (inFlight || !state) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Discarding…');
+        renderActions();
+        try {
+          const rejected = await aiApi(`/api/ai-programmer/proposals/${state.proposalId}/reject`, { method: 'POST' });
+          if (!isCurrent()) return;
+          state = rejected;
+          showInlineStatus(statusEl, null, null);
+        } catch (err) {
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'error', err.message);
+          await resyncState();
+        } finally {
+          if (!isCurrent()) return;
+          inFlight = false;
+          renderReview();
+          renderPurposePicker();
+          renderNotice();
+          renderActions();
+        }
+      }
+
+      /** "Duplicate AI programs" fix (2026-09-23): deletes the day's real
+       * session outright (DELETE /api/workouts/:id — 409s server-side if
+       * it's ever anything other than `planned`, so this can never touch
+       * real logged history). Closes the modal and refreshes `weekData`
+       * afterward, exactly like every other action that changes what the
+       * week grid shows (Part 8) — there is no in-place way to un-render
+       * "this day already has a real workout" from inside this closure
+       * once it's gone; a fresh day object is needed. */
+      async function onDeleteExistingSession() {
+        if (inFlight || !day.plannedSession) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Deleting…');
+        renderActions();
+        try {
+          await api(`/api/workouts/${day.plannedSession.id}`, { method: 'DELETE' });
+          if (!isCurrent()) return;
+          closeDayModal();
+          await loadWeek();
+        } catch (err) {
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'error', err.message);
+          inFlight = false;
           renderActions();
         }
       }
@@ -941,6 +1345,17 @@
           if (!isCurrent()) return;
           state = committed;
           showInlineStatus(statusEl, null, null);
+          // Part 8 (authoritative day object): a commit just changed this
+          // day's REAL activity/plannedWork/plannedSession server-side —
+          // `weekData` (what the week-overview grid behind this modal is
+          // still showing) is now stale until this runs. Never patched
+          // in place here; the one authoritative source is re-fetched,
+          // exactly like every other mutating action on this page
+          // (change-activity, swap, reconcile-week commit) already does.
+          // Runs in the background — the modal itself stays open and
+          // keeps showing `state`'s own fresh "Committed" review, unlike
+          // those other actions, which close the modal outright.
+          loadWeek();
         } catch (err) {
           if (!isCurrent()) return;
           showInlineStatus(statusEl, 'error', err.message);
@@ -949,11 +1364,13 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderPurposePicker();
           renderNotice();
           renderActions();
         }
       }
 
+      renderPurposePicker();
       renderActions(); // shows the "Checking…" placeholder immediately
       discover();
       return section;
@@ -976,6 +1393,33 @@
       return formatDailyActivity(activity === 'rest' ? 'unselected' : activity);
     }
 
+    /** Part 7's before/after diff: what a changed day currently looks
+     * like, read from the SAME live `weekData.days` that renders the
+     * week grid — never a value invented here, and never re-derived from
+     * the proposal itself (that would just echo "after" back as "before"
+     * for a day the model reports won't actually be reached). Returns
+     * null if the day isn't in the currently loaded week at all (e.g. the
+     * page hasn't loaded yet) rather than guessing. */
+    function summarizeBeforeDay(date) {
+      const before = (weekData && weekData.days || []).find((d) => d.date === date);
+      if (!before) return null;
+      if (before.type !== 'gym') return formatSessionType(before.type);
+      const purpose = before.sessionPurpose ? formatSessionType(before.sessionPurpose) : 'Gym';
+      if (before.plannedWork.length === 0 && before.plannedSession) return `${purpose} (AI-planned)`;
+      return `${purpose} (${before.plannedWork.length} exercise${before.plannedWork.length === 1 ? '' : 's'})`;
+    }
+
+    /** The mirror of summarizeBeforeDay, for the proposal's own "after"
+     * side — same shape of summary, so the two read as a genuine pair. */
+    function summarizeAfterDay(reconciliationDay) {
+      const after = formatReconciliationActivity(reconciliationDay.activity);
+      if (reconciliationDay.session && reconciliationDay.session.exercises.length > 0) {
+        const n = reconciliationDay.session.exercises.length;
+        return `${after} (${n} exercise${n === 1 ? '' : 's'})`;
+      }
+      return after;
+    }
+
     /** Renders the read-only review content for a persisted week-
      * reconciliation record (the shared response shape the reconcile-
      * week/GET/approve/commit routes all return — see
@@ -990,20 +1434,32 @@
         el('div', { class: 'card-subtitle', text: 'Proposed week changes' }),
         createStatusBadge(state.status, formatAiProposalStatus(state.status)),
       ]));
+      // Part 9.4/9.4: a week-wide proposal must be even more explicit
+      // than a single-day one that nothing has moved yet — the whole
+      // point of this workflow is reorganizing several days at once.
+      if (state.status === 'pending' || state.status === 'approved') {
+        wrap.appendChild(el('p', { class: 'faint', text: 'This is a proposal — none of these days have changed yet.', style: 'margin:0.2rem 0 0' }));
+      }
       if (output.reconciliation && output.reconciliation.rationale) {
         wrap.appendChild(el('p', { class: 'muted', text: output.reconciliation.rationale, style: 'margin-top:0.5rem' }));
       }
 
+      // Part 7: a real before/after diff, not just the "after" side —
+      // each changed day shows what it currently is next to what this
+      // proposal would make it, so the scope of the reorganization is
+      // legible at a glance before approving anything.
       const changedDays = output.days.filter((d) => d.changeType !== 'unchanged');
       if (changedDays.length > 0) {
         const list = el('div', { class: 'card', style: 'margin-top:0.5rem' });
-        list.appendChild(el('div', { class: 'card-title', text: 'Days affected' }));
+        list.appendChild(el('div', { class: 'card-title', text: `${changedDays.length} day${changedDays.length === 1 ? '' : 's'} affected` }));
         for (const d of changedDays) {
-          list.appendChild(el('p', {
-            class: 'faint',
-            text: `${formatWeekday(d.weekday)} (${formatDate(d.date)}) — ${formatReconciliationActivity(d.activity)}`,
-            style: 'margin:0.2rem 0',
-          }));
+          const before = summarizeBeforeDay(d.date);
+          const row = el('div', { class: 'reconciliation-diff-row' });
+          row.appendChild(el('span', { class: 'muted', text: `${formatWeekday(d.weekday)} (${formatDate(d.date)})`, style: 'min-width:9rem' }));
+          row.appendChild(el('span', { class: 'faint', text: before || 'Currently unknown' }));
+          row.appendChild(el('span', { class: 'faint', text: '→' }));
+          row.appendChild(el('span', { class: 'muted', text: summarizeAfterDay(d) }));
+          list.appendChild(row);
         }
         wrap.appendChild(list);
       }
@@ -1042,18 +1498,23 @@
      * was reopened. `modalToken` is the same token `openDayModal`
      * captured for this exact modal instance. */
     function buildWeekReconciliationSection(day, modalToken) {
-      const wrap = el('div', { class: 'ai-proposal-section', hidden: true });
-      wrap.appendChild(el('h3', { text: 'AI Week Reorganization' }));
-      wrap.appendChild(el('p', { class: 'faint', text: 'Ask the AI Programmer to generate a workout for this day and reorganize the rest of the week around it. Nothing changes until you approve and apply it.' }));
+      const wrap = el('div', { class: 'ai-reconciliation-section', hidden: true });
+      // Part 6/7: the scope word lives directly in the heading text
+      // itself, not a separate decorative eyebrow label — this is a
+      // week-wide action, and the heading says so plainly the moment it
+      // becomes visible (never interleaved with this-day-only controls).
+      wrap.appendChild(el('h3', { text: 'This week — reconcile remaining days', style: 'margin-top:0' }));
+      wrap.appendChild(el('p', { class: 'faint', text: `Generates ${formatWeekday(day.weekday)}'s workout and reorganizes the rest of this week around it. Completed and in-progress days are never touched. Nothing changes until you approve and apply it.` }));
 
       let state = null;
       let inFlight = false;
       let discoveryDone = false;
       let swapFailed = false;
+      const noticeEl = el('div');
       const reviewEl = el('div');
       const actionsEl = el('div');
       const statusEl = el('div');
-      wrap.append(reviewEl, actionsEl, statusEl);
+      wrap.append(noticeEl, reviewEl, actionsEl, statusEl);
 
       function isCurrent() {
         return isModalTokenCurrent(modalToken);
@@ -1067,9 +1528,35 @@
         wrap.hidden = !(swapFailed || state !== null);
       }
 
+      /** Same "no stale full content once inert" fix as
+       * buildAiProposalSection's own renderReview — see its doc comment.
+       * An expired/rejected reconciliation shows nothing here; the
+       * section itself stays visible (updateVisibility keys off `state
+       * !== null`, not status) so "Reconcile remaining week" can still
+       * be offered again, just without the old exercise list cluttering
+       * the space above it. */
       function renderReview() {
         reviewEl.innerHTML = '';
-        if (state) reviewEl.appendChild(buildWeekReconciliationReview(state));
+        if (state && state.status !== 'expired' && state.status !== 'rejected') reviewEl.appendChild(buildWeekReconciliationReview(state));
+      }
+
+      /** Reuses aiProposalNoticeFor verbatim (app.js) — its text is
+       * already generic enough to apply here too, and this is the exact
+       * same "no longer active" case, just at the weekly granularity. */
+      function renderNotice() {
+        noticeEl.innerHTML = '';
+        const notice = aiProposalNoticeFor(state ? state.status : null);
+        if (notice) noticeEl.appendChild(el('p', { class: 'faint', text: notice }));
+      }
+
+      /** Same "duplicate AI programs" fix as buildAiProposalSection's own
+       * blockedByRealSession — see its doc comment for the full
+       * rationale, identical here: a real session already on THIS
+       * target day (from any source) blocks reconciling/approving/
+       * applying, unless it's the one this exact reconciliation itself
+       * applied. */
+      function blockedByRealSession() {
+        return !!day.plannedSession && !(state && state.committedSessionId === day.plannedSession.id);
       }
 
       function renderActions() {
@@ -1078,22 +1565,44 @@
           if (swapFailed) actionsEl.appendChild(el('p', { class: 'faint', text: 'Checking for an existing AI reorganization…' }));
           return;
         }
+
+        if (blockedByRealSession()) {
+          actionsEl.appendChild(el('p', { class: 'muted', text: `${formatWeekday(day.weekday)} already has a real workout — delete it first if you want to reconcile the week again.` }));
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+            createButton({ label: inFlight ? 'Deleting…' : 'Delete existing workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }),
+          ]));
+          if (state && (state.status === 'pending' || state.status === 'approved')) {
+            actionsEl.appendChild(el('p', { class: 'faint', text: 'You also have a separate, not-yet-applied reconciliation for this day.', style: 'margin-top:0.5rem' }));
+            actionsEl.appendChild(createButton({ label: inFlight ? 'Discarding…' : 'Discard this reconciliation instead', variant: 'ghost', disabled: inFlight, onClick: onReject }));
+          }
+          return;
+        }
+
         const actions = aiWeekReconciliationActionsFor(state ? state.status : null);
         if (actions.canGenerate) {
-          actionsEl.appendChild(createButton({ label: inFlight ? 'Asking AI…' : 'Ask AI to reorganize this week', variant: 'secondary', disabled: inFlight, onClick: onGenerate }));
+          actionsEl.appendChild(createButton({ label: inFlight ? 'Reconciling…' : 'Reconcile remaining week', variant: 'secondary', disabled: inFlight, onClick: onGenerate }));
           return;
         }
         if (actions.canApprove) {
-          actionsEl.appendChild(createButton({ label: inFlight ? 'Approving…' : 'Approve', variant: 'secondary', disabled: inFlight, onClick: onApprove }));
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+            createButton({ label: inFlight ? 'Approving…' : 'Approve', variant: 'secondary', disabled: inFlight, onClick: onApprove }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
+          ]));
           return;
         }
         if (actions.canCommit) {
           actionsEl.appendChild(el('p', { class: 'muted', text: 'Approved — not yet applied to your week.' }));
-          actionsEl.appendChild(createButton({ label: inFlight ? 'Applying…' : 'Apply to this week', disabled: inFlight, onClick: onCommit }));
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, [
+            createButton({ label: inFlight ? 'Applying…' : 'Apply to this week', disabled: inFlight, onClick: onCommit }),
+            createButton({ label: inFlight ? 'Discarding…' : 'Discard', variant: 'ghost', disabled: inFlight, onClick: onReject }),
+          ]));
           return;
         }
         if (actions.isCommitted) {
           actionsEl.appendChild(el('p', { class: 'muted', text: 'Applied — your week has been updated.' }));
+          if (state.committedSessionId) {
+            actionsEl.appendChild(createButton({ label: inFlight ? 'Deleting…' : 'Delete this workout', variant: 'ghost', disabled: inFlight, onClick: onDeleteExistingSession }));
+          }
         }
       }
 
@@ -1115,6 +1624,7 @@
           if (!isCurrent()) return;
           discoveryDone = true;
           renderReview();
+          renderNotice();
           renderActions();
           updateVisibility();
         }
@@ -1149,6 +1659,7 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
           renderActions();
           updateVisibility();
         }
@@ -1171,6 +1682,54 @@
           if (!isCurrent()) return;
           inFlight = false;
           renderReview();
+          renderNotice();
+          renderActions();
+        }
+      }
+
+      /** Same "duplicate AI programs" fix as buildAiProposalSection's own
+       * onReject — see its doc comment. Re-enables Generate immediately:
+       * aiWeekReconciliationActionsFor('rejected') matches
+       * aiProposalActionsFor status for status (already asserted in
+       * weekReconciliationUI.test.ts). */
+      async function onReject() {
+        if (inFlight || !state) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Discarding…');
+        renderActions();
+        try {
+          state = await aiApi(`/api/ai-programmer/week-reconciliations/${state.reconciliationId}/reject`, { method: 'POST' });
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, null, null);
+        } catch (err) {
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'error', err.message);
+          await resyncState();
+        } finally {
+          if (!isCurrent()) return;
+          inFlight = false;
+          renderReview();
+          renderNotice();
+          renderActions();
+        }
+      }
+
+      /** Same "duplicate AI programs" fix as buildAiProposalSection's own
+       * onDeleteExistingSession — see its doc comment. */
+      async function onDeleteExistingSession() {
+        if (inFlight || !day.plannedSession) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Deleting…');
+        renderActions();
+        try {
+          await api(`/api/workouts/${day.plannedSession.id}`, { method: 'DELETE' });
+          if (!isCurrent()) return;
+          closeDayModal();
+          await loadWeek();
+        } catch (err) {
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'error', err.message);
+          inFlight = false;
           renderActions();
         }
       }

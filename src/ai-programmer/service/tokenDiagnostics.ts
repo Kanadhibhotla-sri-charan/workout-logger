@@ -60,6 +60,12 @@ export interface TokenDiagnostics {
   actualInputTokens?: number;
   actualOutputTokens?: number;
   actualTotalTokens?: number;
+  /** The provider's own reported completion-stop reason, when supplied
+   * (Velona's `data.finish`) — passed through verbatim for operator
+   * visibility; never used here to make a decision (see
+   * `isLikelyTruncatedOutput` in velonaProvider.ts for the actual
+   * truncation check). */
+  finishReason?: string;
 }
 
 const APPROX_CHARS_PER_TOKEN = 4;
@@ -83,7 +89,7 @@ export function estimateTokensFromChars(chars: number): number {
 export function buildTokenDiagnostics(
   mode: AIProgrammerMode,
   request: AIProgrammerProviderRequest,
-  response?: Pick<AIProgrammerProviderResponse, 'rawText' | 'usage' | 'requestDiagnostics'>
+  response?: Pick<AIProgrammerProviderResponse, 'rawText' | 'usage' | 'requestDiagnostics' | 'finishReason'>
 ): TokenDiagnostics {
   const userTurnContent = buildVelonaUserTurnContent(request);
   const exact = response?.requestDiagnostics;
@@ -107,6 +113,7 @@ export function buildTokenDiagnostics(
     actualInputTokens: response?.usage?.inputTokens,
     actualOutputTokens: response?.usage?.outputTokens,
     actualTotalTokens: response?.usage?.totalTokens,
+    finishReason: response?.finishReason,
   };
 }
 

@@ -10,7 +10,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
-import { reconcileWeekProgram, reconcileAfterActualTraining, type FreshDayInput, type WeekAggregates } from '../../src/engine/weekProgramReconciliation.js';
+import { ensureWeekProgramGenerated, reconcileWeekProgram, reconcileAfterActualTraining, type FreshDayInput, type WeekAggregates } from '../../src/engine/weekProgramReconciliation.js';
 import { WeeklyProgramRepo } from '../../src/repositories/weeklyProgramRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 
@@ -158,5 +158,45 @@ describe('reconcileAfterActualTraining — the remaining-week adaptation entry p
     expect(day0After.snapshot).toEqual(day0Before.snapshot);
     // Unlocked day 1 genuinely adapted and carries a real reason.
     expect((day1After.snapshot as any).deviation_reason).toBe('actual_user_modification');
+  });
+});
+
+// generate_week (2026-09-23), Phase 2: ensureWeekProgramGenerated became
+// async so an AI-backed computeFresh (a real provider call) can be
+// represented without forcing it through a synchronous callback shape.
+// These prove that migration preserved its one real invariant exactly —
+// see programming.ts's own computeFreshWeekOrAI for the real caller this
+// protects (a persisted week must never re-invoke the AI on every page
+// refresh).
+describe('ensureWeekProgramGenerated — async computeFresh, same skip-when-existing invariant', () => {
+  it('calls computeFresh exactly once for a week that has never been persisted, and persists its result', async () => {
+    let calls = 0;
+    const computeFresh = () => {
+      calls++;
+      return { days: [plainDay(0, WEEK_START, 3)], aggregates: AGG };
+    };
+    const program = await ensureWeekProgramGenerated(db, WEEK_START, computeFresh);
+    expect(calls).toBe(1);
+    expect(program.sessions.find((s) => s.day_index === 0)).toBeDefined();
+    expect(new WeeklyProgramRepo(db).getByWeekStart(WEEK_START)?.id).toBe(program.id);
+  });
+
+  it('never calls computeFresh again once a week is persisted — a plain refresh is a pure read', async () => {
+    let calls = 0;
+    const computeFresh = () => {
+      calls++;
+      return { days: [plainDay(0, WEEK_START, 3)], aggregates: AGG };
+    };
+    const first = await ensureWeekProgramGenerated(db, WEEK_START, computeFresh);
+    const second = await ensureWeekProgramGenerated(db, WEEK_START, computeFresh);
+    expect(calls).toBe(1); // not called again for the second call
+    expect(second.id).toBe(first.id);
+  });
+
+  it('accepts a genuinely async (Promise-returning) computeFresh — the actual generate_week case', async () => {
+    const computeFresh = () => Promise.resolve({ days: [plainDay(0, WEEK_START, 5)], aggregates: AGG });
+    const program = await ensureWeekProgramGenerated(db, WEEK_START, computeFresh);
+    const day0 = program.sessions.find((s) => s.day_index === 0)!;
+    expect((day0.snapshot as any).plannedWork[0].sets).toBe(5);
   });
 });

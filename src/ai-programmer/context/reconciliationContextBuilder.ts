@@ -34,7 +34,7 @@ import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverri
 import { WeeklyProgramRepo } from '../../repositories/weeklyProgramRepo.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { AIContextIncompleteError, AITargetNotEditableError } from '../errors.js';
-import { activityTypesForDailyActivity, buildCrossWeekContext, buildTargetContexts } from './programmerContextBuilder.js';
+import { activityTypesForDailyActivity, buildCrossWeekContext, buildIntensityTechniqueCatalogue, buildTargetContexts } from './programmerContextBuilder.js';
 import { hashContext } from './programmerContextDiagnostics.js';
 import type { AIProgrammerActiveGoalContext, AIProgrammerRoutineDayContext } from './programmerContextTypes.js';
 import {
@@ -179,6 +179,7 @@ export function buildReconciliationContext(db: Database.Database, input: BuildRe
   const planInput = assembleWeeklyPlanInput(db, weekStart, budgetMinutes, currentDate);
   const otherActivityForRecovery = activityTypesForDailyActivity(input.requestedActivity === 'gym' ? 'gym' : currentActivityOnTargetDate);
   const targets = buildTargetContexts(planInput, input.targetDate, otherActivityForRecovery, missingData);
+  const intensityTechniqueCatalogue = buildIntensityTechniqueCatalogue(targets);
 
   // Existing persisted weekly program (spec §6.2 "Existing persisted
   // weekly program") — every one of the 7 days, real lock state
@@ -261,6 +262,7 @@ export function buildReconciliationContext(db: Database.Database, input: BuildRe
     },
     existingProgram,
     targets,
+    intensityTechniqueCatalogue,
     crossWeek,
     coachingFoundation,
     lockedDates,
