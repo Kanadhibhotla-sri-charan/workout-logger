@@ -311,6 +311,40 @@ describe('computeTargetFeasibility', () => {
     });
   });
 
+  // Feasibility/Credit Consistency Fix (2026-09-28): an authored candidate
+  // the real Blueprint sub-target scope credits to a DIFFERENT target never
+  // counts toward this one.
+  describe('credit consistency (real Blueprint sub-target scope)', () => {
+    const brachialis = target(
+      'brachialis-arm-thickness',
+      [
+        validExercise({ exerciseId: 'barbell-ez-bar-curl', authoredPrescription: { sets: 3, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } }),
+        validExercise({ exerciseId: 'hammer-curl', authoredPrescription: { sets: 2, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } }),
+      ],
+      { isSpecialization: true }
+    );
+    const biceps = target('biceps', [validExercise({ exerciseId: 'barbell-ez-bar-curl', authoredPrescription: { sets: 3, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } })]);
+
+    it('excludes barbell-ez-bar-curl for brachialis (credited to biceps only) and recommends the crediting hammer-curl', () => {
+      const result = computeTargetFeasibility(brachialis, [biceps, brachialis], 4, 4, UNDER_PRESCRIPTION_TOLERANCE);
+      expect(result.isFeasible).toBe(true);
+      expect(result.feasibleCombinations).toEqual([['hammer-curl']]);
+    });
+
+    it('still counts barbell-ez-bar-curl for biceps, which it genuinely credits', () => {
+      const result = computeTargetFeasibility(biceps, [biceps, brachialis], 5, 5, UNDER_PRESCRIPTION_TOLERANCE);
+      expect(result.isFeasible).toBe(true);
+      expect(result.feasibleCombinations).toEqual([['barbell-ez-bar-curl']]);
+    });
+
+    it('reports a target infeasible when its only authored candidate credits a different target', () => {
+      const onlyMismatched = target('brachialis-arm-thickness', [validExercise({ exerciseId: 'barbell-ez-bar-curl', authoredPrescription: { sets: 3, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } })], { isSpecialization: true });
+      const result = computeTargetFeasibility(onlyMismatched, [biceps, onlyMismatched], 4, 4, UNDER_PRESCRIPTION_TOLERANCE);
+      expect(result.isFeasible).toBe(false);
+      expect(result.feasibleCombinations).toEqual([]);
+    });
+  });
+
   // Regression test (per explicit request): an authored candidate that
   // CAN actually complete the target still reports isFeasible: true and
   // remains usable by completion — the fix above must never make a

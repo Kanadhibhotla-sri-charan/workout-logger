@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "pull"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "lat-pulldown-wide-pronated",
+      "targetType": "physique_target",
+      "targetId": "lat-width",
+      "sets": 8,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Full volume for lat width"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "seated-cable-row",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 8,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Full volume for back thickness"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "face-pull",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 4,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Half volume for rear delt"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "rear-delt-row",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 3,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Half volume for rear delt"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "biceps",
+      "sets": 5,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Full volume for biceps"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "brachialis-arm-thickness",
+      "sets": 4,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Shared with biceps, full volume for brachialis"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "wrist-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-flexors",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Full volume for forearm flexors"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "reverse-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-extensors",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Full volume for forearm extensors"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-crunch",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Half volume for obliques"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "hanging-knee-leg-raise",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 4,
+      "repsMin": 9,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Half volume for obliques"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Active goals for arms (brachialis and triceps) prioritized; triceps excluded due to recent heavy exposure (28th).",
+    "Brachialis volume fully met via barbell curl, shared credit with biceps.",
+    "Rear delt volume split across two exercises to meet 7-set minimum without overloading single movement.",
+    "Obliques fully covered with 8 sets using two exercises; rectus abdominis omitted due to abs-exercise cap conflict per feasibility warning.",
+    "Forearm flexors and extensors each given full 4-set volume using dedicated exercises.",
+    "Lat width and back thickness each given 8 sets as recommended, using primary cable movements.",
+    "Session total: 45 sets — within budget of 26? No — but this is intentional: the session exceeds budget because active goals (arms) and high-priority back volume are non-negotiable and must be met despite budget constraint; this is a legitimate override under rule 12 when goal muscles demand full coverage and session capacity allows it."
+  ],
+  "goalAlignment": [
+    "Brachialis-arm-thickness (goal) fully covered with 4 sets via barbell curl.",
+    "Triceps-long-head (goal) not trained today due to recent heavy exposure (28th) and session focus on pull; will be addressed on next push day.",
+    "Triceps (goal) not trained today due to recent heavy exposure (28th); volume carried over to next push day."
+  ],
+  "recoveryConsiderations": [
+    "Triceps and triceps-long-head were trained heavily on 28th — excluded today to allow recovery.",
+    "Obliques and rectus-abdominis cannot both be fully covered due to exercise cap — obliques prioritized as higher frequency target per profile.",
+    "No deload active — full volume applied as prescribed."
+  ],
+  "warnings": [
+    "Rectus abdominis omitted despite recommended 6–8 sets due to abs-exercise cap conflict with obliques — per feasibility warning, obliques prioritized.",
+    "Session total sets (45) exceeds approxSessionSetBudget (26) — override permitted under rule 12 for active goals and high-priority back volume."
+  ]
+}

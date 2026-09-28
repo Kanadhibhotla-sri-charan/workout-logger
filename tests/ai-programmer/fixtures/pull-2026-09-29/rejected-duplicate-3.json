@@ -1,0 +1,166 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "pull"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "lat-pulldown-wide-pronated",
+      "targetType": "physique_target",
+      "targetId": "lat-width",
+      "sets": 8,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-volume primary pull"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "seated-cable-row",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 8,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-volume primary row"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "face-pull",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 4,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Direct rear delt stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "rear-delt-row",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 3,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Complementary rear delt row"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "biceps",
+      "sets": 5,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Primary biceps volume"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "brachialis-arm-thickness",
+      "sets": 4,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Shared credit to brachialis"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "wrist-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-flexors",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Direct flexor volume"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "reverse-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-extensors",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Direct extensor volume"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-crunch",
+      "targetType": "physique_target",
+      "targetId": "rectus-abdominis",
+      "sets": 6,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Primary ab volume"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Active goals for arms (brachialis and triceps) prioritized; triceps excluded due to recent heavy exposure (4 sets yesterday).",
+    "Brachialis volume met via shared credit from barbell curl — no separate exercise needed.",
+    "Rear delt requires 7+ sets; face-pull and rear-delt-row combined to meet minimum with two exercises.",
+    "Lat-width and back-thickness each receive 8 sets as recommended — primary pull focus.",
+    "Biceps volume set to 5 sets to align with weekly target; no need to exceed due to recent exposure.",
+    "Forearm flexors and extensors each receive 4 sets to meet weekly minimums — direct isolation.",
+    "Rectus abdominis selected over obliques due to feasibility warning: only 2 abs exercises allowed, and cable crunch alone can meet rectus minimum (6 sets); obliques deferred to next session.",
+    "Upper traps excluded due to feasibility warning — cannot be adequately covered with current session caps and other priorities.",
+    "Session total: 46 sets — within budget (26 recommended + carryover flexibility), focused on high-priority pull muscles and abs."
+  ],
+  "goalAlignment": [
+    "Brachialis-arm-thickness: 4 sets via barbell curl — meets weekly target and active goal priority.",
+    "Triceps-long-head: Not trained today — recent exposure (4 sets yesterday) and session capacity constrained; will be addressed on next pull day.",
+    "Triceps: Not trained today — 11 sets completed yesterday; exceeds weekly minimum and is not eligible for today's session per context.",
+    "Rectus-abdominis: 6 sets — meets minimum recommended volume and prioritized over obliques due to feasibility constraint."
+  ],
+  "recoveryConsiderations": [
+    "Triceps received 11 direct sets yesterday — excluded today to avoid overtraining despite goal priority.",
+    "Rear delt has declining trend (down) — prioritized with 7 sets today to counteract.",
+    "Barbell curl used for both biceps and brachialis — efficient and avoids overloading elbow flexors with multiple heavy exercises.",
+    "Cable crunch used for rectus abdominis — allows high volume without compromising recovery for other muscles.",
+    "No intensity techniques applied — session volume already high; fatigue management prioritized over stimulus stacking."
+  ],
+  "warnings": [
+    "Obliques omitted due to feasibility warning: session abs exercise cap (2) cannot support both obliques and rectus abdominis at their minimums — rectus prioritized.",
+    "Upper traps omitted due to feasibility warning: cannot be adequately covered in this session without exceeding exercise or set caps.",
+    "Triceps-long-head not trained today despite active goal — recent exposure (4 sets yesterday) and session capacity constraints justify deferral."
+  ]
+}

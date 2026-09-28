@@ -534,4 +534,36 @@ describe('completeProposalAdequacy', () => {
     const adequacy = validateProposalAdequacy(completed, ctx);
     expect(adequacy.errors.some((e) => e.includes('triceps'))).toBe(false);
   });
+
+  // Feasibility/Credit Consistency Fix (2026-09-28): real Blueprint
+  // sub-target scope credits barbell-ez-bar-curl to biceps only, even
+  // though brachialis lists it as an authored candidate. Completion used to
+  // pick it first (largest ceiling, 3) and add sets that never count
+  // toward brachialis.
+  it('17. completion never adds a candidate that does not credit the target, and still completes brachialis with a credited one', () => {
+    const brachialis = target(
+      'brachialis-arm-thickness',
+      [
+        validExercise({ exerciseId: 'barbell-ez-bar-curl', authoredPrescription: { sets: 3, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } }),
+        validExercise({ exerciseId: 'hammer-curl', authoredPrescription: { sets: 2, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } }),
+        validExercise({ exerciseId: 'cross-body-hammer-curl', authoredPrescription: { sets: 2, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } }),
+      ],
+      { isSpecialization: true, goalId: 'goal-arm-side-thickness' }
+    );
+    // biceps must be present: it is the target Blueprint actually credits barbell-ez-bar-curl to.
+    const biceps = target('biceps', [validExercise({ exerciseId: 'barbell-ez-bar-curl', authoredPrescription: { sets: 3, repsMin: 10, repsMax: 20, rirMin: 1, rirMax: 3 } })]);
+    const allTargets = [biceps, brachialis];
+    const gBrachialis = guidance(brachialis, allTargets, 8, 8); // threshold 4
+    const ctx = contextWith(allTargets, [gBrachialis]);
+    // cross-body-hammer-curl already at its own authored ceiling (2): 2 more sets must come from a NEW exercise.
+    const p = proposal([exercise({ exerciseId: 'cross-body-hammer-curl', targetId: 'brachialis-arm-thickness', sets: 2 })]);
+
+    const { proposal: completed } = completeProposalAdequacy(p, ctx);
+
+    const addedIds = completed.exercises.slice(1).map((e) => e.exerciseId);
+    expect(addedIds).not.toContain('barbell-ez-bar-curl');
+    expect(addedIds).toEqual(['hammer-curl']);
+    const adequacy = validateProposalAdequacy(completed, ctx);
+    expect(adequacy.errors.some((e) => e.includes('brachialis-arm-thickness'))).toBe(false);
+  });
 });

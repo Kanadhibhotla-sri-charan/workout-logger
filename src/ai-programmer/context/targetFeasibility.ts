@@ -20,7 +20,7 @@
 
 import type { BlueprintId } from '../../contracts/types.js';
 import type { AIProgrammerTargetContext, AIProgrammerTargetFeasibility, AIProgrammerValidExerciseContext } from './programmerContextTypes.js';
-import { creditedTargetKeys } from '../validation/sharedCredit.js';
+import { creditedTargetKeys, keyOf } from '../validation/sharedCredit.js';
 
 /** A candidate's real, repair-respecting per-exercise ceiling: its own
  * authored sets, never exceeding the target's own
@@ -113,7 +113,19 @@ export function computeTargetFeasibility(
   // application-default ceiling) can never make a target feasible here,
   // exactly matching completion's own permanent, unchanged authored-only
   // restriction (see effectiveCeiling's own doc comment above).
-  const authoredCandidates = target.validExercises.filter((v) => v.authoredPrescription !== null);
+  // Feasibility/Credit Consistency Fix (2026-09-28): a candidate also has
+  // to actually earn credit for THIS target under the same shared-credit
+  // rule adequacy validation checks. A target can list an exercise its
+  // Blueprint sub-target scope credits elsewhere (barbell-ez-bar-curl is
+  // offered for brachialis but credits only biceps), and recommending it
+  // steered the AI into a zero-credit duplicate.
+  const authoredCandidates = target.validExercises.filter(
+    (v) =>
+      v.authoredPrescription !== null &&
+      creditedTargetKeys({ exerciseId: v.exerciseId, targetType: target.targetType, targetId: target.targetId }, allTargets).includes(
+        keyOf(target.targetType, target.targetId)
+      )
+  );
   const candidates = authoredCandidates.map((v) => ({ exerciseId: v.exerciseId, ceiling: effectiveCeiling(v, directSetsPerExposureCap) }));
   const singleExerciseSufficient = candidates.some((c) => c.ceiling >= adequacyThreshold);
   const { isFeasible, minimumExerciseCount, combination } = computeMinimumCombination(candidates, adequacyThreshold);

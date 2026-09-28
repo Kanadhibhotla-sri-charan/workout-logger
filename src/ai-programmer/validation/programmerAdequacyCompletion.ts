@@ -46,7 +46,7 @@ import { ABS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.
 import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance, AIProgrammerTargetContext, AIProgrammerValidExerciseContext } from '../context/programmerContextTypes.js';
-import { creditedSetsByTarget } from './sharedCredit.js';
+import { creditedSetsByTarget, creditedTargetKeys, keyOf } from './sharedCredit.js';
 import { MAX_SETS_WITHOUT_AUTHORED_CAP } from './programmerProposalRepair.js';
 
 export interface CompletionResult {
@@ -90,15 +90,27 @@ function sortCandidates(candidates: readonly { exerciseId: string; ceiling: numb
  * scarcity (completeProposalAdequacy's own scheduler, below) and, inside
  * completeOneTarget's Step 2, to actually SELECT a candidate — sharing
  * this one function guarantees the two can never disagree about which
- * candidates are still available. */
+ * candidates are still available.
+ *
+ * Feasibility/Credit Consistency Fix (2026-09-28): a candidate must also
+ * earn credit for this target under the shared-credit rule adequacy
+ * checks — the same requirement targetFeasibility.ts applies — so
+ * completion never adds sets that count toward a different target. */
 function remainingUsableCandidates(
   exercises: readonly AIWorkoutExerciseProposal[],
   target: AIProgrammerTargetContext,
-  directSetsPerExposureCap: number | null
+  directSetsPerExposureCap: number | null,
+  allTargets: readonly AIProgrammerTargetContext[]
 ): { exerciseId: string; ceiling: number; catalogueEntry: AIProgrammerValidExerciseContext }[] {
   const presentIds = new Set(exercises.map((e) => e.exerciseId));
+  const targetKey = keyOf(target.targetType, target.targetId);
   return target.validExercises
-    .filter((v) => v.authoredPrescription !== null && !presentIds.has(v.exerciseId))
+    .filter(
+      (v) =>
+        v.authoredPrescription !== null &&
+        !presentIds.has(v.exerciseId) &&
+        creditedTargetKeys({ exerciseId: v.exerciseId, targetType: target.targetType, targetId: target.targetId }, allTargets).includes(targetKey)
+    )
     .map((v) => ({ exerciseId: v.exerciseId, ceiling: effectiveCeiling(v, directSetsPerExposureCap), catalogueEntry: v }))
     .filter((c) => c.ceiling > 0);
 }
@@ -140,10 +152,11 @@ function contentionRank(
   exercises: readonly AIWorkoutExerciseProposal[],
   target: AIProgrammerTargetContext,
   directSetsPerExposureCap: number | null,
-  missing: number
+  missing: number,
+  allTargets: readonly AIProgrammerTargetContext[]
 ): number {
   if (ownBumpHeadroom(exercises, target, directSetsPerExposureCap) >= missing) return Number.POSITIVE_INFINITY;
-  return remainingUsableCandidates(exercises, target, directSetsPerExposureCap).length;
+  return remainingUsableCandidates(exercises, target, directSetsPerExposureCap, allTargets).length;
 }
 
 /** Whether adding one more exercise, for `targetId`, to `exercises` would
@@ -182,7 +195,8 @@ function completeOneTarget(
   guidance: AIProgrammerMuscleGuidance,
   currentTotal: number,
   purpose: SessionPurpose | null,
-  notes: string[]
+  notes: string[],
+  allTargets: readonly AIProgrammerTargetContext[]
 ): void {
   const threshold = guidance.feasibility!.adequacyThreshold;
   let missing = Math.ceil(threshold - currentTotal);
@@ -226,7 +240,7 @@ function completeOneTarget(
   // ranks targets with (Cross-Target Candidate Contention Fix,
   // 2026-09-28) — selection can never see a candidate ranking didn't
   // already know about, or vice versa.
-  const newCandidates = remainingUsableCandidates(exercises, target, cap);
+  const newCandidates = remainingUsableCandidates(exercises, target, cap, allTargets);
   for (const candidate of sortCandidates(newCandidates)) {
     if (missing <= 0) break;
     if (!canAddOneMoreExerciseFor(exercises, target.targetId, purpose)) {
@@ -326,7 +340,7 @@ export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, con
       }
 
       const missing = Math.ceil(guidance.feasibility!.adequacyThreshold - currentTotal);
-      const rank = contentionRank(exercises, target, guidance.directSetsPerExposureCap, missing);
+      const rank = contentionRank(exercises, target, guidance.directSetsPerExposureCap, missing, context.targets);
       // Deterministic tie-break: alphabetical by targetId (never object
       // insertion order or randomness).
       if (!best || rank < best.rank || (rank === best.rank && guidance.targetId < best.guidance.targetId)) {
@@ -336,7 +350,7 @@ export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, con
 
     if (!best) break; // nothing left needs attention this pass
 
-    completeOneTarget(exercises, best.target, best.guidance, best.currentTotal, purpose, notes);
+    completeOneTarget(exercises, best.target, best.guidance, best.currentTotal, purpose, notes, context.targets);
     pending.delete(guidanceKey(best.guidance)); // processed exactly once, regardless of outcome
   }
 
