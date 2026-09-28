@@ -99,7 +99,7 @@ function requireEnabled(): void {
 const REQUESTABLE_SESSION_PURPOSES = ['push', 'pull', 'legs', 'upper'] as const;
 
 aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
-  const { targetDate, timezone, requestedSessionPurpose } = req.body ?? {};
+  const { targetDate, timezone, requestedSessionPurpose, confirmRetry } = req.body ?? {};
   if (typeof targetDate !== 'string' || targetDate.trim() === '') {
     return res.status(400).json({ ok: false, error: 'targetDate (string, YYYY-MM-DD) is required' });
   }
@@ -129,13 +129,18 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
       .status(400)
       .json({ ok: false, error: `requestedSessionPurpose must be one of ${REQUESTABLE_SESSION_PURPOSES.join('|')} (or omitted)` });
   }
+  // Same-context retry gate override: must be an explicit boolean, never
+  // coerced from a truthy string/number.
+  if (confirmRetry !== undefined && typeof confirmRetry !== 'boolean') {
+    return res.status(400).json({ ok: false, error: 'confirmRetry must be a boolean when present' });
+  }
 
   // Express 4 does not automatically forward a rejected promise from an
   // async handler to the error middleware — every path below must
   // resolve via res.json/res.status or explicitly call next(err).
   try {
     const service = createDefaultAIProgrammerService(db(req));
-    const result = await service.generateSession({ targetDate, requestedSessionPurpose });
+    const result = await service.generateSession({ targetDate, requestedSessionPurpose, confirmRetry: confirmRetry === true });
     // Phase 2 §5: the response now also carries the persisted proposal's
     // id/status — proposal.proposalId (echoed in `proposal`) and
     // `proposalId` here are always the exact same string (see

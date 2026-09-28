@@ -145,6 +145,12 @@ describe('program.html: generate-whole-week control', () => {
       expect(generateCallIdx).toBeGreaterThan(pendingIdx);
     });
 
+    it('same-context retry gate: a day the backend refused (AI_GENERATION_PREVIOUSLY_FAILED) is reported as skipped, and the batch never sends the retry override', () => {
+      expect(generateWeekSource).toMatch(/if \(err\.code === 'AI_GENERATION_PREVIOUSLY_FAILED'\) \{\s*\n\s*outcomes\.push\(\{ day, outcome: 'skipped', detail: 'Already failed the quality checks with the same inputs, so it was not sent to the AI again — open this day to try again anyway\.' \}\);/);
+      expect(generateWeekSource).not.toMatch(/confirmRetry/);
+      expect(generateWeekSource).toMatch(/outcomes\.push\(\{ day, outcome: 'failed', detail: err\.message \}\);/); // every other failure unchanged
+    });
+
     it('the completed/in-progress skip behavior is unchanged — still the first check, still using day.status', () => {
       const completedIdx = generateWeekSource.indexOf("day.status === 'completed' || day.status === 'in_progress'");
       const notGymIdx = generateWeekSource.indexOf("day.type !== 'gym'");

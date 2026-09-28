@@ -421,7 +421,10 @@ describe('program.html: AI Workout Proposal section wiring', () => {
   const html = readFile('program.html');
 
   it('calls the real generate/retrieve/approve/commit endpoints, in the retrieve-after-generate pattern', () => {
-    expect(html).toMatch(/aiApi\('\/api\/ai-programmer\/generate-session', \{\s*\n\s*method: 'POST',\s*\n\s*body: requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \},\s*\n\s*\}\)/);
+    // The request object is built first so the explicit same-context retry
+    // override can be added to it (see the retry-gate tests below).
+    expect(html).toMatch(/const request = \{\s*\n\s*method: 'POST',\s*\n\s*body: requestedSessionPurpose \? \{ targetDate: day\.date, requestedSessionPurpose \} : \{ targetDate: day\.date \},\s*\n\s*\};/);
+    expect(html).toMatch(/const generated = await aiApi\('\/api\/ai-programmer\/generate-session', request\);/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{generated\.proposalId\}`\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/approve`, \{ method: 'POST' \}\)/);
     expect(html).toMatch(/aiApi\(`\/api\/ai-programmer\/proposals\/\$\{state\.proposalId\}\/commit`, \{/);
@@ -628,6 +631,84 @@ describe('program.html: AI Workout Proposal section wiring', () => {
     const generateBody = html.slice(html.indexOf('async function onGenerate()'), html.indexOf('async function onApprove()'));
     expect(generateBody).not.toMatch(/\/approve`/);
     expect(generateBody).not.toMatch(/\/commit`/);
+  });
+
+  // Same-context retry gate: after the backend refuses a generate with
+  // AI_GENERATION_PREVIOUSLY_FAILED (no paid AI call), the user sees why
+  // and gets an explicit "Try again anyway" action — the only path that
+  // sends confirmRetry: true.
+  describe('same-context retry gate', () => {
+    it('maps AI_GENERATION_PREVIOUSLY_FAILED to a clear message that names the explicit retry action', () => {
+      const helpers = makeAiHelpers(vi.fn());
+      const message = helpers.mapAiErrorCode('AI_GENERATION_PREVIOUSLY_FAILED');
+      expect(message).not.toBe('Something went wrong. Please try again.');
+      expect(message).not.toBe('AI_GENERATION_PREVIOUSLY_FAILED');
+      expect(message).toMatch(/already failed the programming quality checks/i);
+      expect(message).toMatch(/not sent to the AI again/i);
+      expect(message).toMatch(/Try again anyway/);
+    });
+
+    it('aiApi surfaces the gate as err.code with the mapped message, never the stored backend reason text', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        fakeResponse(false, {
+          ok: false,
+          error: 'AI_GENERATION_PREVIOUSLY_FAILED',
+          message: 'internal: A generation for 2026-10-01 already failed (AI_OUTPUT_ADEQUACY_INVALID)',
+          details: { previousErrorCode: 'AI_OUTPUT_ADEQUACY_INVALID', previousIssues: ['physique_target:upper-traps: 2 sets is clearly inadequate volume'] },
+        })
+      );
+      const helpers = makeAiHelpers(fetchMock);
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await expect(helpers.aiApi('/api/ai-programmer/generate-session', { method: 'POST', body: { targetDate: '2026-10-01' } })).rejects.toMatchObject({
+        code: 'AI_GENERATION_PREVIOUSLY_FAILED',
+        message: helpers.mapAiErrorCode('AI_GENERATION_PREVIOUSLY_FAILED'),
+      });
+      consoleSpy.mockRestore();
+    });
+
+    /** The real request-building lines from runGeneration, executed. */
+    function buildGenerateRequest(day: { date: string }, requestedSessionPurpose: string | null, confirmRetry: unknown) {
+      const runBody = extractFunction(html, 'runGeneration');
+      const start = runBody.indexOf('const request = {');
+      const endMarker = 'if (confirmRetry === true) request.body.confirmRetry = true;';
+      const end = runBody.indexOf(endMarker) + endMarker.length;
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      const snippet = runBody.slice(start, end);
+      return new Function('day', 'requestedSessionPurpose', 'confirmRetry', `${snippet}\nreturn request;`)(day, requestedSessionPurpose, confirmRetry);
+    }
+
+    it('sends confirmRetry: true only for an explicit true — never for false or a click event', () => {
+      const day = { date: '2026-10-01' };
+      expect(buildGenerateRequest(day, null, true).body).toEqual({ targetDate: '2026-10-01', confirmRetry: true });
+      expect(buildGenerateRequest(day, 'pull', true).body).toEqual({ targetDate: '2026-10-01', requestedSessionPurpose: 'pull', confirmRetry: true });
+      expect(buildGenerateRequest(day, null, false).body).toEqual({ targetDate: '2026-10-01' });
+      // createButton passes the DOM event as the first argument — it must never count as confirmation.
+      expect(buildGenerateRequest(day, 'pull', { type: 'click' }).body).toEqual({ targetDate: '2026-10-01', requestedSessionPurpose: 'pull' });
+    });
+
+    it('normal Generate never sends the override; only "Try again anyway" does', () => {
+      expect(extractFunction(html, 'onGenerate')).toMatch(/return runGeneration\(false\);/);
+      expect(extractFunction(html, 'onGenerateAnyway')).toMatch(/return runGeneration\(true\);/);
+      expect((html.match(/runGeneration\(true\)/g) || []).length).toBe(1);
+      expect((html.match(/confirmRetry = true/g) || []).length).toBe(1);
+      expect(html).toMatch(/if \(confirmRetry === true\) request\.body\.confirmRetry = true;/);
+    });
+
+    it('renders "Try again anyway" only after the gate refused, wired to onGenerateAnyway', () => {
+      const actionsBody = html.slice(html.indexOf('function renderActions()', html.indexOf('function buildAiProposalSection(')), html.indexOf('async function discover()'));
+      expect(actionsBody).toMatch(/if \(sameContextRetryOffered\) \{\s*\n\s*actionsEl\.appendChild\(createButton\(\{ label: inFlight \? 'Generating…' : 'Try again anyway', variant: 'secondary', disabled: inFlight, onClick: onGenerateAnyway \}\)\);/);
+      expect(actionsBody).toMatch(/onClick: onGenerate \}/); // the normal Generate button is still the default action
+    });
+
+    it('offers the override only for the gate error code, clears it on success, and on a focus change', () => {
+      const runBody = extractFunction(html, 'runGeneration');
+      expect(runBody).toMatch(/sameContextRetryOffered = err\.code === 'AI_GENERATION_PREVIOUSLY_FAILED';/);
+      expect(runBody).toMatch(/state = fresh;\s*\n\s*sameContextRetryOffered = false;/);
+      expect(runBody).toMatch(/showInlineStatus\(statusEl, 'error', err\.message\);/);
+      const pickerBody = extractFunction(html, 'renderPurposePicker');
+      expect(pickerBody).toMatch(/if \(sameContextRetryOffered\) \{\s*\n\s*sameContextRetryOffered = false;\s*\n\s*renderActions\(\);/);
+    });
   });
 });
 

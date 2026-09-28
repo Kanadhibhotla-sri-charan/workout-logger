@@ -316,7 +316,14 @@
             await aiApi('/api/ai-programmer/generate-session', { method: 'POST', body: { targetDate: day.date } });
             outcomes.push({ day, outcome: 'generated', detail: 'Proposal ready — open this day to review it.' });
           } catch (err) {
-            outcomes.push({ day, outcome: 'failed', detail: err.message });
+            // Same-context retry gate: the backend refused without a paid
+            // AI call. The batch never sends the override itself — retrying
+            // anyway is an explicit per-day choice.
+            if (err.code === 'AI_GENERATION_PREVIOUSLY_FAILED') {
+              outcomes.push({ day, outcome: 'skipped', detail: 'Already failed the quality checks with the same inputs, so it was not sent to the AI again — open this day to try again anyway.' });
+            } else {
+              outcomes.push({ day, outcome: 'failed', detail: err.message });
+            }
           }
         }
 
@@ -1071,6 +1078,10 @@
       // same "generate this day" action produced an upper day one time
       // and a leg day another, with no way to ask for a specific one.
       let requestedSessionPurpose = null;
+      // Same-context retry gate: true only after the backend refused a
+      // generate with AI_GENERATION_PREVIOUSLY_FAILED — the only state in
+      // which the explicit "Try again anyway" action is offered.
+      let sameContextRetryOffered = false;
       const SESSION_PURPOSE_OPTIONS = [
         { value: '', text: 'Let AI decide' },
         { value: 'push', text: 'Push' },
@@ -1110,6 +1121,12 @@
         select.value = requestedSessionPurpose || '';
         select.addEventListener('change', () => {
           requestedSessionPurpose = select.value || null;
+          // A different focus is a different request — the override no
+          // longer applies to it.
+          if (sameContextRetryOffered) {
+            sameContextRetryOffered = false;
+            renderActions();
+          }
         });
         purposeEl.append(label, select);
       }
@@ -1181,6 +1198,9 @@
         if (actions.canGenerate) {
           const label = state ? `Generate a new ${formatWeekday(day.weekday)} proposal` : `Generate ${formatWeekday(day.weekday)} with AI`;
           actionsEl.appendChild(createButton({ label: inFlight ? 'Generating…' : label, disabled: inFlight, onClick: onGenerate }));
+          if (sameContextRetryOffered) {
+            actionsEl.appendChild(createButton({ label: inFlight ? 'Generating…' : 'Try again anyway', variant: 'secondary', disabled: inFlight, onClick: onGenerateAnyway }));
+          }
           return;
         }
         if (actions.canApprove) {
@@ -1257,21 +1277,36 @@
       }
 
       async function onGenerate() {
+        return runGeneration(false);
+      }
+
+      /** The only action that sends the same-context retry override. */
+      async function onGenerateAnyway() {
+        return runGeneration(true);
+      }
+
+      async function runGeneration(confirmRetry) {
         if (inFlight) return;
         inFlight = true;
         showInlineStatus(statusEl, 'saving', 'Generating…');
         renderActions();
         try {
-          const generated = await aiApi('/api/ai-programmer/generate-session', {
+          const request = {
             method: 'POST',
             body: requestedSessionPurpose ? { targetDate: day.date, requestedSessionPurpose } : { targetDate: day.date },
-          });
+          };
+          // `=== true`, not truthiness: a click event passed through as an
+          // argument must never count as the user's confirmation.
+          if (confirmRetry === true) request.body.confirmRetry = true;
+          const generated = await aiApi('/api/ai-programmer/generate-session', request);
           const fresh = await aiApi(`/api/ai-programmer/proposals/${generated.proposalId}`);
           if (!isCurrent()) return;
           state = fresh;
+          sameContextRetryOffered = false;
           showInlineStatus(statusEl, null, null);
         } catch (err) {
           if (!isCurrent()) return;
+          sameContextRetryOffered = err.code === 'AI_GENERATION_PREVIOUSLY_FAILED';
           showInlineStatus(statusEl, 'error', err.message);
         } finally {
           if (!isCurrent()) return;

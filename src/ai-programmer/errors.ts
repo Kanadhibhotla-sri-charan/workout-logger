@@ -24,6 +24,7 @@ export type AIProgrammerErrorCode =
   | 'AI_CONTEXT_INCOMPLETE'
   | 'AI_PROPOSAL_NOT_FOUND'
   | 'AI_PROPOSAL_ALREADY_PENDING'
+  | 'AI_GENERATION_PREVIOUSLY_FAILED'
   | 'AI_PROPOSAL_INVALID_STATE'
   | 'AI_PROPOSAL_EXPIRED'
   | 'AI_PROPOSAL_CONFLICT'
@@ -202,6 +203,29 @@ export class AIProposalAlreadyPendingError extends AIProgrammerError {
       `A pending AI proposal (${existingProposalId}) already exists for ${targetDate}. Approve, commit, or let it expire before generating a new one.`,
       409,
       { targetDate, existingProposalId }
+    );
+  }
+}
+
+/** Same-context retry gate: a generation for this exact targetDate and
+ * contextHash already failed the AI-output quality checks, and nothing
+ * the context is built from has changed since, so the provider is not
+ * called again. The caller may resend with `confirmRetry: true` to pay
+ * for another attempt anyway. `details` carries the stored (already
+ * bounded) reason from the earlier failure. */
+export class AIGenerationPreviouslyFailedError extends AIProgrammerError {
+  constructor(targetDate: string, previous: { code: string; issues: readonly string[]; failedAt: string }) {
+    super(
+      'AI_GENERATION_PREVIOUSLY_FAILED',
+      `A generation for ${targetDate} already failed (${previous.code}) at ${previous.failedAt} with exactly the same inputs; the AI provider was not called again. Resend with confirmRetry: true to retry anyway.`,
+      409,
+      {
+        targetDate,
+        previousErrorCode: previous.code,
+        previousIssues: [...previous.issues],
+        previousFailedAt: previous.failedAt,
+        retryOverride: 'confirmRetry',
+      }
     );
   }
 }

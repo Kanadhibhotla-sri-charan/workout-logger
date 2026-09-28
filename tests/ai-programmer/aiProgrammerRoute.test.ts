@@ -14,6 +14,8 @@ import { weekdayOfDate } from '../../src/engine/workoutBuilder.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
+import { buildProgrammerContext } from '../../src/ai-programmer/context/programmerContextBuilder.js';
+import { findGenerationFailure } from '../../src/ai-programmer/service/generationFailureMemory.js';
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';
@@ -230,5 +232,108 @@ describe('POST /api/ai-programmer/generate-session', () => {
 
     await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: SUNDAY });
     expect(sessionsRepo.getSession(completed.session_id)?.status).toBe('completed');
+  });
+});
+
+// Same-context retry gate: a quality failure for an exact targetDate +
+// contextHash blocks an identical follow-up request BEFORE the paid
+// provider call, unless the request explicitly sends confirmRetry: true.
+describe('POST /api/ai-programmer/generate-session — same-context retry gate', () => {
+  const garbageOutput = () => jsonResponse(200, { data: { output: JSON.stringify({ garbage: true }) } });
+  const contextHashFor = (targetDate: string, requestedSessionPurpose?: 'push' | 'pull' | 'legs' | 'upper') =>
+    buildProgrammerContext(db, { targetDate, requestedSessionPurpose }).contextHash;
+
+  it('a first AI-output quality failure records a failure marker for that targetDate + contextHash', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date } = futureDate();
+    fetchMock.mockResolvedValueOnce(garbageOutput());
+
+    const first = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(first.status).toBe(502);
+    expect(first.body.error).toBe('AI_OUTPUT_SCHEMA_INVALID');
+
+    const marker = findGenerationFailure(db, date, contextHashFor(date));
+    expect(marker).toBeDefined();
+    expect(marker!.code).toBe('AI_OUTPUT_SCHEMA_INVALID');
+    expect(marker!.issues.length).toBeGreaterThan(0);
+  });
+
+  it('a second identical request makes zero provider calls and returns AI_GENERATION_PREVIOUSLY_FAILED with the stored reason', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date } = futureDate();
+    fetchMock.mockResolvedValueOnce(garbageOutput());
+
+    await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const second = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(second.status).toBe(409);
+    expect(second.body.ok).toBe(false);
+    expect(second.body.error).toBe('AI_GENERATION_PREVIOUSLY_FAILED');
+    expect(second.body.details.previousErrorCode).toBe('AI_OUTPUT_SCHEMA_INVALID');
+    expect(second.body.details.previousIssues.length).toBeGreaterThan(0);
+    expect(second.body.details.retryOverride).toBe('confirmRetry');
+    expect(fetchMock).toHaveBeenCalledTimes(1); // never called the provider a second time
+  });
+
+  it('a second request with explicit confirmRetry: true calls the provider despite the gate', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date } = futureDate();
+    fetchMock.mockResolvedValueOnce(garbageOutput()).mockResolvedValueOnce(garbageOutput());
+
+    await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    const retried = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date, confirmRetry: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(retried.body.error).toBe('AI_OUTPUT_SCHEMA_INVALID'); // the real outcome of the new attempt, not the gate
+  });
+
+  it('confirmRetry must be an explicit boolean — a truthy string is rejected, never treated as confirmation', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date } = futureDate();
+    const res = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date, confirmRetry: 'yes' });
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a changed contextHash (a different requested purpose) bypasses the gate and calls the provider normally', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date } = futureDate();
+    expect(contextHashFor(date, 'pull')).not.toBe(contextHashFor(date));
+    fetchMock.mockResolvedValueOnce(garbageOutput()).mockResolvedValueOnce(garbageOutput());
+
+    await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    const different = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date, requestedSessionPurpose: 'pull' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(different.body.error).not.toBe('AI_GENERATION_PREVIOUSLY_FAILED');
+  });
+
+  it('a provider/transient failure never creates a blocking marker — the next request calls the provider again', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date } = futureDate();
+    fetchMock.mockResolvedValue(jsonResponse(500, { error: 'upstream exploded' }));
+
+    const first = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(first.body.error).toBe('AI_PROVIDER_UNAVAILABLE');
+    expect(findGenerationFailure(db, date, contextHashFor(date))).toBeUndefined();
+    const callsAfterFirst = fetchMock.mock.calls.length;
+
+    const second = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(second.body.error).not.toBe('AI_GENERATION_PREVIOUSLY_FAILED');
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+
+  it('a successful generation clears the corresponding failure marker', async () => {
+    process.env.AI_PROGRAMMER_ENABLED = 'true';
+    const { date, weekday } = futureDate();
+    fetchMock
+      .mockResolvedValueOnce(garbageOutput())
+      .mockResolvedValueOnce(jsonResponse(200, { data: { output: JSON.stringify(validProposalJson({ targetDate: date, weekday })) } }));
+
+    await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date });
+    expect(findGenerationFailure(db, date, contextHashFor(date))).toBeDefined();
+
+    const retried = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: date, confirmRetry: true });
+    expect(retried.status).toBe(200);
+    expect(findGenerationFailure(db, date, contextHashFor(date))).toBeUndefined();
   });
 });

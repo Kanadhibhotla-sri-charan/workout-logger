@@ -445,6 +445,7 @@ const AI_ERROR_MESSAGES = {
   AI_CONTEXT_INCOMPLETE: 'Your training profile is incomplete. Please finish setup on the Profile page first.',
   AI_PROPOSAL_NOT_FOUND: 'This proposal could not be found. It may have expired or been removed.',
   AI_PROPOSAL_ALREADY_PENDING: 'A proposal already exists for this date. Open it to approve, commit, or wait for it to expire before generating a new one.',
+  AI_GENERATION_PREVIOUSLY_FAILED: 'This exact request already failed the programming quality checks, and nothing about your training data or the chosen focus has changed since, so it was not sent to the AI again. Pick a different focus, or choose "Try again anyway" to spend another AI request on it.',
   AI_PROPOSAL_INVALID_STATE: "This proposal's status no longer allows that action.",
   AI_PROPOSAL_EXPIRED: 'This proposal expired. Please generate a new one.',
   AI_PROPOSAL_CONFLICT: 'A planned workout already exists for this date.',

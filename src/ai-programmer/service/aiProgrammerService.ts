@@ -32,6 +32,7 @@ import {
   AIOutputDomainInvalidError,
   AIProgrammerDisabledError,
   AIProposalAlreadyPendingError,
+  AIGenerationPreviouslyFailedError,
   AIProviderOutputTruncatedError,
   AIWeekReconciliationOutputDomainInvalidError,
   AIWeekReconciliationOutputSchemaInvalidError,
@@ -41,6 +42,7 @@ import {
 import { isAiProgrammerEnabled, loadVelonaConfig } from '../provider/config.js';
 import { isLikelyTruncatedOutput, VelonaProvider } from '../provider/velonaProvider.js';
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
+import { clearGenerationFailure, findGenerationFailure, isGatedGenerationFailure, recordGenerationFailure } from './generationFailureMemory.js';
 import { validateProposalAdequacy } from '../validation/programmerAdequacyValidator.js';
 import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
 import { completeProposalAdequacy } from '../validation/programmerAdequacyCompletion.js';
@@ -122,6 +124,10 @@ export interface GenerateSessionInput {
   /** "Ask what to generate" fix — see BuildProgrammerContextInput's own
    * doc comment for the full rationale; passed straight through. */
   requestedSessionPurpose?: SessionPurpose;
+  /** Explicit user override for the same-context retry gate: only `true`
+   * lets a request through after the identical context already failed
+   * an AI-output quality check. Never set automatically. */
+  confirmRetry?: boolean;
 }
 
 export interface GenerateSessionResult {
@@ -257,6 +263,35 @@ export class AIProgrammerService {
       requestedSessionPurpose: input.requestedSessionPurpose,
     });
 
+    // Same-context retry gate: the last paid attempt for this exact
+    // targetDate + contextHash failed an AI-output quality check and
+    // nothing the context is built from has changed since (any change —
+    // new training data, a different requested purpose, the next
+    // calendar day — produces a different contextHash). Checked here,
+    // immediately before the provider call, because contextHash only
+    // exists once the context is built. Only an explicit
+    // `confirmRetry: true` gets past it; see generationFailureMemory.ts.
+    const previousFailure = findGenerationFailure(this.db, input.targetDate, context.contextHash);
+    if (previousFailure && input.confirmRetry !== true) {
+      throw new AIGenerationPreviouslyFailedError(input.targetDate, previousFailure);
+    }
+
+    let result: GenerateSessionResult;
+    try {
+      result = await this.generateFromContext(context);
+    } catch (err) {
+      if (isGatedGenerationFailure(err)) recordGenerationFailure(this.db, input.targetDate, context.contextHash, err);
+      throw err;
+    }
+    clearGenerationFailure(this.db, input.targetDate, context.contextHash);
+    return result;
+  }
+
+  /** The paid provider call plus the full parse -> schema -> repair ->
+   * domain -> completion -> adequacy -> persist pipeline for an
+   * already-built context. Unchanged; split out of generateSession only
+   * so the retry gate can observe how it ends. */
+  private async generateFromContext(context: AIProgrammerContext): Promise<GenerateSessionResult> {
     const requestId = randomUUID();
     const systemInstruction = buildProgrammerSystemInstruction();
     const outputSchema = getProgrammerOutputSchema();
