@@ -80,4 +80,76 @@ describe('program.html: generate-whole-week control', () => {
   it('derives the day list from the real current week, never a hardcoded weekday set', () => {
     expect(generateWeekSource).toMatch(/const days = weekData\.days;/);
   });
+
+  // Week-batch eligibility fix (2026-09-28): onGenerateWeek() previously
+  // sent every non-completed/non-in-progress day straight to
+  // generate-session, including a real rest/badminton day or a gym day
+  // with no decided session purpose — both structurally doomed to fail
+  // (see the forensic investigation this fix resolves). These tests
+  // cover the required eligibility matrix, reusing the EXISTING
+  // day.type/day.sessionPurpose fields the week response already
+  // carries — never a second source of truth.
+  describe('eligibility: skips a day before ever calling generate-session', () => {
+    it('a non-gym/rest day is skipped with a clear reason, before any API call', () => {
+      expect(generateWeekSource).toMatch(/day\.type !== 'gym'/);
+      expect(generateWeekSource).toMatch(/Not a gym training day\./);
+    });
+
+    it('a badminton day is caught by the SAME day.type check — never a second, badminton-specific rule', () => {
+      // day.type for a real badminton day is the literal string
+      // 'badminton' (see nonGymDayType/renderWeekDays) — the single
+      // `day.type !== 'gym'` guard above already catches it; there is
+      // deliberately no separate `=== 'badminton'` branch to duplicate.
+      expect(generateWeekSource).not.toMatch(/day\.type === 'badminton'/);
+      expect(generateWeekSource).not.toMatch(/day\.activity === 'badminton'/);
+    });
+
+    it('a gym day with no decided session purpose is skipped with an actionable message, before any generate-session call', () => {
+      expect(generateWeekSource).toMatch(/!day\.sessionPurpose/);
+      expect(generateWeekSource).toMatch(/No session purpose set — open this day and choose a specific purpose \(Push, Pull, Legs, or Upper\)\./);
+    });
+
+    it('both new eligibility checks run AFTER the existing completed/in-progress check and BEFORE the existing pending-proposal check — order preserved, nothing reordered', () => {
+      const completedIdx = generateWeekSource.indexOf("day.status === 'completed'");
+      const notGymIdx = generateWeekSource.indexOf("day.type !== 'gym'");
+      const noPurposeIdx = generateWeekSource.indexOf('!day.sessionPurpose');
+      const pendingIdx = generateWeekSource.indexOf('aiProposalActionsFor(existing');
+      expect(completedIdx).toBeGreaterThan(-1);
+      expect(notGymIdx).toBeGreaterThan(completedIdx);
+      expect(noPurposeIdx).toBeGreaterThan(notGymIdx);
+      expect(pendingIdx).toBeGreaterThan(noPurposeIdx);
+    });
+
+    it('both new checks `continue` immediately — never fall through to a network call for the same iteration', () => {
+      const notGymIfIdx = generateWeekSource.indexOf("if (day.type !== 'gym')");
+      const notGymBlock = generateWeekSource.slice(notGymIfIdx, notGymIfIdx + 200);
+      expect(notGymIfIdx).toBeGreaterThan(-1);
+      expect(notGymBlock).toMatch(/continue;/);
+      const noPurposeIfIdx = generateWeekSource.indexOf('if (!day.sessionPurpose)');
+      const noPurposeBlock = generateWeekSource.slice(noPurposeIfIdx, noPurposeIfIdx + 260);
+      expect(noPurposeIfIdx).toBeGreaterThan(-1);
+      expect(noPurposeBlock).toMatch(/continue;/);
+    });
+
+    it('a real gym day WITH a decided session purpose falls through both new guards and reaches generate-session — the existing happy path is unchanged', () => {
+      // Structural proof: the two new guards are the ONLY new gates
+      // added, both scoped to a falsy condition (day.type !== 'gym',
+      // !day.sessionPurpose) — a day satisfying neither (a real gym day
+      // with a real purpose) necessarily falls through to the
+      // pre-existing pending-proposal check and, beyond that, the
+      // pre-existing generate-session call — both still present and
+      // untouched below the new guards.
+      const pendingIdx = generateWeekSource.indexOf('aiProposalActionsFor(existing');
+      const generateCallIdx = generateWeekSource.indexOf("aiApi('/api/ai-programmer/generate-session'");
+      expect(pendingIdx).toBeGreaterThan(-1);
+      expect(generateCallIdx).toBeGreaterThan(pendingIdx);
+    });
+
+    it('the completed/in-progress skip behavior is unchanged — still the first check, still using day.status', () => {
+      const completedIdx = generateWeekSource.indexOf("day.status === 'completed' || day.status === 'in_progress'");
+      const notGymIdx = generateWeekSource.indexOf("day.type !== 'gym'");
+      expect(completedIdx).toBeGreaterThan(-1);
+      expect(completedIdx).toBeLessThan(notGymIdx);
+    });
+  });
 });

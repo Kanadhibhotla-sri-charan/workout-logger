@@ -261,6 +261,37 @@
             continue;
           }
 
+          // Week-batch eligibility fix (2026-09-28): a day that isn't a
+          // real gym/both training day (rest, badminton) has no business
+          // being sent to generate-session at all — the single-day
+          // "AI Workout Proposal" section never offers Generate for a
+          // non-gym day either (see its own `day.type !== 'gym'` guard),
+          // so this reuses the SAME existing field (never a second
+          // source of truth) to skip it here too, before ever calling
+          // the backend.
+          if (day.type !== 'gym') {
+            outcomes.push({ day, outcome: 'skipped', detail: 'Not a gym training day.' });
+            continue;
+          }
+
+          // Week-batch eligibility fix (2026-09-28): a gym day with no
+          // decided session purpose (day.sessionPurpose === null — either
+          // its own deterministic plan was deleted, or the week's
+          // schedule changed since the plan was generated) makes
+          // generate-session build its context with sessionPurpose: null,
+          // which makes EVERY target "eligible" regardless of real
+          // compatibility (programmerContextBuilder.ts's own
+          // `eligibleForThisSession` rule) — a structural adequacy trap
+          // whenever active goals span incompatible muscle groups, not a
+          // model mistake. The single-day flow's own purpose picker
+          // exists exactly to let the user resolve this explicitly; the
+          // week-batch has no such picker, so it skips instead of
+          // guessing or silently sending an unscoped request.
+          if (!day.sessionPurpose) {
+            outcomes.push({ day, outcome: 'skipped', detail: 'No session purpose set — open this day and choose a specific purpose (Push, Pull, Legs, or Upper).' });
+            continue;
+          }
+
           showInlineStatus(statusEl, 'saving', `Checking ${formatWeekday(day.weekday)} ${progress}…`);
           let existing = null;
           try {
