@@ -186,12 +186,116 @@
         return;
       }
 
+      container.appendChild(buildGenerateWeekControl());
       container.appendChild(buildSwapControl());
 
       const grid = el('div', { class: 'week-grid' });
       for (const day of weekData.days) grid.appendChild(buildDayCard(day));
       container.appendChild(grid);
       renderGoalSummary();
+    }
+
+    /** Generates an AI workout proposal for every eligible day of the
+     * current week in one action, instead of opening each day's modal
+     * and clicking "Generate" seven times. This is pure orchestration
+     * over the SAME single-day endpoint (POST /generate-session) and the
+     * SAME discovery endpoint (GET /proposals/latest) the per-day
+     * "AI Workout Proposal" section (buildAiProposalSection) already
+     * uses — it never invents a batch-generation endpoint or a second
+     * eligibility rule. Requests run sequentially (never in parallel) so
+     * this never bursts N simultaneous requests at the AI provider.
+     *
+     * Eligibility mirrors buildAiProposalSection exactly: a day already
+     * showing a completed/in_progress workout is skipped without a
+     * network call (the same `locked` check that section uses), and a
+     * day whose discovery finds an existing proposal that
+     * `aiProposalActionsFor` says is not currently generatable (pending,
+     * approved, or committed) is skipped rather than sent to
+     * generate-session, where it would only fail with
+     * AI_PROPOSAL_ALREADY_PENDING. Every proposal this creates is still
+     * just a proposal — nothing is added to the program until the user
+     * opens that day and explicitly approves + commits it, exactly like
+     * the single-day flow. */
+    function buildGenerateWeekControl() {
+      const section = el('div', { class: 'change-activity', style: 'margin-bottom:1rem' });
+      const statusEl = el('div');
+      const resultsEl = el('div');
+      let inFlight = false;
+
+      section.appendChild(el('p', { class: 'faint', text: 'Ask the AI Programmer for a proposed session on every day this week that can still be generated for. Nothing is added to your program until you open and approve/commit each one individually.', style: 'margin:0 0 0.5rem' }));
+
+      const btn = createButton({ label: 'Generate AI proposals for the week', variant: 'secondary', onClick: onGenerateWeek });
+      section.appendChild(btn);
+      section.appendChild(statusEl);
+      section.appendChild(resultsEl);
+
+      function renderResults(outcomes) {
+        resultsEl.innerHTML = '';
+        if (outcomes.length === 0) return;
+        const generated = outcomes.filter((o) => o.outcome === 'generated').length;
+        const skipped = outcomes.filter((o) => o.outcome === 'skipped').length;
+        const failed = outcomes.filter((o) => o.outcome === 'failed').length;
+        resultsEl.appendChild(el('p', { class: 'muted', text: `${generated} generated, ${skipped} skipped, ${failed} failed.`, style: 'margin:0.5rem 0 0.3rem' }));
+        for (const o of outcomes) {
+          resultsEl.appendChild(el('p', { class: 'faint', text: `${formatWeekday(o.day.weekday)} (${formatDate(o.day.date)}): ${o.detail}`, style: 'margin:0.15rem 0' }));
+        }
+      }
+
+      async function onGenerateWeek() {
+        if (inFlight) return;
+        inFlight = true;
+        btn.disabled = true;
+        resultsEl.innerHTML = '';
+        const days = weekData.days;
+        const outcomes = [];
+
+        for (let i = 0; i < days.length; i++) {
+          const day = days[i];
+          const progress = `(${i + 1} of ${days.length})`;
+
+          // Same locked check buildAiProposalSection uses — a day with a
+          // completed/in-progress workout is never editable, so there is
+          // no need to even ask the backend.
+          if (day.status === 'completed' || day.status === 'in_progress') {
+            outcomes.push({ day, outcome: 'skipped', detail: `Already has a ${formatSessionType(day.status).toLowerCase()} workout.` });
+            continue;
+          }
+
+          showInlineStatus(statusEl, 'saving', `Checking ${formatWeekday(day.weekday)} ${progress}…`);
+          let existing = null;
+          try {
+            const result = await aiApi(`/api/ai-programmer/proposals/latest?targetDate=${encodeURIComponent(day.date)}`);
+            existing = result.found ? result : null;
+          } catch (err) {
+            outcomes.push({ day, outcome: 'failed', detail: err.message });
+            continue;
+          }
+
+          // aiProposalActionsFor is the single source of truth (app.js)
+          // for which status allows a fresh Generate — reused here
+          // unchanged, never re-derived, exactly like the per-day
+          // section does.
+          if (!aiProposalActionsFor(existing ? existing.status : null).canGenerate) {
+            outcomes.push({ day, outcome: 'skipped', detail: 'Already has an active AI proposal — open this day to review it.' });
+            continue;
+          }
+
+          showInlineStatus(statusEl, 'saving', `Generating ${formatWeekday(day.weekday)} ${progress}…`);
+          try {
+            await aiApi('/api/ai-programmer/generate-session', { method: 'POST', body: { targetDate: day.date } });
+            outcomes.push({ day, outcome: 'generated', detail: 'Proposal ready — open this day to review it.' });
+          } catch (err) {
+            outcomes.push({ day, outcome: 'failed', detail: err.message });
+          }
+        }
+
+        inFlight = false;
+        btn.disabled = false;
+        showInlineStatus(statusEl, null, null);
+        renderResults(outcomes);
+      }
+
+      return section;
     }
 
     /** Two-day schedule swap — a purely deterministic scheduling

@@ -126,6 +126,22 @@ describe('mapAiErrorCode: every documented backend error code maps to a safe, co
     expect(helpers.mapAiErrorCode('AI_PROVIDER_UNAVAILABLE')).toMatch(/temporarily unavailable/i);
   });
 
+  // Regression coverage: these three codes are real, legitimately-thrown
+  // AIProgrammerError codes (src/ai-programmer/errors.ts) that were
+  // missing from AI_ERROR_MESSAGES, silently falling through to the
+  // generic "Something went wrong" message instead of a real one —
+  // most visibly, AI_PROPOSAL_ALREADY_PENDING firing on every
+  // "Generate" click for a date that already has a pending proposal.
+  it('maps every real AIProgrammerError code to a non-generic message (regression: no silent fallback)', () => {
+    const helpers = makeAiHelpers(vi.fn());
+    expect(helpers.mapAiErrorCode('AI_PROPOSAL_ALREADY_PENDING')).toMatch(/already exists/i);
+    expect(helpers.mapAiErrorCode('AI_PROPOSAL_ALREADY_PENDING')).not.toBe('Something went wrong. Please try again.');
+    expect(helpers.mapAiErrorCode('AI_OUTPUT_ADEQUACY_INVALID')).toMatch(/quality/i);
+    expect(helpers.mapAiErrorCode('AI_OUTPUT_ADEQUACY_INVALID')).not.toBe('Something went wrong. Please try again.');
+    expect(helpers.mapAiErrorCode('AI_COMMIT_INTENT_MISMATCH')).toMatch(/schedule changed/i);
+    expect(helpers.mapAiErrorCode('AI_COMMIT_INTENT_MISMATCH')).not.toBe('Something went wrong. Please try again.');
+  });
+
   it('never returns the raw code itself as the message', () => {
     const helpers = makeAiHelpers(vi.fn());
     for (const code of ['AI_PROGRAMMER_DISABLED', 'AI_PROPOSAL_EXPIRED', 'AI_PROPOSAL_CONFLICT', 'AI_OUTPUT_SCHEMA_INVALID']) {
