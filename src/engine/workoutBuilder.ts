@@ -778,8 +778,16 @@ export function estimateMinutes(sets: number): number {
   return Math.round((workMinutes + TIME_ESTIMATION.setupMinutesPerExercise) * 10) / 10;
 }
 
-interface TargetRanking {
-  target: TargetBuildContext;
+/** The only TargetBuildContext fields rankTarget/compareRankings read —
+ * exported (2026-09-28, Session Planner) so the AI session planner ranks
+ * targets with this exact comparator instead of a second copy. */
+export type RankableTarget = Pick<
+  TargetBuildContext,
+  'target_type' | 'target_id' | 'is_specialization' | 'goal_priority' | 'weekly_exposure_units' | 'days_since_target_last_trained'
+>;
+
+export interface TargetRanking<T extends RankableTarget = TargetBuildContext> {
+  target: T;
   classification: TargetClassification;
   /** How far below Blueprint's own conservative starting_point_sets
    * threshold this week's REAL combined exposure (primary 1.00 +
@@ -835,13 +843,13 @@ interface TargetRanking {
  * Falls back to `startingPointMin` when no package reference exists for
  * this target (e.g. a functional_goal, which Blueprint's development
  * packages don't cover). */
-function rankTarget(
-  target: TargetBuildContext,
+export function rankTarget<T extends RankableTarget>(
+  target: T,
   startingPointMin: number,
-  recovery: RecoveryConstraintResult,
-  developmentReference: DevelopmentReference | null,
+  recovery: Pick<RecoveryConstraintResult, 'priority_adjustment'>,
+  developmentReference: Pick<DevelopmentReference, 'weekly_direct_set_reference'> | null,
   rotationTieBreak: number
-): TargetRanking {
+): TargetRanking<T> {
   const recoveryNeed = recovery.priority_adjustment === 'avoid' ? 2 : recovery.priority_adjustment === 'reduce' ? 1 : 0;
   if (target.is_specialization) return { target, classification: 'specialization', needDeficit: 0, recoveryNeed, rotationTieBreak: 0 };
   const threshold = developmentReference?.weekly_direct_set_reference ?? startingPointMin;
@@ -895,8 +903,8 @@ function rankTarget(
  *      tier already separates these in practice, so this branch is only
  *      a defensive fallback, never actually exercised.
  */
-function compareRankings(a: TargetRanking, b: TargetRanking): number {
-  const tierOf = (r: TargetRanking) => (r.target.is_specialization ? r.target.goal_priority : r.classification === 'normal_development' ? 3 : 4);
+export function compareRankings(a: TargetRanking<RankableTarget>, b: TargetRanking<RankableTarget>): number {
+  const tierOf = (r: TargetRanking<RankableTarget>) => (r.target.is_specialization ? r.target.goal_priority : r.classification === 'normal_development' ? 3 : 4);
   const tierA = tierOf(a);
   const tierB = tierOf(b);
   if (tierA !== tierB) return tierA - tierB;
@@ -916,6 +924,23 @@ function compareRankings(a: TargetRanking, b: TargetRanking): number {
   }
 
   return a.target.target_id.localeCompare(b.target.target_id);
+}
+
+/** Non-Goal Muscle Rotation Fix (2026-09-16): the alphabetically sorted
+ * ring of every non-goal physique_target, the cursor normalised onto it,
+ * and each target's rotationTieBreak (its ring position relative to the
+ * cursor). Extracted unchanged from buildWeeklyProgrammingPlan
+ * (2026-09-28) so the AI session planner uses the same rotation rule. */
+export function nonGoalRotation(
+  targets: readonly Pick<TargetBuildContext, 'target_type' | 'target_id' | 'is_specialization'>[],
+  cursorInput: number | undefined
+): { ring: string[]; cursor: number; tieBreakByTargetId: Map<string, number> } {
+  const ring = [...new Set(targets.filter((t) => !t.is_specialization && t.target_type === 'physique_target').map((t) => t.target_id))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const cursor = ring.length > 0 ? (((cursorInput ?? 0) % ring.length) + ring.length) % ring.length : 0;
+  const tieBreakByTargetId = new Map<string, number>(ring.map((id, ringIndex) => [id, ((ringIndex - cursor) % ring.length + ring.length) % ring.length]));
+  return { ring, cursor, tieBreakByTargetId };
 }
 
 function targetKey(t: Pick<TargetBuildContext, 'target_type' | 'target_id'>): string {
@@ -1066,13 +1091,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   // it starting from the cursor reproduces exactly the "A,B -> C,A ->
   // B,C -> repeat" rotation example the fix was specified with. Goal
   // (specialization) targets never consult this map — see rankTarget.
-  const nonGoalRing = [...new Set(input.targets.filter((t) => !t.is_specialization && t.target_type === 'physique_target').map((t) => t.target_id))].sort((a, b) =>
-    a.localeCompare(b)
-  );
-  const rotationCursor = nonGoalRing.length > 0 ? (((input.nonGoalRotationCursor ?? 0) % nonGoalRing.length) + nonGoalRing.length) % nonGoalRing.length : 0;
-  const rotationTieBreakByTargetId = new Map<string, number>(
-    nonGoalRing.map((id, ringIndex) => [id, ((ringIndex - rotationCursor) % nonGoalRing.length + nonGoalRing.length) % nonGoalRing.length])
-  );
+  const { ring: nonGoalRing, cursor: rotationCursor, tieBreakByTargetId: rotationTieBreakByTargetId } = nonGoalRotation(input.targets, input.nonGoalRotationCursor);
 
   // Fixed processing order — Goal 1's own targets, then Goal 2's, then
   // every normal_development target, then every maintenance target,

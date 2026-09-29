@@ -208,6 +208,15 @@ export const DEFAULT_WEEKLY_SCHEDULE: Record<Weekday, 'gym' | 'badminton' | 'res
  * isBodyFocusAllowedOnDay. */
 export const LOWER_BODY_PHYSIQUE_REGIONS: readonly string[] = ['quads', 'hamstrings', 'calves', 'hips'];
 
+/** [DEFAULT] The Blueprint parent_region values that carry no session
+ * identity — the same regions LOWER_BODY_PHYSIQUE_REGIONS' own doc comment
+ * above already classifies as "neither clearly upper nor lower" (core,
+ * forearms, neck; core is also UNIVERSAL_PHYSIQUE_TARGETS' region). Every
+ * other region a session purpose's targets belong to is that session's
+ * identity. Read by the AI session planner (sessionPlanner.ts), which
+ * gives capacity to every identity region before any accessory region. */
+export const SESSION_ACCESSORY_REGIONS: readonly string[] = ['core', 'forearms', 'neck'];
+
 /** [SPEC] §16: "Monday must never be generated as a lower-body day."
  * Hard constraint, checked deterministically — see
  * constraintEngine.isBodyFocusAllowedOnDay, which resolves a

@@ -43,6 +43,10 @@ import { isAiProgrammerEnabled, loadVelonaConfig } from '../provider/config.js';
 import { isLikelyTruncatedOutput, VelonaProvider } from '../provider/velonaProvider.js';
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
 import { clearGenerationFailure, findGenerationFailure, isGatedGenerationFailure, recordGenerationFailure } from './generationFailureMemory.js';
+import { buildGenerationRejectionDiagnostic, logGenerationRejection } from './generationDiagnostics.js';
+import { planSession, summarizeSessionPlanForLog } from '../planning/sessionPlanner.js';
+import { UsersRepo } from '../../repositories/usersRepo.js';
+import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { validateProposalAdequacy } from '../validation/programmerAdequacyValidator.js';
 import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
 import { completeProposalAdequacy } from '../validation/programmerAdequacyCompletion.js';
@@ -244,7 +248,26 @@ export function buildGenerateWeekSystemInstruction(): string {
 export class AIProgrammerService {
   constructor(private readonly db: Database.Database, private readonly provider: AIProgrammerProvider) {}
 
+  /** Rejection observability: every rejected request leaves one bounded,
+   * structured server-log record (stage, code, bounded issues, context).
+   * Pure observation — the error itself is rethrown unchanged. */
   async generateSession(input: GenerateSessionInput): Promise<GenerateSessionResult> {
+    const observed: { contextHash: string | null; sessionPurpose: string | null } = {
+      contextHash: null,
+      sessionPurpose: input.requestedSessionPurpose ?? null,
+    };
+    try {
+      return await this.runGenerateSession(input, observed);
+    } catch (err) {
+      logGenerationRejection(buildGenerationRejectionDiagnostic(err, { targetDate: input.targetDate, ...observed }));
+      throw err;
+    }
+  }
+
+  private async runGenerateSession(
+    input: GenerateSessionInput,
+    observed: { contextHash: string | null; sessionPurpose: string | null }
+  ): Promise<GenerateSessionResult> {
     if (!isAiProgrammerEnabled()) {
       throw new AIProgrammerDisabledError();
     }
@@ -262,6 +285,10 @@ export class AIProgrammerService {
       targetDate: input.targetDate,
       requestedSessionPurpose: input.requestedSessionPurpose,
     });
+    observed.contextHash = context.contextHash;
+    observed.sessionPurpose = context.programmingBrief.session.purpose;
+
+    this.logShadowSessionPlan(context);
 
     // Same-context retry gate: the last paid attempt for this exact
     // targetDate + contextHash failed an AI-output quality check and
@@ -285,6 +312,26 @@ export class AIProgrammerService {
     }
     clearGenerationFailure(this.db, input.targetDate, context.contextHash);
     return result;
+  }
+
+  /** Session Planner shadow mode: computes the deterministic session plan
+   * and logs a bounded summary. Nothing reads the plan back — context,
+   * prompt, output, repair, completion and validation are unaffected — and
+   * a planner failure is logged and swallowed, never allowed to change the
+   * generation outcome. Reads only (the rotation cursor lookup never
+   * writes; the user row already exists once the context is built). */
+  private logShadowSessionPlan(context: AIProgrammerContext): void {
+    try {
+      const userId = new UsersRepo(this.db).getOrCreateDefault().id;
+      const nonGoalRotationCursor = new NonGoalRotationRepo(this.db).cursorFor(userId, context.reportingBoundary.weekStart);
+      const plan = planSession(context, { nonGoalRotationCursor });
+      console.log('[ai-programmer] shadow session plan', JSON.stringify(summarizeSessionPlanForLog(plan)));
+    } catch (err) {
+      console.warn(
+        '[ai-programmer] shadow session plan failed',
+        JSON.stringify({ targetDate: context.targetDate, contextHash: context.contextHash, error: err instanceof Error ? err.name : 'unknown' })
+      );
+    }
   }
 
   /** The paid provider call plus the full parse -> schema -> repair ->

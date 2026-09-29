@@ -32,7 +32,7 @@ export interface AdequacyValidationResult {
  * meaningful direct coverage" for session-identity/priority-coverage
  * purposes — a single warm-up-weight set does not. [DEFAULT], not a
  * Blueprint value; documented here rather than left as a magic number. */
-const MEANINGFUL_COVERAGE_MIN_SETS = 2;
+export const MEANINGFUL_COVERAGE_MIN_SETS = 2;
 
 /** When a session's identity names more than this many non-universal
  * expected-coverage targets (e.g. Push names chest/front-delt/side-delt/
@@ -41,7 +41,7 @@ const MEANINGFUL_COVERAGE_MIN_SETS = 2;
  * prioritization and flexible exercise selection remain intact; a
  * session recognizably built around its identity does not require
  * hitting every single muscle it could touch). [DEFAULT]. */
-const MIN_EXPECTED_COVERAGE_TARGETS = 2;
+export const MIN_EXPECTED_COVERAGE_TARGETS = 2;
 
 /** A single target consuming more than this fraction of the whole
  * session's total sets — while at least this many distinct targets are
