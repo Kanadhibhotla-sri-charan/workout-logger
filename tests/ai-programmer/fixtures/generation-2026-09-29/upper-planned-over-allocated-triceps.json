@@ -1,0 +1,205 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "proposalId": "86510675-8afa-4fcf-a596-53b5ae8c50b8",
+  "mode": "generate_session",
+  "targetDate": "2026-10-02",
+  "weekday": "friday",
+  "sessionFocus": [
+    "Upper Body",
+    "Aesthetic Development",
+    "Arm Thickness",
+    "Triceps Depth"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "hammer-curl",
+      "targetType": "physique_target",
+      "targetId": "brachialis-arm-thickness",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High recent volume history; fresh stimulus needed"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "cable-overhead-extension-leaning-forward",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High completion ratio; optimal long-head stimulus"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "cable-pushdown",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Balances volume after recent heavy pushdowns"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "close-grip-bench-press",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 2,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Compound base for triceps; recent use supports progression"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "overhead-triceps-extension",
+      "targetType": "physique_target",
+      "targetId": "triceps-long-head",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Direct long-head focus; recent high volume supports maintenance"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "chest-supported-row",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High load history; safe and effective for thickness"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "lat-pulldown-wide-pronated",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Complements row with vertical pull pattern"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "face-pull",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "reconstructed"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "rear-delt-row",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "reconstructed"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "dip-chest-biased",
+      "targetType": "physique_target",
+      "targetId": "lower-pec",
+      "sets": 2,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Only candidate; optimal stretch and activation"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "biceps",
+      "sets": 3,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "reconstructed"
+      ],
+      "source": "blueprint",
+      "role": "primary"
+    }
+  ],
+  "programmingRationale": [
+    "Triceps volume (6 sets) meets minimum but falls below recommended (12) due to recent high weekly volume (11 sets) and high completion ratio (4.6x); prioritizing quality over quantity to avoid overtraining.",
+    "Triceps-long-head (2 sets) is fully covered by overhead extension, which also credits triceps — no need for additional exercise.",
+    "Brachialis (2 sets) uses hammer curl to avoid overloading biceps, which are already trained via EZ-bar curl; this isolates the target without overlap.",
+    "Back thickness (4 sets) uses two complementary horizontal pulls to maximize thickness stimulus within capacity limits.",
+    "Rear delt (4 sets) reaches minimum despite low recent volume; high historical completion ratio (10.5x) allows safe volume despite low recent exposure.",
+    "Lower pec (2 sets) uses only available candidate; sufficient for maintenance given low weekly demand.",
+    "Biceps (3 sets) meets minimum; volume capped due to shared capacity constraints with brachialis and high recent exposure (21 completed sets).",
+    "No intensity techniques applied — session volume is already high on triceps and rear delt; advanced user can self-manage effort.",
+    "Session structure avoids antagonist supersets to preserve recovery for upcoming badminton on Saturday and Sunday."
+  ],
+  "goalAlignment": [
+    "Arms look thin from the side: addressed via 2 sets hammer curl (brachialis) and 3 sets EZ-bar curl (biceps) — direct stimulation of lateral arm profile.",
+    "Triceps have no depth from behind: addressed via 2 sets cable overhead extension, 2 sets overhead extension, and 2 sets close-grip bench press — comprehensive long-head and overall triceps volume."
+  ],
+  "recoveryConsiderations": [
+    "Triceps received 11 sets last session; this session adds 6 sets — total weekly volume (17) is high but within advanced tolerance due to high completion ratio and trend.",
+    "Rear delt received 21 sets in last 4 weeks; current 4-set session is low-risk despite low recent exposure.",
+    "No deload active; cooldown period ends 2026-10-07 — session is within safe limits for advanced user.",
+    "Badminton scheduled for Saturday and Sunday — session avoids excessive fatigue or failure to preserve athletic performance."
+  ],
+  "warnings": [
+    "Triceps weekly volume (17 sets) is elevated — monitor for elbow or shoulder fatigue over next 72 hours.",
+    "Rear delt maximum sets (4) is incorrectly set in plan — recommended is 7, but plan caps at 4; this session meets cap, not recommendation — consider adjusting plan in next review."
+  ]
+}

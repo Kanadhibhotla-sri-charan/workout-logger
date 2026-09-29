@@ -12,6 +12,7 @@ import { openDb } from '../../src/db/client.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
+import { GoalPhaseRepo } from '../../src/repositories/goalPhaseRepo.js';
 import { buildProgrammerContext } from '../../src/ai-programmer/context/programmerContextBuilder.js';
 import type { AIProgrammerContext } from '../../src/ai-programmer/context/programmerContextTypes.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../../src/ai-programmer/contracts/programmerTypes.js';
@@ -130,6 +131,22 @@ function everything(c: Case): AIWorkoutExerciseProposal[] {
   return out;
 }
 
+/** Independent of conformance code: each present capacity group counted at max(labelled entries, reserved slots). */
+function groupNeed(plan: SessionPlan, exs: readonly AIWorkoutExerciseProposal[]): number {
+  let total = 0;
+  for (const g of plan.capacityGroups) {
+    const labelled = exs.filter((e) => g.targetIds.includes(e.targetId)).length;
+    if (labelled > 0) total += Math.max(labelled, g.exerciseSlots);
+  }
+  return total;
+}
+
+/** Regions of planned, non-accessory targets present in the proposal. */
+function representedRegions(plan: SessionPlan, exs: readonly AIWorkoutExerciseProposal[]): string[] {
+  const present = new Set(exs.map((e) => e.targetId));
+  return [...new Set(planned(plan).filter((t) => t.tier !== 'accessory' && t.parentRegion && present.has(t.targetId)).map((t) => t.parentRegion!))].sort();
+}
+
 /** The required post-conformance invariants. */
 function expectConformant(c: Case, before: AIWorkoutSessionProposal, after: AIWorkoutSessionProposal, removedTargetIds: string[]) {
   const planByKey = new Map(c.plan.targets.map((t) => [t.key, t]));
@@ -191,17 +208,25 @@ describe('plan conformance — rules', () => {
     expect(out.notes[0]).toContain(`removed ${wrong} from ${calf.targetId} — it does not earn credit for ${calf.targetId}`);
   });
 
-  it('rule 3: over capacity drops whole OPTIONAL targets lowest plan priority first; required goals always stay', () => {
+  it('rule 3: over capacity removes only useful, legal whole OPTIONAL targets — never a goal, identity-minimum target or a represented region', () => {
     let exercised = 0;
     for (const c of cases) {
       const input = proposal(everything(c));
       const out = conformProposalToPlan(input, c.plan, c.context);
       expectConformant(c, input, out.proposal, out.removedTargetIds);
-      const dropped = out.removedTargetIds.map((id) => byId(c.plan, id));
-      for (const t of dropped) expect(t.status, `${c.purpose}: ${t.targetId} dropped`).toBe('selected');
-      const keptRanks = planned(c.plan).filter((t) => t.status === 'selected' && out.proposal.exercises.some((e) => e.targetId === t.targetId)).map((t) => t.rank!);
-      for (const t of dropped) for (const r of keptRanks) expect(t.rank!, `${c.purpose}: dropped ${t.targetId} ranks below every kept optional`).toBeGreaterThan(r);
-      if (dropped.length > 0) exercised++;
+      const removals = out.notes.filter((n) => n.includes('removed optional target')).map((n) => /removed optional target ([a-z-]+)/.exec(n)![1]!);
+      let exs = input.exercises;
+      for (const id of removals) {
+        const t = byId(c.plan, id);
+        expect(t.status, `${c.purpose}: ${id}`).toBe('selected');
+        expect(c.plan.identityMinimum.coveringTargetIds, `${c.purpose}: ${id}`).not.toContain(id);
+        const after = exs.filter((e) => e.targetId !== id);
+        expect(groupNeed(c.plan, after), `${c.purpose}: removing ${id} frees capacity`).toBeLessThan(groupNeed(c.plan, exs));
+        expect(after.some((e) => creditedTargetKeys(e, c.context.targets).includes(t.key)), `${c.purpose}: ${id} no longer credited`).toBe(false);
+        exs = after;
+      }
+      for (const r of representedRegions(c.plan, input.exercises)) expect(representedRegions(c.plan, out.proposal.exercises), `${c.purpose}: region ${r}`).toContain(r);
+      if (removals.length > 0) exercised++;
     }
     expect(exercised).toBeGreaterThan(0);
   });
@@ -239,6 +264,152 @@ describe('plan conformance — rules', () => {
 });
 
 const summarize = (o: PipelineOutcome) => (o.ok ? 'valid' : `${o.stage}: ${o.errors.join(' | ')}`);
+
+// ---- Rule 3 amendment (2026-09-29, production Upper): useful/legal removal + shared-group trim ----
+
+/** Production's user holds BOTH goals (created before the goal-category guard); the guard
+ * forbids that through GoalsRepo.create, so the second goal is activated directly, as it is there. */
+function dbWithBothGoals(): Database.Database {
+  const db = dbWithGoal('arm-side-thickness');
+  const second = new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'triceps-back-depth', priority: 2, active: false });
+  db.prepare('UPDATE goals SET active = 1 WHERE id = ?').run(second.id);
+  new GoalPhaseRepo(db).create({ goal_id: second.id, start_date: '2026-09-01', review_date: '2026-10-01', package_level: 'complete' });
+  return db;
+}
+
+describe('rule 3 — useful and legal capacity corrections (production Upper, 2026-10-02)', () => {
+  let upper: Case;
+  /** The logged production Upper plan (contextHash dad17366…): the same targets, ranks and tiers the
+   * two-goal test context produces, with production's history-driven numbers — triceps + long head
+   * share 3 slots (triceps minimum 6), mid-pec deferred, no flex. Conformance reads only the plan and
+   * Blueprint credit, so this reproduces the production decision exactly. */
+  let productionPlan: SessionPlan;
+  const productionOutput = () => fixture('generation-2026-09-29/upper-planned-over-allocated-triceps.json');
+
+  beforeAll(() => {
+    const db = dbWithBothGoals();
+    const context = buildProgrammerContext(db, { targetDate, requestedSessionPurpose: 'upper' });
+    upper = { scenario: 'arm-side-thickness', purpose: 'upper', db, context, plan: planSession(context, { nonGoalRotationCursor: 0 }) };
+    const p: SessionPlan = structuredClone(upper.plan);
+    const set = (id: string, v: Partial<TargetPlan>) => Object.assign(p.targets.find((t) => t.targetId === id)!, v);
+    set('brachialis-arm-thickness', { status: 'required', reservedExerciseSlots: 1, plannedMinimumSets: 2 });
+    set('triceps', { status: 'required', reservedExerciseSlots: 3, plannedMinimumSets: 6 });
+    set('triceps-long-head', { status: 'required', reservedExerciseSlots: 1, plannedMinimumSets: 2 });
+    set('back-thickness', { status: 'selected', reservedExerciseSlots: 2, plannedMinimumSets: 4 });
+    set('lower-pec', { status: 'selected', reservedExerciseSlots: 1, plannedMinimumSets: 1 });
+    set('rear-delt', { status: 'selected', reservedExerciseSlots: 2, plannedMinimumSets: 4 });
+    set('biceps', { status: 'selected', reservedExerciseSlots: 1, plannedMinimumSets: 3 });
+    set('mid-pec', { status: 'deferred', reservedExerciseSlots: 0 });
+    for (const t of p.targets) t.availableExtraSlots = 0;
+    p.capacityGroups = [
+      { targetIds: ['back-thickness'], exerciseSlots: 2 },
+      { targetIds: ['biceps', 'brachialis-arm-thickness'], exerciseSlots: 2 },
+      { targetIds: ['lower-pec'], exerciseSlots: 1 },
+      { targetIds: ['rear-delt'], exerciseSlots: 2 },
+      { targetIds: ['triceps', 'triceps-long-head'], exerciseSlots: 3 },
+    ];
+    p.flexExerciseSlots = 0;
+    p.identityMinimum = { ...p.identityMinimum, coveringTargetIds: ['brachialis-arm-thickness', 'triceps'] };
+    productionPlan = p;
+  });
+
+  const ids = (exs: readonly AIWorkoutExerciseProposal[]) => exs.map((e) => `${e.targetId}:${e.exerciseId}`);
+
+  it('precondition: the production output is 11 exercises, one over the cap, the triceps group using 4 of its 3 slots', () => {
+    const exs = productionOutput().exercises;
+    expect(exs).toHaveLength(11);
+    expect(groupNeed(productionPlan, exs)).toBe(11);
+    expect(exs.filter((e: AIWorkoutExerciseProposal) => ['triceps', 'triceps-long-head'].includes(e.targetId))).toHaveLength(4);
+  });
+
+  it('A. no-op removal: biceps is never removed while hammer-curl keeps the biceps + brachialis group at its reservation', () => {
+    const exs: AIWorkoutExerciseProposal[] = productionOutput().exercises;
+    expect(groupNeed(productionPlan, exs.filter((e) => e.targetId !== 'biceps'))).toBe(groupNeed(productionPlan, exs)); // frees nothing
+    const out = conformProposalToPlan(productionOutput(), productionPlan, upper.context);
+    expect(out.removedTargetIds).not.toContain('biceps');
+    expect(ids(out.proposal.exercises)).toContain('biceps:barbell-ez-bar-curl');
+    expect(out.proposal.exercises.find((e) => e.targetId === 'biceps')!.sets).toBe(3); // the AI's own sets, not a completion refill
+  });
+
+  it('B. regional protection: no removal leaves back, chest or shoulders (each held by one identity target) unrepresented', () => {
+    const out = conformProposalToPlan(productionOutput(), productionPlan, upper.context);
+    for (const id of ['rear-delt', 'lower-pec', 'back-thickness']) expect(out.removedTargetIds, id).not.toContain(id);
+    expect(representedRegions(productionPlan, out.proposal.exercises)).toEqual(representedRegions(productionPlan, productionOutput().exercises));
+  });
+
+  it('C. required goals and identity-minimum targets are never removed — even an optional covering target', () => {
+    for (const c of cases) {
+      const out = conformProposalToPlan(proposal(everything(c)), c.plan, c.context);
+      for (const t of c.plan.targets.filter((t) => t.status === 'required' || c.plan.identityMinimum.coveringTargetIds.includes(t.targetId))) {
+        expect(out.removedTargetIds, `${c.purpose}: ${t.targetId}`).not.toContain(t.targetId);
+      }
+    }
+    // Pull: back-thickness is an optional (selected) target that covers the identity minimum.
+    const pull = get('arm-side-thickness', 'pull');
+    expect(byId(pull.plan, 'back-thickness').status).toBe('selected');
+    expect(pull.plan.identityMinimum.coveringTargetIds).toContain('back-thickness');
+  });
+
+  it('D. among several useful, legal removals the lowest plan priority still goes first (Upper: mid-pec before lower-pec)', () => {
+    const plan = upper.plan;
+    // Every planned target at its reservation (the triceps group filled jointly through triceps, whose
+    // overhead extension also credits the long head), plus one extra triceps exercise: one over the cap.
+    const used = new Set<string>();
+    const exs: AIWorkoutExerciseProposal[] = [];
+    for (const t of planned(plan).filter((t) => t.targetId !== 'triceps-long-head')) {
+      for (const cand of t.candidates.filter((x) => !used.has(x.exerciseId)).slice(0, t.reservedExerciseSlots)) {
+        used.add(cand.exerciseId);
+        exs.push(entry(t, cand.exerciseId, upper.context));
+      }
+    }
+    const triceps = byId(plan, 'triceps');
+    exs.push(entry(triceps, triceps.candidates.find((x) => !used.has(x.exerciseId))!.exerciseId, upper.context));
+    expect(groupNeed(plan, exs)).toBe(plan.caps.maxExercises + 1);
+    // Preconditions: mid-pec and lower-pec are both chest, both selected, each would free a slot.
+    const midPec = byId(plan, 'mid-pec');
+    const lowerPec = byId(plan, 'lower-pec');
+    expect([midPec.status, lowerPec.status, midPec.parentRegion, lowerPec.parentRegion]).toEqual(['selected', 'selected', 'chest', 'chest']);
+    expect(midPec.rank!).toBeGreaterThan(lowerPec.rank!);
+    const out = conformProposalToPlan(proposal(exs), plan, upper.context);
+    expect(out.removedTargetIds).toEqual(['mid-pec']);
+    expect(out.notes.some((n) => n.includes('trimmed'))).toBe(false); // a legal removal existed, so no trim
+  });
+
+  it('E. shared-group trim: the production Upper triceps group goes from 4 entries to 3 — minimums, goals, regions and the cap all hold', () => {
+    const input = productionOutput();
+    const out = conformProposalToPlan(input, productionPlan, upper.context);
+    const exs = out.proposal.exercises;
+    const group = exs.filter((e) => ['triceps', 'triceps-long-head'].includes(e.targetId));
+    expect(group).toHaveLength(3);
+    expect(out.removedTargetIds).toEqual([]);
+    expect(exs).toHaveLength(10);
+    expect(groupNeed(productionPlan, exs)).toBeLessThanOrEqual(productionPlan.caps.maxExercises);
+    // Least credited sets lost (a 2-set, triceps-only entry), then the later-listed one: close-grip-bench-press.
+    expect(ids(input.exercises).filter((x) => !ids(exs).includes(x))).toEqual(['triceps:close-grip-bench-press']);
+    for (const id of ['triceps', 'triceps-long-head']) {
+      const t = byId(productionPlan, id);
+      const credit = exs.filter((e) => creditedTargetKeys(e, upper.context.targets).includes(t.key)).reduce((s, e) => s + e.sets, 0);
+      expect(credit, id).toBeGreaterThanOrEqual(t.plannedMinimumSets);
+    }
+    for (const t of productionPlan.targets.filter((t) => t.status === 'required')) expect(exs.some((e) => e.targetId === t.targetId), t.targetId).toBe(true);
+    expect(representedRegions(productionPlan, exs)).toEqual(representedRegions(productionPlan, input.exercises));
+    expect(out.notes).toEqual([expect.stringMatching(/^Plan conformance: trimmed close-grip-bench-press from triceps — the triceps \+ triceps-long-head group used 4 exercises against its planned allocation of 3; every member keeps at least its planned minimum sets \(triceps 6\/6, triceps-long-head 4\/2\)\.$/)]);
+    expect(out.proposal.warnings.slice(-1)).toEqual(out.notes);
+    // Deterministic, input untouched.
+    expect(JSON.stringify(conformProposalToPlan(productionOutput(), productionPlan, upper.context))).toBe(JSON.stringify(out));
+    expect(input.exercises).toHaveLength(11);
+  });
+
+  it('F. impossible trim: when every trim would break a member minimum, conformance invents no repair', () => {
+    const strict: SessionPlan = structuredClone(productionPlan);
+    strict.targets.find((t) => t.targetId === 'triceps')!.plannedMinimumSets = 8; // 4 × 2 sets = 8: nothing can go
+    const input = productionOutput();
+    const out = conformProposalToPlan(input, strict, upper.context);
+    expect(out.proposal.exercises).toHaveLength(11);
+    expect(out.removedTargetIds).toEqual([]);
+    expect(out.notes).toEqual([]);
+  });
+});
 
 describe('Phase 3 fixture replay — real saved AI outputs, current pipeline vs pipeline with plan conformance', () => {
   for (const name of ['pull-old-contract-rejected-adequacy-1.json', 'pull-old-contract-rejected-adequacy-2.json']) {

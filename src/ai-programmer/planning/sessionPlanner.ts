@@ -181,6 +181,16 @@ interface CapacityResult {
   perTarget: Map<string, { slots: number; reachSets: number; sharedWith: string[] }>;
 }
 
+/** A capacity group's planned exercise allocation: its reserved slots, plus
+ * the extra slots it may take from the session's flex capacity (never more
+ * than the flex, nor more than any member may take). Read by the planned AI
+ * context and by plan conformance so both state the same number. */
+export function groupExerciseAllocation(plan: SessionPlan, group: CapacityGroup): { reserved: number; extra: number } {
+  const members = plan.targets.filter((t) => group.targetIds.includes(t.targetId));
+  const memberExtra = Math.max(0, ...members.map((t) => t.availableExtraSlots));
+  return { reserved: group.exerciseSlots, extra: Math.min(plan.flexExerciseSlots, memberExtra) };
+}
+
 /** Upper bound on ownership assignments tried exhaustively (real sessions have ≤ 8). */
 const MAX_OWNERSHIP_ASSIGNMENTS = 4096;
 

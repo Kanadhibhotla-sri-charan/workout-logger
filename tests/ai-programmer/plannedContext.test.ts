@@ -112,7 +112,7 @@ describe('planned AI context', () => {
       });
       for (const t of ai.sessionPlan.targets) {
         const p = plan.targets.find((x) => x.targetId === t.targetId)!;
-        expect([t.reservedExercises, t.extraExercisesAllowed, t.minimumSets, t.maximumSets]).toEqual([p.reservedExerciseSlots, p.availableExtraSlots, p.plannedMinimumSets, p.legalMaximumSets]);
+        expect([t.minimumSets, t.maximumSets]).toEqual([p.plannedMinimumSets, p.legalMaximumSets]);
       }
     }
   });
@@ -132,17 +132,55 @@ describe('planned AI context', () => {
     }
   });
 
-  it('6. shared credit names only other planned targets (alsoCredits), and shared reservations are stated', () => {
+  it('6. shared credit names only other planned targets (alsoCredits), and shared groups are stated', () => {
     let shared = 0;
     for (const { context, plan } of cases) {
       const ai = buildPlannedAIContext(context, plan);
       const planned = new Set(ai.sessionPlan.targets.map((t) => t.targetId));
       for (const t of ai.sessionPlan.targets) {
         for (const c of t.candidates) for (const id of c.alsoCredits) expect(planned.has(id), `${t.targetId}/${c.exerciseId} -> ${id}`).toBe(true);
-        if (t.sharesExercisesWith.length > 0) shared++;
       }
+      shared += ai.sessionPlan.exerciseGroups.filter((g) => g.targetIds.length > 1).length;
     }
     expect(shared).toBeGreaterThan(0); // e.g. Push triceps + triceps-long-head
+  });
+
+  it('G. shared groups are ONE joint exercise allocation: no per-target reservation, and group totals add up to the session reservation', () => {
+    let multi = 0;
+    for (const { purpose, context, plan } of cases) {
+      const ai = buildPlannedAIContext(context, plan);
+      const sp = ai.sessionPlan;
+      // No target carries an exercise reservation of its own that could be read as additive.
+      for (const t of sp.targets) {
+        expect(t).not.toHaveProperty('reservedExercises');
+        expect(t).not.toHaveProperty('extraExercisesAllowed');
+        expect(t).not.toHaveProperty('sharesExercisesWith');
+      }
+      // Every planned target belongs to exactly one group, and its group states its minimum.
+      for (const t of sp.targets) {
+        const groups = sp.exerciseGroups.filter((g) => g.targetIds.includes(t.targetId));
+        expect(groups, `${purpose}:${t.targetId}`).toHaveLength(1);
+        expect(groups[0]!.groupId).toBe(t.exerciseGroup);
+        expect(groups[0]!.memberMinimumSets[t.targetId]).toBe(t.minimumSets);
+      }
+      expect(sp.exerciseGroups.flatMap((g) => g.targetIds).sort()).toEqual(sp.targets.map((t) => t.targetId).sort());
+      // Group totals are the plan's joint capacity: they sum to the session reservation, within the cap.
+      expect(sp.exerciseGroups.map((g) => g.reservedExercises)).toEqual(sp.exerciseGroups.map((g) => plan.capacityGroups.find((c) => c.targetIds.slice().sort().join() === g.targetIds.slice().sort().join())!.exerciseSlots));
+      expect(sp.exerciseGroups.reduce((s, g) => s + g.reservedExercises, 0)).toBe(sp.capacity.reservedExercises);
+      expect(sp.capacity.reservedExercises + sp.capacity.flexExercises).toBeLessThanOrEqual(sp.capacity.maxExercises);
+      for (const g of sp.exerciseGroups) expect(g.extraExercisesAllowed).toBeLessThanOrEqual(sp.capacity.flexExercises);
+      multi += sp.exerciseGroups.filter((g) => g.targetIds.length > 1).length;
+    }
+    expect(multi).toBeGreaterThan(0);
+  });
+
+  it('G. triceps + triceps-long-head is shown as one group with one joint count, not 3 + 1 separate reservations', () => {
+    const c = cases.find((x) => x.purpose === 'push' && x.plan.targets.some((t) => t.targetId === 'triceps' && t.status === 'required'))!;
+    const sp = buildPlannedAIContext(c.context, c.plan).sessionPlan;
+    const group = sp.exerciseGroups.find((g) => g.targetIds.includes('triceps'))!;
+    expect(group.targetIds).toEqual(['triceps', 'triceps-long-head']);
+    expect(group.reservedExercises).toBe(c.plan.capacityGroups.find((g) => g.targetIds.includes('triceps'))!.exerciseSlots);
+    expect(sp.targets.find((t) => t.targetId === 'triceps-long-head')!.exerciseGroup).toBe(group.groupId);
   });
 
   it('7. carries none of the raw constraint sections the plan replaces', () => {
@@ -198,7 +236,8 @@ describe('planned system instruction (prompt contract)', () => {
   });
   it('requires required goals and keeps the AI within reserved + flex capacity', () => {
     expect(text).toMatch(/Every target whose role is "required_goal" must be included/);
-    expect(text).toMatch(/at least reservedExercises .* at most reservedExercises \+ extraExercisesAllowed/);
+    expect(text).toMatch(/Give each group at least reservedExercises and at most reservedExercises \+ extraExercisesAllowed/);
+    expect(text).toMatch(/counted for the group as a whole, not per target/);
     expect(text).toMatch(/at most sessionPlan\.capacity\.maxExercises/);
   });
   it('leaves exercise choice, order, emphasis and rationale to the AI', () => {

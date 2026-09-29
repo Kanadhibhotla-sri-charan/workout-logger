@@ -9,7 +9,7 @@
 // provider sees.
 
 import type { AIProgrammerContext, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
-import type { SessionPlan, TargetPlan } from './sessionPlanner.js';
+import { groupExerciseAllocation, type SessionPlan, type TargetPlan } from './sessionPlanner.js';
 
 export const AI_PROGRAMMER_PLANNED_CONTEXT_SCHEMA_VERSION = 'ai-programmer-planned-context.v1' as const;
 
@@ -32,18 +32,29 @@ export interface PlannedTargetForAI {
   targetId: string;
   displayName: string;
   role: 'required_goal' | 'selected';
-  reservedExercises: number;
-  extraExercisesAllowed: number;
+  /** The groupId in sessionPlan.exerciseGroups whose joint exercise allocation this target draws from. */
+  exerciseGroup: string;
   minimumSets: number;
   recommendedSets: { min: number; max: number };
   maximumSets: number;
-  sharesExercisesWith: string[];
   antagonistGroup: 'push' | 'pull' | null;
   currentWeeklyDirectSets: number;
   lastTrainedDate: string | null;
   daysSinceLastTrained: number | null;
   recoveryCaution: 'none' | 'reduce';
   candidates: PlannedCandidateForAI[];
+}
+
+export interface PlannedExerciseGroupForAI {
+  groupId: string;
+  /** The targets that share this allocation; an exercise counts toward each target it credits. */
+  targetIds: string[];
+  /** Exercises reserved for the whole group together. */
+  reservedExercises: number;
+  /** Further exercises the group may take from capacity.flexExercises. */
+  extraExercisesAllowed: number;
+  /** Each member's own minimum sets, reached by the group's exercises together. */
+  memberMinimumSets: Record<string, number>;
 }
 
 export interface AIProgrammerPlannedContext {
@@ -62,6 +73,10 @@ export interface AIProgrammerPlannedContext {
     capacity: { maxExercises: number; reservedExercises: number; flexExercises: number; maxTargets: number; absExerciseMax: number | null; legExerciseMax: number | null };
     /** In priority order: required goals first. */
     targets: PlannedTargetForAI[];
+    /** One JOINT exercise allocation per group of targets that share exercises (a target on its
+     * own is a group of one). reservedExercises is the group's total, not per target; the
+     * groups' reservedExercises add up to capacity.reservedExercises. */
+    exerciseGroups: PlannedExerciseGroupForAI[];
     notInThisSession: { deferred: string[]; infeasible: string[] };
     notes: string[];
   };
@@ -87,6 +102,22 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
   const targetOf = (id: string) => context.targets.find((t) => t.targetId === id) as AIProgrammerTargetContext;
   const guidanceOf = (id: string) => context.programmingBrief.muscles.find((m) => m.targetId === id)!;
 
+  // Groups in the order of their highest-priority member, ids g1, g2, ...
+  const rankOf = (id: string) => planned.find((t) => t.targetId === id)?.rank ?? Number.MAX_SAFE_INTEGER;
+  const orderedGroups = [...plan.capacityGroups].sort((a, b) => Math.min(...a.targetIds.map(rankOf)) - Math.min(...b.targetIds.map(rankOf)));
+  const exerciseGroups: PlannedExerciseGroupForAI[] = orderedGroups.map((g, i) => {
+    const { reserved, extra } = groupExerciseAllocation(plan, g);
+    const members = [...g.targetIds].sort((a, b) => rankOf(a) - rankOf(b));
+    return {
+      groupId: `g${i + 1}`,
+      targetIds: members,
+      reservedExercises: reserved,
+      extraExercisesAllowed: extra,
+      memberMinimumSets: Object.fromEntries(members.map((id) => [id, planned.find((t) => t.targetId === id)!.plannedMinimumSets])),
+    };
+  });
+  const groupOf = (id: string) => exerciseGroups.find((g) => g.targetIds.includes(id))!.groupId;
+
   const targets: PlannedTargetForAI[] = planned.map((t) => {
     const target = targetOf(t.targetId);
     const guidance = guidanceOf(t.targetId);
@@ -94,12 +125,10 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
       targetId: t.targetId,
       displayName: target.displayName,
       role: t.status === 'required' ? 'required_goal' : 'selected',
-      reservedExercises: t.reservedExerciseSlots,
-      extraExercisesAllowed: t.availableExtraSlots,
+      exerciseGroup: groupOf(t.targetId),
       minimumSets: t.plannedMinimumSets,
       recommendedSets: { ...t.recommendedSessionSets },
       maximumSets: t.legalMaximumSets,
-      sharesExercisesWith: [...t.sharedSlotsWith],
       antagonistGroup: guidance.antagonistGroup,
       currentWeeklyDirectSets: guidance.currentWeeklyDirectSets,
       lastTrainedDate: target.lastTrainedDate,
@@ -148,6 +177,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
         legExerciseMax: plan.caps.legExerciseShareMax,
       },
       targets,
+      exerciseGroups,
       notInThisSession: {
         deferred: plan.targets.filter((t) => t.status === 'deferred').map((t) => t.targetId),
         infeasible: plan.targets.filter((t) => t.status === 'infeasible').map((t) => t.targetId),
@@ -179,7 +209,7 @@ export function buildPlannedProgrammerSystemInstruction(): string {
     'Structure (fixed by the plan):',
     '1. Train exactly the targets in sessionPlan.targets. Every target whose role is "required_goal" must be included. Never add a target that is not listed — sessionPlan.notInThisSession lists targets that are deferred or infeasible today.',
     '2. For each target, use only exercises from that target\'s own candidates, labelled with that target\'s targetId. Never invent an exercise, target or goal id.',
-    '3. Give each target at least reservedExercises exercises that count toward it, and at most reservedExercises + extraExercisesAllowed. The whole session uses at most sessionPlan.capacity.maxExercises exercises (at most absExerciseMax abs exercises and legExerciseMax leg exercises when those are set).',
+    '3. Each target\'s exerciseGroup names its entry in sessionPlan.exerciseGroups. Give each group at least reservedExercises and at most reservedExercises + extraExercisesAllowed exercises labelled with its targetIds, counted for the group as a whole, not per target. The whole session uses at most sessionPlan.capacity.maxExercises exercises (at most absExerciseMax abs exercises and legExerciseMax leg exercises when those are set).',
     '4. An exercise appears once in the session. A candidate\'s alsoCredits names other targets it also counts toward: list it once, under one target, and count its sets toward each.',
     '5. Each exercise gets at most its maxSets; copy its repsMin, repsMax, rirMin and rirMax exactly.',
     '6. Each target\'s total sets reach its minimumSets, should fall within recommendedSets, and never exceed maximumSets. If context.coachingFoundation.programState shows a deload, these numbers already include it.',
