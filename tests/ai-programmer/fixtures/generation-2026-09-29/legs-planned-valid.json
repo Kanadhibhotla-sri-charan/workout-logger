@@ -1,0 +1,131 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "legs"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "seated-calf-raise",
+      "targetType": "physique_target",
+      "targetId": "soleus",
+      "sets": 3,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "high-rep focus for soleus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "hip-thrust",
+      "targetType": "physique_target",
+      "targetId": "gluteus-maximus",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "prioritize recent usage trend"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "romanian-deadlift",
+      "targetType": "physique_target",
+      "targetId": "hamstrings",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "only candidate; direct hamstring stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "back-squat",
+      "targetType": "physique_target",
+      "targetId": "quads",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "high-load compound baseline"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "bulgarian-split-squat-knee-dominant",
+      "targetType": "physique_target",
+      "targetId": "quads",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "unilateral volume complement"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-crunch",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "high-frequency candidate; recent usage"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-woodchop",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "rotational variety; low fatigue cost"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Soleus: 3 sets meets recommended volume; seated calf raise selected for higher-rep bias and no recent usage.",
+    "Gluteus Maximus: Hip thrust chosen over Bulgarian split squat due to higher recent usage and direct glute focus.",
+    "Hamstrings: Romanian deadlift is only available candidate; 3 sets meets max allowed despite recommended 5, due to session cap constraints.",
+    "Quads: Back squat and Bulgarian split squat (knee-dominant) selected to meet 2 reserved exercises; both have recent history and complement each other.",
+    "Obliques: Cable crunch (recently used) and cable woodchop selected to meet 4 reserved + 1 extra allowed; avoids overloading hanging raises due to recent use on 9/25.",
+    "Total exercises: 7 (within 8 max); all targets meet minimum sets; obliques volume at 8 sets (recommended) despite recent training on 9/28 due to low fatigue cost and goal priority.",
+    "No intensity techniques applied: session volume is sufficient without adding fatigue; user is advanced but recovery is not flagged for deload."
+  ],
+  "goalAlignment": [
+    "Arms look thin from the side: not directly trained today; maintained via overall upper body volume from other days.",
+    "Triceps have no depth from behind: not directly trained today; maintained via overall upper body volume from other days."
+  ],
+  "recoveryConsiderations": [
+    "Hamstrings volume capped at 3 sets despite recommended 5 due to session capacity limits — will be carried over to Thursday.",
+    "Obliques trained after 1 day rest; cable exercises have low systemic fatigue, safe despite recent session.",
+    "Quads and glutes trained after 12 days since last exposure; volume is moderate and appropriate for recovery state."
+  ],
+  "warnings": [
+    "Hamstrings volume is below recommended (3/5) due to session cap — ensure Thursday session compensates.",
+    "No gastrocnemius or gluteus medius training today; deferred per plan due to exercise slot limits."
+  ]
+}

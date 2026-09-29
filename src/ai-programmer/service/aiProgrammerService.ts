@@ -39,19 +39,17 @@ import {
   AIGenerateWeekOutputDomainInvalidError,
   AIGenerateWeekOutputSchemaInvalidError,
 } from '../errors.js';
-import { isAiProgrammerEnabled, loadVelonaConfig } from '../provider/config.js';
+import { isAiProgrammerEnabled, isPlannedGenerationEnabled, loadVelonaConfig } from '../provider/config.js';
 import { isLikelyTruncatedOutput, VelonaProvider } from '../provider/velonaProvider.js';
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
 import { clearGenerationFailure, findGenerationFailure, isGatedGenerationFailure, recordGenerationFailure } from './generationFailureMemory.js';
 import { buildGenerationRejectionDiagnostic, logGenerationRejection } from './generationDiagnostics.js';
-import { planSession, summarizeSessionPlanForLog } from '../planning/sessionPlanner.js';
+import { planSession, summarizeSessionPlanForLog, type SessionPlan } from '../planning/sessionPlanner.js';
+import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction } from '../planning/plannedContext.js';
+import { runProposalPipeline } from './proposalPipeline.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
-import { validateProposalAdequacy } from '../validation/programmerAdequacyValidator.js';
-import { validateProposalDomain } from '../validation/programmerDomainValidator.js';
-import { completeProposalAdequacy } from '../validation/programmerAdequacyCompletion.js';
-import { validateProposalSchema } from '../validation/programmerOutputValidator.js';
-import { repairProposal, repairWeekReconciliation, repairGenerateWeek } from '../validation/programmerProposalRepair.js';
+import { repairWeekReconciliation, repairGenerateWeek } from '../validation/programmerProposalRepair.js';
 import { validateWeekReconciliationDomain } from '../validation/weekReconciliationDomainValidator.js';
 import { validateWeekReconciliationSchema } from '../validation/weekReconciliationOutputValidator.js';
 import { validateGenerateWeekDomain } from '../validation/generateWeekDomainValidator.js';
@@ -288,7 +286,15 @@ export class AIProgrammerService {
     observed.contextHash = context.contextHash;
     observed.sessionPurpose = context.programmingBrief.session.purpose;
 
-    this.logShadowSessionPlan(context);
+    // Session plan: always computed and logged. Applied to generation (AI
+    // context/instruction + plan conformance) only when the planned-
+    // generation flag is on and the plan needs no refusal — otherwise the
+    // existing contract runs unchanged.
+    const plan = this.computeSessionPlan(context);
+    const appliedPlan = isPlannedGenerationEnabled() && plan !== null && plan.refusals.length === 0 ? plan : null;
+    if (plan) {
+      console.log('[ai-programmer] shadow session plan', JSON.stringify({ ...summarizeSessionPlanForLog(plan), appliedToGeneration: appliedPlan !== null }));
+    }
 
     // Same-context retry gate: the last paid attempt for this exact
     // targetDate + contextHash failed an AI-output quality check and
@@ -305,7 +311,7 @@ export class AIProgrammerService {
 
     let result: GenerateSessionResult;
     try {
-      result = await this.generateFromContext(context);
+      result = await this.generateFromContext(context, appliedPlan);
     } catch (err) {
       if (isGatedGenerationFailure(err)) recordGenerationFailure(this.db, input.targetDate, context.contextHash, err);
       throw err;
@@ -314,35 +320,35 @@ export class AIProgrammerService {
     return result;
   }
 
-  /** Session Planner shadow mode: computes the deterministic session plan
-   * and logs a bounded summary. Nothing reads the plan back — context,
-   * prompt, output, repair, completion and validation are unaffected — and
-   * a planner failure is logged and swallowed, never allowed to change the
-   * generation outcome. Reads only (the rotation cursor lookup never
-   * writes; the user row already exists once the context is built). */
-  private logShadowSessionPlan(context: AIProgrammerContext): void {
+  /** The deterministic session plan for this context, or null if the
+   * planner fails (logged; generation then runs the existing contract).
+   * Reads only (the rotation cursor lookup never writes; the user row
+   * already exists once the context is built). */
+  private computeSessionPlan(context: AIProgrammerContext): SessionPlan | null {
     try {
       const userId = new UsersRepo(this.db).getOrCreateDefault().id;
       const nonGoalRotationCursor = new NonGoalRotationRepo(this.db).cursorFor(userId, context.reportingBoundary.weekStart);
-      const plan = planSession(context, { nonGoalRotationCursor });
-      console.log('[ai-programmer] shadow session plan', JSON.stringify(summarizeSessionPlanForLog(plan)));
+      return planSession(context, { nonGoalRotationCursor });
     } catch (err) {
       console.warn(
         '[ai-programmer] shadow session plan failed',
         JSON.stringify({ targetDate: context.targetDate, contextHash: context.contextHash, error: err instanceof Error ? err.name : 'unknown' })
       );
+      return null;
     }
   }
 
-  /** The paid provider call plus the full parse -> schema -> repair ->
-   * domain -> completion -> adequacy -> persist pipeline for an
-   * already-built context. Unchanged; split out of generateSession only
-   * so the retry gate can observe how it ends. */
-  private async generateFromContext(context: AIProgrammerContext): Promise<GenerateSessionResult> {
+  /** The paid provider call plus the one post-provider pipeline
+   * (runProposalPipeline) and persistence for an already-built context.
+   * `plan` non-null = planned generation: the AI receives the compact
+   * SessionPlan context and plan instruction, and the pipeline applies
+   * plan conformance. Every other stage is identical either way. */
+  private async generateFromContext(context: AIProgrammerContext, plan: SessionPlan | null): Promise<GenerateSessionResult> {
     const requestId = randomUUID();
-    const systemInstruction = buildProgrammerSystemInstruction();
+    const systemInstruction = plan ? buildPlannedProgrammerSystemInstruction() : buildProgrammerSystemInstruction();
     const outputSchema = getProgrammerOutputSchema();
-    const providerRequest: AIProgrammerProviderRequest = { mode: 'generate_session', systemInstruction, context, outputSchema, requestId };
+    const aiContext = plan ? buildPlannedAIContext(context, plan) : context;
+    const providerRequest: AIProgrammerProviderRequest = { mode: 'generate_session', systemInstruction, context: aiContext, outputSchema, requestId };
     const providerResponse = await this.provider.generate(providerRequest);
     const diagnostics = buildTokenDiagnostics('generate_session', providerRequest, providerResponse);
     logTokenDiagnostics(diagnostics);
@@ -366,47 +372,17 @@ export class AIProgrammerService {
       }
     }
 
-    const structural = validateProposalSchema(parsedJson);
-    if (!structural.ok || !structural.value) {
-      throw new AIOutputSchemaInvalidError(structural.errors);
+    // schema -> [plan conformance] -> repair -> domain -> completion ->
+    // adequacy: see proposalPipeline.ts. An inadequate or invalid proposal
+    // is never persisted — each failing stage throws its own typed error,
+    // exactly as before.
+    const outcome = runProposalPipeline(parsedJson, context, this.db, plan);
+    if (!outcome.ok) {
+      if (outcome.stage === 'schema') throw new AIOutputSchemaInvalidError(outcome.errors);
+      if (outcome.stage === 'domain') throw new AIOutputDomainInvalidError(outcome.errors);
+      throw new AIOutputAdequacyInvalidError(outcome.errors);
     }
-
-    // Repair pass (2026-09-18): fixes the mechanically-correctable
-    // issues found via a real model eval (role, authored-prescription
-    // drift, over-cap exercise count from rule 11's own distribution
-    // guidance) in place, before domain validation ever runs — see
-    // programmerProposalRepair.ts's own header comment.
-    const repaired = repairProposal(structural.value, context);
-
-    const domain = validateProposalDomain(repaired, context, this.db);
-    if (!domain.ok || !domain.value) {
-      throw new AIOutputDomainInvalidError(domain.errors);
-    }
-
-    // Push Generation Architectural Fix (2026-09-24), priority 3:
-    // deterministic completion runs here — AFTER repair and domain
-    // validation (operating on the FINAL, structurally-legitimate
-    // effective exercise/set values, never the raw AI output), and
-    // BEFORE adequacy validation (whose real, unmodified check still
-    // decides pass/fail on this function's output — completion has no
-    // authority of its own and never bypasses it). See
-    // programmerAdequacyCompletion.ts's own header comment for the full
-    // contract: it only ever adds the minimum real, already-feasible
-    // coverage a target the AI already represented is still short of —
-    // never a redesign, never an invented exercise, never a forced pass.
-    const completed = completeProposalAdequacy(domain.value, context);
-
-    // Repair: structural/domain validity says nothing about whether the
-    // session is a programmatically ADEQUATE workout — see
-    // programmerAdequacyValidator.ts's own header comment. Checked here,
-    // after domain validation (and deterministic completion) and before
-    // persistence, so an inadequate proposal is never stored as pending
-    // (same "no persistence on validation failure" guarantee domain
-    // validation already has).
-    const adequacy = validateProposalAdequacy(completed.proposal, context);
-    if (!adequacy.ok) {
-      throw new AIOutputAdequacyInvalidError(adequacy.errors);
-    }
+    const completed = { proposal: outcome.proposal };
 
     // Correction pass §7: proposalId is application-owned, never
     // trusted from the model. Whatever value the provider returned is

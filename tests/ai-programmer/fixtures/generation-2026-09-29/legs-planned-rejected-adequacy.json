@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "legs"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "seated-calf-raise",
+      "targetType": "physique_target",
+      "targetId": "soleus",
+      "sets": 3,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "high-rep focus",
+        "soleus preference"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "hip-thrust",
+      "targetType": "physique_target",
+      "targetId": "gluteus-maximus",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently used",
+        "high load potential"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "lying-leg-curl",
+      "targetType": "physique_target",
+      "targetId": "hamstrings",
+      "sets": 3,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "isolation focus",
+        "fresh option"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "back-squat",
+      "targetType": "physique_target",
+      "targetId": "quads",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "compound priority",
+        "recently used"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "leg-extension",
+      "targetType": "physique_target",
+      "targetId": "quads",
+      "sets": 3,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "pump focus",
+        "isolated quad stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-crunch",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently used",
+        "high volume"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-woodchop",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 2,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "rotational variety",
+        "fresh stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "pallof-press",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 2,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "anti-rotation focus",
+        "core stability"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Soleus: 3 sets to meet max recommended volume; high-rep bias aligns with blueprint preference.",
+    "Gluteus Maximus: Hip thrust selected over Bulgarian split squat due to recent usage of the latter on 2026-09-17; 3 sets meet minimum, 3 below recommended due to recent 3-set exposure 12 days ago — volume is being distributed across week.",
+    "Hamstrings: Lying leg curl chosen over Romanian deadlift to avoid overlapping with quads' compound load; 3 sets below recommended (5) due to low recent exposure and session capacity constraints — remaining volume deferred to Thursday.",
+    "Quads: Back squat and leg extension selected to balance compound and isolation; 3 sets each = 6 total, below recommended 8 due to recent 13-set exposure on 2026-09-17 and trend-down data — volume is being tapered to avoid overloading.",
+    "Obliques: Cable crunch (4 sets) + cable woodchop (2) + pallof press (2) = 8 sets, meeting recommended volume; cable crunch prioritized due to recent consecutive usage (2 sessions), others added for variety and to reach target without exceeding 8-exercise cap.",
+    "Session total: 8 exercises (max allowed), 5 leg exercises (max allowed), 3 abs exercises — all within constraints. No deload active; recovery is adequate per state."
+  ],
+  "goalAlignment": [
+    "Arms look thin from the side: not directly targeted — this session focuses on legs and core; arms will be addressed on Thursday per routine.",
+    "Triceps have no depth from behind: not directly targeted — this session focuses on legs and core; triceps will be addressed on Thursday per routine."
+  ],
+  "recoveryConsiderations": [
+    "Gluteus maximus and quads were trained 12 days ago — sufficient recovery window; recent exposure was moderate (3 sets each), so current volume is conservative.",
+    "Obliques were trained yesterday — 4 sets yesterday + 8 sets today = 12 sets in 24 hours; this is acceptable for advanced trainee with high frequency preference (4x/week).",
+    "No deload active; reactive cooldown ended on 2026-10-07 — current state is ACTIVE, no fatigue overload detected."
+  ],
+  "warnings": [
+    "Hamstrings volume (3 sets) is below recommended (5) — deferred to Thursday session to avoid exceeding 5-leg-exercise cap.",
+    "Quads volume (6 sets) is below recommended (8) — deferred to Thursday session to avoid overloading after recent 13-set exposure.",
+    "Obliques volume is high (8 sets) in two consecutive days — monitor for lower back fatigue; no current signs of distress."
+  ]
+}

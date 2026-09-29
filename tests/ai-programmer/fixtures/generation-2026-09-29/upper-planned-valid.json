@@ -1,0 +1,167 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "upper body",
+    "arms",
+    "triceps",
+    "back",
+    "lower pec",
+    "rear delt"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "hammer-curl",
+      "targetType": "physique_target",
+      "targetId": "brachialis-arm-thickness",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High recent volume on brachialis; use hammer curl for direct stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-pushdown",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Fresh after heavy triceps day; isolate with cable pushdown"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "close-grip-bench-press",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High weekly volume; maintain compound triceps load"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "overhead-triceps-extension",
+      "targetType": "physique_target",
+      "targetId": "triceps-long-head",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High recent volume; prioritize long-head stretch"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "chest-supported-row",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 3,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Low recent volume; maximize back thickness stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "dip-chest-biased",
+      "targetType": "physique_target",
+      "targetId": "lower-pec",
+      "sets": 2,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "First-time training; full ROM for lower pec activation"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "face-pull",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High historical completion; prioritize rear delt health"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "rear-delt-row",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High recent volume; reinforce rear delt with row"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "biceps",
+      "sets": 3,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High recent volume; maintain biceps direct stimulus"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Triceps and triceps-long-head are trained together with 5 sets each to meet weekly volume demands after yesterday's heavy session; overhead extension is prioritized for long-head stretch.",
+    "Brachialis is trained with hammer curl (also credits biceps) to align with recent high volume and avoid redundancy.",
+    "Biceps is trained with barbell curl to meet minimum 3-set requirement; hammer curl already credits it, so no duplication needed.",
+    "Back thickness is addressed with chest-supported row to maximize mid-back stimulus after 4 days of inactivity.",
+    "Rear delt volume is maximized at 4 sets (minimum) despite recommended 7 due to session cap and recent high volume (10.5x completion ratio); face pull and rear delt row are paired for efficiency.",
+    "Lower pec is introduced with dip (chest-biased) to begin direct stimulation after no prior exposure.",
+    "Session structure avoids overloading: all targets are covered within 9 exercises, under 10-cap, with no leg or abs work.",
+    "No intensity techniques applied — recent high volume on triceps and rear delt warrants conservative fatigue management."
+  ],
+  "goalAlignment": [
+    "Arms look thin from the side: addressed via brachialis (hammer curl) and biceps (EZ-bar curl) with 5 total direct sets.",
+    "Triceps have no depth from behind: addressed via 5 sets on triceps-long-head (overhead extension) and 5 sets on overall triceps (pushdown + close-grip bench + overhead extension)."
+  ],
+  "recoveryConsiderations": [
+    "Triceps received 11 sets yesterday; today’s 10 sets are within tolerance due to high training experience and recent deload completion.",
+    "Rear delt has 21 completed sets in last 2 weeks (10.5x prescribed); today’s 4 sets are conservative to avoid overuse.",
+    "Hammer curl is shared between brachialis and biceps — used once to avoid redundancy and reduce session length.",
+    "No drop sets or rest-pause used despite availability — recent high volume on triceps and rear delt demands fatigue control."
+  ],
+  "warnings": [
+    "Triceps volume is high this week (21 sets in 2 days); monitor for elbow fatigue in next session.",
+    "Rear delt volume is exceptionally high (21 sets in 2 weeks); consider reducing next exposure if discomfort arises.",
+    "Lower pec has no recent history — ensure form is controlled to avoid shoulder strain on dip."
+  ]
+}

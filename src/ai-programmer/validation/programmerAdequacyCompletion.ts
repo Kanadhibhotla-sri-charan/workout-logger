@@ -47,6 +47,7 @@ import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance, AIProgrammerTargetContext, AIProgrammerValidExerciseContext } from '../context/programmerContextTypes.js';
 import { creditedSetsByTarget, creditedTargetKeys, keyOf } from './sharedCredit.js';
+import type { SessionPlan } from '../planning/sessionPlanner.js';
 import { MAX_SETS_WITHOUT_AUTHORED_CAP } from './programmerProposalRepair.js';
 
 export interface CompletionResult {
@@ -95,12 +96,18 @@ function sortCandidates(candidates: readonly { exerciseId: string; ceiling: numb
  * Feasibility/Credit Consistency Fix (2026-09-28): a candidate must also
  * earn credit for this target under the shared-credit rule adequacy
  * checks — the same requirement targetFeasibility.ts applies — so
- * completion never adds sets that count toward a different target. */
+ * completion never adds sets that count toward a different target.
+ *
+ * Session plan (Phase 3, 2026-09-29): when a plan is supplied,
+ * `planAllowed` restricts candidates further to that target's own
+ * plan-legal candidate list (which already excludes side credit the plan
+ * cannot cover). Null means no plan — behaviour exactly as before. */
 function remainingUsableCandidates(
   exercises: readonly AIWorkoutExerciseProposal[],
   target: AIProgrammerTargetContext,
   directSetsPerExposureCap: number | null,
-  allTargets: readonly AIProgrammerTargetContext[]
+  allTargets: readonly AIProgrammerTargetContext[],
+  planAllowed: ReadonlySet<string> | null
 ): { exerciseId: string; ceiling: number; catalogueEntry: AIProgrammerValidExerciseContext }[] {
   const presentIds = new Set(exercises.map((e) => e.exerciseId));
   const targetKey = keyOf(target.targetType, target.targetId);
@@ -109,6 +116,7 @@ function remainingUsableCandidates(
       (v) =>
         v.authoredPrescription !== null &&
         !presentIds.has(v.exerciseId) &&
+        (planAllowed === null || planAllowed.has(v.exerciseId)) &&
         creditedTargetKeys({ exerciseId: v.exerciseId, targetType: target.targetType, targetId: target.targetId }, allTargets).includes(targetKey)
     )
     .map((v) => ({ exerciseId: v.exerciseId, ceiling: effectiveCeiling(v, directSetsPerExposureCap), catalogueEntry: v }))
@@ -153,10 +161,11 @@ function contentionRank(
   target: AIProgrammerTargetContext,
   directSetsPerExposureCap: number | null,
   missing: number,
-  allTargets: readonly AIProgrammerTargetContext[]
+  allTargets: readonly AIProgrammerTargetContext[],
+  planAllowed: ReadonlySet<string> | null
 ): number {
   if (ownBumpHeadroom(exercises, target, directSetsPerExposureCap) >= missing) return Number.POSITIVE_INFINITY;
-  return remainingUsableCandidates(exercises, target, directSetsPerExposureCap, allTargets).length;
+  return remainingUsableCandidates(exercises, target, directSetsPerExposureCap, allTargets, planAllowed).length;
 }
 
 /** Whether adding one more exercise, for `targetId`, to `exercises` would
@@ -196,7 +205,8 @@ function completeOneTarget(
   currentTotal: number,
   purpose: SessionPurpose | null,
   notes: string[],
-  allTargets: readonly AIProgrammerTargetContext[]
+  allTargets: readonly AIProgrammerTargetContext[],
+  planAllowed: ReadonlySet<string> | null
 ): void {
   const threshold = guidance.feasibility!.adequacyThreshold;
   let missing = Math.ceil(threshold - currentTotal);
@@ -240,7 +250,7 @@ function completeOneTarget(
   // ranks targets with (Cross-Target Candidate Contention Fix,
   // 2026-09-28) — selection can never see a candidate ranking didn't
   // already know about, or vice versa.
-  const newCandidates = remainingUsableCandidates(exercises, target, cap, allTargets);
+  const newCandidates = remainingUsableCandidates(exercises, target, cap, allTargets, planAllowed);
   for (const candidate of sortCandidates(newCandidates)) {
     if (missing <= 0) break;
     if (!canAddOneMoreExerciseFor(exercises, target.targetId, purpose)) {
@@ -279,8 +289,15 @@ function completeOneTarget(
  * validation; the adequacy validator itself still runs, unmodified, on
  * this function's output — this module never decides pass/fail on its
  * own. */
-export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext): CompletionResult {
+export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, context: AIProgrammerContext, plan: SessionPlan | null = null): CompletionResult {
   const notes: string[] = [];
+  // With a session plan, each target may only receive exercises from its own
+  // plan-legal candidate list; a target outside the plan receives nothing.
+  const planAllowedFor = (key: string): ReadonlySet<string> | null => {
+    if (!plan) return null;
+    const t = plan.targets.find((p) => p.key === key && (p.status === 'required' || p.status === 'selected'));
+    return new Set(t ? t.candidates.map((c) => c.exerciseId) : []);
+  };
   const exercises: AIWorkoutExerciseProposal[] = proposal.exercises.map((e) => ({ ...e }));
   const purpose = context.programmingBrief.session.purpose;
   const expectedCoverageSet = new Set(context.programmingBrief.session.expectedCoverageTargetIds);
@@ -340,7 +357,7 @@ export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, con
       }
 
       const missing = Math.ceil(guidance.feasibility!.adequacyThreshold - currentTotal);
-      const rank = contentionRank(exercises, target, guidance.directSetsPerExposureCap, missing, context.targets);
+      const rank = contentionRank(exercises, target, guidance.directSetsPerExposureCap, missing, context.targets, planAllowedFor(key));
       // Deterministic tie-break: alphabetical by targetId (never object
       // insertion order or randomness).
       if (!best || rank < best.rank || (rank === best.rank && guidance.targetId < best.guidance.targetId)) {
@@ -350,7 +367,7 @@ export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, con
 
     if (!best) break; // nothing left needs attention this pass
 
-    completeOneTarget(exercises, best.target, best.guidance, best.currentTotal, purpose, notes, context.targets);
+    completeOneTarget(exercises, best.target, best.guidance, best.currentTotal, purpose, notes, context.targets, planAllowedFor(guidanceKey(best.guidance)));
     pending.delete(guidanceKey(best.guidance)); // processed exactly once, regardless of outcome
   }
 

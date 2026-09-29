@@ -1,0 +1,187 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "push"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "close-grip-bench-press",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-load triceps stimulus",
+        "Recent heavy use"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-overhead-extension-leaning-forward",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Long-head emphasis",
+        "Fresh after 0 recent uses"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-pushdown",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-rep pump",
+        "Low fatigue cost"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "overhead-triceps-extension",
+      "targetType": "physique_target",
+      "targetId": "triceps-long-head",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Direct long-head focus",
+        "Recent high volume"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "incline-barbell-press",
+      "targetType": "physique_target",
+      "targetId": "upper-pec",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Heavy upper pec stimulus",
+        "Recent use"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "flat-barbell-bench-press",
+      "targetType": "physique_target",
+      "targetId": "mid-pec",
+      "sets": 3,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-load mid-pec",
+        "Undertrained this week"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-fly",
+      "targetType": "physique_target",
+      "targetId": "lower-pec",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Stretch-focused lower pec",
+        "Shared with upper/mid"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "dumbbell-lateral-raise",
+      "targetType": "physique_target",
+      "targetId": "side-delt",
+      "sets": 3,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-rep side delt pump",
+        "Recent volume down"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-crunch",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 3,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-rep oblique burn",
+        "Recent heavy use"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-woodchop",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 2,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Rotational oblique stimulus",
+        "Fresh option"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Triceps: 7 sets total (3+2+2) — exceeds minimum (6) and matches recommended (12) by using cable pushdown for high-rep volume after heavy compound; avoids overloading long-head with redundant overhead extensions.",
+    "Triceps-long-head: 2 sets — meets minimum (2) and approaches recommended (4) using overhead extension, already heavily used recently; no extra set to avoid redundancy with triceps.",
+    "Upper pec: 3 sets — meets minimum (3) and reaches recommended (5) by using incline barbell press, primary heavy mover; cable fly and incline fly deferred to avoid exceeding 10-exercise cap.",
+    "Mid pec: 3 sets — meets minimum (3) and reaches recommended (5) with flat barbell press, underutilized this week despite recent history; cable fly shared with upper/lower.",
+    "Lower pec: 2 sets — exceeds minimum (1), reaches recommended (2) with cable fly, leveraging shared exercise to avoid slot overuse.",
+    "Side delt: 3 sets — below recommended (5–7) due to session cap; recent volume down (trend) but recovery is fine; no extra set to prioritize triceps and pecs.",
+    "Obliques: 5 sets (3+2) — exceeds minimum (4), below recommended (8) due to abs cap (2 exercises max); cable crunch prioritized for recent use, woodchop added for variety.",
+    "Session structure: All exercises fit within 10-exercise cap; no leg/abs overuse; triceps and pecs prioritized per goal hierarchy; obliques given minimal but sufficient volume.",
+    "No intensity techniques applied — session volume already high; user is advanced but recovery is not flagged for deload or caution."
+  ],
+  "goalAlignment": [
+    "Arms look thin from the side: addressed via 7 triceps sets (close-grip, cable overhead, cable pushdown) — direct volume exceeds weekly average and targets side thickness.",
+    "Triceps have no depth from behind: addressed via 2 overhead extension sets (triceps-long-head) — direct long-head stimulus after recent high volume, reinforcing depth."
+  ],
+  "recoveryConsiderations": [
+    "Triceps trained 2 days in a row (Mon/Tue); volume is high but recovery caution is 'none' and historical completion ratio is high (4.6x), indicating strong tolerance.",
+    "Side delt volume is below recommendation (3 vs 5–7) due to session cap — not a concern as trend is down but not fatigued; will be addressed Thursday.",
+    "Obliques trained 2 days in a row (Mon/Tue); volume is moderate (5 sets) and within safe limits given high rep ranges and low load.",
+    "No deload active; program state is ACTIVE; cooldown period ended 2026-09-23; no reactive fatigue triggers."
+  ],
+  "warnings": [
+    "Obliques volume (5 sets) is below recommended (8) due to 2-exercise cap — next opportunity is Thursday.",
+    "Side delt volume (3 sets) is below recommended (5–7) — deferred to Thursday session to avoid exceeding session capacity.",
+    "Upper pec and mid pec each have 3 sets — recommended is 5 each; remaining volume deferred to Thursday due to exercise slot limits and shared cable fly usage."
+  ]
+}

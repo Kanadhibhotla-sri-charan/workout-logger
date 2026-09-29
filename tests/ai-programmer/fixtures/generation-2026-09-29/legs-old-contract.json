@@ -1,0 +1,161 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "legs"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "back-squat",
+      "targetType": "physique_target",
+      "targetId": "quads",
+      "sets": 4,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High priority quad stimulus; recent exposure low"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "bulgarian-split-squat-knee-dominant",
+      "targetType": "physique_target",
+      "targetId": "quads",
+      "sets": 4,
+      "repsMin": 6,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Complements squat; targets quads with unilateral focus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "romanian-deadlift",
+      "targetType": "physique_target",
+      "targetId": "hamstrings",
+      "sets": 5,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Primary hamstring stimulus; recent exposure absent"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "hip-thrust",
+      "targetType": "physique_target",
+      "targetId": "gluteus-maximus",
+      "sets": 6,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High volume glute focus; recent exposure absent"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "hip-abduction",
+      "targetType": "physique_target",
+      "targetId": "gluteus-medius-minimus",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Direct glute medius stimulus; recent exposure absent"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "leg-press-calf-raise",
+      "targetType": "physique_target",
+      "targetId": "gastrocnemius",
+      "sets": 3,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-rep gastrocnemius focus; efficient volume delivery"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "seated-calf-raise",
+      "targetType": "physique_target",
+      "targetId": "soleus",
+      "sets": 3,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Direct soleus stimulus; high rep range optimal"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-crunch",
+      "targetType": "physique_target",
+      "targetId": "rectus-abdominis",
+      "sets": 6,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "High-volume ab focus; recent exposure moderate"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-woodchop",
+      "targetType": "physique_target",
+      "targetId": "obliques",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Rotational oblique stimulus; recent exposure low"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Session focused on legs and core as per session purpose; 9 exercises within 8-muscle limit (abs counted as 1 muscle group).",
+    "Quads: 8 sets total (squat + split squat) to meet 8-set minimum; recent exposure absent.",
+    "Hamstrings: 5 sets via Romanian deadlift to meet 5-set minimum; no recent exposure.",
+    "Gluteus maximus: 6 sets via hip thrust to meet 6-set minimum; no recent exposure.",
+    "Gluteus medius: 2 sets via hip abduction to meet 2-set minimum; no recent exposure.",
+    "Gastrocnemius and soleus: 3 sets each to meet 3-set minimums; no recent exposure.",
+    "Rectus abdominis: 6 sets to meet 6-set minimum; recent exposure was 4 sets, so increased slightly.",
+    "Obliques: 4 sets via cable woodchop to meet 8-set minimum; only 4 sets assigned as 8 is unfeasible in this session due to volume constraints.",
+    "Adductors: Not trained — unfeasible to meet 8-set minimum without exceeding session capacity; deferred to next leg day.",
+    "No exercises from push/pull groups included — session strictly follows legs purpose and muscle eligibility."
+  ],
+  "goalAlignment": [
+    "Active goal 'Arms look thin from the side' not trained today — eligible for this session but deferred to prioritize leg focus and session capacity.",
+    "Active goal 'Triceps have no depth from behind' not trained today — eligible for this session but deferred to prioritize leg focus and session capacity.",
+    "All leg and core targets are being addressed with full recommended volume where feasible, consistent with active goal priority hierarchy."
+  ],
+  "recoveryConsiderations": [
+    "No deload active — training intensity maintained per program state.",
+    "Recent exposure to quads, hamstrings, glutes, and calves was absent — appropriate to load today.",
+    "Abs and obliques trained with high-rep, low-load work — minimal systemic fatigue impact.",
+    "No structural advisories triggered — no imbalances requiring adjustment."
+  ],
+  "warnings": []
+}

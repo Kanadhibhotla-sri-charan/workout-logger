@@ -90,10 +90,11 @@ exports[`session planner — representative snapshots > arm-side-thickness / leg
     {
       "candidates": [
         "bulgarian-split-squat-hip-dominant:3",
-        "cable-kickback-glute:2",
         "hip-thrust:3",
       ],
-      "excluded": [],
+      "excluded": [
+        "cable-kickback-glute",
+      ],
       "extra": 0,
       "id": "gluteus-maximus",
       "max": 6,
@@ -106,14 +107,15 @@ exports[`session planner — representative snapshots > arm-side-thickness / leg
     },
     {
       "candidates": [
-        "lying-leg-curl:2",
         "romanian-deadlift:3",
-        "seated-leg-curl:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "lying-leg-curl",
+        "seated-leg-curl",
+      ],
       "extra": 0,
       "id": "hamstrings",
-      "max": 5,
+      "max": 3,
       "min": 3,
       "rank": 3,
       "reserved": 1,
@@ -310,13 +312,14 @@ exports[`session planner — representative snapshots > arm-side-thickness / pul
     {
       "candidates": [
         "chest-supported-row:3",
-        "lat-pulldown-wide-pronated:3",
         "seated-cable-row:3",
       ],
-      "excluded": [],
+      "excluded": [
+        "lat-pulldown-wide-pronated",
+      ],
       "extra": 0,
       "id": "back-thickness",
-      "max": 8,
+      "max": 6,
       "min": 4,
       "rank": 2,
       "reserved": 2,
@@ -343,13 +346,14 @@ exports[`session planner — representative snapshots > arm-side-thickness / pul
     {
       "candidates": [
         "barbell-ez-bar-curl:3",
-        "hammer-curl:2",
-        "incline-dumbbell-curl:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "hammer-curl",
+        "incline-dumbbell-curl",
+      ],
       "extra": 0,
       "id": "biceps",
-      "max": 5,
+      "max": 3,
       "min": 3,
       "rank": 4,
       "reserved": 1,
@@ -359,15 +363,16 @@ exports[`session planner — representative snapshots > arm-side-thickness / pul
     },
     {
       "candidates": [
-        "chest-supported-row:3",
         "lat-pulldown-wide-pronated:3",
-        "seated-cable-row:3",
         "straight-arm-pulldown:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "chest-supported-row",
+        "seated-cable-row",
+      ],
       "extra": 0,
       "id": "lat-width",
-      "max": 8,
+      "max": 5,
       "min": 4,
       "rank": 5,
       "reserved": 2,
@@ -851,13 +856,14 @@ exports[`session planner — representative snapshots > arm-side-thickness / upp
     {
       "candidates": [
         "barbell-ez-bar-curl:3",
-        "hammer-curl:2",
-        "incline-dumbbell-curl:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "hammer-curl",
+        "incline-dumbbell-curl",
+      ],
       "extra": 0,
       "id": "biceps",
-      "max": 5,
+      "max": 3,
       "min": 3,
       "rank": 7,
       "reserved": 1,
@@ -1112,10 +1118,11 @@ exports[`session planner — representative snapshots > triceps-back-depth / leg
     {
       "candidates": [
         "bulgarian-split-squat-hip-dominant:3",
-        "cable-kickback-glute:2",
         "hip-thrust:3",
       ],
-      "excluded": [],
+      "excluded": [
+        "cable-kickback-glute",
+      ],
       "extra": 0,
       "id": "gluteus-maximus",
       "max": 6,
@@ -1128,14 +1135,15 @@ exports[`session planner — representative snapshots > triceps-back-depth / leg
     },
     {
       "candidates": [
-        "lying-leg-curl:2",
         "romanian-deadlift:3",
-        "seated-leg-curl:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "lying-leg-curl",
+        "seated-leg-curl",
+      ],
       "extra": 0,
       "id": "hamstrings",
-      "max": 5,
+      "max": 3,
       "min": 3,
       "rank": 3,
       "reserved": 1,
@@ -1316,13 +1324,14 @@ exports[`session planner — representative snapshots > triceps-back-depth / pul
     {
       "candidates": [
         "chest-supported-row:3",
-        "lat-pulldown-wide-pronated:3",
         "seated-cable-row:3",
       ],
-      "excluded": [],
+      "excluded": [
+        "lat-pulldown-wide-pronated",
+      ],
       "extra": 0,
       "id": "back-thickness",
-      "max": 8,
+      "max": 6,
       "min": 4,
       "rank": 1,
       "reserved": 2,
@@ -1333,14 +1342,15 @@ exports[`session planner — representative snapshots > triceps-back-depth / pul
     {
       "candidates": [
         "barbell-ez-bar-curl:3",
-        "cross-body-hammer-curl:2",
-        "hammer-curl:2",
-        "incline-dumbbell-curl:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "cross-body-hammer-curl",
+        "hammer-curl",
+        "incline-dumbbell-curl",
+      ],
       "extra": 0,
       "id": "biceps",
-      "max": 5,
+      "max": 3,
       "min": 3,
       "rank": 2,
       "reserved": 1,
@@ -1382,15 +1392,16 @@ exports[`session planner — representative snapshots > triceps-back-depth / pul
     },
     {
       "candidates": [
-        "chest-supported-row:3",
         "lat-pulldown-wide-pronated:3",
-        "seated-cable-row:3",
         "straight-arm-pulldown:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "chest-supported-row",
+        "seated-cable-row",
+      ],
       "extra": 0,
       "id": "lat-width",
-      "max": 8,
+      "max": 5,
       "min": 4,
       "rank": 5,
       "reserved": 2,
@@ -1877,14 +1888,15 @@ exports[`session planner — representative snapshots > triceps-back-depth / upp
     {
       "candidates": [
         "barbell-ez-bar-curl:3",
-        "cross-body-hammer-curl:2",
-        "hammer-curl:2",
-        "incline-dumbbell-curl:2",
       ],
-      "excluded": [],
+      "excluded": [
+        "cross-body-hammer-curl",
+        "hammer-curl",
+        "incline-dumbbell-curl",
+      ],
       "extra": 0,
       "id": "biceps",
-      "max": 5,
+      "max": 3,
       "min": 3,
       "rank": 7,
       "reserved": 1,

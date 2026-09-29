@@ -1,0 +1,270 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "upper body",
+    "arms",
+    "chest",
+    "shoulders",
+    "back"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "cross-body-hammer-curl",
+      "targetType": "physique_target",
+      "targetId": "brachialis-arm-thickness",
+      "sets": 4,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, single exercise sufficient"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "close-grip-bench-press",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 4,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume needed"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "dip-triceps-biased",
+      "targetType": "physique_target",
+      "targetId": "triceps",
+      "sets": 4,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, complements close-grip"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-overhead-extension-leaning-forward",
+      "targetType": "physique_target",
+      "targetId": "triceps-long-head",
+      "sets": 4,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, direct long-head stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "incline-barbell-press",
+      "targetType": "physique_target",
+      "targetId": "upper-pec",
+      "sets": 5,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume requirement"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "flat-barbell-bench-press",
+      "targetType": "physique_target",
+      "targetId": "mid-pec",
+      "sets": 5,
+      "repsMin": 6,
+      "repsMax": 12,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume requirement"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-fly",
+      "targetType": "physique_target",
+      "targetId": "lower-pec",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, minimal sets needed"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "dumbbell-lateral-raise",
+      "targetType": "physique_target",
+      "targetId": "side-delt",
+      "sets": 5,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume requirement"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "face-pull",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 4,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, paired with rear-delt row"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "rear-delt-row",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 3,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, paired with face-pull"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "lat-pulldown-wide-pronated",
+      "targetType": "physique_target",
+      "targetId": "lat-width",
+      "sets": 4,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume requirement"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "seated-cable-row",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 4,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume requirement"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "biceps",
+      "sets": 5,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume requirement"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "wrist-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-flexors",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, direct flexor stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "reverse-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-extensors",
+      "sets": 4,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, direct extensor stimulus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "cable-crunch",
+      "targetType": "physique_target",
+      "targetId": "rectus-abdominis",
+      "sets": 6,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "Goal-focused, high volume requirement"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Triceps volume prioritized at 8 sets (4+4) to meet goal-oriented weekly target of 13, using two exercises to avoid overloading one.",
+    "Triceps long-head targeted with 4 sets of cable overhead extension to meet goal-oriented weekly target of 6, leveraging shared credit with triceps.",
+    "Upper and mid-pec each receive 5 sets to meet their 5-set weekly targets, using high-volume barbell presses.",
+    "Side delt targeted with 5 sets of dumbbell lateral raise to meet weekly target of 5, despite recent trend decline.",
+    "Rear delt targeted with 7 sets (4+3) to meet weekly target of 14, using two complementary exercises.",
+    "Lat width and back thickness each receive 4 sets to meet weekly targets of 16, using cable pulldown and seated row.",
+    "Biceps targeted with 5 sets of barbell curl to meet weekly target of 10, leveraging shared credit with brachialis.",
+    "Forearm flexors and extensors each receive 4 sets to meet weekly targets of 12, using direct curl variations.",
+    "Rectus abdominis targeted with 6 sets of cable crunch to meet weekly target of 6, omitting obliques due to abs-exercise cap conflict.",
+    "Session total: 16 exercises, 72 sets — within upper-body limits, prioritizing active goals and maintenance as feasible."
+  ],
+  "goalAlignment": [
+    "Brachialis: 4 sets — directly addresses goal_dbea4249-c5be-4926-890a-c34b59eb696f (arm side thickness)",
+    "Triceps: 8 sets — directly addresses goal_dbea4249-c5be-4926-890a-c34b59eb696f (arm thickness)",
+    "Triceps long-head: 4 sets — directly addresses goal_4eded2a8-f2e1-46c9-b1a6-73ea910228d8 (triceps back depth)",
+    "Rectus abdominis: 6 sets — high volume to support aesthetics and core stability",
+    "All other exercises maintain non-goal muscles within recommended volumes"
+  ],
+  "recoveryConsiderations": [
+    "Triceps trained 1 day after heavy session — volume reduced from 12 to 8 sets to avoid overtraining despite high recent completion ratio.",
+    "Rear delt trend is declining — volume increased to 7 sets to counteract stagnation, using fresh exercise pairing.",
+    "Side delt trend is declining — volume increased to 5 sets to stimulate growth despite recent high volume.",
+    "Obliques omitted due to abs-exercise cap conflict — will be addressed on next pull day.",
+    "No deload active — full volume applied per coaching data."
+  ],
+  "warnings": [
+    "Obliques and rectus-abdominis cannot both be adequately covered in one session due to 2-exercise cap — rectus abdominis prioritized as higher frequency target.",
+    "Front delt target (14 sets/week) cannot be met in this session due to shared credit with chest/triceps — deferred to next upper day.",
+    "Upper traps and neck thickness not trained — eligible but omitted due to session capacity and lower priority than active goals."
+  ]
+}

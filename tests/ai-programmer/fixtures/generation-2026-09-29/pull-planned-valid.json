@@ -1,0 +1,186 @@
+{
+  "schemaVersion": "ai-workout-session-proposal.v1",
+  "mode": "generate_session",
+  "targetDate": "2026-09-29",
+  "weekday": "tuesday",
+  "sessionFocus": [
+    "pull"
+  ],
+  "exercises": [
+    {
+      "exerciseId": "hammer-curl",
+      "targetType": "physique_target",
+      "targetId": "brachialis-arm-thickness",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently underused",
+        "high volume potential"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "lat-pulldown-wide-pronated",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 3,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently used",
+        "high completion ratio"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "seated-cable-row",
+      "targetType": "physique_target",
+      "targetId": "back-thickness",
+      "sets": 3,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "fresh option",
+        "balanced volume"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "rear-delt-row",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently used",
+        "trend down"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "face-pull",
+      "targetType": "physique_target",
+      "targetId": "rear-delt",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "fresh option",
+        "high rep range"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "barbell-ez-bar-curl",
+      "targetType": "physique_target",
+      "targetId": "biceps",
+      "sets": 3,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently used",
+        "high completion"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "straight-arm-pulldown",
+      "targetType": "physique_target",
+      "targetId": "lat-width",
+      "sets": 2,
+      "repsMin": 10,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "fresh option",
+        "lat width focus"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "chest-supported-row",
+      "targetType": "physique_target",
+      "targetId": "lat-width",
+      "sets": 2,
+      "repsMin": 8,
+      "repsMax": 15,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "balanced load",
+        "low recent use"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "reverse-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-extensors",
+      "sets": 2,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently used",
+        "high rep bias"
+      ],
+      "source": "blueprint"
+    },
+    {
+      "exerciseId": "wrist-curl",
+      "targetType": "physique_target",
+      "targetId": "forearm-flexors",
+      "sets": 2,
+      "repsMin": 14,
+      "repsMax": 20,
+      "rirMin": 1,
+      "rirMax": 3,
+      "rationale": [
+        "recently used",
+        "balanced volume"
+      ],
+      "source": "blueprint"
+    }
+  ],
+  "programmingRationale": [
+    "Brachialis: Hammer curl selected to break recent inactivity despite low consecutive use; volume meets minimum and recommended.",
+    "Back thickness: Lat pulldown and seated cable row used to balance recent exposure and maintain volume within recommended range.",
+    "Rear delt: Rear delt row and face pull paired to address trend down; volume capped at max due to historical overexposure.",
+    "Biceps: Barbell curl retained due to high recent completion and shared exercise credit with brachialis.",
+    "Lat width: Straight-arm pulldown added for novel stimulus; chest-supported row balances volume without overloading.",
+    "Forearms: Reverse curl and wrist curl retained to meet high-frequency blueprint needs; both at max sets due to low rep range.",
+    "Total exercises: 10 — exactly at cap; no deferrals possible without violating reserved exercise minimums.",
+    "No intensity techniques applied — session volume already meets or exceeds recommended sets; fatigue management prioritized."
+  ],
+  "goalAlignment": [
+    "Arms look thin from the side: addressed via hammer curl (brachialis) and barbell curl (biceps) with full volume.",
+    "Triceps have no depth from behind: not directly targeted — deferred to next session per plan; back thickness and lat width indirectly support posterior chain aesthetics."
+  ],
+  "recoveryConsiderations": [
+    "No deload active — program state is ACTIVE.",
+    "Rear delt volume reduced to max (4 sets) despite recommended 7 due to historical overexposure (10.5 completion ratio) — prevents overuse.",
+    "Forearms trained at high frequency (3x/week) — volume kept minimal to avoid cumulative fatigue.",
+    "All exercises use moderate RIR (1–3) — preserves form and recovery for advanced trainee."
+  ],
+  "warnings": [
+    "Rear delt recommended volume (7 sets) not met — historical overexposure justifies reduction.",
+    "Forearm flexors max sets (2) is below recommended (4) — due to session cap and higher-priority targets; will be carried over to next pull day.",
+    "No abs or obliques included — deferred per session plan due to exercise cap."
+  ]
+}

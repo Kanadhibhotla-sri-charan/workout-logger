@@ -9,6 +9,16 @@ export function isAiProgrammerEnabled(): boolean {
   return process.env.AI_PROGRAMMER_ENABLED === 'true';
 }
 
+/** Planned generation (Phases 3+4 of the generation-contract redesign):
+ * when on, generate_session sends the AI the compact SessionPlan context
+ * and plan-aware instruction, and applies plan conformance. Off by
+ * default — the existing contract stays the behaviour until this is
+ * explicitly enabled. It never forks validation, repair, completion,
+ * persistence or the proposal lifecycle. */
+export function isPlannedGenerationEnabled(): boolean {
+  return process.env.AI_PLANNED_GENERATION_ENABLED === 'true';
+}
+
 export interface VelonaConfig {
   apiKey: string;
   baseUrl: string;

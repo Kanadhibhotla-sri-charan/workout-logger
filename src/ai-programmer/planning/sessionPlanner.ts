@@ -75,8 +75,14 @@ export interface PlannedCandidate {
 
 export interface ExcludedCandidate {
   exerciseId: string;
+  /** side_credit: it would give a side-credited target an obligation this plan cannot satisfy.
+   * below_minimum: within the target's reserved slots it can never reach plannedMinimumSets.
+   * owned_elsewhere: a label-only candidate of several planned targets, assigned to ownerTargetId. */
+  reason: 'side_credit' | 'below_minimum' | 'owned_elsewhere';
   /** Side-credited targets that would get an obligation this plan cannot satisfy. */
   uncoveredSideTargets: string[];
+  /** For owned_elsewhere: the one planned target this session uses the exercise for. */
+  ownerTargetId?: string;
 }
 
 export interface TargetPlan {
@@ -173,6 +179,85 @@ interface CapacityResult {
   creditedTargetCount: number;
   groups: CapacityGroup[];
   perTarget: Map<string, { slots: number; reachSets: number; sharedWith: string[] }>;
+}
+
+/** Upper bound on ownership assignments tried exhaustively (real sessions have ≤ 8). */
+const MAX_OWNERSHIP_ASSIGNMENTS = 4096;
+
+/** Step 7a of planSession: gives each contested label-only candidate exactly
+ * one owning planned target (mutates the plans' candidate lists) and
+ * returns the plan notes describing each assignment. */
+function assignContestedOwnership(plannedWorking: readonly Working[]): string[] {
+  const listers = new Map<string, Working[]>();
+  for (const w of plannedWorking) for (const c of w.plan.candidates) listers.set(c.exerciseId, [...(listers.get(c.exerciseId) ?? []), w]);
+  const candidateOf = (w: Working, exerciseId: string) => w.plan.candidates.find((c) => c.exerciseId === exerciseId)!;
+  const credits = (w: Working, exerciseId: string, other: Working) => candidateOf(w, exerciseId).sideCredits.includes(other.key);
+
+  const contested = [...listers.entries()]
+    .filter(([id, ws]) => ws.length > 1 && ws.some((a) => ws.some((b) => a !== b && !credits(a, id, b))))
+    .map(([id, ws]) => ({ exerciseId: id, listers: [...ws].sort((a, b) => a.plan.rank! - b.plan.rank!) }))
+    .sort((a, b) => a.exerciseId.localeCompare(b.exerciseId));
+  if (contested.length === 0) return [];
+
+  const isPrimary = (w: Working, exerciseId: string) => w.target.validExercises.find((v) => v.exerciseId === exerciseId)?.role === 'primary';
+  const coverage = (w: Working, exerciseId: string, ws: readonly Working[]) => ws.filter((o) => o !== w && credits(w, exerciseId, o)).length;
+  const involved = [...new Set(contested.flatMap((c) => c.listers))];
+  /** An unshared target must still reach its planned minimum within its reserved slots from what it keeps. */
+  const reaches = (w: Working, lost: ReadonlySet<string>) => {
+    if (w.plan.sharedSlotsWith.length > 0 || w.plan.reservedExerciseSlots === 0) return true;
+    const top = w.plan.candidates
+      .filter((c) => !lost.has(c.exerciseId))
+      .map((c) => c.ceiling)
+      .sort((a, b) => b - a)
+      .slice(0, w.plan.reservedExerciseSlots)
+      .reduce((s, x) => s + x, 0);
+    const cap = w.guidance.directSetsPerExposureCap;
+    return (cap != null ? Math.min(cap, top) : top) >= w.plan.plannedMinimumSets;
+  };
+
+  // Enumerate owner choices (index into each contested exercise's rank-ordered listers).
+  const total = contested.reduce((n, c) => n * c.listers.length, 1);
+  if (total > MAX_OWNERSHIP_ASSIGNMENTS) return [`ownership: ${contested.length} contested candidates exceed the exact search — left unassigned`];
+  let best: { choice: number[]; score: number[] } | null = null;
+  for (let n = 0; n < total; n++) {
+    const choice: number[] = [];
+    let rest = n;
+    for (const c of contested) {
+      choice.push(rest % c.listers.length);
+      rest = Math.floor(rest / c.listers.length);
+    }
+    const lostBy = new Map<Working, Set<string>>(involved.map((w) => [w, new Set()]));
+    contested.forEach((c, i) => c.listers.forEach((w, j) => j !== choice[i] && lostBy.get(w)!.add(c.exerciseId)));
+    if (!involved.every((w) => reaches(w, lostBy.get(w)!))) continue;
+    // Higher is better, compared left to right: shared-credit coverage, Blueprint-primary owners, then owner priority per exercise.
+    const owners = contested.map((c, i) => c.listers[choice[i]!]!);
+    const score = [
+      contested.reduce((s, c, i) => s + coverage(owners[i]!, c.exerciseId, c.listers), 0),
+      contested.reduce((s, c, i) => s + Number(isPrimary(owners[i]!, c.exerciseId)), 0),
+      ...choice.map((j) => -j),
+    ];
+    const k = best ? score.findIndex((v, i) => v !== best!.score[i]) : -1;
+    if (!best || (k >= 0 && score[k]! > best.score[k]!)) best = { choice, score };
+  }
+  if (!best) return [`ownership: contested candidates ${contested.map((c) => c.exerciseId).join(', ')} cannot be split without leaving a target below its minimum — left shared`];
+
+  const notes: string[] = [];
+  contested.forEach((c, i) => {
+    const owner = c.listers[best!.choice[i]!]!;
+    for (const w of c.listers) {
+      if (w === owner) continue;
+      w.plan.candidates = w.plan.candidates.filter((x) => x.exerciseId !== c.exerciseId);
+      w.plan.excludedCandidates.push({ exerciseId: c.exerciseId, reason: 'owned_elsewhere', uncoveredSideTargets: [], ownerTargetId: owner.target.targetId });
+    }
+    const others = c.listers.filter((w) => w !== owner).map((w) => w.target.targetId);
+    notes.push(`ownership: ${c.exerciseId} is used for ${owner.target.targetId} this session (it is also listed for ${others.join(', ')}, but earns their credit only under their own label)`);
+  });
+  for (const w of involved) {
+    const sumCeilings = w.plan.candidates.reduce((s, c) => s + c.ceiling, 0);
+    const cap = w.guidance.directSetsPerExposureCap;
+    w.plan.legalMaximumSets = cap != null ? Math.min(cap, sumCeilings) : sumCeilings;
+  }
+  return notes;
 }
 
 export function planSession(context: AIProgrammerContext, options: PlanSessionOptions = {}): SessionPlan {
@@ -294,7 +379,7 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
         return false;
       });
       if (uncovered.length === 0) kept.push(c);
-      else excluded.push({ exerciseId: c.exerciseId, uncoveredSideTargets: uncovered });
+      else excluded.push({ exerciseId: c.exerciseId, reason: 'side_credit', uncoveredSideTargets: uncovered });
     }
     return { kept, excluded };
   }
@@ -511,6 +596,44 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
   for (const w of covering) w.plan.plannedMinimumSets = Math.max(w.plan.hardMinimumSets, MEANINGFUL_COVERAGE_MIN_SETS);
   const identitySatisfied = covering.length >= requiredTargets;
   if (!identitySatisfied) refusals.push({ code: 'IDENTITY_MINIMUM_UNSATISFIABLE', targetIds: covering.map((w) => w.target.targetId) });
+
+  // ---- 7a. contested candidate ownership ----
+  // An exercise listed for several planned targets, where some label does
+  // not credit another listing target (e.g. seated-cable-row for both
+  // back-thickness and lat-width — back credits by label only), can appear
+  // once in a session, so exactly one target owns it. Every assignment is
+  // tried; only those where each unshared target still reaches its
+  // plannedMinimumSets within its reserved slots are kept (so ownership
+  // never makes a target unreachable when any valid assignment exists).
+  // Among those: most Blueprint-primary owners, then higher-priority
+  // (lower rank) owners in exercise order. Genuine shared credit — every
+  // label credits every listing target — stays available to all of them.
+  notes.push(...assignContestedOwnership(working.filter((w) => planned.has(w.key))));
+
+  // ---- 7b. candidates that can meet the minimum within the reservation ----
+  // A target with its own (unshared) reservation of N slots only offers
+  // candidates that, with the N-1 best other candidates, reach
+  // plannedMinimumSets — so any choice from the list honours the plan
+  // (e.g. hamstrings with 1 slot and a 3-set minimum never offers a
+  // 2-set leg curl). Shared-slot targets are left as they are.
+  for (const w of working) {
+    if (!planned.has(w.key) || w.plan.sharedSlotsWith.length > 0 || w.plan.reservedExerciseSlots === 0) continue;
+    const others = (c: PlannedCandidate) =>
+      w.plan.candidates
+        .filter((o) => o !== c)
+        .map((o) => o.ceiling)
+        .sort((a, b) => b - a)
+        .slice(0, w.plan.reservedExerciseSlots - 1)
+        .reduce((s, x) => s + x, 0);
+    const reach = (c: PlannedCandidate) => c.ceiling + others(c);
+    const usable = w.plan.candidates.filter((c) => reach(c) >= w.plan.plannedMinimumSets);
+    if (usable.length === 0 || usable.length === w.plan.candidates.length) continue;
+    for (const c of w.plan.candidates) if (!usable.includes(c)) w.plan.excludedCandidates.push({ exerciseId: c.exerciseId, reason: 'below_minimum', uncoveredSideTargets: [] });
+    w.plan.candidates = usable;
+    const sumCeilings = usable.reduce((s, c) => s + c.ceiling, 0);
+    const cap = w.guidance.directSetsPerExposureCap;
+    w.plan.legalMaximumSets = cap != null ? Math.min(cap, sumCeilings) : sumCeilings;
+  }
 
   // ---- 8. flex capacity and per-target extra slots ----
   const flexExerciseSlots = Math.max(0, caps.maxExercises - final.exerciseSlots);

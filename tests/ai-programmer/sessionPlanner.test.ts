@@ -232,7 +232,114 @@ describe('session planner invariants (every real scenario × purpose)', () => {
       }
     }
   });
+
+  it('14. an unshared reservation only offers candidates that can reach the planned minimum within its reserved slots', () => {
+    let narrowed = 0;
+    for (const { plan } of contexts) {
+      for (const t of planned(plan).filter((t) => t.sharedSlotsWith.length === 0)) {
+        const label = `${plan.purpose}:${t.targetId}`;
+        for (const c of t.candidates) {
+          const others = t.candidates.filter((o) => o !== c).map((o) => o.ceiling).sort((a, b) => b - a).slice(0, t.reservedExerciseSlots - 1);
+          expect(c.ceiling + others.reduce((s, x) => s + x, 0), `${label} ${c.exerciseId}`).toBeGreaterThanOrEqual(t.plannedMinimumSets);
+        }
+        for (const e of t.excludedCandidates.filter((e) => e.reason === 'below_minimum')) {
+          expect(t.candidates.map((c) => c.exerciseId), label).not.toContain(e.exerciseId);
+          narrowed++;
+        }
+      }
+    }
+    expect(narrowed).toBeGreaterThan(0);
+  });
+
+  it('14. Legs: hamstrings with one slot and a 3-set minimum never offers a 2-set leg curl', () => {
+    for (const scenario of SCENARIOS) {
+      const hamstrings = target(get(scenario, 'legs').plan, 'hamstrings');
+      if (hamstrings.reservedExerciseSlots !== 1 || hamstrings.plannedMinimumSets < 3) continue;
+      expect(hamstrings.candidates.every((c) => c.ceiling >= 3)).toBe(true);
+      expect(hamstrings.candidates.map((c) => c.exerciseId)).toContain('romanian-deadlift');
+    }
+  });
 });
+
+describe('session planner — contested candidate ownership', () => {
+  /** Exercise ids listed for more than one planned target, where some listing target does not get credit from another's label. */
+  const labelOnlyShared = (plan: SessionPlan) => {
+    const listers = new Map<string, TargetPlan[]>();
+    for (const t of planned(plan)) for (const c of t.candidates) listers.set(c.exerciseId, [...(listers.get(c.exerciseId) ?? []), t]);
+    return [...listers.entries()].filter(([id, ts]) =>
+      ts.length > 1 && ts.some((a) => ts.some((b) => a !== b && !a.candidates.find((c) => c.exerciseId === id)!.sideCredits.includes(b.key)))
+    );
+  };
+
+  it('no planned target is offered an exercise that another planned target also lists by label only', () => {
+    for (const { plan } of contexts) expect(labelOnlyShared(plan).map(([id]) => `${plan.purpose}:${id}`)).toEqual([]);
+  });
+
+  it('Pull: lat-width and back-thickness each own their contested rows — no exercise listed for both', () => {
+    for (const scenario of SCENARIOS) {
+      const plan = get(scenario, 'pull').plan;
+      const back = target(plan, 'back-thickness');
+      const lat = target(plan, 'lat-width');
+      expect(back.candidates.map((c) => c.exerciseId).sort()).toEqual(['chest-supported-row', 'seated-cable-row']);
+      expect(lat.candidates.map((c) => c.exerciseId).sort()).toEqual(['lat-pulldown-wide-pronated', 'straight-arm-pulldown']);
+      expect(back.excludedCandidates).toContainEqual({ exerciseId: 'lat-pulldown-wide-pronated', reason: 'owned_elsewhere', uncoveredSideTargets: [], ownerTargetId: 'lat-width' });
+      expect(lat.excludedCandidates.filter((e) => e.reason === 'owned_elsewhere').map((e) => [e.exerciseId, e.ownerTargetId]).sort()).toEqual([
+        ['chest-supported-row', 'back-thickness'],
+        ['seated-cable-row', 'back-thickness'],
+      ]);
+      // Both keep the capacity to reach adequacy with their own reserved slots.
+      for (const t of [back, lat]) {
+        expect(t.status).toBe('selected');
+        const reach = t.candidates.map((c) => c.ceiling).sort((a, b) => b - a).slice(0, t.reservedExerciseSlots).reduce((s, x) => s + x, 0);
+        expect(reach, t.targetId).toBeGreaterThanOrEqual(t.plannedMinimumSets);
+        expect(t.legalMaximumSets).toBeGreaterThanOrEqual(t.adequacyThreshold);
+      }
+      const ownership = plan.notes.filter((n) => n.startsWith('ownership:'));
+      for (const [id, owner] of [['chest-supported-row', 'back-thickness'], ['lat-pulldown-wide-pronated', 'lat-width'], ['seated-cable-row', 'back-thickness']]) {
+        expect(ownership.some((n) => n.startsWith(`ownership: ${id} is used for ${owner} `)), id).toBe(true);
+      }
+    }
+  });
+
+  it('ownership is deterministic: repeated planning and reordered targets give the same assignment', () => {
+    for (const { context, plan } of contexts) {
+      const lists = (p: SessionPlan) => JSON.stringify(p.targets.map((t) => [t.targetId, t.candidates.map((c) => c.exerciseId), t.excludedCandidates]));
+      const reordered: AIProgrammerContext = { ...context, targets: [...context.targets].reverse() };
+      expect(lists(planSession(context, { nonGoalRotationCursor: 0 }))).toBe(lists(plan));
+      expect(lists(planSession(reordered, { nonGoalRotationCursor: 0 }))).toBe(lists(plan));
+    }
+  });
+
+  it('genuine shared credit stays available to every target it credits (overhead extensions, cable-fly)', () => {
+    const push = get('triceps-back-depth', 'push').plan;
+    for (const id of ['cable-overhead-extension-leaning-forward', 'overhead-triceps-extension']) {
+      for (const t of ['triceps', 'triceps-long-head']) expect(target(push, t).candidates.map((c) => c.exerciseId), `${t}/${id}`).toContain(id);
+    }
+    const pecs = ['lower-pec', 'mid-pec', 'upper-pec'].map((id) => target(push, id)).filter((t) => planned(push).includes(t));
+    expect(pecs.length).toBeGreaterThan(1);
+    for (const t of pecs) expect(t.candidates.map((c) => c.exerciseId), t.targetId).toContain('cable-fly');
+    for (const { plan } of contexts) for (const t of plan.targets) for (const e of t.excludedCandidates.filter((e) => e.reason === 'owned_elsewhere')) {
+      // an owned-elsewhere exclusion is only ever a label-only listing
+      const owner = target(plan, e.ownerTargetId!);
+      expect(owner.candidates.find((c) => c.exerciseId === e.exerciseId)!.sideCredits.includes(t.key) && t.candidates.find((c) => c.exerciseId === e.exerciseId) !== undefined).toBe(false);
+    }
+  });
+
+  it('ownership never makes a target infeasible or deferred: the same targets are planned, each still reaching its minimum', () => {
+    for (const { plan } of contexts) {
+      for (const t of plan.targets.filter((t) => t.excludedCandidates.some((e) => e.reason === 'owned_elsewhere'))) {
+        expect(isPlannedTarget(t), `${plan.purpose}:${t.targetId}`).toBe(true);
+        expect(t.feasible).toBe(true);
+        if (t.sharedSlotsWith.length === 0) {
+          const reach = t.candidates.map((c) => c.ceiling).sort((a, b) => b - a).slice(0, t.reservedExerciseSlots).reduce((s, x) => s + x, 0);
+          expect(reach, `${plan.purpose}:${t.targetId}`).toBeGreaterThanOrEqual(t.plannedMinimumSets);
+        }
+      }
+    }
+  });
+});
+
+const isPlannedTarget = (t: TargetPlan) => (t.status === 'required' || t.status === 'selected') && t.reservedExerciseSlots > 0;
 
 describe('session identity priority', () => {
   it('capacity is handed out goal → identity (one per region first) → identity → accessory, never out of tier order', () => {
