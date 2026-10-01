@@ -605,3 +605,40 @@ CREATE TABLE IF NOT EXISTS user_profile_factors (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, factor_name)
 );
+
+-- Explicit week generation (2026-10-01): one row per POST
+-- /api/ai-programmer/generate-week attempt. Durable (not process memory)
+-- because a paid run must stay single and auditable across process
+-- restarts. At most ONE 'running' row per week is enforced by the partial
+-- unique index below, so the guard is acquired by a single synchronous
+-- INSERT before any provider await. days_json holds the bounded per-day
+-- outcomes; next_allowed_at is the provider-failure backoff.
+CREATE TABLE IF NOT EXISTS ai_week_generation_runs (
+  id TEXT PRIMARY KEY,
+  week_start TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'partially_completed', 'failed', 'abandoned')),
+  failure_class TEXT CHECK (failure_class IS NULL OR failure_class IN ('provider_auth', 'provider_transient', 'abandoned')),
+  days_json TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  heartbeat_at TEXT NOT NULL,
+  finished_at TEXT,
+  next_allowed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_week_generation_runs_week ON ai_week_generation_runs(week_start, started_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_week_generation_runs_one_running ON ai_week_generation_runs(week_start) WHERE status = 'running';
+
+-- Same-context quality gate for week-run days: a day whose generation
+-- failed an AI-output quality check is not paid for again with the exact
+-- same context (target_date + context_hash) unless the caller confirms a
+-- retry. Any context change produces a different hash, so it is never
+-- blocked by this row.
+CREATE TABLE IF NOT EXISTS ai_week_generation_day_failures (
+  target_date TEXT NOT NULL,
+  context_hash TEXT NOT NULL,
+  code TEXT NOT NULL,
+  issues_json TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  failed_at TEXT NOT NULL,
+  PRIMARY KEY (target_date, context_hash)
+);

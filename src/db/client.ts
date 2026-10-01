@@ -82,6 +82,10 @@ function migrate(db: Database.Database): void {
   // prior, only-ever-deterministic behavior before this fix.
   addColumnIfMissing(db, 'workout_sessions', 'source_type', "TEXT NOT NULL DEFAULT 'deterministic'");
   addColumnIfMissing(db, 'workout_sessions', 'supersedes_program_session_id', 'TEXT REFERENCES program_sessions(id) ON DELETE SET NULL');
+  // Explicit week generation (2026-10-01): the week-generation run that
+  // produced a proposal; null for every single-day generate_session
+  // proposal and every pre-existing row.
+  addColumnIfMissing(db, 'ai_program_proposals', 'week_run_id', 'TEXT');
 
   // Coaching Depth Batch 3 (Periodization System): extends the existing
   // coaching_program_state row (never a second table) with reactive-deload

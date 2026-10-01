@@ -29,6 +29,7 @@ import type { TargetType } from '../../engine/goalResolver.js';
 import { addDays, daysBetween, isValidCalendarDate } from '../../engine/dateMath.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import { applyRecoveryConstraint } from '../../engine/recoveryEngine.js';
+import { applyProjectedSessions, type ProjectedSession } from './projectedExposure.js';
 import { exercisesTrainingTarget, roleFor } from '../../engine/exerciseSelector.js';
 import {
   assembleWeeklyPlanInput,
@@ -556,6 +557,12 @@ export interface BuildProgrammerContextInput {
    * explicit user choice for what to generate right now outranks the
    * day's own default rotation slot. */
   requestedSessionPurpose?: SessionPurpose;
+  /** Explicit week generation (2026-10-01): earlier days of the same
+   * week-generation run, planned but not yet trained, layered onto real
+   * history as projected exposure (see projectedExposure.ts). Absent for
+   * every single-day generate_session call, which is therefore
+   * unchanged. */
+  projectedSessions?: readonly ProjectedSession[];
 }
 
 export function buildProgrammerContext(db: Database.Database, input: BuildProgrammerContextInput): AIProgrammerContext {
@@ -637,7 +644,11 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   // wholesale from the deterministic engine's own weekly plan input
   // assembly rather than re-derived.
   const budgetMinutes = profile.default_session_duration_minutes;
-  const planInput = assembleWeeklyPlanInput(db, weekStart, budgetMinutes, currentDate);
+  const realPlanInput = assembleWeeklyPlanInput(db, weekStart, budgetMinutes, currentDate);
+  const planInput =
+    input.projectedSessions && input.projectedSessions.length > 0
+      ? { ...realPlanInput, targets: applyProjectedSessions(realPlanInput.targets, input.projectedSessions, input.targetDate) }
+      : realPlanInput;
   const otherActivityToday = activityTypesForDailyActivity(targetDateActivity);
 
   // Fix: the same real periodization read every other planner call site

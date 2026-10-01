@@ -58,6 +58,8 @@ export interface AIProposalRecord {
   committedAt: string | null;
   rejectedAt: string | null;
   expiresAt: string;
+  /** The week-generation run that produced this proposal; null for a single-day generate_session proposal. */
+  weekRunId: string | null;
 }
 
 export interface CreateAIProposalInput {
@@ -67,6 +69,9 @@ export interface CreateAIProposalInput {
   modelProvider: string;
   modelName: string;
   requestId: string;
+  /** Overrides the default 24h TTL (week-run proposals expire at the end of their target date). */
+  expiresAt?: string;
+  weekRunId?: string | null;
 }
 
 /** A stored `proposal_json` value that is not valid JSON, or does not
@@ -98,6 +103,7 @@ interface AIProposalRow {
   committed_at: string | null;
   rejected_at: string | null;
   expires_at: string;
+  week_run_id: string | null;
 }
 
 function rowToRecord(row: AIProposalRow): AIProposalRecord {
@@ -126,6 +132,7 @@ function rowToRecord(row: AIProposalRow): AIProposalRecord {
     committedAt: row.committed_at,
     rejectedAt: row.rejected_at,
     expiresAt: row.expires_at,
+    weekRunId: row.week_run_id ?? null,
   };
 }
 
@@ -166,18 +173,19 @@ export class AIProposalRepo {
       approved_at: null,
       committed_at: null,
       rejected_at: null,
-      expires_at: computeExpiresAt(now),
+      expires_at: input.expiresAt ?? computeExpiresAt(now),
+      week_run_id: input.weekRunId ?? null,
     };
     this.db
       .prepare(
         `INSERT INTO ai_program_proposals
            (id, status, target_date, weekday, proposal_json, context_hash, blueprint_commit,
             model_provider, model_name, request_id, committed_session_id, failure_reason,
-            created_at, updated_at, approved_at, committed_at, rejected_at, expires_at)
+            created_at, updated_at, approved_at, committed_at, rejected_at, expires_at, week_run_id)
          VALUES
            (@id, @status, @target_date, @weekday, @proposal_json, @context_hash, @blueprint_commit,
             @model_provider, @model_name, @request_id, @committed_session_id, @failure_reason,
-            @created_at, @updated_at, @approved_at, @committed_at, @rejected_at, @expires_at)`
+            @created_at, @updated_at, @approved_at, @committed_at, @rejected_at, @expires_at, @week_run_id)`
       )
       .run(row);
     return rowToRecord(row);

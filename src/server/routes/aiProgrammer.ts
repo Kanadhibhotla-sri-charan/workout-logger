@@ -28,7 +28,9 @@ import {
   rejectWeekReconciliation,
 } from '../../ai-programmer/service/weekReconciliationLifecycle.js';
 import { buildTokenReport } from '../../ai-programmer/service/tokenReport.js';
-import { isAiProgrammerEnabled, loadVelonaConfig } from '../../ai-programmer/provider/config.js';
+import { aiWeekGenerationMode, isAiProgrammerEnabled, loadVelonaConfig } from '../../ai-programmer/provider/config.js';
+import { activeRunClaimingDate, startWeekGeneration } from '../../ai-programmer/service/weekGeneration.js';
+import { AIWeekGenerationInProgressError } from '../../ai-programmer/errors.js';
 
 export const aiProgrammerRouter = Router();
 
@@ -139,6 +141,13 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
   // async handler to the error middleware — every path below must
   // resolve via res.json/res.status or explicitly call next(err).
   try {
+    // Explicit week generation (2026-10-01): a date an active week run is
+    // about to generate is not generated a second time in parallel. Only
+    // while that run is live — otherwise generate-session is unchanged.
+    if (aiWeekGenerationMode() === 'explicit') {
+      const claiming = activeRunClaimingDate(db(req), targetDate);
+      if (claiming) throw new AIWeekGenerationInProgressError(targetDate, claiming.id);
+    }
     const service = createDefaultAIProgrammerService(db(req));
     const result = await service.generateSession({ targetDate, requestedSessionPurpose, confirmRetry: confirmRetry === true });
     // Phase 2 §5: the response now also carries the persisted proposal's
@@ -154,6 +163,40 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
       provider: result.provider,
       model: result.model,
       requestId: result.requestId,
+    });
+  } catch (err) {
+    if (err instanceof AIProgrammerError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.code, message: err.publicMessage, details: err.details });
+    }
+    next(err);
+  }
+});
+
+// POST /api/ai-programmer/generate-week {weekStart, confirmRetry?}
+// Explicit week generation (2026-10-01): creates per-day PENDING proposals
+// for the week's remaining gym days (see weekGeneration.ts). Answers 202 as
+// soon as the run's guard is held — the run itself continues in the
+// background (it makes one provider call per day, longer than a proxy
+// timeout) and its progress is read from GET /api/programming/week's
+// `generation` field. A concurrent request for the same week gets the
+// already-running run (202, status "in_progress"); nothing new is paid for.
+aiProgrammerRouter.post('/generate-week', (req, res, next) => {
+  const { weekStart, confirmRetry } = req.body ?? {};
+  if (typeof weekStart !== 'string' || !isValidCalendarDate(weekStart)) {
+    return res.status(400).json({ ok: false, error: 'weekStart (string, YYYY-MM-DD) is required' });
+  }
+  if (confirmRetry !== undefined && typeof confirmRetry !== 'boolean') {
+    return res.status(400).json({ ok: false, error: 'confirmRetry must be a boolean when present' });
+  }
+  try {
+    const database = db(req);
+    const result = startWeekGeneration(database, createDefaultAIProgrammerService(database), weekStart, { confirmRetry: confirmRetry === true });
+    res.status(202).json({
+      ok: true,
+      runId: result.run.id,
+      status: result.kind === 'started' ? 'running' : 'in_progress',
+      weekStart: result.run.weekStart,
+      days: result.run.days.map((d) => ({ date: d.date, purpose: d.purpose, outcome: d.outcome })),
     });
   } catch (err) {
     if (err instanceof AIProgrammerError) {

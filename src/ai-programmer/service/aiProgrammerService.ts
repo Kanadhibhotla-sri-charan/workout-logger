@@ -343,7 +343,22 @@ export class AIProgrammerService {
    * `plan` non-null = planned generation: the AI receives the compact
    * SessionPlan context and plan instruction, and the pipeline applies
    * plan conformance. Every other stage is identical either way. */
-  private async generateFromContext(context: AIProgrammerContext, plan: SessionPlan | null): Promise<GenerateSessionResult> {
+  /** Explicit week generation (2026-10-01): ONE planned day of a week
+   * run — the exact generate_session provider call, pipeline and
+   * persistence (generateFromContext), with the week run's link and
+   * end-of-target-date expiry. The caller (weekGeneration.ts) owns the
+   * guard, the eligibility re-check and the gates; nothing here forks
+   * the single-day path. */
+  async generatePlannedDayProposal(context: AIProgrammerContext, plan: SessionPlan, persist: { weekRunId: string; expiresAt: string }): Promise<GenerateSessionResult> {
+    if (!isAiProgrammerEnabled()) throw new AIProgrammerDisabledError();
+    return this.generateFromContext(context, plan, persist);
+  }
+
+  private async generateFromContext(
+    context: AIProgrammerContext,
+    plan: SessionPlan | null,
+    persist: { weekRunId: string; expiresAt: string } | null = null
+  ): Promise<GenerateSessionResult> {
     const requestId = randomUUID();
     const systemInstruction = plan ? buildPlannedProgrammerSystemInstruction() : buildProgrammerSystemInstruction();
     const outputSchema = getProgrammerOutputSchema();
@@ -408,6 +423,7 @@ export class AIProgrammerService {
       modelProvider: providerResponse.provider,
       modelName: providerResponse.model,
       requestId: providerResponse.requestId,
+      ...(persist ? { weekRunId: persist.weekRunId, expiresAt: persist.expiresAt } : {}),
     });
 
     return {

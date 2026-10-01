@@ -19,6 +19,15 @@ export function isPlannedGenerationEnabled(): boolean {
   return process.env.AI_PLANNED_GENERATION_ENABLED === 'true';
 }
 
+/** Week generation mode (2026-10-01). 'legacy' (default): GET
+ * /api/programming/week and /today generate an unsaved week on first read,
+ * exactly as before. 'explicit': reads never generate; AI week sessions are
+ * created only by POST /api/ai-programmer/generate-week, as per-day pending
+ * proposals. Setting it back to legacy is the rollback. */
+export function aiWeekGenerationMode(): 'legacy' | 'explicit' {
+  return process.env.AI_WEEK_GENERATION_MODE === 'explicit' ? 'explicit' : 'legacy';
+}
+
 export interface VelonaConfig {
   apiKey: string;
   baseUrl: string;

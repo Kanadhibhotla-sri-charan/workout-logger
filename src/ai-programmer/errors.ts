@@ -42,7 +42,12 @@ export type AIProgrammerErrorCode =
   | 'AI_WEEK_RECONCILIATION_OUTPUT_SCHEMA_INVALID'
   | 'AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID'
   | 'AI_GENERATE_WEEK_OUTPUT_SCHEMA_INVALID'
-  | 'AI_GENERATE_WEEK_OUTPUT_DOMAIN_INVALID';
+  | 'AI_GENERATE_WEEK_OUTPUT_DOMAIN_INVALID'
+  | 'AI_WEEK_GENERATION_DISABLED'
+  | 'AI_WEEK_GENERATION_NOT_ALLOWED'
+  | 'AI_WEEK_GENERATION_NOTHING_TO_DO'
+  | 'AI_WEEK_GENERATION_BACKOFF'
+  | 'AI_WEEK_GENERATION_IN_PROGRESS';
 
 /** Base class for every error this integration throws. `statusCode` is
  * the HTTP status the route layer maps it to; `publicMessage` is what a
@@ -445,5 +450,47 @@ export class AIGenerateWeekOutputDomainInvalidError extends AIProgrammerError {
     super('AI_GENERATE_WEEK_OUTPUT_DOMAIN_INVALID', `AI generate-week output failed domain validation: ${bounded.join('; ')}`, 502, {
       issues: bounded,
     });
+  }
+}
+
+// ---- Explicit week generation (2026-10-01) ----
+
+/** POST /generate-week while AI_WEEK_GENERATION_MODE is not 'explicit'. */
+export class AIWeekGenerationDisabledError extends AIProgrammerError {
+  constructor() {
+    super('AI_WEEK_GENERATION_DISABLED', 'Explicit week generation is not enabled (AI_WEEK_GENERATION_MODE is not "explicit").', 409);
+  }
+}
+
+/** The requested week is outside the paid-generation window (current week; next week from Saturday). */
+export class AIWeekGenerationNotAllowedError extends AIProgrammerError {
+  constructor(weekStart: string, allowedWeekStarts: readonly string[], reason: string) {
+    super('AI_WEEK_GENERATION_NOT_ALLOWED', `Week ${weekStart} cannot be generated: ${reason}.`, 400, { weekStart, allowedWeekStarts: [...allowedWeekStarts] });
+  }
+}
+
+/** No remaining gym day of the week needs a proposal (all past, locked, or already proposed/committed). */
+export class AIWeekGenerationNothingToDoError extends AIProgrammerError {
+  constructor(weekStart: string, days: ReadonlyArray<{ date: string; reason: string }>) {
+    super('AI_WEEK_GENERATION_NOTHING_TO_DO', `No gym day in week ${weekStart} needs an AI proposal.`, 409, { weekStart, days: [...days] });
+  }
+}
+
+/** A recent run for this week failed at the provider; no paid call until `retryAfter`. */
+export class AIWeekGenerationBackoffError extends AIProgrammerError {
+  constructor(weekStart: string, retryAfter: string, failureClass: string | null) {
+    super(
+      'AI_WEEK_GENERATION_BACKOFF',
+      `The AI provider was unavailable for the last attempt at week ${weekStart}; try again after ${retryAfter}.`,
+      503,
+      { weekStart, retryAfter, failureClass }
+    );
+  }
+}
+
+/** generate-session for a date that an active week-generation run is about to (or currently does) generate. */
+export class AIWeekGenerationInProgressError extends AIProgrammerError {
+  constructor(targetDate: string, runId: string) {
+    super('AI_WEEK_GENERATION_IN_PROGRESS', `A week generation run (${runId}) is currently generating ${targetDate}; wait for it to finish.`, 409, { targetDate, runId });
   }
 }

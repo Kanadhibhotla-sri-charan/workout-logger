@@ -45,7 +45,8 @@ import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS } from '../../engine/config.js';
 import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
 import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning } from '../friendlyExplanation.js';
 import type { SkippedTarget } from '../../engine/workoutBuilder.js';
-import { isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
+import { aiWeekGenerationMode, isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
+import { readWeekGenerationState } from '../../ai-programmer/service/weekGeneration.js';
 import { createDefaultAIProgrammerService } from '../../ai-programmer/service/aiProgrammerService.js';
 import { AIProgrammerError } from '../../ai-programmer/errors.js';
 
@@ -415,6 +416,25 @@ export function computeFreshWeek(
  * do, rather than silently serving a deterministic week the user never
  * asked for and has no way to know replaced what the AI would have
  * produced. */
+/** The week program GET /week and /today render. Legacy mode: exactly as
+ * before (generate + persist on the first read of a week). Explicit mode
+ * (2026-10-01): a pure read — the saved program if one exists, otherwise an
+ * in-memory empty program (never saved), which renders the live week
+ * skeleton; AI sessions come only from POST /api/ai-programmer/generate-week. */
+async function weekProgramForRead(database: Database.Database, weekStart: string, budgetMinutes: number, date: string): Promise<{ program: PersistedWeekProgram; saved: boolean }> {
+  if (aiWeekGenerationMode() !== 'explicit') {
+    return { program: await ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeekOrAI(database, weekStart, budgetMinutes, date)), saved: true };
+  }
+  const saved = new WeeklyProgramRepo(database).getByWeekStart(weekStart);
+  if (saved) return { program: saved, saved: true };
+  return { program: { id: '', start_date: weekStart, end_date: addDays(weekStart, 6), active_goals: null, target_allocations: null, sessions: [] }, saved: false };
+}
+
+/** Explicit mode only: the additive `generation` field (absent in legacy mode, which is byte-identical to before). */
+function generationField(database: Database.Database, weekStart: string, saved: boolean): { generation?: ReturnType<typeof readWeekGenerationState> } {
+  return aiWeekGenerationMode() === 'explicit' ? { generation: readWeekGenerationState(database, weekStart, saved) } : {};
+}
+
 async function computeFreshWeekOrAI(database: Database.Database, weekStart: string, budgetMinutes: number, date: string): Promise<{ days: FreshDayInput[]; aggregates: WeekAggregates }> {
   if (isAiProgrammerEnabled()) {
     const { days, aggregates } = await createDefaultAIProgrammerService(database).generateWeek(weekStart);
@@ -593,11 +613,11 @@ programmingRouter.get('/week', async (req, res, next) => {
   const weekStart = programmingWeekStart(date);
 
   try {
-    const program = await ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeekOrAI(database, weekStart, budgetMinutes, date));
+    const { program, saved } = await weekProgramForRead(database, weekStart, budgetMinutes, date);
 
     const user = new UsersRepo(database).getOrCreateDefault();
     const profile = new TrainingProfileRepo(database).get(user.id);
-    res.json(buildWeekResponse(database, weekStart, program, profile));
+    res.json({ ...buildWeekResponse(database, weekStart, program, profile), ...generationField(database, weekStart, saved) });
   } catch (err) {
     // generate_week (2026-09-23): a real AI failure surfaces here as a
     // clear, typed error — never a silent fallback to the deterministic
@@ -948,7 +968,7 @@ programmingRouter.get('/today', async (req, res, next) => {
   const weekStart = programmingWeekStart(date);
 
   try {
-    const program = await ensureWeekProgramGenerated(database, weekStart, () => computeFreshWeekOrAI(database, weekStart, budgetMinutes, date));
+    const { program, saved } = await weekProgramForRead(database, weekStart, budgetMinutes, date);
 
     const user = new UsersRepo(database).getOrCreateDefault();
     const profile = new TrainingProfileRepo(database).get(user.id);
@@ -996,6 +1016,7 @@ programmingRouter.get('/today', async (req, res, next) => {
       // needed to reconstruct this.
       constraints: { available_equipment: profile?.available_equipment ?? [], budget_minutes: budgetMinutes },
       loggedSessions,
+      ...generationField(database, weekStart, saved),
     });
   } catch (err) {
     if (err instanceof AIProgrammerError) {
