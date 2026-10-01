@@ -22,7 +22,7 @@ import {
 } from '../../engine/workoutBuilder.js';
 import { exercisesTrainingTarget } from '../../engine/exerciseSelector.js';
 import { filterEquipmentFeasible } from '../../engine/constraintEngine.js';
-import { addDays } from '../../engine/dateMath.js';
+import { addDays, isValidCalendarDate } from '../../engine/dateMath.js';
 import { DAILY_ACTIVITIES, WEEKDAYS, type BlueprintId, type DailyActivity, type Goal, type RecurringActivity, type TrainingProfile, type Weekday, type WorkoutSession } from '../../contracts/types.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import type { TargetType } from '../../engine/goalResolver.js';
@@ -582,6 +582,13 @@ function buildWeekResponse(database: Database.Database, weekStart: string, progr
 programmingRouter.get('/week', async (req, res, next) => {
   const database = db(req);
   const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
+  // Validated before anything parses it: this async handler's date math
+  // otherwise throws outside the try below, and an unhandled rejection
+  // exits the whole process (seen 2026-09-30: a scraper requesting the
+  // frontend's unexpanded `${session.date}` template text).
+  if (!isValidCalendarDate(date)) {
+    return res.status(400).json({ error: 'date must be a real calendar date in YYYY-MM-DD format' });
+  }
   const budgetMinutes = defaultBudgetMinutes(database);
   const weekStart = programmingWeekStart(date);
 
@@ -930,6 +937,13 @@ programmingRouter.post('/week/move', (req, res) => {
 programmingRouter.get('/today', async (req, res, next) => {
   const database = db(req);
   const date = typeof req.query.date === 'string' ? req.query.date : todayForUser(database);
+  // Validated before anything parses it: this async handler's date math
+  // otherwise throws outside the try below, and an unhandled rejection
+  // exits the whole process (seen 2026-09-30: a scraper requesting the
+  // frontend's unexpanded `${session.date}` template text).
+  if (!isValidCalendarDate(date)) {
+    return res.status(400).json({ error: 'date must be a real calendar date in YYYY-MM-DD format' });
+  }
   const budgetMinutes = defaultBudgetMinutes(database);
   const weekStart = programmingWeekStart(date);
 
