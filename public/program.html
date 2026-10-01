@@ -217,6 +217,11 @@
      * opens that day and explicitly approves + commits it, exactly like
      * the single-day flow. */
     function buildGenerateWeekControl() {
+      // Explicit week generation (2026-10-01): when the backend reports a
+      // `generation` state, generation is the backend's own week action —
+      // render that instead. Without it (legacy mode) this control is
+      // exactly as before.
+      if (weekData.generation) return buildWeekGenerationControl(weekData.generation);
       const section = el('div', { class: 'change-activity', style: 'margin-bottom:1rem' });
       const statusEl = el('div');
       const resultsEl = el('div');
@@ -331,6 +336,95 @@
         btn.disabled = false;
         showInlineStatus(statusEl, null, null);
         renderResults(outcomes);
+      }
+
+      return section;
+    }
+
+    /** Explicit week generation (2026-10-01): one action — POST
+     * /api/ai-programmer/generate-week — and a display of the backend's own
+     * `generation` state from GET /week (weekGenerationView in app.js maps
+     * it to text; nothing is decided here). The run happens on the server
+     * in the background; while the backend says "generating", this re-reads
+     * GET /week every few seconds and re-renders from that response, and
+     * stops as soon as it says anything else. Each day's proposal is still
+     * reviewed, approved and committed in that day's own panel, exactly as
+     * before — this never shows or edits a second copy of the workouts. */
+    let weekGenerationRefreshTimer = null;
+    const WEEK_GENERATION_REFRESH_MS = 4000;
+
+    async function refreshWeekGenerationState() {
+      weekGenerationRefreshTimer = null;
+      try {
+        weekData = await api('/api/programming/week');
+        renderWeek();
+      } catch {
+        scheduleWeekGenerationRefresh(); // transient read failure: keep following the run
+      }
+    }
+
+    function scheduleWeekGenerationRefresh() {
+      if (weekGenerationRefreshTimer) return; // one pending refresh at a time
+      weekGenerationRefreshTimer = setTimeout(refreshWeekGenerationState, WEEK_GENERATION_REFRESH_MS);
+    }
+
+    function buildWeekGenerationControl(generation) {
+      const view = weekGenerationView(generation);
+      const section = el('div', { class: 'change-activity week-generation', style: 'margin-bottom:1rem' });
+      section.appendChild(el('p', { class: 'muted', text: view.headline, style: 'margin:0 0 0.4rem' }));
+
+      if (view.notice) {
+        const notice = view.retryAfter ? `${view.notice} You can try again after ${formatTimestamp(view.retryAfter)}.` : view.notice;
+        section.appendChild(el('p', { class: 'faint', text: notice, style: 'margin:0 0 0.5rem' }));
+      }
+
+      const statusEl = el('div');
+      let inFlight = false;
+      const btn = createButton({
+        label: view.isGenerating ? 'Generating…' : "Generate this week's AI sessions",
+        variant: 'secondary',
+        disabled: !view.canStart,
+        onClick: onStart,
+      });
+      section.appendChild(btn);
+      section.appendChild(statusEl);
+
+      if (view.days.length > 0) {
+        const list = el('div', { class: 'week-generation-days', style: 'margin-top:0.6rem' });
+        for (const d of view.days) {
+          const purpose = d.purpose ? ` · ${capitalize(d.purpose)}` : '';
+          const row = el('div', { style: 'display:flex;align-items:center;gap:0.5rem;margin:0.2rem 0;flex-wrap:wrap' });
+          row.appendChild(el('span', { class: 'faint', text: `${formatDate(d.date)}${purpose}` }));
+          row.appendChild(el('span', { class: `badge badge-${d.tone}`, text: d.label }));
+          list.appendChild(row);
+        }
+        section.appendChild(list);
+        section.appendChild(el('p', { class: 'faint', text: 'Nothing is added to your program until you open a day and approve and commit its proposal.', style: 'margin:0.5rem 0 0' }));
+      }
+
+      if (view.isGenerating) scheduleWeekGenerationRefresh();
+
+      async function onStart() {
+        if (inFlight || !view.canStart) return;
+        inFlight = true;
+        btn.disabled = true;
+        showInlineStatus(statusEl, 'saving', 'Starting…');
+        try {
+          await aiApi('/api/ai-programmer/generate-week', { method: 'POST', body: { weekStart: weekData.weekStart } });
+        } catch (err) {
+          showInlineStatus(statusEl, 'error', err.message);
+          // Re-read the backend's state (e.g. a backoff's retry time) and keep the button
+          // as the backend allows, without hiding the message.
+          try {
+            weekData = await api('/api/programming/week');
+            btn.disabled = !weekGenerationView(weekData.generation).canStart;
+          } catch {
+            btn.disabled = !view.canStart;
+          }
+          inFlight = false;
+          return;
+        }
+        await refreshWeekGenerationState();
       }
 
       return section;

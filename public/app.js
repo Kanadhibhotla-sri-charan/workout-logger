@@ -462,6 +462,11 @@ const AI_ERROR_MESSAGES = {
   AI_WEEK_RECONCILIATION_COMMIT_FAILED: 'This week reconciliation could not be committed. Please try again.',
   AI_WEEK_RECONCILIATION_OUTPUT_SCHEMA_INVALID: 'The week reconciliation could not be validated. Please try generating again.',
   AI_WEEK_RECONCILIATION_OUTPUT_DOMAIN_INVALID: 'The week reconciliation could not be validated. Please try generating again.',
+  AI_WEEK_GENERATION_DISABLED: "Generating this week's AI sessions isn't available right now.",
+  AI_WEEK_GENERATION_NOT_ALLOWED: 'AI sessions can be generated for the current week, and for next week from Saturday.',
+  AI_WEEK_GENERATION_NOTHING_TO_DO: 'Every remaining gym day this week already has a proposal or a workout.',
+  AI_WEEK_GENERATION_BACKOFF: 'The AI provider was unavailable on the last attempt. Please try again later.',
+  AI_WEEK_GENERATION_IN_PROGRESS: "This week's AI sessions are being generated right now. Please wait for that to finish.",
 };
 
 function mapAiErrorCode(code) {
@@ -531,6 +536,56 @@ async function aiApi(path, options = {}) {
     throw err;
   }
   return body;
+}
+
+/** Explicit week generation (2026-10-01): pure display mapping of the
+ * backend's own `generation` state (GET /api/programming/week). Never
+ * decides anything itself — whether a run may start (`canStart`) is the
+ * backend's `canGenerate`, and every label is a direct translation of a
+ * backend status or reason. DOM-free so it is directly testable. */
+const WEEK_GENERATION_HEADLINES = {
+  not_generated: "This week's AI sessions haven't been generated yet.",
+  generating: "Generating this week's AI sessions…",
+  partially_generated: "Some of this week's AI sessions are ready.",
+  generated: "This week's AI sessions are ready to review.",
+  failed: "The last attempt to generate this week's AI sessions failed.",
+  saved: 'This week already has a saved program.',
+};
+const WEEK_GENERATION_REASONS = {
+  outside_window: 'AI sessions can be generated for the current week, and for next week from Saturday.',
+  in_progress: 'Generation is in progress — this page updates on its own.',
+  provider_unavailable: 'The AI provider is unavailable right now.',
+  nothing_to_generate: 'Every remaining gym day already has a proposal or a workout.',
+  disabled: "Generating this week's AI sessions isn't available right now.",
+};
+const WEEK_GENERATION_DAY_STATUS = {
+  past: { label: 'Past', tone: 'rest' },
+  locked: { label: 'Workout logged', tone: 'success' },
+  committed: { label: 'Planned workout', tone: 'success' },
+  proposal_pending: { label: 'Proposal ready — open the day to review', tone: 'progress' },
+  approved: { label: 'Approved — open the day to commit', tone: 'progress' },
+  generating: { label: 'Generating…', tone: 'progress' },
+  refused: { label: "Can't be planned with the current setup", tone: 'warning' },
+  failed_quality: { label: 'Failed the quality checks', tone: 'danger' },
+  gated: { label: 'Not retried — the same request already failed', tone: 'warning' },
+  failed_provider: { label: 'AI provider unavailable', tone: 'danger' },
+  not_generated: { label: 'Not generated', tone: 'neutral' },
+};
+function weekGenerationView(generation) {
+  const g = generation || {};
+  const isGenerating = g.status === 'generating';
+  return {
+    status: g.status || 'not_generated',
+    headline: WEEK_GENERATION_HEADLINES[g.status] || WEEK_GENERATION_HEADLINES.not_generated,
+    isGenerating,
+    canStart: g.canGenerate === true && !isGenerating,
+    notice: g.reason ? WEEK_GENERATION_REASONS[g.reason] || null : null,
+    retryAfter: g.reason === 'provider_unavailable' && g.retryAfter ? g.retryAfter : null,
+    days: (g.perDay || []).map((d) => {
+      const s = WEEK_GENERATION_DAY_STATUS[d.status] || WEEK_GENERATION_DAY_STATUS.not_generated;
+      return { date: d.date, weekday: d.weekday, purpose: d.purpose || null, label: s.label, tone: s.tone };
+    }),
+  };
 }
 
 /** Pure lifecycle-representation logic (Proposal Review UI spec §3):
