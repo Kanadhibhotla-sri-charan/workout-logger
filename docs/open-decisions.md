@@ -1,5 +1,9 @@
 # Open decisions
 
+> AI generation (SessionPlan, plan conformance, planned and explicit week
+> generation, 2026-09/10): decisions, incidents and open items are recorded
+> in `docs/AI_GENERATION_REDESIGN_DECISION_LOG.md`.
+
 Phase 1/1.5/2 deliberately picked pragmatic defaults, built provisional
 implementations, or wrote up proposals rather than silently deciding
 things for good. The "Next Phase Implementation Specification"
