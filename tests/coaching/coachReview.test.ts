@@ -83,15 +83,27 @@ describe('facts and checks', () => {
     expect(facts.goals[0]!.targets.length).toBeGreaterThan(0);
   });
 
-  it('accepts a grounded answer and rejects made-up exercises, non-stalled advice and unlisted swaps', () => {
+  it('accepts a grounded answer, drops made-up, non-stalled and unlisted-swap advice, and rejects a malformed review', () => {
     const facts = buildCoachFacts(db, TODAY, noRequirement);
-    expect(validateCoachReview(answer(facts), facts).ok).toBe(true);
-    const bad = (plateau: Record<string, unknown>) => validateCoachReview(answer(facts, { plateaus: [{ ...answer(facts).plateaus[0], ...plateau }] }), facts);
-    expect(bad({ exerciseId: 'made-up-curl' })).toMatchObject({ ok: false });
-    expect(bad({ exerciseId: 'close-grip-bench-press', kind: 'load', swapToExerciseId: null })).toMatchObject({ ok: false });
-    expect(bad({ swapToExerciseId: 'barbell-back-squat' })).toMatchObject({ ok: false });
-    expect(bad({ kind: 'rep_range' })).toMatchObject({ ok: false }); // swap target on a non-swap
+    expect(validateCoachReview(answer(facts), facts)).toMatchObject({ ok: true, dropped: [] });
+    const withPlateau = (plateau: Record<string, unknown>) => validateCoachReview(answer(facts, { plateaus: [{ ...answer(facts).plateaus[0], ...plateau }] }), facts);
+    // 2026-10-11: one off-rule advice item is dropped; the review is kept.
+    for (const plateau of [{ exerciseId: 'made-up-curl' }, { exerciseId: 'close-grip-bench-press', kind: 'load', swapToExerciseId: null }, { swapToExerciseId: 'barbell-back-squat' }]) {
+      const r = withPlateau(plateau);
+      expect(r).toMatchObject({ ok: true, plateaus: [] });
+      expect((r as { dropped: string[] }).dropped).toHaveLength(1);
+    }
+    expect(withPlateau({ kind: 'rep_range' })).toMatchObject({ ok: true, plateaus: [{ kind: 'rep_range', swapToExerciseId: null }] }); // swap target ignored on a non-swap
     expect(validateCoachReview(answer(facts, { focusThisWeek: ['a', 'b', 'c', 'd'] }), facts)).toMatchObject({ ok: false });
+    expect(validateCoachReview(answer(facts, { headline: '' }), facts)).toMatchObject({ ok: false });
+  });
+
+  it('an exercise qualifies when any of its series (per equipment) is stalled or down', () => {
+    const facts = buildCoachFacts(db, TODAY, noRequirement);
+    const stalled = facts.strength.find((x) => x.status === 'stalled' || x.status === 'down')!;
+    const twoSeries = { ...facts, strength: [{ ...stalled, status: 'flat' as const }, stalled] };
+    const r = validateCoachReview(answer(facts, { plateaus: [{ ...answer(facts).plateaus[0], exerciseId: stalled.exerciseId }] }), twoSeries);
+    expect(r).toMatchObject({ ok: true, dropped: [] });
   });
 });
 
@@ -124,7 +136,7 @@ describe('routes', () => {
 
   it('an invalid answer saves nothing', async () => {
     const app = createApp(db);
-    app.locals.coachProvider = new FakeCoach((facts) => answer(facts, { plateaus: [{ exerciseId: 'made-up', kind: 'load', observation: 'x', suggestion: 'y', swapToExerciseId: null }] }));
+    app.locals.coachProvider = new FakeCoach((facts) => answer(facts, { headline: '' }));
     const res = (await request(app).post('/api/coaching/review').send({}).expect(502)).body;
     expect(res.error).toBe('AI_COACH_REVIEW_OUTPUT_INVALID');
     expect(new CoachRepo(db).latestReview()).toBeNull();
@@ -139,6 +151,16 @@ describe('routes', () => {
     await request(app).post(`/api/coaching/advice/${advice.id}`).send({ decision: 'maybe' }).expect(400);
     delete process.env.AI_PROGRAMMER_ENABLED;
     await request(app).post('/api/coaching/review').send({ regenerate: true }).expect(503);
+  });
+});
+
+describe('off-rule advice (2026-10-11 production case)', () => {
+  it('advice on a flat exercise is dropped and the review is saved', async () => {
+    const app = createApp(db);
+    app.locals.coachProvider = new FakeCoach((facts) => answer(facts, { plateaus: [{ exerciseId: 'close-grip-bench-press', kind: 'load', observation: 'x', suggestion: 'y', swapToExerciseId: null }] }));
+    const saved = (await request(app).post('/api/coaching/review').send({}).expect(201)).body.review;
+    expect(saved.advice).toEqual([]);
+    expect(new CoachRepo(db).latestReview()).not.toBeNull();
   });
 });
 

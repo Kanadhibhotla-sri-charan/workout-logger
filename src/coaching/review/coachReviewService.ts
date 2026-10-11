@@ -161,8 +161,11 @@ export function buildCoachInstruction(): string {
 
 const isText = (v: unknown, max = MAX_TEXT): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 
-/** Checks the model's review against the schema and the facts. */
-export function validateCoachReview(raw: unknown, facts: CoachFacts): { ok: true; review: CoachReviewBody; plateaus: Array<{ exerciseId: string; kind: CoachAdviceKind; observation: string; suggestion: string; swapToExerciseId: string | null }> } | { ok: false; errors: string[] } {
+/** Checks the model's review against the schema and the facts. A
+ * malformed review fails; a plateau item that breaks the rules (an
+ * exercise not stalled or down, a bad swap...) is dropped and reported in
+ * `dropped`, so one off-rule item does not discard the whole review. */
+export function validateCoachReview(raw: unknown, facts: CoachFacts): { ok: true; review: CoachReviewBody; plateaus: Array<{ exerciseId: string; kind: CoachAdviceKind; observation: string; suggestion: string; swapToExerciseId: string | null }>; dropped: string[] } | { ok: false; errors: string[] } {
   const errors: string[] = [];
   const o = raw as Record<string, unknown>;
   if (!o || typeof o !== 'object') return { ok: false, errors: ['output is not a JSON object'] };
@@ -173,23 +176,27 @@ export function validateCoachReview(raw: unknown, facts: CoachFacts): { ok: true
     if (!Array.isArray(v) || v.length > max || !v.every((x) => isText(x))) errors.push(`${key} must be an array of at most ${max} non-empty strings of at most ${MAX_TEXT} characters`);
   }
   if (!isText(o.recovery, 600)) errors.push('recovery must be a non-empty string of at most 600 characters');
-  const known = new Map(facts.strength.map((s) => [s.exerciseId, s]));
+  // One exercise can have several series (per equipment/attachment/unit):
+  // it qualifies when any of them is stalled or down.
+  const statuses = new Map<string, string[]>();
+  for (const s of facts.strength) statuses.set(s.exerciseId, [...(statuses.get(s.exerciseId) ?? []), s.status]);
+  const dropped: string[] = [];
   const plateaus: Array<{ exerciseId: string; kind: CoachAdviceKind; observation: string; suggestion: string; swapToExerciseId: string | null }> = [];
   if (!Array.isArray(o.plateaus) || o.plateaus.length > MAX_PLATEAUS) errors.push(`plateaus must be an array of at most ${MAX_PLATEAUS} items`);
   else {
     const seen = new Set<string>();
     o.plateaus.forEach((p: any, i: number) => {
       const at = `plateaus[${i}]`;
-      const fact = known.get(p?.exerciseId);
-      if (!fact) return errors.push(`${at}.exerciseId "${p?.exerciseId}" is not an exercise in the facts`);
-      if (fact.status !== 'stalled' && fact.status !== 'down') return errors.push(`${at}: ${p.exerciseId} is "${fact.status}", not stalled or down`);
-      if (seen.has(p.exerciseId)) return errors.push(`${at}: ${p.exerciseId} appears twice`);
-      seen.add(p.exerciseId);
-      if (!ADVICE_KINDS.includes(p.kind)) return errors.push(`${at}.kind must be one of ${ADVICE_KINDS.join(', ')}`);
-      if (!isText(p.observation) || !isText(p.suggestion)) return errors.push(`${at}: observation and suggestion must be non-empty strings of at most ${MAX_TEXT} characters`);
+      const drop = (why: string) => dropped.push(`${at}: ${why}`);
+      const exerciseStatuses = statuses.get(p?.exerciseId);
+      if (!exerciseStatuses) return drop(`exerciseId "${p?.exerciseId}" is not an exercise in the facts`);
+      if (!exerciseStatuses.some((st) => st === 'stalled' || st === 'down')) return drop(`${p.exerciseId} is "${exerciseStatuses.join('/')}", not stalled or down`);
+      if (seen.has(p.exerciseId)) return drop(`${p.exerciseId} appears twice`);
+      if (!ADVICE_KINDS.includes(p.kind)) return drop(`kind must be one of ${ADVICE_KINDS.join(', ')}`);
+      if (!isText(p.observation) || !isText(p.suggestion)) return drop(`observation and suggestion must be non-empty strings of at most ${MAX_TEXT} characters`);
       const options = (facts.swapOptions[p.exerciseId] ?? []).map((x) => x.exerciseId);
-      if (p.kind === 'swap' && !options.includes(p.swapToExerciseId)) return errors.push(`${at}.swapToExerciseId must be one of ${options.join(', ') || '(no options)'}`);
-      if (p.kind !== 'swap' && p.swapToExerciseId !== null && p.swapToExerciseId !== undefined) return errors.push(`${at}.swapToExerciseId must be null unless kind is "swap"`);
+      if (p.kind === 'swap' && !options.includes(p.swapToExerciseId)) return drop(`swapToExerciseId must be one of ${options.join(', ') || '(no options)'}`);
+      seen.add(p.exerciseId);
       plateaus.push({ exerciseId: p.exerciseId, kind: p.kind, observation: p.observation.trim(), suggestion: p.suggestion.trim(), swapToExerciseId: p.kind === 'swap' ? p.swapToExerciseId : null });
     });
   }
@@ -204,6 +211,7 @@ export function validateCoachReview(raw: unknown, facts: CoachFacts): { ok: true
       recovery: (o.recovery as string).trim(),
     },
     plateaus,
+    dropped,
   };
 }
 
@@ -227,7 +235,7 @@ export async function generateCoachReview(db: Database.Database, provider: AIPro
     console.log('[coach-review] rejected', JSON.stringify({ requestId, errors: checked.errors }));
     throw new AIProgrammerError('AI_COACH_REVIEW_OUTPUT_INVALID', 'The coach review did not pass its checks; nothing was saved.', 502, checked.errors);
   }
-  console.log('[coach-review] saved', JSON.stringify({ requestId, model: response.model, usage: response.usage ?? null }));
+  console.log('[coach-review] saved', JSON.stringify({ requestId, model: response.model, usage: response.usage ?? null, droppedPlateaus: checked.dropped }));
   return new CoachRepo(db).saveReview({
     weekStart: facts.weekStart,
     asOf,

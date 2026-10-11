@@ -801,3 +801,26 @@ changing the carry to steps saved and relabelled the column, Insights then
 read "17.5 kg × 45 steps". That check caught a duplicate `capitalize`
 declaration that stopped the logger loading, fixed before commit; the new
 script test guards it.
+
+## 17. Coach review: off-rule advice no longer discards the review (2026-10-11)
+Owner's first "Write this week's review" failed with
+AI_COACH_REVIEW_OUTPUT_INVALID. Production log (request c0f7d907): the only
+error was `plateaus[0]: overhead-triceps-extension is "flat", not stalled or
+down`. The model advised on an exercise that went 27 -> 33 -> 21 -> 15 -> 15 ->
+27 kg (status flat because it ended where it started); the validator then
+rejected the whole review, so the paid call produced nothing.
+
+Changes (`coachReviewService.validateCoachReview`):
+- A plateau item that breaks the rules (unknown exercise, not stalled/down,
+  duplicate, bad kind/text, swap not in swapOptions) is dropped and logged
+  (`droppedPlateaus` on the `[coach-review] saved` line); the review and the
+  valid items are saved. A malformed review (headline, lists, recovery) still
+  fails and saves nothing. A swap target on a non-swap item is ignored.
+- Since section 14 an exercise can have several series (per equipment, now
+  also attachment/unit). The old check looked up one series per exercise id;
+  an exercise now qualifies when any of its series is stalled or down.
+- The Coaching page shows the plain error message, not the error code.
+
+Tests: `tests/coaching/coachReview.test.ts` (dropping, multi-series
+eligibility, production case saved with no advice). Full suite: the same
+245 known failures, 0 new. No paid call made; the owner retries the review.

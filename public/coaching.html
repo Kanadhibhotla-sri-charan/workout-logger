@@ -68,7 +68,7 @@
             await api('/api/coaching/review', { method: 'POST', body: regenerate ? { regenerate: true } : {} });
             await loadReview();
           } catch (err) {
-            showInlineStatus(statusEl, 'error', err.message || 'The review could not be written.');
+            showInlineStatus(statusEl, 'error', (err.body && err.body.message) || 'The review could not be written. Try again.');
             btn.disabled = false;
           }
         },
