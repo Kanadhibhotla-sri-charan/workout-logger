@@ -562,3 +562,19 @@ button.
 `tests/ai-programmer/deloadVolume.test.ts` (6). Full suite 2235 tests: the same
 245 known date-rotation failures, 0 new. Replay 10/10 (the replay stub now
 gives every member of a shared group one exercise before filling minimums).
+
+### 12.5 Deployed 2026-10-11 06:49Z
+* Commit `7a94cc2` on `main`. Backup:
+  `deployment-backups/pre-7a94cc2-20261011T064924Z.sqlite`.
+* New drop-in `/etc/systemd/system/workout-logger.service.d/exercise-pool.conf`
+  -> `AI_EXERCISE_POOL_MODE=wide`. Rollback: delete it, `daemon-reload`,
+  restart (package pool; all schema changes additive, nothing to migrate).
+* Verified: service active, `/api/health` ok, running process has
+  AI_PROGRAMMER_ENABLED, AI_PLANNED_GENERATION_ENABLED, AI_WEEK_GENERATION_MODE
+  =explicit and AI_EXERCISE_POOL_MODE=wide; tables `day_notes` and
+  `injury_pauses` created; `/injuries`, `/periodization` (with
+  reactiveEvidence) and `/week` (targetAllocationsBasis "completed", 23
+  allocations) respond. Scratch dir `~/wl-paid-test` removed.
+* Left to the owner: the reactive deload stored before the fix (through
+  2026-10-14) is still active; its evidence predates per-exercise trends.
+  End it with "End this deload now" on Insights if wanted.
