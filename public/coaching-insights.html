@@ -40,7 +40,7 @@
 
     <section>
       <h2>Strength progress</h2>
-      <p class="faint">Each exercise compared only with itself on the same equipment: your best set per session as an estimated 1-rep max. Set the equipment on each exercise in the logger; sessions without it form their own series. Hollow dots are deload sessions and do not count.</p>
+      <p class="faint">Each exercise compared only with itself on the same equipment, attachment and count unit: your best set per session as an estimated 1-rep max (for steps, seconds or metres, the heaviest load). Set these on each exercise in the logger; sessions without them form their own series. Hollow dots are deload sessions and do not count.</p>
       <div id="strength-section"></div>
     </section>
 
@@ -113,7 +113,7 @@
       if (signals.length > 0) {
         card.appendChild(el('p', { class: 'faint', text: 'Why: these exercises trended down (estimated 1-rep max):', style: 'margin:0.6rem 0 0.2rem' }));
         for (const s of signals) {
-          const parts = (s.exercises || []).filter((x) => x.trend === 'down').map((x) => `${x.exerciseName}${x.equipment ? ` (${x.equipment})` : ''} ${x.first} → ${x.last} kg over ${x.points} sessions`);
+          const parts = (s.exercises || []).filter((x) => x.trend === 'down').map((x) => `${x.exerciseName}${[x.equipment, x.attachment].filter(Boolean).length ? ` (${[x.equipment, x.attachment].filter(Boolean).join(', ')})` : ''} ${x.first} → ${x.last} kg over ${x.points} sessions`);
           card.appendChild(el('p', { class: 'faint', text: `• ${s.targetName}${parts.length ? ': ' + parts.join('; ') : ' (measured before the per-exercise fix)'}`, style: 'margin:0' }));
         }
       }
@@ -301,7 +301,7 @@
       for (const e of shown) {
         const card = createCard();
         const head = el('div', { class: 'progress-row' });
-        head.appendChild(el('div', { class: 'card-title', text: e.equipment ? `${e.name} · ${e.equipment}` : e.name }));
+        head.appendChild(el('div', { class: 'card-title', text: [e.name, e.equipment, e.attachment, e.countUnit && e.countUnit !== 'reps' ? `in ${e.countUnit}` : null].filter(Boolean).join(' · ') }));
         const badges = el('div', { style: 'display:flex;gap:0.35rem' });
         if (e.goal) badges.appendChild(el('span', { class: 'badge badge-activity', text: 'Goal' }));
         badges.appendChild(el('span', { class: `badge ${STATUS_BADGE[e.status]}`, text: STATUS_LABEL[e.status] }));

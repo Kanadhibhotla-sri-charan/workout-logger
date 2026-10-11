@@ -73,33 +73,51 @@
     // substitution state. A fetch failure leaves the map empty; name
     // resolution then falls back to the generated program's own name,
     // or the raw id as a last resort (unchanged from before this fix).
-    // Equipment picker (2026-10-11): one Blueprint exercise can be done with
-    // a barbell, dumbbells, a cable... Progress is only compared within the
-    // same equipment, so each logged exercise records which was used.
+    // How each logged exercise was done (2026-10-11), on every exercise card:
+    // equipment (one Blueprint exercise can be done with a barbell,
+    // dumbbells, a cable...), attachment (rope, V-bar...) and what the set
+    // count measures (reps, steps, seconds, metres). Progress is only
+    // compared within the same equipment, attachment and unit. Attachment
+    // and unit are universal: every exercise offers every choice.
     let exerciseEquipmentById = new Map();
     const EQUIPMENT_CHOICES = ['barbell', 'dumbbell', 'ez-bar', 'cable', 'machine', 'smith machine', 'kettlebell', 'band', 'bodyweight', 'other'];
+    // Mirrors src/contracts/loggingOptions.ts (tests/logging/logOptions.test.ts checks).
+    const ATTACHMENT_CHOICES = ['straight bar', 'ez-bar', 'v-bar', 'rope', 'single handle', 'lat bar', 'close-grip handle', 'neutral-grip handle', 'ankle strap', 'band', 'belt', 'other'];
+    const REP_UNITS = ['reps', 'steps', 'seconds', 'metres'];
+    const repUnitOf = (perf) => (perf && REP_UNITS.includes(perf.rep_unit) ? perf.rep_unit : 'reps');
 
-    function buildEquipmentPicker(perf) {
-      const listed = (exerciseEquipmentById.get(perf.exercise_id) || []).filter((e) => EQUIPMENT_CHOICES.includes(e));
-      const choices = [...listed, ...EQUIPMENT_CHOICES.filter((e) => !listed.includes(e))];
-      if (perf.equipment && !choices.includes(perf.equipment)) choices.unshift(perf.equipment);
-      const select = el('select', { 'aria-label': 'Equipment used', style: 'width:auto;margin:0' }, [
-        el('option', { value: '', text: 'Not specified' }),
-        ...choices.map((e) => el('option', { value: e, text: e.charAt(0).toUpperCase() + e.slice(1), ...(perf.equipment === e ? { selected: 'selected' } : {}) })),
+    function buildLogOptionSelect(perf, field, label, choices, emptyText, onSaved) {
+      const current = perf[field] ?? null;
+      const all = current && !choices.includes(current) ? [current, ...choices] : choices;
+      const select = el('select', { 'aria-label': label, style: 'width:auto;margin:0' }, [
+        ...(emptyText ? [el('option', { value: '', text: emptyText })] : []),
+        ...all.map((c) => el('option', { value: c, text: capitalize(c), ...((current ?? (emptyText ? '' : all[0])) === c ? { selected: 'selected' } : {}) })),
       ]);
-      const statusEl = el('span', { class: 'faint', style: 'margin-left:0.5rem' });
+      const statusEl = el('span', { class: 'faint' });
       select.addEventListener('change', async () => {
         statusEl.textContent = 'Saving…';
+        const value = select.value || null;
         try {
-          await api(`/api/workouts/${sessionId}/exercises/${perf.id}`, { method: 'PATCH', body: { equipment: select.value || null } });
-          perf.equipment = select.value || null;
+          await api(`/api/workouts/${sessionId}/exercises/${perf.id}`, { method: 'PATCH', body: { [field]: value } });
+          perf[field] = value;
           statusEl.textContent = 'Saved';
+          if (onSaved) onSaved();
         } catch (err) {
-          select.value = perf.equipment || '';
+          select.value = perf[field] || (emptyText ? '' : all[0]);
           statusEl.textContent = err.message || 'Could not save';
         }
       });
-      return el('div', { style: 'display:flex;align-items:center;gap:0.5rem;margin:0.3rem 0 0.5rem;flex-wrap:wrap' }, [el('span', { class: 'faint', text: 'Equipment' }), select, statusEl]);
+      return el('label', { style: 'display:flex;align-items:center;gap:0.4rem;margin:0' }, [el('span', { class: 'faint', text: label }), select, statusEl]);
+    }
+
+    function buildLogOptionsPicker(perf, onUnitChange) {
+      const listed = (exerciseEquipmentById.get(perf.exercise_id) || []).filter((e) => EQUIPMENT_CHOICES.includes(e));
+      const equipmentChoices = [...listed, ...EQUIPMENT_CHOICES.filter((e) => !listed.includes(e))];
+      return el('div', { class: 'log-options', style: 'display:flex;align-items:center;gap:0.4rem 1rem;margin:0.3rem 0 0.5rem;flex-wrap:wrap' }, [
+        buildLogOptionSelect(perf, 'equipment', 'Equipment', equipmentChoices, 'Not specified'),
+        buildLogOptionSelect(perf, 'attachment', 'Attachment', ATTACHMENT_CHOICES, 'None'),
+        buildLogOptionSelect(perf, 'rep_unit', 'Count', REP_UNITS, null, onUnitChange),
+      ]);
     }
 
     async function loadExerciseNames() {
@@ -223,7 +241,9 @@
       header.appendChild(el('div', { class: 'exercise-name', text: exerciseDisplayName(perf, generatedMatch) }));
       if (!generatedMatch) header.appendChild(el('span', { class: 'badge badge-warning', text: 'Unplanned exercise' }));
       card.appendChild(header);
-      card.appendChild(buildEquipmentPicker(perf));
+      // Updated in place (a full render would drop unsaved set entries).
+      let onUnitChanged = () => {};
+      card.appendChild(buildLogOptionsPicker(perf, () => onUnitChanged()));
 
       // Fix: `perf.target_*` is this exercise's own planned prescription
       // when it was pre-created with one (e.g. an AI-committed session —
@@ -239,7 +259,7 @@
         pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(`${completed} completed${skipped ? `, ${skipped} skipped` : ''}`)]));
         card.appendChild(pva);
         if (generatedMatch && generatedMatch.previous_performance) {
-          card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'} (${formatDate(generatedMatch.previous_performance.date)})` }));
+          card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'}${generatedMatch.previous_performance.rep_unit ? ` ${generatedMatch.previous_performance.rep_unit}` : ''} (${formatDate(generatedMatch.previous_performance.date)})` }));
         }
       }
 
@@ -257,7 +277,9 @@
       if (session.status === 'completed' || hasLoggedData) {
         const table = el('table');
         const headRow = el('tr');
-        for (const h of ['Set', 'Weight', 'Reps', 'Done']) headRow.appendChild(el('th', { text: h }));
+        const unitTh = el('th', { text: capitalize(repUnitOf(perf)) });
+        headRow.append(el('th', { text: 'Set' }), el('th', { text: 'Weight' }), unitTh, el('th', { text: 'Done' }));
+        onUnitChanged = () => { unitTh.textContent = capitalize(repUnitOf(perf)); };
         table.appendChild(headRow);
         for (const s of perf.sets) {
           const row = el('tr');
@@ -271,9 +293,10 @@
         return card;
       }
 
-      const state = { sets: perf.sets.map((s) => ({ ...s })) };
+      const state = { sets: perf.sets.map((s) => ({ ...s })), unit: repUnitOf(perf) };
       const setsContainer = el('div');
       renderSetEditor(setsContainer, state, () => { dirty = true; });
+      onUnitChanged = () => { state.unit = repUnitOf(perf); renderSetEditor(setsContainer, state, () => { dirty = true; }); };
       card.appendChild(setsContainer);
 
       const addSetBtn = createButton({ label: '+ Add set', variant: 'secondary', onClick: () => {
@@ -419,7 +442,7 @@
       card.appendChild(header);
 
       if (g.previous_performance) {
-        card.appendChild(el('p', { class: 'faint', text: `Last time: ${g.previous_performance.weight ?? '—'} × ${g.previous_performance.reps ?? '—'} (${formatDate(g.previous_performance.date)})` }));
+        card.appendChild(el('p', { class: 'faint', text: `Last time: ${g.previous_performance.weight ?? '—'} × ${g.previous_performance.reps ?? '—'}${g.previous_performance.rep_unit ? ` ${g.previous_performance.rep_unit}` : ''} (${formatDate(g.previous_performance.date)})` }));
       } else {
         card.appendChild(el('p', { class: 'faint', text: 'No previous performance recorded.' }));
       }
@@ -476,7 +499,8 @@
         const weight = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'kg', 'aria-label': `Set ${set.set_number} weight` });
         if (set.weight !== null) weight.value = set.weight;
         weight.addEventListener('input', () => { set.weight = weight.value === '' ? null : Number(weight.value); onDirty(); });
-        const reps = el('input', { type: 'number', inputmode: 'numeric', placeholder: 'reps', 'aria-label': `Set ${set.set_number} reps` });
+        const unit = state.unit || 'reps';
+        const reps = el('input', { type: 'number', inputmode: 'numeric', placeholder: unit, 'aria-label': `Set ${set.set_number} ${unit}` });
         if (set.reps !== null) reps.value = set.reps;
         reps.addEventListener('input', () => { set.reps = reps.value === '' ? null : Number(reps.value); onDirty(); });
         const done = el('button', { type: 'button', class: 'set-done-toggle', 'aria-pressed': String(!!set.completed), 'aria-label': `Set ${set.set_number} done` }, [document.createTextNode('✓')]);
@@ -716,8 +740,10 @@
       for (const perf of session.exercises) {
         const generatedMatch = generated ? generated.exercises.find((g) => g.exercise_id === perf.exercise_id) : null;
         const name = exerciseDisplayName(perf, generatedMatch);
-        const setsText = perf.sets.map((s) => `${s.weight ?? '—'}×${s.reps ?? '—'}${s.completed ? '' : ' (skipped)'}`).join(', ');
-        lines.push(`${name} — ${perf.sets.length} set(s): ${setsText}`);
+        const unit = perf.rep_unit && perf.rep_unit !== 'reps' ? ` ${perf.rep_unit}` : '';
+        const setsText = perf.sets.map((s) => `${s.weight ?? '—'}×${s.reps ?? '—'}${unit}${s.completed ? '' : ' (skipped)'}`).join(', ');
+        const how = [perf.equipment, perf.attachment].filter(Boolean).join(', ');
+        lines.push(`${name}${how ? ` (${how})` : ''} — ${perf.sets.length} set(s): ${setsText}`);
       }
       if (session.notes) {
         lines.push('', `Session note: ${session.notes}`);

@@ -10,6 +10,7 @@
 // structurally cannot see: an approved outside-Blueprint exercise
 // (which BlueprintAdapter has no record of at all).
 
+import { countsReps, repUnitOf } from '../../contracts/loggingOptions.js';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { roleFor } from '../../engine/exerciseSelector.js';
@@ -60,8 +61,11 @@ function average(values: readonly number[]): number | undefined {
 function buildExposureRecord(session: WorkoutSession, performance: ExercisePerformance, targetId: string): HistoricalExerciseExposure {
   const completedSets: Set[] = performance.sets.filter((s) => s.completed);
 
-  const completedReps = completedSets.filter((s) => s.reps !== null).map((s) => s.reps!);
-  const loadPoints = completedSets.filter((s) => s.weight !== null && s.reps !== null).map((s) => s.weight! * (1 + s.reps! / 30));
+  // Steps, seconds or metres are not repetitions: no reps and no
+  // weight x reps load for them (loggingOptions.ts).
+  const repCounted = countsReps(performance);
+  const completedReps = repCounted ? completedSets.filter((s) => s.reps !== null).map((s) => s.reps!) : [];
+  const loadPoints = repCounted ? completedSets.filter((s) => s.weight !== null && s.reps !== null).map((s) => s.weight! * (1 + s.reps! / 30)) : [];
   const rirValues = completedSets.filter((s) => s.rir !== null).map((s) => s.rir!);
 
   const prescribedSets = performance.target_sets ?? undefined;
@@ -94,6 +98,8 @@ function buildExposureRecord(session: WorkoutSession, performance: ExercisePerfo
     targetId,
     exerciseId: performance.exercise_id,
     equipment: performance.equipment ?? null,
+    attachment: performance.attachment ?? null,
+    repUnit: repUnitOf(performance),
     prescribedSets,
     completedSets: completedSetsCount,
     prescribedRepsMin: performance.target_reps_min ?? undefined,

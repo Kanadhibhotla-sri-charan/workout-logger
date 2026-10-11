@@ -302,6 +302,12 @@ export interface ExercisePerformance {
    * exercise's own equipment options or "other"; null when not specified.
    * Progress is only compared within the same equipment. */
   equipment?: string | null;
+  /** Attachment used (rope, V-bar, ...); null when not specified. Any
+   * exercise may carry one. Progress is only compared within the same one. */
+  attachment?: string | null;
+  /** What each set's `reps` counts: 'reps' (default when null), 'steps',
+   * 'seconds' or 'metres' (src/contracts/loggingOptions.ts). */
+  rep_unit?: string | null;
   sets: Set[];
 }
 

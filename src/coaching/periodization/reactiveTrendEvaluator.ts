@@ -5,6 +5,7 @@
 // competing history/trend computation) plus the real completed-session
 // count from `WorkoutSessionsRepo` — no new persisted history.
 
+import { parseProgressSeriesKey, progressSeriesKey, type RepUnit } from '../../contracts/loggingOptions.js';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { REACTIVE_TRIGGER } from '../../engine/config.js';
@@ -32,6 +33,8 @@ export interface ExerciseTrendEvidence {
   exerciseId: string;
   /** Equipment the series was done with; null when not specified. */
   equipment: string | null;
+  /** Attachment the series was done with; null when not specified. */
+  attachment?: string | null;
   trend: BasicTrendDirection;
   points: number;
   first: number;
@@ -76,19 +79,20 @@ export function targetDeclineEvidence(
   const exposures = getTargetHistory(db, targetId, start, end).filter(
     (e): e is typeof e & { load: number } => e.completionStatus === 'completed' && e.load !== undefined && !excludedDates.has(e.date)
   );
-  // One series per exercise AND equipment: dumbbell and barbell numbers for
-  // the same exercise are not comparable.
+  // One series per exercise, equipment and attachment: dumbbell and barbell
+  // (or rope and bar) numbers for the same exercise are not comparable.
   const byExercise = new Map<string, Array<{ date: string; load: number }>>();
-  const keyOf = (e: { exerciseId: string; equipment?: string | null }) => `${e.exerciseId}|${e.equipment ?? ''}`;
+  const keyOf = (e: { exerciseId: string; equipment?: string | null; attachment?: string | null; repUnit?: RepUnit }) => progressSeriesKey(e);
   for (const e of exposures) (byExercise.get(keyOf(e)) ?? byExercise.set(keyOf(e), []).get(keyOf(e))!).push({ date: e.date, load: e.load });
   const exercises: ExerciseTrendEvidence[] = [...byExercise].map(([key, points]) => {
-    const [exerciseId, equipment] = key.split('|') as [string, string];
+    const { exerciseId, equipment, attachment } = parseProgressSeriesKey(key);
     const first = points[0]!.load;
     const last = points[points.length - 1]!.load;
     const trend = calculateBasicTrend(points);
     return {
       exerciseId,
-      equipment: equipment || null,
+      equipment,
+      attachment,
       // A decline must also end lower than it started: one light session in
       // the middle can tip the early/late averages without any real drop.
       trend: trend === 'down' && last >= first ? 'stable' : trend,
@@ -183,7 +187,7 @@ export function evaluateReactiveDeloadTrigger(db: Database.Database, input: Eval
     if (evidence.trend !== 'down') continue;
     declining.push({
       signal: { targetId: target.id, trend: evidence.trend, dataQuality: evidence.dataQuality, completedExposureCount: evidence.completedExposureCount, exercises: evidence.exercises },
-      exerciseIds: evidence.exercises.filter((x) => x.trend === 'down' && x.points >= MIN_EXERCISE_POINTS_FOR_DECLINE).map((x) => `${x.exerciseId}|${x.equipment ?? ''}`),
+      exerciseIds: evidence.exercises.filter((x) => x.trend === 'down' && x.points >= MIN_EXERCISE_POINTS_FOR_DECLINE).map((x) => progressSeriesKey(x)),
     });
   }
   // Independent evidence only: each declining exercise supports one target

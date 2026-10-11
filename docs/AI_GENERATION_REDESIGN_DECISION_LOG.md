@@ -757,3 +757,47 @@ Three new free-text secondary phrases needed an explicit decision
 ### 15.4 Verification
 Full suite 2260: the same 245 known failures, 0 new. On a production copy the
 three exercises appear in the valid pools for lower-pec/mid-pec and lat-width.
+
+## 16. Attachment and count unit on every logged exercise (2026-10-11)
+Owner notes: "Used v bar for pushdowns" (10/01) and "The rep count logged for
+suitcase carry is actually step count" (10/09). Owner asked for both to be
+universal, usable on any exercise whenever needed, not tied to particular
+exercises.
+
+### 16.1 What was added
+- `workout_exercises.attachment` (free short string; the logger offers
+  straight bar, EZ-bar, V-bar, rope, single handle, lat bar, close-grip
+  handle, neutral-grip handle, ankle strap, band, belt, other) and
+  `workout_exercises.rep_unit` (`reps` | `steps` | `seconds` | `metres`; null
+  = reps). Shared definitions: `src/contracts/loggingOptions.ts`.
+- Like equipment, a new exercise row starts with the attachment and unit last
+  logged for that exercise (a carry stays in steps). POST and PATCH
+  `/api/workouts/:id/exercises[/:exerciseId]` accept both; null clears; each
+  may be sent alone.
+- Logger: every exercise card has one row with Equipment, Attachment and Count
+  pickers (all choices on every exercise). Changing Count relabels the set
+  column in place without losing unsaved entries. "Last time" and the copied
+  workout text show a non-reps unit and the equipment/attachment.
+
+### 16.2 How the numbers are read
+- Progress series are per exercise + equipment + attachment + unit
+  (`progressSeriesKey`), in Insights and in the reactive-deload evidence:
+  rope vs straight-bar pushdowns are never compared.
+- Steps, seconds and metres are not reps: no estimated 1RM, no completed reps
+  and no load in history (`historicalService`), the goal-phase load trend
+  skips them, and double progression only reads sessions logged in reps (none
+  when the latest session was not in reps). Set counts (volume) are unchanged.
+- Insights shows such a series by its heaviest load ("24 kg × 40 steps"), or
+  by the count when unloaded. The coach review facts carry the same labels.
+- Calorie Tracker export gains `rep_unit` per exercise (additive;
+  docs/CALORIE_TRACKER_INTEGRATION.md).
+
+### 16.3 Verification
+`tests/logging/logOptions.test.ts` (API, defaults, history/Insights/trend
+maths, export, logger lists match the contract, logger script loads with
+app.js). Full suite 2270: the same 245 known failures, 0 new. Logger checked
+headlessly on a production data copy: 9/9 cards show the three pickers,
+changing the carry to steps saved and relabelled the column, Insights then
+read "17.5 kg × 45 steps". That check caught a duplicate `capitalize`
+declaration that stopped the logger loading, fixed before commit; the new
+script test guards it.

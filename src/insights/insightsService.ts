@@ -10,6 +10,7 @@
 //   goalCheckIns      — each active goal's last self-assessment and when the
 //                       next one is due.
 
+import { parseProgressSeriesKey, progressSeriesKey, repUnitOf, type RepUnit } from '../contracts/loggingOptions.js';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { WEEKDAYS, type Goal } from '../contracts/types.js';
@@ -38,7 +39,8 @@ export type ProgressStatus = 'new_best' | 'up' | 'flat' | 'down' | 'stalled' | '
 
 export interface StrengthPoint {
   date: string;
-  /** Best estimated 1RM (kg) that session, or best reps for an unloaded exercise. */
+  /** Best estimated 1RM (kg) that session; for steps/seconds/metres the
+   * heaviest load (kg); unloaded: the best count. */
   value: number;
   bestSet: string;
   deload: boolean;
@@ -49,11 +51,15 @@ export interface ExerciseProgress {
   /** Equipment of this series; null when not specified. One exercise done
    * with different equipment is reported as separate series. */
   equipment: string | null;
+  /** Attachment of this series (rope, V-bar...); null when not specified. */
+  attachment: string | null;
+  /** What the sets counted: reps, steps, seconds or metres. */
+  countUnit: RepUnit;
   name: string;
   targetIds: string[];
   /** Trains a target of an active goal. */
   goal: boolean;
-  unit: 'kg' | 'reps';
+  unit: 'kg' | RepUnit;
   sessions: number;
   first: number;
   last: number;
@@ -84,16 +90,21 @@ export function strengthProgress(db: Database.Database, asOf: string, days = 56)
   const deload = deloadDatesInRange(db, programId, start, asOf);
   const goalTargets = goalTargetIds(db);
 
-  const byExercise = new Map<string, Map<string, { value: number; bestSet: string; unit: 'kg' | 'reps' }>>();
+  const byExercise = new Map<string, Map<string, { value: number; bestSet: string; unit: 'kg' | RepUnit }>>();
   for (const session of repo.listSessionsInRange(start, asOf).filter((s) => s.status === 'completed')) {
     for (const perf of repo.getExercisePerformances(session.session_id)) {
       const sets = perf.sets.filter((s) => s.completed && s.reps !== null && s.reps > 0);
       if (sets.length === 0) continue;
       const loaded = sets.filter((s) => s.weight !== null && s.weight > 0);
+      const countUnit = repUnitOf(perf);
+      // Weight x reps (estimated 1RM) only for reps; for steps, seconds or
+      // metres the heaviest load carried/held, else the best count.
       const best = loaded.length > 0
-        ? loaded.map((s) => ({ value: s.weight! * (1 + s.reps! / 30), bestSet: `${s.weight} kg × ${s.reps}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
-        : sets.map((s) => ({ value: s.reps!, bestSet: `${s.reps} reps`, unit: 'reps' as const })).sort((a, b) => b.value - a.value)[0]!;
-      const key = `${perf.exercise_id}|${perf.equipment ?? ''}`;
+        ? countUnit === 'reps'
+          ? loaded.map((s) => ({ value: s.weight! * (1 + s.reps! / 30), bestSet: `${s.weight} kg × ${s.reps}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
+          : loaded.map((s) => ({ value: s.weight!, bestSet: `${s.weight} kg × ${s.reps} ${countUnit}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
+        : sets.map((s) => ({ value: s.reps!, bestSet: `${s.reps} ${countUnit}`, unit: countUnit })).sort((a, b) => b.value - a.value)[0]!;
+      const key = progressSeriesKey({ exerciseId: perf.exercise_id, equipment: perf.equipment, attachment: perf.attachment, repUnit: countUnit });
       const dates = byExercise.get(key) ?? byExercise.set(key, new Map()).get(key)!;
       const prev = dates.get(session.date);
       if (!prev || best.value > prev.value) dates.set(session.date, best);
@@ -102,9 +113,9 @@ export function strengthProgress(db: Database.Database, asOf: string, days = 56)
 
   const result: ExerciseProgress[] = [];
   for (const [key, dates] of byExercise) {
-    const [exerciseId, equipmentKey] = key.split('|') as [string, string];
+    const { exerciseId, equipment, attachment, repUnit } = parseProgressSeriesKey(key);
     const all = [...dates].sort(([a], [b]) => a.localeCompare(b));
-    const unit = all.some(([, p]) => p.unit === 'kg') ? 'kg' : 'reps';
+    const unit = all.some(([, p]) => p.unit === 'kg') ? 'kg' : repUnit;
     const points: StrengthPoint[] = all.filter(([, p]) => p.unit === unit).map(([date, p]) => ({ date, value: round1(p.value), bestSet: p.bestSet, deload: deload.has(date) }));
     if (points.length === 0) continue;
     const counted = points.filter((p) => !p.deload);
@@ -131,7 +142,9 @@ export function strengthProgress(db: Database.Database, asOf: string, days = 56)
     const last = (counted[counted.length - 1] ?? points[points.length - 1]!).value;
     result.push({
       exerciseId,
-      equipment: equipmentKey || null,
+      equipment,
+      attachment,
+      countUnit: repUnit,
       name: exercise?.name ?? exerciseId,
       targetIds,
       goal: targetIds.some((t) => goalTargets.has(t)),

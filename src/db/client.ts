@@ -58,6 +58,11 @@ function migrate(db: Database.Database): void {
   // 2026-10-11: which equipment the exercise was done with (one Blueprint
   // exercise can be done with a barbell, dumbbells, a cable...). Null = not specified.
   addColumnIfMissing(db, 'workout_exercises', 'equipment', 'TEXT');
+  // 2026-10-11: attachment used (rope, V-bar, ...) and what the set count
+  // measures (reps, steps, seconds, metres) — see src/contracts/loggingOptions.ts.
+  // Null = not specified / reps.
+  addColumnIfMissing(db, 'workout_exercises', 'attachment', 'TEXT');
+  addColumnIfMissing(db, 'workout_exercises', 'rep_unit', 'TEXT');
   addColumnIfMissing(db, 'workout_exercises', 'target_reps_min', 'INTEGER');
   addColumnIfMissing(db, 'workout_exercises', 'target_reps_max', 'INTEGER');
   addColumnIfMissing(db, 'workout_exercises', 'target_rir_min', 'REAL');

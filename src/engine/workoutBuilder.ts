@@ -54,6 +54,7 @@ import { exercisesTrainingTarget, selectExercise, AllCandidatesAvoidedError, typ
 import { evaluateSessionPairings } from './exercisePairing.js';
 import { calculateExerciseExposure } from './exposureEngine.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
+import { repUnitOf, type RepUnit } from '../contracts/loggingOptions.js';
 import { computeProgression, type ProgressionResult } from './progressionEngine.js';
 import { applyRecoveryConstraint, type RecentBadmintonSignal, type RecoveryConstraintResult } from './recoveryEngine.js';
 import type { ResourceAllocationEntry } from './resourceAllocation.js';
@@ -98,6 +99,8 @@ const FREQUENCY_REFERENCE_WINDOW_DAYS = 7;
 export interface ExerciseSessionHistory {
   date: string;
   sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
+  /** What `sets[].reps` counts (reps when absent) — loggingOptions.ts. */
+  rep_unit?: RepUnit;
 }
 
 /** Remediation §7.1/§14, Final Pass §6/§7/§12: every relevant target is
@@ -402,7 +405,7 @@ export interface PlannedExercise {
    * exercise, if any — distinguished from the planned target above,
    * per remediation §6.2 ("the output must distinguish: planned
    * target; previous result; progression decision"). */
-  previous_performance: { date: string; weight: number | null; reps: number | null } | null;
+  previous_performance: { date: string; weight: number | null; reps: number | null; rep_unit?: RepUnit } | null;
   /** Real progressionEngine.computeProgression output when usable
    * prior history for this exact exercise exists; null for a
    * first-time prescription (Blueprint's own baseline reps/RIR only —
@@ -1522,15 +1525,21 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
       if (exerciseHistory.length > 0) {
         const mostRecent = exerciseHistory[0]!;
         const lastCompletedSet = [...mostRecent.sets].reverse().find((s) => s.completed) ?? null;
-        previousPerformance = { date: mostRecent.date, weight: lastCompletedSet?.weight ?? null, reps: lastCompletedSet?.reps ?? null };
-        const reps = parseRange(prescription.reps);
-        progressionDecision = computeProgression({
-          exercise_id: selection.exercise_id,
-          target_reps_min: reps.min,
-          target_reps_max: reps.max,
-          recent_sessions_actual_sets: exerciseHistory.map((h) => h.sets),
-        });
-        log.push(progressionDecision.reasoning);
+        const unit = mostRecent.rep_unit ?? 'reps';
+        previousPerformance = { date: mostRecent.date, weight: lastCompletedSet?.weight ?? null, reps: lastCompletedSet?.reps ?? null, ...(unit !== 'reps' ? { rep_unit: unit } : {}) };
+        // Double progression reads reps against a rep range: only sessions
+        // logged in reps count, and none when the latest was steps/seconds/metres.
+        const repSessions = exerciseHistory.filter((h) => (h.rep_unit ?? 'reps') === 'reps');
+        if (unit === 'reps') {
+          const reps = parseRange(prescription.reps);
+          progressionDecision = computeProgression({
+            exercise_id: selection.exercise_id,
+            target_reps_min: reps.min,
+            target_reps_max: reps.max,
+            recent_sessions_actual_sets: repSessions.map((h) => h.sets),
+          });
+          log.push(progressionDecision.reasoning);
+        }
       }
       return { selection, prescription, progressionDecision, previousPerformance };
     };
@@ -2558,6 +2567,8 @@ export interface TargetTouch {
   date: string;
   exercise_id: BlueprintId;
   sets: ReadonlyArray<Pick<LoggedSet, 'weight' | 'reps' | 'completed' | 'rir'>>;
+  /** What `sets[].reps` counts (reps when absent). */
+  rep_unit?: RepUnit;
   /** Post-v2 Corrective Fix v2 §4/§7: whether this specific touch was a
    * DIRECT (primary-role) exposure of the target, or merely compound
    * overlap (secondary role) from an exercise trained for a different
@@ -2600,7 +2611,7 @@ export function gatherTargetTouches(sessionsRepo: WorkoutSessionsRepo, recentSes
       for (const c of contributions) {
         const key = `${c.target_type}:${c.target_id}`;
         const list = byTarget.get(key) ?? [];
-        list.push({ date: session.date, exercise_id: performance.exercise_id, sets: performance.sets, role: c.role });
+        list.push({ date: session.date, exercise_id: performance.exercise_id, sets: performance.sets, role: c.role, rep_unit: repUnitOf(performance) });
         byTarget.set(key, list);
       }
     }
@@ -2717,7 +2728,7 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     // it), so each exercise's list stays most-recent-first too.
     const exerciseHistory: Record<BlueprintId, ExerciseSessionHistory[]> = {};
     for (const touch of touches) {
-      (exerciseHistory[touch.exercise_id] ??= []).push({ date: touch.date, sets: touch.sets });
+      (exerciseHistory[touch.exercise_id] ??= []).push({ date: touch.date, sets: touch.sets, rep_unit: touch.rep_unit });
     }
 
     // Post-v2 Corrective Fix v2 §4/§7: every distinct real date this

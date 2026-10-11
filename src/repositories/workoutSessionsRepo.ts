@@ -122,6 +122,9 @@ export interface AddExercisePerformanceInput {
    * (so a planned or AI-committed exercise starts with what you used last
    * time); null: not specified. */
   equipment?: string | null;
+  /** Attachment / count unit; omitted = last logged for this exercise. */
+  attachment?: string | null;
+  rep_unit?: string | null;
 }
 
 export interface UpdateWorkoutSessionInput {
@@ -290,11 +293,11 @@ export class WorkoutSessionsRepo {
       `INSERT INTO workout_exercises
          (id, workout_session_id, exercise_id, order_index, role,
           target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds,
-          target_type, target_id, equipment)
+          target_type, target_id, equipment, attachment, rep_unit)
        VALUES
          (@id, @workout_session_id, @exercise_id, @order_index, @role,
           @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds,
-          @target_type, @target_id, @equipment)`
+          @target_type, @target_id, @equipment, @attachment, @rep_unit)`
     );
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
@@ -313,6 +316,8 @@ export class WorkoutSessionsRepo {
       target_type: input.target_type ?? null,
       target_id: input.target_id ?? null,
       equipment: input.equipment !== undefined ? input.equipment : this.lastEquipmentFor(input.exercise_id),
+      attachment: input.attachment !== undefined ? input.attachment : this.lastLogOptionFor(input.exercise_id, 'attachment'),
+      rep_unit: input.rep_unit !== undefined ? input.rep_unit : this.lastLogOptionFor(input.exercise_id, 'rep_unit'),
     };
 
     const tx = this.db.transaction(() => {
@@ -383,6 +388,8 @@ export class WorkoutSessionsRepo {
           target_type: 'physique_target' | 'functional_goal' | null;
           target_id: string | null;
           equipment: string | null;
+          attachment: string | null;
+          rep_unit: string | null;
         }
       | undefined;
     if (!exerciseRow) return undefined;
@@ -436,6 +443,8 @@ export class WorkoutSessionsRepo {
       target_type: exerciseRow.target_type,
       target_id: exerciseRow.target_id,
       equipment: exerciseRow.equipment,
+      attachment: exerciseRow.attachment,
+      rep_unit: exerciseRow.rep_unit,
       sets: normalizedSets,
     };
   }
@@ -508,6 +517,8 @@ export class WorkoutSessionsRepo {
       target_type: 'physique_target' | 'functional_goal' | null;
       target_id: string | null;
       equipment: string | null;
+      attachment: string | null;
+      rep_unit: string | null;
     }>;
 
     const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
@@ -540,6 +551,8 @@ export class WorkoutSessionsRepo {
         target_type: row.target_type,
         target_id: row.target_id,
         equipment: row.equipment,
+        attachment: row.attachment,
+        rep_unit: row.rep_unit,
         sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
       };
     });
@@ -559,5 +572,21 @@ export class WorkoutSessionsRepo {
   /** Sets the equipment for one logged exercise (null = not specified). */
   setExerciseEquipment(workoutExerciseId: string, equipment: string | null): void {
     this.db.prepare('UPDATE workout_exercises SET equipment = ? WHERE id = ?').run(equipment, workoutExerciseId);
+  }
+
+  /** The attachment / count unit most recently logged for an exercise, or null. */
+  lastLogOptionFor(exerciseId: string, column: 'attachment' | 'rep_unit'): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT we.${column} AS value FROM workout_exercises we JOIN workout_sessions ws ON ws.session_id = we.workout_session_id
+         WHERE we.exercise_id = ? AND we.${column} IS NOT NULL ORDER BY ws.date DESC LIMIT 1`
+      )
+      .get(exerciseId) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  /** Sets the attachment or count unit for one logged exercise (null = not specified / reps). */
+  setExerciseLogOption(workoutExerciseId: string, column: 'attachment' | 'rep_unit', value: string | null): void {
+    this.db.prepare(`UPDATE workout_exercises SET ${column} = ? WHERE id = ?`).run(value, workoutExerciseId);
   }
 }

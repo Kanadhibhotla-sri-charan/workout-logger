@@ -13,6 +13,7 @@
 // applyReviewDecision only ever acts on an explicit decision a caller
 // (ultimately the user, via a route) passes in.
 
+import { countsReps } from '../contracts/loggingOptions.js';
 import type Database from 'better-sqlite3';
 import { GoalsRepo } from '../repositories/goalsRepo.js';
 import type { Goal, Measurement, TrainingProfile } from '../contracts/types.js';
@@ -348,6 +349,7 @@ export function gatherReviewEvidence(db: Database.Database, goal: Goal, phase: G
         // treated as equivalent direct performance evidence for this
         // goal (spec §2 "Important").
         if (roleFor(exercise.exercise_id, target.target_type, target.target_id) !== 'primary') continue;
+        if (!countsReps(exercise)) continue; // steps/seconds/metres: no weight x reps load
         const completedSets = exercise.sets.filter((s) => s.completed && s.weight != null && s.reps != null);
         for (const set of completedSets) {
           loadPoints.push({ date: session.date, load: set.weight! * (1 + set.reps! / 30) });

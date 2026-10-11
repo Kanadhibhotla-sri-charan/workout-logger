@@ -9,12 +9,35 @@ import {
 } from '../../repositories/badmintonSessionDetailsRepo.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
+import { REP_UNITS, isRepUnit } from '../../contracts/loggingOptions.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { reconcileAfterActualTraining } from '../../engine/weekProgramReconciliation.js';
 import { computeFreshWeek, defaultBudgetMinutes } from './programming.js';
 import { findActiveGymSessionConflict, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 
 export const workoutsRouter = Router();
+
+/** Optional per-exercise log options (equipment, attachment, rep_unit):
+ * absent -> undefined (keep / default), null -> clear, else validated.
+ * Returns an error message for an invalid value. */
+type LogOptions = { equipment?: string | null; attachment?: string | null; rep_unit?: string | null };
+function parseLogOptions(body: Record<string, unknown> | undefined): { options: LogOptions; error?: string } {
+  const options: LogOptions = {};
+  const has = (k: string) => !!body && Object.prototype.hasOwnProperty.call(body, k);
+  for (const key of ['equipment', 'attachment'] as const) {
+    if (!has(key)) continue;
+    const v = body![key];
+    if (v === null) options[key] = null;
+    else if (typeof v === 'string' && v.trim() !== '' && v.length <= 40) options[key] = v.trim();
+    else return { options, error: `${key} must be a short string or null` };
+  }
+  if (has('rep_unit')) {
+    const v = body!.rep_unit;
+    if (v === null || isRepUnit(v)) options.rep_unit = v as string | null;
+    else return { options, error: `rep_unit must be one of ${REP_UNITS.join(', ')} or null` };
+  }
+  return { options };
+}
 
 function db(req: import('express').Request): Database.Database {
   return req.app.locals.db;
@@ -220,6 +243,8 @@ workoutsRouter.post('/:id/exercises', (req, res) => {
   if (typeof exercise_id !== 'string' || typeof order !== 'number' || typeof role !== 'string' || !Array.isArray(sets)) {
     return res.status(400).json({ error: 'exercise_id (string), order (number), role (string), sets (array) are required' });
   }
+  const logOptions = parseLogOptions(req.body);
+  if (logOptions.error) return res.status(400).json({ error: logOptions.error });
 
   const database = db(req);
   const repo = new WorkoutSessionsRepo(database);
@@ -242,6 +267,7 @@ workoutsRouter.post('/:id/exercises', (req, res) => {
       target_rest_seconds,
       target_type,
       target_id,
+      ...logOptions.options,
     });
     // Programming Redesign (Step 12) §7/§8/rule #14: a correction to an
     // ALREADY-completed session's own actual logged work still counts
@@ -271,16 +297,14 @@ workoutsRouter.post('/:id/exercises', (req, res) => {
  * the request body alone — so one session's logging can never leak into
  * another's exercise rows. */
 workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
-  // `equipment` (2026-10-11): which equipment the exercise was done with; a
-  // short string, or null for "not specified". May be sent alone.
+  // `equipment`, `attachment`, `rep_unit` (2026-10-11): how the exercise
+  // was done (see parseLogOptions); each may be sent alone, null clears it.
   const { sets } = req.body ?? {};
-  const hasEquipment = req.body && Object.prototype.hasOwnProperty.call(req.body, 'equipment');
-  const equipment = hasEquipment ? req.body.equipment : undefined;
-  if (hasEquipment && equipment !== null && (typeof equipment !== 'string' || equipment.trim() === '' || equipment.length > 40)) {
-    return res.status(400).json({ error: 'equipment must be a short string or null' });
-  }
-  if (!Array.isArray(sets) && !hasEquipment) {
-    return res.status(400).json({ error: 'sets (array) or equipment is required' });
+  const { options, error } = parseLogOptions(req.body);
+  if (error) return res.status(400).json({ error });
+  const hasOptions = Object.keys(options).length > 0;
+  if (!Array.isArray(sets) && !hasOptions) {
+    return res.status(400).json({ error: 'sets (array), equipment, attachment or rep_unit is required' });
   }
 
   const database = db(req);
@@ -294,7 +318,9 @@ workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
     return res.status(404).json({ error: `No exercise "${req.params.exerciseId}" on workout session "${req.params.id}"` });
   }
 
-  if (hasEquipment) repo.setExerciseEquipment(req.params.exerciseId, equipment === null ? null : equipment.trim());
+  if (options.equipment !== undefined) repo.setExerciseEquipment(req.params.exerciseId, options.equipment);
+  if (options.attachment !== undefined) repo.setExerciseLogOption(req.params.exerciseId, 'attachment', options.attachment);
+  if (options.rep_unit !== undefined) repo.setExerciseLogOption(req.params.exerciseId, 'rep_unit', options.rep_unit);
   if (!Array.isArray(sets)) {
     return res.json(repo.getExercisePerformances(req.params.id).find((p) => p.id === req.params.exerciseId));
   }

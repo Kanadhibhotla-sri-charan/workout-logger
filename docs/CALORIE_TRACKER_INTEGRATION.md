@@ -40,6 +40,8 @@ exercises: [
                          Calorie Tracker should not key off this)
     order
     role
+    rep_unit            what each set's `reps` counts: 'reps' | 'steps' |
+                         'seconds' | 'metres' (added 2026-10-11)
     sets: [
       { set_number, weight, reps, completed }
     ]

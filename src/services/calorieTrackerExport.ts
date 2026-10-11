@@ -17,6 +17,7 @@
 // all-statuses history view (e.g. for this app's own UI); do not overload
 // getCompletedWorkouts() to serve that purpose.
 
+import { repUnitOf } from '../contracts/loggingOptions.js';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import type { WorkoutSession, WorkoutSessionStatus } from '../contracts/types.js';
@@ -68,6 +69,8 @@ function toExport(repo: WorkoutSessionsRepo, session: WorkoutSession): WorkoutSe
       exercise_name: BlueprintAdapter.getExercise(p.exercise_id)?.name ?? null,
       order: p.order,
       role: p.role,
+      // What each set's `reps` counts: reps, steps, seconds or metres.
+      rep_unit: repUnitOf(p),
       sets: p.sets.map((s) => ({
         set_number: s.set_number,
         weight: s.weight,

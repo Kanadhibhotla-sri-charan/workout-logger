@@ -9,6 +9,8 @@
  * `undefined` — never a fabricated `0`/false value — whenever the
  * underlying data genuinely was not recorded (spec §6.3: "missing data
  * is not zero"). */
+import type { RepUnit } from '../../contracts/loggingOptions.js';
+
 export interface HistoricalExerciseExposure {
   date: string;
   programId?: string;
@@ -16,6 +18,10 @@ export interface HistoricalExerciseExposure {
   exerciseId: string;
   /** Equipment used (2026-10-11); null when not specified. */
   equipment?: string | null;
+  /** Attachment used; null when not specified. */
+  attachment?: string | null;
+  /** What the logged counts measure; load/completedReps exist only for 'reps'. */
+  repUnit?: RepUnit;
   prescribedSets?: number;
   completedSets?: number;
   prescribedRepsMin?: number;
