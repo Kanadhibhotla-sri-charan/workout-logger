@@ -55,7 +55,7 @@ const NAV_ITEMS = [
   { href: '/today.html', label: 'Today' },
   { href: '/program.html', label: 'Program' },
   { href: '/coaching-insights.html', label: 'Insights' },
-  { href: '/coaching-settings.html', label: 'Coaching' },
+  { href: '/coaching.html', label: 'Coaching' },
   { href: '/index.html', label: 'Goals' },
   { href: '/history.html', label: 'History' },
   { href: '/profile.html', label: 'Profile' },

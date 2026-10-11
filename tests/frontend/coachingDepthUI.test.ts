@@ -279,7 +279,8 @@ describe('collectWeekAppliedTechniques: scans /week days[].plannedWork[].applied
 describe('NAV_ITEMS: Coaching Settings and Coaching Insights are real navigable pages', () => {
   it('includes the two new coaching-depth pages', () => {
     const { NAV_ITEMS } = makeCoachingHelpers();
-    expect(NAV_ITEMS.some((item) => item.href === '/coaching-settings.html')).toBe(true);
+    // 2026-10-11: Coaching is the weekly coach review; the settings page moved under Profile.
+    expect(NAV_ITEMS.some((item) => item.href === '/coaching.html')).toBe(true);
     expect(NAV_ITEMS.some((item) => item.href === '/coaching-insights.html')).toBe(true);
   });
 
@@ -409,7 +410,8 @@ describe('coaching-settings.html: preferences and training-experience wiring (B4
   });
 
   it('is reachable from the shared nav', () => {
-    expect(html).toMatch(/renderAppHeader\('\/coaching-settings\.html'\)/);
+    expect(html).toMatch(/renderAppHeader\('\/profile\.html'\)/);
+    expect(readFile('profile.html')).toMatch(/href="\/coaching-settings\.html"/);
   });
 });
 

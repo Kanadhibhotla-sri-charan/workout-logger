@@ -55,6 +55,19 @@ describe('per-exercise decline', () => {
     expect(targetDeclineEvidence(db, 'back-thickness', '2026-11-01', '2026-11-20', new Set()).trend).not.toBe('down');
   });
 
+  it('one light middle session is not a decline when the exercise ends higher', () => {
+    for (const [d, w] of [['2026-11-02', 30], ['2026-11-05', 15], ['2026-11-08', 33]] as const) seed(d, 'overhead-triceps-extension', w);
+    expect(targetDeclineEvidence(db, 'triceps', '2026-11-01', '2026-11-20', new Set()).trend).not.toBe('down');
+  });
+
+  it('one declining exercise that credits two targets is one piece of evidence', () => {
+    // Overhead extension trains triceps and triceps-long-head; it alone must not make "2 targets".
+    for (const [d, w] of [['2026-11-02', 30], ['2026-11-04', 30], ['2026-11-06', 24], ['2026-11-08', 22], ['2026-11-10', 20], ['2026-11-12', 20]] as const) seed(d, 'overhead-triceps-extension', w);
+    const r = evaluate('2026-11-13');
+    expect(r.signals).toHaveLength(1);
+    expect(r.triggered).toBe(false);
+  });
+
   it('a target is down only when most of its exercises are down', () => {
     for (const [d, w] of [['2026-11-02', 70], ['2026-11-05', 70], ['2026-11-08', 60], ['2026-11-11', 58]] as const) seed(d, 'seated-cable-row', w);
     for (const [d, w] of [['2026-11-03', 14], ['2026-11-06', 14], ['2026-11-09', 16], ['2026-11-12', 16]] as const) seed(d, 'chest-supported-row', w);

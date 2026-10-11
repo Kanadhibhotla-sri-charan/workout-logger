@@ -31,6 +31,7 @@ import { WEEKDAYS, type ActivityType, type BlueprintId, type Weekday } from '../
 import type { TargetType } from '../../engine/goalResolver.js';
 import { addDays, daysBetween, isValidCalendarDate } from '../../engine/dateMath.js';
 import { DayNotesRepo } from '../../repositories/dayNotesRepo.js';
+import { CoachRepo } from '../../repositories/coachRepo.js';
 import { InjuryPausesRepo, targetIdsForArea } from '../../repositories/injuryPausesRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import { applyRecoveryConstraint } from '../../engine/recoveryEngine.js';
@@ -237,6 +238,9 @@ export function buildTargetContexts(
           prescriptionSource = 'profile_default';
         }
       }
+      // The user's own preference (2026-10-11): an avoided exercise is a hard
+      // rule and is never prescribed, in either pool mode.
+      const userPreference = t.preferences?.get(exerciseId);
       if (prescriptionEntry && !widePhysique) {
         try {
           const reps = parseRange(prescriptionEntry.reps);
@@ -246,6 +250,11 @@ export function buildTargetContexts(
         } catch {
           missingData.push(`exercise ${exerciseId} for target ${t.target_id}: malformed authored reps/rir range — omitted, not guessed`);
         }
+      }
+
+      if (userPreference === 'avoided') {
+        authoredPrescription = null;
+        prescriptionSource = undefined;
       }
 
       // IDs only — see AIProgrammerContext.intensityTechniqueCatalogue's
@@ -272,6 +281,7 @@ export function buildTargetContexts(
         plausibleIntensityTechniques,
         recentConsecutiveSessionsUsed,
         ...(prescriptionSource ? { prescriptionSource } : {}),
+        ...(userPreference === 'preferred' || userPreference === 'disliked' ? { userPreference } : {}),
       };
     });
 
@@ -837,6 +847,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     trainingExperience,
     structuralAdvisories,
     injuryPauses: injuryPauses.map((p) => ({ area: p.area, since: p.since, note: p.note, targetIds: targetIdsForArea(p.area) })),
+    coachAdvice: new CoachRepo(db).activeAccepted(currentDate).map((a) => ({ exerciseId: a.exerciseId, kind: a.kind, suggestion: a.suggestion, swapToExerciseId: a.swapToExerciseId })),
     activityNotes: new DayNotesRepo(db).listBetween(addDays(input.targetDate, -ACTIVITY_NOTES_DAYS), input.targetDate),
     intensityTechniqueCatalogue,
     outputRequirements: {

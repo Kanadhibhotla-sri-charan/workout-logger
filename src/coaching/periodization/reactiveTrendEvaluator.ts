@@ -76,13 +76,20 @@ export function targetDeclineEvidence(
   );
   const byExercise = new Map<string, Array<{ date: string; load: number }>>();
   for (const e of exposures) (byExercise.get(e.exerciseId) ?? byExercise.set(e.exerciseId, []).get(e.exerciseId)!).push({ date: e.date, load: e.load });
-  const exercises: ExerciseTrendEvidence[] = [...byExercise].map(([exerciseId, points]) => ({
-    exerciseId,
-    trend: calculateBasicTrend(points),
-    points: points.length,
-    first: Math.round(points[0]!.load * 10) / 10,
-    last: Math.round(points[points.length - 1]!.load * 10) / 10,
-  }));
+  const exercises: ExerciseTrendEvidence[] = [...byExercise].map(([exerciseId, points]) => {
+    const first = points[0]!.load;
+    const last = points[points.length - 1]!.load;
+    const trend = calculateBasicTrend(points);
+    return {
+      exerciseId,
+      // A decline must also end lower than it started: one light session in
+      // the middle can tip the early/late averages without any real drop.
+      trend: trend === 'down' && last >= first ? 'stable' : trend,
+      points: points.length,
+      first: Math.round(first * 10) / 10,
+      last: Math.round(last * 10) / 10,
+    };
+  });
   const withTrend = exercises.filter((x) => x.trend !== 'unknown' && x.points >= MIN_EXERCISE_POINTS_FOR_DECLINE);
   const down = withTrend.filter((x) => x.trend === 'down').length;
   const counted = withTrend.reduce((n, x) => n + x.points, 0);
@@ -162,12 +169,27 @@ export function evaluateReactiveDeloadTrigger(db: Database.Database, input: Eval
   }
 
   const deloadDates = deloadDatesInRange(db, input.programId, lookbackStart, lookbackEnd);
-  const signals: ReactiveDeclineSignal[] = [];
+  const declining: Array<{ signal: ReactiveDeclineSignal; exerciseIds: string[] }> = [];
   for (const target of BlueprintAdapter.getTargets()) {
     const evidence = targetDeclineEvidence(db, target.id, lookbackStart, lookbackEnd, deloadDates);
     if (evidence.dataQuality === 'insufficient') continue;
     if (evidence.trend !== 'down') continue;
-    signals.push({ targetId: target.id, trend: evidence.trend, dataQuality: evidence.dataQuality, completedExposureCount: evidence.completedExposureCount, exercises: evidence.exercises });
+    declining.push({
+      signal: { targetId: target.id, trend: evidence.trend, dataQuality: evidence.dataQuality, completedExposureCount: evidence.completedExposureCount, exercises: evidence.exercises },
+      exerciseIds: evidence.exercises.filter((x) => x.trend === 'down' && x.points >= MIN_EXERCISE_POINTS_FOR_DECLINE).map((x) => x.exerciseId),
+    });
+  }
+  // Independent evidence only: each declining exercise supports one target
+  // (overhead extension credits triceps and its long head, but is one
+  // piece of evidence). Targets with the fewest declining exercises claim
+  // theirs first, so the count is the largest independent set.
+  const claimed = new Set<string>();
+  const signals: ReactiveDeclineSignal[] = [];
+  for (const d of [...declining].sort((x, y) => x.exerciseIds.length - y.exerciseIds.length)) {
+    const own = d.exerciseIds.find((id) => !claimed.has(id));
+    if (!own) continue;
+    claimed.add(own);
+    signals.push(d.signal);
   }
 
   if (signals.length === 0) {

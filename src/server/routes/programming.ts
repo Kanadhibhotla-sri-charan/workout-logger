@@ -593,7 +593,7 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
  * start (the same requiredDirectSets a saved week would carry), and its
  * direct sets actually completed so far this calendar week. Read-only:
  * no rotation record, nothing persisted. */
-function liveTargetAllocations(database: Database.Database, weekStart: string) {
+export function liveTargetAllocations(database: Database.Database, weekStart: string) {
   const input = assembleWeeklyPlanInput(database, weekStart, defaultBudgetMinutes(database), weekStart);
   const plan = buildWeeklyProgrammingPlan(input);
   const today = todayForUser(database);

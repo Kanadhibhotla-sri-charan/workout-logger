@@ -3,20 +3,61 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Coaching Insights - Workout Programmer</title>
+  <title>Insights - Workout Programmer</title>
   <link rel="stylesheet" href="/style.css" />
+  <style>
+    .progress-list { display: grid; gap: var(--space-3); }
+    .progress-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+    .progress-numbers { font-variant-numeric: tabular-nums; }
+    .spark { width: 120px; height: 32px; flex: none; }
+    .spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+    .spark circle { fill: var(--accent); }
+    .spark circle.deload { fill: var(--surface); stroke: var(--accent); stroke-width: 1; }
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .volume-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    .volume-table th, .volume-table td { padding: 0.35rem 0.5rem; text-align: center; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .volume-table th:first-child, .volume-table td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); }
+    .volume-table .group-row td { background: var(--surface-muted); font-weight: 600; text-align: left; }
+    .vol-good { background: var(--success-bg); color: var(--success); }
+    .vol-mid { background: var(--warning-bg); color: var(--warning); }
+    .vol-low { background: var(--danger-bg); color: var(--danger); }
+    .vol-none { color: var(--text-faint); }
+  </style>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header id="app-header" class="app-header"></header>
 
   <main id="main-content">
-    <h1>Coaching insights</h1>
-    <p class="muted">A plain-language look at what the program is prioritizing right now — never a medical or diagnostic assessment.</p>
+    <h1>Insights</h1>
+    <p class="muted">What is actually happening in your training, from what you have logged.</p>
 
     <section>
       <h2>Recovery and training state</h2>
       <div id="state-section"></div>
+      <div id="deload-history"></div>
+    </section>
+
+    <section>
+      <h2>Strength progress</h2>
+      <p class="faint">Each exercise compared only with itself: your best set per session as an estimated 1-rep max. Hollow dots are deload sessions and do not count.</p>
+      <div id="strength-section"></div>
+    </section>
+
+    <section>
+      <h2>Weekly volume</h2>
+      <p class="faint">Direct sets done / required per muscle, by week (current week so far).</p>
+      <div id="volume-section"></div>
+    </section>
+
+    <section>
+      <h2>Consistency</h2>
+      <div id="consistency-section"></div>
+    </section>
+
+    <section>
+      <h2>Goal check-ins</h2>
+      <div id="checkins-section"></div>
     </section>
 
     <section>
@@ -191,7 +232,174 @@
       return card;
     }
 
+
+    // ---------- Insights data (GET /api/insights) ----------
+
+    const STATUS_LABEL = { new_best: 'New best', up: 'Improving', flat: 'Holding', down: 'Dropping', stalled: 'Stalled', new: 'New' };
+    const STATUS_BADGE = { new_best: 'badge-success', up: 'badge-success', flat: 'badge-neutral', down: 'badge-danger', stalled: 'badge-warning', new: 'badge-progress' };
+    let insightsData = null;
+    let showAllExercises = false;
+
+    async function loadInsights() {
+      const ids = ['strength-section', 'volume-section', 'consistency-section', 'checkins-section'];
+      for (const id of ids) showLoading(document.getElementById(id), 'Loading…');
+      try {
+        insightsData = await api('/api/insights');
+        renderDeloadHistory(insightsData.deloads);
+        renderStrength();
+        renderVolume(insightsData.volume);
+        renderConsistency(insightsData.consistency);
+        renderCheckIns(insightsData.goalCheckIns);
+      } catch (err) {
+        for (const id of ids) showError(document.getElementById(id), 'We could not load insights.', loadInsights);
+      }
+    }
+
+    function renderDeloadHistory(deloads) {
+      const container = document.getElementById('deload-history');
+      container.innerHTML = '';
+      if (!deloads || deloads.length === 0) return;
+      const parts = deloads.map((d) => `${d.kind === 'reactive' ? 'Recovery' : 'Scheduled'} deload ${formatDate(d.start)} – ${formatDate(d.end)}`);
+      container.appendChild(el('p', { class: 'faint', text: `Deloads in the last 6 weeks: ${parts.join('; ')}.`, style: 'margin:0.5rem 0 0' }));
+    }
+
+    function sparkline(points) {
+      const ns = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(ns, 'svg');
+      svg.setAttribute('viewBox', '0 0 120 32');
+      svg.setAttribute('class', 'spark');
+      svg.setAttribute('aria-hidden', 'true');
+      if (points.length < 2) return svg;
+      const values = points.map((p) => p.value);
+      const min = Math.min(...values);
+      const span = Math.max(...values) - min || 1;
+      const xy = points.map((p, i) => [4 + (i * 112) / (points.length - 1), 28 - ((p.value - min) * 24) / span]);
+      const line = document.createElementNS(ns, 'polyline');
+      line.setAttribute('points', xy.filter((_, i) => !points[i].deload).map((c) => c.join(',')).join(' '));
+      svg.appendChild(line);
+      xy.forEach(([x, y], i) => {
+        const dot = document.createElementNS(ns, 'circle');
+        dot.setAttribute('cx', x);
+        dot.setAttribute('cy', y);
+        dot.setAttribute('r', 2.2);
+        if (points[i].deload) dot.setAttribute('class', 'deload');
+        svg.appendChild(dot);
+      });
+      return svg;
+    }
+
+    function renderStrength() {
+      const container = document.getElementById('strength-section');
+      container.innerHTML = '';
+      const all = insightsData.strength.filter((e) => e.sessions >= 2);
+      if (all.length === 0) {
+        showEmpty(container, 'Log the same exercise in at least two sessions to see its progress.');
+        return;
+      }
+      const shown = showAllExercises ? all : all.filter((e) => e.goal || e.sessions >= 4).slice(0, 12);
+      const list = el('div', { class: 'progress-list' });
+      for (const e of shown) {
+        const card = createCard();
+        const head = el('div', { class: 'progress-row' });
+        head.appendChild(el('div', { class: 'card-title', text: e.name }));
+        const badges = el('div', { style: 'display:flex;gap:0.35rem' });
+        if (e.goal) badges.appendChild(el('span', { class: 'badge badge-activity', text: 'Goal' }));
+        badges.appendChild(el('span', { class: `badge ${STATUS_BADGE[e.status]}`, text: STATUS_LABEL[e.status] }));
+        head.appendChild(badges);
+        card.appendChild(head);
+        const body = el('div', { class: 'progress-row', style: 'margin-top:0.3rem' });
+        const lastPoint = e.points[e.points.length - 1];
+        const change = e.changePct === null ? '' : ` (${e.changePct > 0 ? '+' : ''}${e.changePct}%)`;
+        body.appendChild(el('div', { class: 'muted progress-numbers', text: `${e.first} → ${e.last} ${e.unit}${change} · last ${lastPoint.bestSet} on ${formatDate(lastPoint.date)} · ${e.sessions} sessions` }));
+        body.appendChild(sparkline(e.points));
+        card.appendChild(body);
+        list.appendChild(card);
+      }
+      container.appendChild(list);
+      if (all.length > shown.length || showAllExercises) {
+        container.appendChild(el('div', { class: 'btn-row', style: 'margin-top:0.6rem' }, [createButton({
+          label: showAllExercises ? 'Show fewer' : `Show all ${all.length} exercises`,
+          variant: 'secondary',
+          onClick: () => { showAllExercises = !showAllExercises; renderStrength(); },
+        })]));
+      }
+    }
+
+    function volumeCell(w) {
+      if (w.required === null || w.required === 0) return el('td', { class: w.done > 0 ? '' : 'vol-none', text: w.done > 0 ? `${w.done}` : '–' });
+      const pct = w.done / w.required;
+      return el('td', { class: pct >= 0.9 ? 'vol-good' : pct >= 0.5 ? 'vol-mid' : 'vol-low', text: `${w.done}/${w.required}` });
+    }
+
+    function renderVolume(rows) {
+      const container = document.getElementById('volume-section');
+      container.innerHTML = '';
+      if (!rows || rows.length === 0) {
+        showEmpty(container, 'No volume data yet.');
+        return;
+      }
+      const weeks = rows[0].weeks.map((w) => w.weekStart);
+      const table = el('table', { class: 'volume-table' });
+      const head = el('tr', {}, [el('th', { text: 'Muscle' }), ...weeks.map((w, i) => el('th', { text: i === weeks.length - 1 ? 'This week' : formatDate(w) }))]);
+      table.appendChild(el('thead', {}, [head]));
+      const tbody = el('tbody');
+      let group = null;
+      for (const r of rows) {
+        const label = r.goalLabel || 'Other';
+        if (label !== group) {
+          group = label;
+          tbody.appendChild(el('tr', { class: 'group-row' }, [el('td', { text: label, colspan: String(weeks.length + 1) })]));
+        }
+        tbody.appendChild(el('tr', {}, [el('td', { text: r.name }), ...r.weeks.map(volumeCell)]));
+      }
+      table.appendChild(tbody);
+      container.appendChild(el('div', { class: 'table-scroll' }, [table]));
+    }
+
+    function renderConsistency(weeks) {
+      const container = document.getElementById('consistency-section');
+      container.innerHTML = '';
+      if (!weeks || weeks.length === 0) {
+        showEmpty(container, 'No training logged yet.');
+        return;
+      }
+      const grid = el('div', { class: 'summary-grid' });
+      weeks.forEach((w, i) => {
+        const card = createCard();
+        card.appendChild(el('div', { class: 'card-title', text: i === weeks.length - 1 ? 'This week' : `Week of ${formatDate(w.weekStart)}` }));
+        card.appendChild(el('div', { class: 'card-subtitle', text: `Gym days: ${w.gymDaysDone} of ${w.gymDaysScheduled}` }));
+        if (w.setsPrescribed > 0) {
+          const pct = Math.round((w.setsDone / w.setsPrescribed) * 100);
+          card.appendChild(el('div', { class: 'faint', text: `Sets: ${w.setsDone} of ${w.setsPrescribed} prescribed (${pct}%)` }));
+        }
+        grid.appendChild(card);
+      });
+      container.appendChild(grid);
+    }
+
+    function renderCheckIns(goals) {
+      const container = document.getElementById('checkins-section');
+      container.innerHTML = '';
+      if (!goals || goals.length === 0) {
+        showEmpty(container, 'No active goals.', el('a', { class: 'btn', href: '/index.html', text: 'Add a goal' }));
+        return;
+      }
+      for (const g of goals) {
+        const card = createCard();
+        const row = el('div', { class: 'progress-row' });
+        row.appendChild(el('div', { class: 'card-title', text: g.name }));
+        row.appendChild(el('span', { class: `badge ${g.overdue ? 'badge-warning' : 'badge-success'}`, text: g.overdue ? 'Check-in due' : `Next ${formatDate(g.nextDue)}` }));
+        card.appendChild(row);
+        card.appendChild(el('p', { class: 'muted', style: 'margin:0.3rem 0 0', text: g.lastAssessment
+          ? `Last check-in ${formatDate(g.lastAssessment.date)}: rated ${g.lastAssessment.rating}/5.`
+          : 'No check-in yet. Rate how this area looks on the Goals page; goal progress and volume decisions use it.' }));
+        card.appendChild(el('a', { href: '/index.html', text: 'Go to Goals', style: 'display:inline-block;margin-top:0.3rem' }));
+        container.appendChild(card);
+      }
+    }
+
     loadState();
+    loadInsights();
     loadAdvisories();
     loadTechniques();
   </script>

@@ -40,6 +40,8 @@ const RECOMMENDED_TYPICAL_OUTPUT_TOKENS: Record<AIProgrammerMode, number> = {
   // reconcile_week's own context/instruction) — a placeholder value only
   // so the Record type is total; never actually read.
   generate_week: 3000,
+  // Weekly coach review (2026-10-11); not wired into this tool either.
+  coach_review: 2000,
 };
 
 /** One model's optional per-million-token prices. Absent fields (not

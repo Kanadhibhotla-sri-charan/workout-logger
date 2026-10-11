@@ -578,3 +578,73 @@ gives every member of a shared group one exercise before filling minimums).
 * Left to the owner: the reactive deload stored before the fix (through
   2026-10-14) is still active; its evidence predates per-exercise trends.
   End it with "End this deload now" on Insights if wanted.
+
+---
+
+## 13. Insights and Coaching pages (2026-10-11, owner-approved)
+
+Owner feedback: Insights showed only a vague deload note; Coaching was only
+exercise preferences. Split by question: Insights = what is happening (facts
+from logs, no AI); Coaching = what to do about it (AI-written, grounded in
+those facts).
+
+### 13.1 Reactive deload evidence, tightened further
+Running the per-exercise trigger (12.1) on the production history showed two
+remaining false signals: an exercise whose early/late averages dipped while it
+ended higher (overhead extension 30.9 -> 38.5 kg counted "down"), and one
+exercise counted for two targets (triceps and triceps long head). Now an
+exercise is "down" only if it also ends lower than it started, and each
+declining exercise supports one target (targets with the fewest declining
+exercises claim theirs first). Production history re-evaluated: the
+2026-09-17 reactive deload would have been "watch" (brachialis only), and
+2026-10-06/08/09 "clear". So both reactive deloads (Sep 17-23, Oct 8-14) were
+false; with the scheduled Oct 5-7 week, three deloads in four weeks.
+
+### 13.2 Insights (`GET /api/insights`, `src/insights/insightsService.ts`)
+* Strength progress: per exercise, best set per session as estimated 1RM
+  (Epley; reps for unloaded work), deload sessions marked and excluded from
+  status. Status: new best (beats every earlier session by 1%), stalled (no
+  new best in the last 3 sessions, 4+ sessions), else improving / dropping /
+  holding from the early-late trend, which must agree with first vs last.
+* Weekly volume: direct sets done vs required per muscle per week (6 weeks;
+  leading weeks with no logged work dropped). Required = the saved week
+  program's allocations, else the planner as of the week start (cached for
+  finished weeks).
+* Consistency (gym days done vs scheduled, sets done vs prescribed), goal
+  check-ins (last self-assessment, next due), deload history (from the event
+  log). Page: training state card with evidence + "End this deload now",
+  then these sections; advisories and techniques kept below.
+
+### 13.3 Coaching (`/coaching.html`, `/api/coaching/*`)
+* Weekly coach review: ONE paid call (`mode: coach_review`) on the user's
+  click, at most one per programming week unless "Write a new review"
+  (`regenerate`). Facts: goals, training state and deloads, up to 15
+  exercises (goal or 3+ sessions) with recent best sets, 4 weeks of volume
+  and consistency, check-ins, 14 days of notes, injury pauses, accepted
+  advice, and swap options (same-primary-target alternatives, paused areas
+  excluded) for stalled/dropping exercises.
+* Output checked strictly (`validateCoachReview`): sizes, every plateau
+  exercise must be a stalled/dropping exercise from the facts, a swap target
+  must be one of its swap options. Invalid -> 502, nothing saved. Tables
+  `coach_reviews`, `coach_advice`.
+* Advice accept/dismiss. Accepted advice (21 days) goes to session
+  generation as `context.coachAdvice` (planned rule 7). An accepted swap also
+  sets a 14-day avoid on the old exercise and a 14-day prefer on the new one,
+  unless the user already has a rule for either.
+* Settings moved: the old Coaching page (exercise preferences, training
+  experience) is now "Training settings", reached from Profile; the nav's
+  Coaching item opens the review.
+
+### 13.4 Exercise preferences now reach AI generation
+Finding: only the legacy deterministic planner read exercise preferences; the
+AI path ignored them, so an "avoid" rule had no effect on AI workouts. Now
+(both pool modes) an avoided exercise is never prescribed; preferred and
+disliked are passed to the model (`userPreference`, rule 7) and order the wide
+shortlist (preferred first, disliked last).
+
+### 13.5 Verification
+`tests/insights/insightsService.test.ts` (9), `tests/coaching/coachReview.test.ts`
+(7), two more cases in `reactiveDeclinePerExercise.test.ts`; frontend wiring
+tests updated for the nav move. Full suite 2253 tests: the same 245 known
+date-rotation failures, 0 new. Replay 10/10. Pages rendered headlessly
+(jsdom) against a production-data copy: no script errors.

@@ -152,6 +152,7 @@ export function applyExerciseShortlist(targets: readonly AIProgrammerTargetConte
     const rested = accessories.filter((v) => !usedInEveryConsidered(v));
     const eligible = rested.length > 0 ? rested : accessories;
     const order = (a: AIProgrammerValidExerciseContext, b: AIProgrammerValidExerciseContext) =>
+      preferenceRank(a) - preferenceRank(b) ||
       a.recentSameTypeUsage!.sessionsUsed - b.recentSameTypeUsage!.sessionsUsed ||
       (a.recentSameTypeUsage!.lastUsedDate ?? '').localeCompare(b.recentSameTypeUsage!.lastUsedDate ?? '') ||
       Number(b.role === 'primary') - Number(a.role === 'primary') ||
@@ -173,6 +174,11 @@ export function applyExerciseShortlist(targets: readonly AIProgrammerTargetConte
 
     return { ...target, validExercises: restrictTo(target, withSignal, shortlist).validExercises };
   });
+}
+
+/** User preference first in the rotation order: preferred, neutral, disliked. */
+function preferenceRank(v: AIProgrammerValidExerciseContext): number {
+  return v.userPreference === 'preferred' ? 0 : v.userPreference === 'disliked' ? 2 : 1;
 }
 
 /** The target with only `shortlist` keeping its prescription, shortlisted

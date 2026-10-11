@@ -662,3 +662,31 @@ CREATE TABLE IF NOT EXISTS injury_pauses (
   since TEXT NOT NULL, -- ISO date the pause started
   created_at TEXT NOT NULL
 );
+
+-- Weekly coach review (2026-10-11): one AI-written review per request,
+-- grounded in the Insights facts, and the plateau advice it gave. Accepted
+-- advice is passed to session generation (context.coachAdvice).
+CREATE TABLE IF NOT EXISTS coach_reviews (
+  id TEXT PRIMARY KEY,
+  week_start TEXT NOT NULL,
+  as_of TEXT NOT NULL,
+  review_json TEXT NOT NULL,
+  model TEXT,
+  request_id TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS coach_advice (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL REFERENCES coach_reviews(id) ON DELETE CASCADE,
+  exercise_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  observation TEXT NOT NULL,
+  suggestion TEXT NOT NULL,
+  swap_to_exercise_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('open', 'accepted', 'dismissed')),
+  decided_on TEXT,
+  created_at TEXT NOT NULL
+);

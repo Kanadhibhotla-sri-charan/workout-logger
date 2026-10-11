@@ -90,6 +90,10 @@ export interface AIProgrammerValidExerciseContext {
    * the Blueprint development package, or the Blueprint profile default
    * (programmingProfiles.ts) for a primary-target exercise outside it. */
   prescriptionSource?: 'package' | 'profile_default';
+  /** The user's own preference for this exercise (Coaching settings),
+   * when it is 'preferred' or 'disliked'. An 'avoided' exercise is never
+   * prescribed (authoredPrescription null). Absent when neutral. */
+  userPreference?: 'preferred' | 'disliked';
 }
 
 export interface AIProgrammerTargetContext {
@@ -515,6 +519,11 @@ export interface AIProgrammerContext {
    * physique targets each covers. Those targets are ineligible for every
    * session (programmingBrief.muscles[].pausedForInjury). */
   injuryPauses: ReadonlyArray<{ area: string; since: string; note: string | null; targetIds: readonly string[] }>;
+
+  /** Weekly-coach-review advice the user accepted in the last 21 days
+   * (2026-10-11): the exercise it is about, the kind of change, and the
+   * suggestion in the coach's words. */
+  coachAdvice: ReadonlyArray<{ exerciseId: string; kind: string; suggestion: string; swapToExerciseId: string | null }>;
 
   /** Context-bloat fix (2026-09-18): the full text for every intensity
    * technique referenced anywhere in `targets[].validExercises[].plausibleIntensityTechniques`,

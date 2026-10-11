@@ -29,6 +29,8 @@ export interface PlannedCandidateForAI {
   /** Wide exercise-pool mode (replaces recentConsecutiveSessionsUsed). */
   recentSameTypeUsage?: { sessionsUsed: number; sessionsConsidered: number; lastUsedDate: string | null };
   recentHistory: ReadonlyArray<{ date: string; completedSets: number }>;
+  /** The user's own preference, when not neutral. */
+  userPreference?: 'preferred' | 'disliked';
 }
 
 export interface PlannedTargetForAI {
@@ -92,6 +94,7 @@ export interface AIProgrammerPlannedContext {
   structuralAdvisories: AIProgrammerContext['structuralAdvisories'];
   activityNotes: AIProgrammerContext['activityNotes'];
   injuryPauses: AIProgrammerContext['injuryPauses'];
+  coachAdvice: AIProgrammerContext['coachAdvice'];
   intensityTechniqueCatalogue: AIProgrammerContext['intensityTechniqueCatalogue'];
   outputRequirements: AIProgrammerContext['outputRequirements'];
 }
@@ -160,6 +163,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
           plausibleIntensityTechniques: v.plausibleIntensityTechniques,
           ...(v.recentSameTypeUsage ? { recentSameTypeUsage: v.recentSameTypeUsage } : { recentConsecutiveSessionsUsed: v.recentConsecutiveSessionsUsed }),
           recentHistory: target.exerciseHistory[c.exerciseId] ?? [],
+          ...(v.userPreference ? { userPreference: v.userPreference } : {}),
         };
       }),
     };
@@ -205,6 +209,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
     structuralAdvisories: context.structuralAdvisories,
     activityNotes: context.activityNotes,
     injuryPauses: context.injuryPauses,
+    coachAdvice: context.coachAdvice,
     intensityTechniqueCatalogue: pick(context.intensityTechniqueCatalogue, [...usedTechniques]),
     outputRequirements: context.outputRequirements,
   };
@@ -229,7 +234,7 @@ export function buildPlannedProgrammerSystemInstruction(rotationShortlist = fals
     '',
     'Your coaching decisions (real judgment; cite the specific data behind each in programmingRationale):',
     rotationShortlist
-      ? '7. Which candidates to use for each target. Each candidate list is already a rotation shortlist: each target\'s main compound lift stays for the training block, and its accessories are the ones that were not used in both of the last two sessions of this day type. Choose accessories that give a different angle from those sessions, using recentSameTypeUsage (sessionsUsed of sessionsConsidered, lastUsedDate), recentHistory and coachingFoundation.historicalSummaries trends.'
+      ? '7. Which candidates to use for each target. Each candidate list is already a rotation shortlist: each target\'s main compound lift stays for the training block, and its accessories are the ones that were not used in both of the last two sessions of this day type. Choose accessories that give a different angle from those sessions, using recentSameTypeUsage (sessionsUsed of sessionsConsidered, lastUsedDate), recentHistory and coachingFoundation.historicalSummaries trends. A candidate\'s userPreference is the user\'s own: favour "preferred" ones, and use a "disliked" one only when the alternatives fit worse. context.coachAdvice lists coaching advice the user accepted; follow it where the plan allows.'
       : '7. Which candidates to use for each target — weigh recentHistory, recentConsecutiveSessionsUsed (a long streak is a reason to consider a fresh angle, never a requirement), coachingFoundation.historicalSummaries trends, and exercise variety.',
     '8. Exercise order and pairing — two trained targets with opposite antagonistGroup can be sequenced as a superset when that genuinely helps.',
     '9. Volume within each target\'s legal range — go below recommendedSets only for a concrete, cited reason (e.g. recoveryCaution "reduce", recent heavy exposure, or pain or an injury reported in context.activityNotes), and never below minimumSets. During a deload, aim for recommendedSets: they already contain the deload\'s reduction, so the deload itself is not a reason to go lower.',
