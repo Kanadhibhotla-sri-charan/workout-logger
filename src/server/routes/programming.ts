@@ -619,8 +619,14 @@ function buildWeekResponse(database: Database.Database, weekStart: string, progr
   return {
     weekStart,
     weekEnd: addDays(weekStart, 6),
-    // otherNote: the user's "Other" note for that date, if any.
-    days: renderWeekDays(database, weekStart, program, profile).map((d) => ({ ...d, otherNote: notes.get(d.date) ?? null })),
+    // otherNote: the user's "Other" note for that date, if any. A non-gym
+    // day with a note IS an "Other" day (the user chose Other instead of
+    // its scheduled activity), so its type and activity read 'other'; a
+    // gym day keeps its workout and just carries the note.
+    days: renderWeekDays(database, weekStart, program, profile).map((d) => {
+      const otherNote = notes.get(d.date) ?? null;
+      return otherNote !== null && d.type !== 'gym' ? { ...d, type: 'other', activity: 'other', otherNote } : { ...d, otherNote };
+    }),
     targetAllocations: live ? liveTargetAllocations(database, weekStart) : (program.target_allocations ?? []),
     // 'completed': deliveredDirectSets counts sets actually logged this
     // week; 'programmed': sets in the saved week program.

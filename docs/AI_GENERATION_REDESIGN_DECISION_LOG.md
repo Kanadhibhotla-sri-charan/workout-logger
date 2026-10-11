@@ -704,3 +704,13 @@ barbell -> dumbbell switch is not a decline (`reactiveDeclinePerExercise.test.ts
 check-in wiring (`tests/frontend/goalCheckIn.test.ts`). Full suite 2260: the
 same 245 known failures, 0 new. Replay 10/10. Logger and Goals pages exercised
 headlessly on a data copy: picker saves, check-in saves, no script errors.
+
+### 14.4 "Other" days show as Other (2026-10-11)
+Owner report: Sat 10/10 was changed to Other with a note, but the card still
+said Badminton (with the raw note text under it). Section 11.3 had made a
+note an annotation that never changed the day. Now `/week` (and `/today`)
+return a non-gym day that has a note as `type: 'other', activity: 'other'`;
+a gym day keeps its workout and just carries the note. Cards show "Other" and
+"Note added" instead of a raw preview (the full note is in the day's modal).
+Choosing a normal activity again on an Other day removes its note first;
+clearing the note also restores the day.

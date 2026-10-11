@@ -116,6 +116,7 @@
       { value: 'unselected', text: 'Rest / clear' },
     ];
     function formatDailyActivity(activity) {
+      if (activity === 'other') return 'Other';
       return (DAILY_ACTIVITY_OPTIONS.find((o) => o.value === activity) || {}).text || activity;
     }
 
@@ -560,8 +561,7 @@
         head.appendChild(el('div', { class: 'wd-meta', text: meta }));
       }
       if (day.otherNote) {
-        const preview = day.otherNote.length > 40 ? `${day.otherNote.slice(0, 40)}…` : day.otherNote;
-        head.appendChild(el('div', { class: 'wd-meta', text: `Other: ${preview}` }));
+        head.appendChild(el('div', { class: 'wd-meta', text: day.type === 'gym' ? 'Note added' : 'Note added — open to read' }));
       }
       btn.appendChild(head);
       btn.appendChild(buildDayStatusBadge(day));
@@ -755,6 +755,8 @@
       // deliberate "Generate a new workout" action rather than the
       // change silently falling back to regeneration on its own.
       async function changeActivity(prescriptionPolicy) {
+        // Leaving an "Other" day: its note is what makes it Other, so remove it.
+        if (day.type === 'other') await api(`/api/programming/days/${day.date}/note`, { method: 'PUT', body: { note: '' } });
         return withSaving(saveBtn, statusEl, () => api(`/api/programming/week/days/${day.weekday}/activity`, {
           method: 'PUT',
           body: { activity: select.value, prescriptionPolicy },
@@ -804,6 +806,7 @@
         }
       }});
 
+      saveBtn.hidden = select.value === 'other';
       const row = el('div', { class: 'btn-row' }, [select, saveBtn]);
       section.append(row, statusEl, noteSection);
       return section;
@@ -815,7 +818,7 @@
     function buildOtherNoteSection(day) {
       const section = el('div', { style: 'margin-top:0.6rem' });
       section.hidden = !day.otherNote;
-      section.appendChild(el('p', { class: 'faint', text: 'Other activity: write what you did and how it went (e.g. a rehab session, an injury, a sport). The AI Programmer reads this when planning; it does not change this day\'s schedule.', style: 'margin:0 0 0.4rem' }));
+      section.appendChild(el('p', { class: 'faint', text: 'Other activity: write what you did and how it went (e.g. a rehab session, an injury, a sport). The AI Programmer reads this when planning. On a non-gym day the day then shows as Other; a gym day keeps its workout. Clear the note to undo.', style: 'margin:0 0 0.4rem' }));
       const textarea = el('textarea', {
         rows: '3',
         maxlength: '2000',

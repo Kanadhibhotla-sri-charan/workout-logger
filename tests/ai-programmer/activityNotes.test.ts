@@ -54,13 +54,19 @@ describe('PUT /api/programming/days/:date/note', () => {
     expect(new DayNotesRepo(db).get('2026-10-10')).toBeNull();
   });
 
-  it('does not change the day\'s activity or write a week program', async () => {
+  it('makes a non-gym day an Other day, leaves a gym day a gym day, and writes no week program', async () => {
     const app = createApp(db);
-    const before = (await request(app).get('/api/programming/week?date=2026-10-10').expect(200)).body.days.map((d: any) => d.activity);
-    await request(app).put('/api/programming/days/2026-10-10/note').send({ note: 'rehab' }).expect(200);
-    const after = (await request(app).get('/api/programming/week?date=2026-10-10').expect(200)).body.days.map((d: any) => d.activity);
-    expect(after).toEqual(before);
+    await request(app).put('/api/programming/days/2026-10-10/note').send({ note: 'Knee rehab' }).expect(200); // Saturday: not a gym day
+    await request(app).put('/api/programming/days/2026-10-09/note').send({ note: 'Felt tired' }).expect(200); // Friday: gym day
+    const days = (await request(app).get('/api/programming/week?date=2026-10-10').expect(200)).body.days;
+    expect(days.find((d: any) => d.date === '2026-10-10')).toMatchObject({ type: 'other', activity: 'other', otherNote: 'Knee rehab' });
+    expect(days.find((d: any) => d.date === '2026-10-09')).toMatchObject({ type: 'gym', otherNote: 'Felt tired' });
     expect((db.prepare('SELECT COUNT(*) AS n FROM programs').get() as { n: number }).n).toBe(0);
+    // Clearing the note restores the day's own activity.
+    await request(app).put('/api/programming/days/2026-10-10/note').send({ note: '' }).expect(200);
+    const after = (await request(app).get('/api/programming/week?date=2026-10-10').expect(200)).body.days.find((d: any) => d.date === '2026-10-10');
+    expect(after.type).not.toBe('other');
+    expect(after.otherNote).toBeNull();
   });
 
   it('rejects a bad date, a non-string note and an over-long note', async () => {
