@@ -714,3 +714,46 @@ a gym day keeps its workout and just carries the note. Cards show "Other" and
 "Note added" instead of a raw preview (the full note is in the day's modal).
 Choosing a normal activity again on an Other day removes its note first;
 clearing the note also restores the day.
+
+## 15. Blueprint sync: three missing variations (2026-10-11)
+Owner notes showed three real exercises logged under stand-ins because the
+library lacked them:
+
+| Date  | Performed                   | Logged as                  |
+|-------|-----------------------------|----------------------------|
+| 09/24 | decline barbell bench press | decline-dumbbell-fly       |
+| 09/29 | single-arm lat pulldown     | neutral-grip-lat-pulldown  |
+| 10/01 | decline dumbbell press      | decline-dumbbell-fly       |
+
+The owner added them to workout-blueprint (ba784d4, signed off b90c302).
+
+### 15.1 Snapshot
+`npm run sync-blueprint` from b018abc (2026-08-29) to b90c302: 123 -> 143
+exercises, none removed, development packages unchanged. Besides the three
+(`decline-barbell-bench-press` and `decline-dumbbell-press` -> mid/lower pec,
+`single-arm-lat-pulldown` -> lat width) the sync brings 17 other exercises
+added in Blueprint since August (glute-bridge, step-up, side-plank,
+copenhagen-plank, sissy-squat, ...), refreshed cues/mistakes/video fields on
+all 123, equipment lists edited on 17, primary-target text on 3 curls, and
+three target definitions reworded (triceps, rectus-abdominis,
+core-anti-lateral-flexion). In wide mode all of them are eligible like any
+other library exercise.
+
+### 15.2 Secondary-target mapping
+Three new free-text secondary phrases needed an explicit decision
+(`docs/SECONDARY_TARGET_MAPPING.md`): `gluteus medius` and
+`bottom-leg hip abductors` -> `gluteus-medius-minimus`;
+`obliques and lateral trunk` -> `obliques`.
+
+### 15.3 Effects on stored data
+- Proposals generated but not yet committed against the old snapshot fail
+  their Blueprint-commit staleness check and must be regenerated (checked on
+  production before deploy).
+- With owner approval the three stand-in rows above were re-pointed to the
+  real exercises (`workout_exercises.exercise_id` only; sets unchanged),
+  after a DB backup. This moves press-level loads off decline fly and the
+  single-arm session off neutral-grip pulldown in Insights/trend evidence.
+
+### 15.4 Verification
+Full suite 2260: the same 245 known failures, 0 new. On a production copy the
+three exercises appear in the valid pools for lower-pec/mid-pec and lat-width.

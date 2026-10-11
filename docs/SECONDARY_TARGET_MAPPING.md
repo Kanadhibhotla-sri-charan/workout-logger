@@ -120,6 +120,9 @@ in code form.
 | `external rotators` | `rotator-cuff` | functional_goal |
 | `glutes` | `gluteus-maximus` | physique_target (see note) |
 | `grip` | `forearm-flexors` | physique_target (see note) |
+| `gluteus medius` | `gluteus-medius-minimus` | physique_target (added 2026-10-11) |
+| `bottom-leg hip abductors` | `gluteus-medius-minimus` | physique_target (added 2026-10-11, see note) |
+| `obliques and lateral trunk` | `obliques` | physique_target (added 2026-10-11, see note) |
 
 **Notes on the two judgment calls above** (everything else in this table
 is a direct or near-exact name match, not a judgment call):
@@ -135,6 +138,12 @@ is a direct or near-exact name match, not a judgment call):
   "glutes" refers to in this exercise pool.
 - `grip` → `forearm-flexors`: grip strength is produced by the forearm
   flexor group; Blueprint has no separate "grip" target.
+- `bottom-leg hip abductors` → `gluteus-medius-minimus` (copenhagen-plank,
+  2026-10-11 sync): gluteus medius/minimus are the main hip abductors and
+  Blueprint's own target for abduction work. Unlike bare `tensor fasciae
+  latae` (unmapped), the phrase names the abductor function, not TFL.
+- `obliques and lateral trunk` → `obliques` (copenhagen-plank): the phrase
+  names obliques explicitly; "lateral trunk" adds no other canonical target.
 
 ### Explicitly left UNMAPPED (too generic or genuinely no canonical target)
 

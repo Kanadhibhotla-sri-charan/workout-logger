@@ -81,7 +81,7 @@
       "id": "triceps",
       "name": "Triceps",
       "parent_region": "arms",
-      "definition": "The triceps brachii (all three heads), trained through elbow-extension movements.",
+      "definition": "The triceps brachii (all three heads), trained through elbow-extension movements, including triceps-biased presses such as close-grip pressing and triceps-biased dips.",
       "physique_outcome": "Visually, the triceps make up roughly two-thirds of upper-arm size — more than the biceps — so triceps development has an outsized effect on overall arm thickness, most visible from the side and back of the arm."
     },
     {
@@ -102,7 +102,7 @@
       "id": "rectus-abdominis",
       "name": "Abs (Rectus Abdominis)",
       "parent_region": "core",
-      "definition": "The rectus abdominis, the muscle responsible for the \"six-pack\" look, trained through spinal- and hip-flexion movements that shorten the distance between the ribcage and pelvis.",
+      "definition": "The rectus abdominis, the muscle responsible for the \"six-pack\" look, trained through spinal- and hip-flexion movements that shorten the distance between the ribcage and pelvis, and through anti-extension bracing that resists the lower back arching.",
       "physique_outcome": "Visually, this is the classic six-pack definition down the front of the midline — though, like obliques, visibility depends heavily on body-fat level, not just how developed the muscle is."
     },
     {
@@ -1080,8 +1080,8 @@
       "id": "core-anti-lateral-flexion",
       "name": "Core Anti-Lateral-Flexion",
       "parent_region": "core",
-      "definition": "Trunk bracing that resists sideways bending, trained through unilaterally-loaded carries that make the trunk resist being pulled toward the loaded side.",
-      "why_it_matters": "Lateral trunk control and durability, plus grip endurance as a side effect — relevant to single-side carrying and loading tasks a bilateral, symmetric lift never challenges."
+      "definition": "Trunk bracing that resists sideways bending, trained through unilaterally-loaded carries that make the trunk resist being pulled toward the loaded side, or side-lying holds such as the side plank that resist bending toward the floor.",
+      "why_it_matters": "Lateral trunk control and durability — relevant to single-side carrying and loading tasks a bilateral, symmetric lift never challenges. Carries add grip endurance as a side effect."
     }
   ],
   "developmentPackages": {

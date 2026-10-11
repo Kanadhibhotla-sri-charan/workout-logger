@@ -59,6 +59,10 @@ const SECONDARY_TARGET_MAP: Record<string, MappedTarget> = {
   'upper trapezius': { target_type: 'physique_target', target_id: 'upper-traps' },
   'wrist extensors': { target_type: 'physique_target', target_id: 'forearm-extensors' },
   'external rotators': { target_type: 'functional_goal', target_id: 'rotator-cuff' },
+  // Added with the 2026-10-11 Blueprint sync (b90c302).
+  'gluteus medius': { target_type: 'physique_target', target_id: 'gluteus-medius-minimus' },
+  'bottom-leg hip abductors': { target_type: 'physique_target', target_id: 'gluteus-medius-minimus' },
+  'obliques and lateral trunk': { target_type: 'physique_target', target_id: 'obliques' },
 
   // Deliberately UNMAPPED (documented in docs/SECONDARY_TARGET_MAPPING.md):
   // brachioradialis, calves, chest, elbow flexors, erectors,

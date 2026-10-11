@@ -103,6 +103,7 @@ describe('mapping completeness — no new, undocumented phrase silently falls th
     'hamstrings', 'hip flexors', 'hip stabilizers', 'lats', 'mid-back', 'obliques', 'quads',
     'rectus abdominis', 'serratus anterior', 'soleus', 'traps', 'triceps', 'upper chest',
     'upper trapezius', 'wrist extensors', 'external rotators',
+    'gluteus medius', 'bottom-leg hip abductors', 'obliques and lateral trunk', // 2026-10-11 sync
     // deliberately unmapped
     'brachioradialis', 'calves', 'chest', 'elbow flexors', 'erectors', 'spinal erectors',
     'forearms', 'hip musculature', 'shoulders', 'tensor fasciae latae', 'trunk musculature',
