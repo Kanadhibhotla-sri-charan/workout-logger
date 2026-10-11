@@ -174,8 +174,16 @@
         }));
       }
 
+      if (goal.active && goal.goal_type === 'aesthetic') {
+        actions.insertBefore(createButton({ label: 'Check in', variant: 'primary', onClick: () => openCheckIn(goal) }), actions.firstChild);
+      }
       actions.appendChild(createButton({ label: 'History', variant: 'ghost', onClick: () => viewGoalHistory(goal) }));
 
+      if (goal.active && goal.goal_type === 'aesthetic') {
+        const lastEl = el('p', { class: 'faint', style: 'margin:0.2rem 0 0.4rem' });
+        card.appendChild(lastEl);
+        showLastCheckIn(goal, lastEl);
+      }
       card.appendChild(actions);
       card.appendChild(statusEl);
       return card;
@@ -198,6 +206,54 @@
       document.addEventListener('keydown', onKey);
       root.appendChild(backdrop);
       closeBtn.focus();
+    }
+
+    // Goal check-in (2026-10-11): how the target area looks compared with
+    // the last check-in, on the app's 1-5 scale. Goal progress and volume
+    // decisions read these; the API existed but the page had no way in.
+    const CHECK_IN_LABELS = { 1: 'Significantly worse', 2: 'Slightly worse', 3: 'No meaningful change', 4: 'Improved', 5: 'Significantly improved' };
+
+    async function showLastCheckIn(goal, target) {
+      try {
+        const list = await api(`/api/goals/${goal.id}/assessments`);
+        const last = [...list].sort((a, b) => b.date.localeCompare(a.date))[0];
+        target.textContent = last
+          ? `Last check-in ${formatDate(last.date)}: ${CHECK_IN_LABELS[last.rating]}. Next due ${formatDate(addDaysIso(last.date, goal.review_cadence_days))}.`
+          : 'No check-in yet.';
+      } catch {
+        target.textContent = '';
+      }
+    }
+
+    function addDaysIso(date, days) {
+      const d = new Date(`${date}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + days);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function openCheckIn(goal) {
+      const statusEl = el('div');
+      const dateInput = el('input', { type: 'date', value: todayIso(), max: todayIso() });
+      const options = Object.entries(CHECK_IN_LABELS).map(([value, label]) =>
+        el('label', { style: 'display:flex;align-items:center;gap:0.5rem;margin:0.3rem 0' }, [el('input', { type: 'radio', name: 'checkin-rating', value }), document.createTextNode(`${value} — ${label}`)])
+      );
+      const notes = el('textarea', { rows: '3', maxlength: '1000', placeholder: 'Optional: what you see in the mirror or photos, e.g. "side view looks fuller".', style: 'width:100%;resize:vertical;font:inherit' });
+      const saveBtn = createButton({ label: 'Save check-in', variant: 'primary', onClick: async () => {
+        const chosen = options.map((o) => o.querySelector('input')).find((i) => i.checked);
+        if (!chosen) return showInlineStatus(statusEl, 'error', 'Choose how it looks compared with last time.');
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/goals/${goal.id}/assessments`, { method: 'POST', body: { date: dateInput.value, rating: Number(chosen.value), notes: notes.value.trim() || null } }), 'Check-in saved.');
+          document.getElementById('day-modal-root').innerHTML = '';
+          await loadGoals();
+        } catch (err) { /* error shown inline */ }
+      }});
+      openModal(`Check in: ${blueprintDisplayName(goal.blueprint_ref)}`, [
+        el('p', { class: 'muted', text: 'Compared with your last check-in (or with when you set this goal), how does this area look? Use the same mirror, light and angle each time.' }),
+        el('label', { text: 'Date' }), dateInput,
+        el('div', { style: 'margin-top:0.6rem' }, options),
+        el('label', { text: 'Notes', style: 'display:block;margin-top:0.6rem' }), notes,
+        el('div', { class: 'btn-row', style: 'margin-top:0.6rem' }, [saveBtn]), statusEl,
+      ]);
     }
 
     async function viewBlueprintContext(goal) {

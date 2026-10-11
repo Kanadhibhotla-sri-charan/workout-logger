@@ -111,3 +111,18 @@ describe('deload sessions are ignored', () => {
     expect(r.signals.find((s) => s.targetId === 'back-thickness')!.exercises![0]).toMatchObject({ exerciseId: 'seated-cable-row', trend: 'down', points: 4 });
   });
 });
+
+describe('equipment (2026-10-11)', () => {
+  it('switching from barbell to dumbbells is not a decline', () => {
+    const repo = new WorkoutSessionsRepo(db);
+    const log = (date: string, equipment: string, weight: number) => {
+      const s = repo.createSession({ date, session_type: 'gym', status: 'completed' });
+      repo.addExercisePerformance(s.session_id, { exercise_id: 'wrist-curl', order: 0, role: 'primary', equipment, target_sets: 1, sets: [{ set_number: 1, weight, reps: 12, completed: true, rir: null }] });
+    };
+    for (const d of ['2026-11-02', '2026-11-04', '2026-11-06']) log(d, 'barbell', 22.5);
+    for (const d of ['2026-11-08', '2026-11-10', '2026-11-12']) log(d, 'dumbbell', 7.5);
+    const e = targetDeclineEvidence(db, 'forearm-flexors', '2026-11-01', '2026-11-20', new Set());
+    expect(e.trend).not.toBe('down');
+    expect(e.exercises.map((x) => x.equipment).sort()).toEqual(['barbell', 'dumbbell']);
+  });
+});

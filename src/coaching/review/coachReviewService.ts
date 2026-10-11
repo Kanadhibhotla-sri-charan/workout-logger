@@ -94,7 +94,7 @@ export function buildCoachFacts(db: Database.Database, asOf: string, requirement
     },
     strength: strength.map((e) => ({
       exerciseId: e.exerciseId,
-      name: e.name,
+      name: e.equipment ? `${e.name} (${e.equipment})` : e.name,
       muscles: e.targetIds.map(targetName),
       goal: e.goal,
       status: e.status,

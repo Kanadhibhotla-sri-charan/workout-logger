@@ -662,3 +662,45 @@ date-rotation failures, 0 new. Replay 10/10. Pages rendered headlessly
   (re-evaluated at their start with the current rule); the instruction (5a)
   says to describe an unconfirmed one as a measurement artifact, and Insights
   labels it a false alarm.
+
+---
+
+## 14. Equipment per logged exercise; goal check-in button (2026-10-11)
+
+Owner report: (1) Insights showed "new best" for wrist curl 7.7 -> 36 kg because
+dumbbell and barbell sessions of the same exercise were compared (also hammer
+curl DB vs cable, chest press barbell vs Smith); the equipment was only in
+session notes. (2) Insights said "check-in due" but the Goals page had no way
+to record one (the assessments API existed, no UI).
+
+### 14.1 Equipment
+* `workout_exercises.equipment` (TEXT, nullable; additive migration). A new
+  exercise row starts with the equipment last logged for that exercise, so
+  planned and AI-committed sessions are pre-filled; null = not specified.
+* `PATCH /api/workouts/:id/exercises/:exerciseId` accepts `{equipment}` alone
+  (string up to 40 chars, or null). Logger: an "Equipment" picker on every
+  saved exercise card, including past completed sessions (saves on change).
+  Choices: the exercise's Blueprint options first, then barbell, dumbbell,
+  ez-bar, cable, machine, smith machine, kettlebell, band, bodyweight, other
+  (Blueprint lists are incomplete: flat bench has no Smith, pulldown no
+  machine).
+* Progress is compared only within one exercise + equipment: Insights strength
+  series, the reactive-deload evidence and the coach facts. Untagged sessions
+  form their own series.
+* Backfilled from the owner's own session notes (production, at deploy):
+  2026-09-11 overhead triceps extension = dumbbell; 2026-10-02 and 2026-10-06
+  wrist curl = barbell; 2026-10-06 wide lat pulldown = machine. Everything
+  else stays "not specified" until the owner tags it in the logger.
+
+### 14.2 Goal check-in
+Goals page: "Check in" on each active aesthetic goal opens a form (date, the
+app's 1-5 scale from "significantly worse" to "significantly improved",
+optional notes) posting to `/api/goals/:id/assessments`; each card shows the
+last check-in and the next due date (last + review cadence).
+
+### 14.3 Verification
+New tests: equipment series split and default/PATCH (`insightsService.test.ts`),
+barbell -> dumbbell switch is not a decline (`reactiveDeclinePerExercise.test.ts`),
+check-in wiring (`tests/frontend/goalCheckIn.test.ts`). Full suite 2260: the
+same 245 known failures, 0 new. Replay 10/10. Logger and Goals pages exercised
+headlessly on a data copy: picker saves, check-in saves, no script errors.

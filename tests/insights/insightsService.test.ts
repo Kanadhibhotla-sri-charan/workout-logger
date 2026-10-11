@@ -117,3 +117,40 @@ describe('volume, consistency, check-ins, deloads', () => {
     await request(createApp(db)).get('/api/insights?date=2026-13-01').expect(400);
   });
 });
+
+describe('equipment (2026-10-11)', () => {
+  function logWith(date: string, exerciseId: string, equipment: string | null, weight: number, reps = 12) {
+    const repo = new WorkoutSessionsRepo(db);
+    const s = repo.listSessionsByDate(date)[0] ?? repo.createSession({ date, session_type: 'gym', status: 'completed' });
+    repo.addExercisePerformance(s.session_id, { exercise_id: exerciseId, order: 0, role: 'primary', equipment, sets: [{ set_number: 1, weight, reps, completed: true }] });
+  }
+
+  it('dumbbell and barbell sessions of one exercise are separate series (no false new best)', () => {
+    logWith('2026-11-02', 'wrist-curl', 'dumbbell', 7.5);
+    logWith('2026-11-05', 'wrist-curl', 'dumbbell', 7.5);
+    logWith('2026-11-09', 'wrist-curl', 'barbell', 22.5);
+    logWith('2026-11-12', 'wrist-curl', 'barbell', 22.5);
+    const series = strengthProgress(db, '2026-11-20').filter((e) => e.exerciseId === 'wrist-curl');
+    expect(series.map((e) => [e.equipment, e.status]).sort()).toEqual([['barbell', 'flat'], ['dumbbell', 'flat']]);
+  });
+
+  it('a new exercise row starts with the equipment last logged for that exercise; null stays null', () => {
+    logWith('2026-11-02', 'wrist-curl', 'barbell', 20);
+    const repo = new WorkoutSessionsRepo(db);
+    const s = repo.createSession({ date: '2026-11-09', session_type: 'gym', status: 'planned' });
+    expect(repo.addExercisePerformance(s.session_id, { exercise_id: 'wrist-curl', order: 0, role: 'primary', sets: [] }).equipment).toBe('barbell');
+    expect(repo.addExercisePerformance(s.session_id, { exercise_id: 'cable-pushdown', order: 1, role: 'primary', sets: [] }).equipment).toBeNull();
+  });
+
+  it('PATCH sets or clears equipment alone, and rejects junk', async () => {
+    const repo = new WorkoutSessionsRepo(db);
+    const s = repo.createSession({ date: '2026-11-09', session_type: 'gym', status: 'completed' });
+    const perf = repo.addExercisePerformance(s.session_id, { exercise_id: 'wrist-curl', order: 0, role: 'primary', sets: [{ set_number: 1, weight: 20, reps: 12, completed: true }] });
+    const app = createApp(db);
+    expect((await request(app).patch(`/api/workouts/${s.session_id}/exercises/${perf.id}`).send({ equipment: 'barbell' }).expect(200)).body.equipment).toBe('barbell');
+    expect(repo.getExercisePerformances(s.session_id)[0]!.sets[0]!.weight).toBe(20); // sets untouched
+    expect((await request(app).patch(`/api/workouts/${s.session_id}/exercises/${perf.id}`).send({ equipment: null }).expect(200)).body.equipment).toBeNull();
+    await request(app).patch(`/api/workouts/${s.session_id}/exercises/${perf.id}`).send({ equipment: 5 }).expect(400);
+    await request(app).patch(`/api/workouts/${s.session_id}/exercises/${perf.id}`).send({}).expect(400);
+  });
+});

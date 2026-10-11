@@ -93,6 +93,7 @@ function buildExposureRecord(session: WorkoutSession, performance: ExercisePerfo
     programId: session.program_id ?? undefined,
     targetId,
     exerciseId: performance.exercise_id,
+    equipment: performance.equipment ?? null,
     prescribedSets,
     completedSets: completedSetsCount,
     prescribedRepsMin: performance.target_reps_min ?? undefined,

@@ -73,6 +73,35 @@
     // substitution state. A fetch failure leaves the map empty; name
     // resolution then falls back to the generated program's own name,
     // or the raw id as a last resort (unchanged from before this fix).
+    // Equipment picker (2026-10-11): one Blueprint exercise can be done with
+    // a barbell, dumbbells, a cable... Progress is only compared within the
+    // same equipment, so each logged exercise records which was used.
+    let exerciseEquipmentById = new Map();
+    const EQUIPMENT_CHOICES = ['barbell', 'dumbbell', 'ez-bar', 'cable', 'machine', 'smith machine', 'kettlebell', 'band', 'bodyweight', 'other'];
+
+    function buildEquipmentPicker(perf) {
+      const listed = (exerciseEquipmentById.get(perf.exercise_id) || []).filter((e) => EQUIPMENT_CHOICES.includes(e));
+      const choices = [...listed, ...EQUIPMENT_CHOICES.filter((e) => !listed.includes(e))];
+      if (perf.equipment && !choices.includes(perf.equipment)) choices.unshift(perf.equipment);
+      const select = el('select', { 'aria-label': 'Equipment used', style: 'width:auto;margin:0' }, [
+        el('option', { value: '', text: 'Not specified' }),
+        ...choices.map((e) => el('option', { value: e, text: e.charAt(0).toUpperCase() + e.slice(1), ...(perf.equipment === e ? { selected: 'selected' } : {}) })),
+      ]);
+      const statusEl = el('span', { class: 'faint', style: 'margin-left:0.5rem' });
+      select.addEventListener('change', async () => {
+        statusEl.textContent = 'Saving…';
+        try {
+          await api(`/api/workouts/${sessionId}/exercises/${perf.id}`, { method: 'PATCH', body: { equipment: select.value || null } });
+          perf.equipment = select.value || null;
+          statusEl.textContent = 'Saved';
+        } catch (err) {
+          select.value = perf.equipment || '';
+          statusEl.textContent = err.message || 'Could not save';
+        }
+      });
+      return el('div', { style: 'display:flex;align-items:center;gap:0.5rem;margin:0.3rem 0 0.5rem;flex-wrap:wrap' }, [el('span', { class: 'faint', text: 'Equipment' }), select, statusEl]);
+    }
+
     async function loadExerciseNames() {
       try {
         const [blueprintExercises, outsideExercises] = await Promise.all([
@@ -80,6 +109,7 @@
           api('/api/outside-blueprint-exercises').catch(() => []),
         ]);
         exerciseNamesById = new Map([...blueprintExercises, ...outsideExercises].map((e) => [e.id, e.name]));
+        exerciseEquipmentById = new Map(blueprintExercises.map((e) => [e.id, e.equipment || []]));
       } catch (err) {
         exerciseNamesById = new Map();
       }
@@ -193,6 +223,7 @@
       header.appendChild(el('div', { class: 'exercise-name', text: exerciseDisplayName(perf, generatedMatch) }));
       if (!generatedMatch) header.appendChild(el('span', { class: 'badge badge-warning', text: 'Unplanned exercise' }));
       card.appendChild(header);
+      card.appendChild(buildEquipmentPicker(perf));
 
       // Fix: `perf.target_*` is this exercise's own planned prescription
       // when it was pre-created with one (e.g. an AI-committed session —

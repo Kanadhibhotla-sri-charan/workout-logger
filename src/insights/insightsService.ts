@@ -46,6 +46,9 @@ export interface StrengthPoint {
 
 export interface ExerciseProgress {
   exerciseId: string;
+  /** Equipment of this series; null when not specified. One exercise done
+   * with different equipment is reported as separate series. */
+  equipment: string | null;
   name: string;
   targetIds: string[];
   /** Trains a target of an active goal. */
@@ -69,7 +72,8 @@ export function goalTargetIds(db: Database.Database): Set<string> {
 }
 
 /** Each exercise logged in the `days` before `asOf` (inclusive), compared
- * only with itself. Status is read from non-deload sessions: a new best
+ * only with itself and only within the same equipment (an untagged series
+ * is its own series). Status is read from non-deload sessions: a new best
  * (beats every earlier session by 1%), stalled (no new best in the last
  * STALL_SESSIONS sessions, with at least STALL_SESSIONS + 1 sessions),
  * else the early-vs-late trend. */
@@ -89,14 +93,16 @@ export function strengthProgress(db: Database.Database, asOf: string, days = 56)
       const best = loaded.length > 0
         ? loaded.map((s) => ({ value: s.weight! * (1 + s.reps! / 30), bestSet: `${s.weight} kg × ${s.reps}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
         : sets.map((s) => ({ value: s.reps!, bestSet: `${s.reps} reps`, unit: 'reps' as const })).sort((a, b) => b.value - a.value)[0]!;
-      const dates = byExercise.get(perf.exercise_id) ?? byExercise.set(perf.exercise_id, new Map()).get(perf.exercise_id)!;
+      const key = `${perf.exercise_id}|${perf.equipment ?? ''}`;
+      const dates = byExercise.get(key) ?? byExercise.set(key, new Map()).get(key)!;
       const prev = dates.get(session.date);
       if (!prev || best.value > prev.value) dates.set(session.date, best);
     }
   }
 
   const result: ExerciseProgress[] = [];
-  for (const [exerciseId, dates] of byExercise) {
+  for (const [key, dates] of byExercise) {
+    const [exerciseId, equipmentKey] = key.split('|') as [string, string];
     const all = [...dates].sort(([a], [b]) => a.localeCompare(b));
     const unit = all.some(([, p]) => p.unit === 'kg') ? 'kg' : 'reps';
     const points: StrengthPoint[] = all.filter(([, p]) => p.unit === unit).map(([date, p]) => ({ date, value: round1(p.value), bestSet: p.bestSet, deload: deload.has(date) }));
@@ -125,6 +131,7 @@ export function strengthProgress(db: Database.Database, asOf: string, days = 56)
     const last = (counted[counted.length - 1] ?? points[points.length - 1]!).value;
     result.push({
       exerciseId,
+      equipment: equipmentKey || null,
       name: exercise?.name ?? exerciseId,
       targetIds,
       goal: targetIds.some((t) => goalTargets.has(t)),

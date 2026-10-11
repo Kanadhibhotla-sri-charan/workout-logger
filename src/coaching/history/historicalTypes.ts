@@ -14,6 +14,8 @@ export interface HistoricalExerciseExposure {
   programId?: string;
   targetId: string;
   exerciseId: string;
+  /** Equipment used (2026-10-11); null when not specified. */
+  equipment?: string | null;
   prescribedSets?: number;
   completedSets?: number;
   prescribedRepsMin?: number;

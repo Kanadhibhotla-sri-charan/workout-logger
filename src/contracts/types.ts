@@ -298,6 +298,10 @@ export interface ExercisePerformance {
    * already-persisted exercise, not just a deterministic-preview one. */
   target_type: 'physique_target' | 'functional_goal' | null;
   target_id: string | null;
+  /** Equipment used (e.g. "barbell", "dumbbell"), one of the Blueprint
+   * exercise's own equipment options or "other"; null when not specified.
+   * Progress is only compared within the same equipment. */
+  equipment?: string | null;
   sets: Set[];
 }
 

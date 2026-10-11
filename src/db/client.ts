@@ -55,6 +55,9 @@ function migrate(db: Database.Database): void {
   // history (every pre-existing row simply has NULL prescription
   // columns, meaning "no prescription recorded for this performance").
   addColumnIfMissing(db, 'workout_exercises', 'target_sets', 'INTEGER');
+  // 2026-10-11: which equipment the exercise was done with (one Blueprint
+  // exercise can be done with a barbell, dumbbells, a cable...). Null = not specified.
+  addColumnIfMissing(db, 'workout_exercises', 'equipment', 'TEXT');
   addColumnIfMissing(db, 'workout_exercises', 'target_reps_min', 'INTEGER');
   addColumnIfMissing(db, 'workout_exercises', 'target_reps_max', 'INTEGER');
   addColumnIfMissing(db, 'workout_exercises', 'target_rir_min', 'REAL');

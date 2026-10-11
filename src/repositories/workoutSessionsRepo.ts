@@ -118,6 +118,10 @@ export interface AddExercisePerformanceInput {
    * ExercisePerformance's own doc comment. */
   target_type?: 'physique_target' | 'functional_goal' | null;
   target_id?: string | null;
+  /** Equipment used. Omitted: the equipment last logged for this exercise
+   * (so a planned or AI-committed exercise starts with what you used last
+   * time); null: not specified. */
+  equipment?: string | null;
 }
 
 export interface UpdateWorkoutSessionInput {
@@ -286,11 +290,11 @@ export class WorkoutSessionsRepo {
       `INSERT INTO workout_exercises
          (id, workout_session_id, exercise_id, order_index, role,
           target_sets, target_reps_min, target_reps_max, target_rir_min, target_rir_max, target_rest_seconds,
-          target_type, target_id)
+          target_type, target_id, equipment)
        VALUES
          (@id, @workout_session_id, @exercise_id, @order_index, @role,
           @target_sets, @target_reps_min, @target_reps_max, @target_rir_min, @target_rir_max, @target_rest_seconds,
-          @target_type, @target_id)`
+          @target_type, @target_id, @equipment)`
     );
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
@@ -308,6 +312,7 @@ export class WorkoutSessionsRepo {
       target_rest_seconds: input.target_rest_seconds ?? null,
       target_type: input.target_type ?? null,
       target_id: input.target_id ?? null,
+      equipment: input.equipment !== undefined ? input.equipment : this.lastEquipmentFor(input.exercise_id),
     };
 
     const tx = this.db.transaction(() => {
@@ -377,6 +382,7 @@ export class WorkoutSessionsRepo {
           target_rest_seconds: number | null;
           target_type: 'physique_target' | 'functional_goal' | null;
           target_id: string | null;
+          equipment: string | null;
         }
       | undefined;
     if (!exerciseRow) return undefined;
@@ -429,6 +435,7 @@ export class WorkoutSessionsRepo {
       target_rest_seconds: exerciseRow.target_rest_seconds,
       target_type: exerciseRow.target_type,
       target_id: exerciseRow.target_id,
+      equipment: exerciseRow.equipment,
       sets: normalizedSets,
     };
   }
@@ -500,6 +507,7 @@ export class WorkoutSessionsRepo {
       target_rest_seconds: number | null;
       target_type: 'physique_target' | 'functional_goal' | null;
       target_id: string | null;
+      equipment: string | null;
     }>;
 
     const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
@@ -531,8 +539,25 @@ export class WorkoutSessionsRepo {
         target_rest_seconds: row.target_rest_seconds,
         target_type: row.target_type,
         target_id: row.target_id,
+        equipment: row.equipment,
         sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
       };
     });
+  }
+
+  /** The equipment most recently logged for an exercise, or null. */
+  lastEquipmentFor(exerciseId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT we.equipment FROM workout_exercises we JOIN workout_sessions ws ON ws.session_id = we.workout_session_id
+         WHERE we.exercise_id = ? AND we.equipment IS NOT NULL ORDER BY ws.date DESC LIMIT 1`
+      )
+      .get(exerciseId) as { equipment: string } | undefined;
+    return row?.equipment ?? null;
+  }
+
+  /** Sets the equipment for one logged exercise (null = not specified). */
+  setExerciseEquipment(workoutExerciseId: string, equipment: string | null): void {
+    this.db.prepare('UPDATE workout_exercises SET equipment = ? WHERE id = ?').run(equipment, workoutExerciseId);
   }
 }

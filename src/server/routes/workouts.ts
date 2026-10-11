@@ -271,9 +271,16 @@ workoutsRouter.post('/:id/exercises', (req, res) => {
  * the request body alone — so one session's logging can never leak into
  * another's exercise rows. */
 workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
+  // `equipment` (2026-10-11): which equipment the exercise was done with; a
+  // short string, or null for "not specified". May be sent alone.
   const { sets } = req.body ?? {};
-  if (!Array.isArray(sets)) {
-    return res.status(400).json({ error: 'sets (array) is required' });
+  const hasEquipment = req.body && Object.prototype.hasOwnProperty.call(req.body, 'equipment');
+  const equipment = hasEquipment ? req.body.equipment : undefined;
+  if (hasEquipment && equipment !== null && (typeof equipment !== 'string' || equipment.trim() === '' || equipment.length > 40)) {
+    return res.status(400).json({ error: 'equipment must be a short string or null' });
+  }
+  if (!Array.isArray(sets) && !hasEquipment) {
+    return res.status(400).json({ error: 'sets (array) or equipment is required' });
   }
 
   const database = db(req);
@@ -287,6 +294,10 @@ workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
     return res.status(404).json({ error: `No exercise "${req.params.exerciseId}" on workout session "${req.params.id}"` });
   }
 
+  if (hasEquipment) repo.setExerciseEquipment(req.params.exerciseId, equipment === null ? null : equipment.trim());
+  if (!Array.isArray(sets)) {
+    return res.json(repo.getExercisePerformances(req.params.id).find((p) => p.id === req.params.exerciseId));
+  }
   const performance = repo.updateExercisePerformanceSets(req.params.exerciseId, sets);
   if (session.status === 'completed') adaptCurrentWeekIfNeeded(database, session.date);
   res.json(performance);
