@@ -314,7 +314,7 @@ export function commitAIProposalToPlannedSession(
   // (it throws AITargetNotEditableError, itself an AIProgrammerError
   // with its own 409 status, if either fails) rather than duplicating
   // that logic here.
-  const context = buildProgrammerContext(db, { targetDate: proposal.targetDate });
+  const context = buildProgrammerContext(db, { targetDate: proposal.targetDate, applyRotationShortlist: false });
 
   // Full domain revalidation against the FRESH context — this is what
   // catches a changed authored prescription, an exercise that is no

@@ -10,8 +10,11 @@ import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { REACTIVE_TRIGGER } from '../../engine/config.js';
 import { rollingRangeEnding } from '../../engine/dateMath.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
-import { getTargetSummary } from '../history/historicalService.js';
+import { getTargetHistory } from '../history/historicalService.js';
 import type { BasicTrendDirection, TrendDataQuality } from '../history/historicalTypes.js';
+import { calculateBasicTrend, classifyDataQuality } from '../history/trendCalculations.js';
+import { addDays } from '../../engine/dateMath.js';
+import { PeriodizationEventsRepo } from './periodizationEventsRepo.js';
 
 export type ReactiveEvaluationLevel = 'clear' | 'watch' | 'triggered';
 
@@ -20,6 +23,75 @@ export interface ReactiveDeclineSignal {
   trend: BasicTrendDirection;
   dataQuality: TrendDataQuality;
   completedExposureCount: number;
+  /** Per-exercise evidence (2026-10-11): each exercise's own estimated-1RM
+   * trend, oldest and newest value, over the non-deload exposures. */
+  exercises?: ExerciseTrendEvidence[];
+}
+
+export interface ExerciseTrendEvidence {
+  exerciseId: string;
+  trend: BasicTrendDirection;
+  points: number;
+  first: number;
+  last: number;
+}
+
+/** Dates in [start, end] that fell in a deload (scheduled or reactive),
+ * from the periodization event log: each event's new state holds from its
+ * evaluation date until the next event. */
+export function deloadDatesInRange(db: Database.Database, programId: string, start: string, end: string): Set<string> {
+  const events = new PeriodizationEventsRepo(db).listForProgram(programId).map((e) => ({
+    date: (e.evidence as { evaluationTimestamp?: string } | null)?.evaluationTimestamp ?? e.occurredAt.slice(0, 10),
+    deload: e.newState !== 'ACTIVE',
+  }));
+  const dates = new Set<string>();
+  for (let i = 0; i < events.length; i++) {
+    if (!events[i]!.deload) continue;
+    const until = i + 1 < events.length ? addDays(events[i + 1]!.date, -1) : end;
+    for (let d = events[i]!.date < start ? start : events[i]!.date; d <= until && d <= end; d = addDays(d, 1)) dates.add(d);
+  }
+  return dates;
+}
+
+/** An exercise needs at least this many non-deload sessions before its
+ * own trend can count as decline: two points are one good day against
+ * one bad day, not a sustained trend. */
+export const MIN_EXERCISE_POINTS_FOR_DECLINE = 3;
+
+/** A target's decline signal from its exercises compared each with
+ * itself (2026-10-11 fix): averaging load across different exercises read
+ * an exercise swap (e.g. seated cable row -> chest-supported DB row) or a
+ * deload week as a decline. Exposures on deload dates are ignored; the
+ * target is "down" when more than half of its exercises with a trend are
+ * down (only exercises with MIN_EXERCISE_POINTS_FOR_DECLINE sessions count). */
+export function targetDeclineEvidence(
+  db: Database.Database,
+  targetId: string,
+  start: string,
+  end: string,
+  excludedDates: ReadonlySet<string>
+): { trend: BasicTrendDirection; dataQuality: TrendDataQuality; completedExposureCount: number; exercises: ExerciseTrendEvidence[] } {
+  const exposures = getTargetHistory(db, targetId, start, end).filter(
+    (e): e is typeof e & { load: number } => e.completionStatus === 'completed' && e.load !== undefined && !excludedDates.has(e.date)
+  );
+  const byExercise = new Map<string, Array<{ date: string; load: number }>>();
+  for (const e of exposures) (byExercise.get(e.exerciseId) ?? byExercise.set(e.exerciseId, []).get(e.exerciseId)!).push({ date: e.date, load: e.load });
+  const exercises: ExerciseTrendEvidence[] = [...byExercise].map(([exerciseId, points]) => ({
+    exerciseId,
+    trend: calculateBasicTrend(points),
+    points: points.length,
+    first: Math.round(points[0]!.load * 10) / 10,
+    last: Math.round(points[points.length - 1]!.load * 10) / 10,
+  }));
+  const withTrend = exercises.filter((x) => x.trend !== 'unknown' && x.points >= MIN_EXERCISE_POINTS_FOR_DECLINE);
+  const down = withTrend.filter((x) => x.trend === 'down').length;
+  const counted = withTrend.reduce((n, x) => n + x.points, 0);
+  return {
+    trend: withTrend.length === 0 ? 'unknown' : down * 2 > withTrend.length ? 'down' : 'stable',
+    dataQuality: classifyDataQuality(counted),
+    completedExposureCount: counted,
+    exercises,
+  };
 }
 
 export interface ReactiveEvaluationResult {
@@ -89,12 +161,13 @@ export function evaluateReactiveDeloadTrigger(db: Database.Database, input: Eval
     };
   }
 
+  const deloadDates = deloadDatesInRange(db, input.programId, lookbackStart, lookbackEnd);
   const signals: ReactiveDeclineSignal[] = [];
   for (const target of BlueprintAdapter.getTargets()) {
-    const summary = getTargetSummary(db, target.id, lookbackStart, lookbackEnd);
-    if (summary.dataQuality === 'insufficient') continue;
-    if (summary.trend !== 'down') continue;
-    signals.push({ targetId: target.id, trend: summary.trend, dataQuality: summary.dataQuality, completedExposureCount: summary.completedExposureCount });
+    const evidence = targetDeclineEvidence(db, target.id, lookbackStart, lookbackEnd, deloadDates);
+    if (evidence.dataQuality === 'insufficient') continue;
+    if (evidence.trend !== 'down') continue;
+    signals.push({ targetId: target.id, trend: evidence.trend, dataQuality: evidence.dataQuality, completedExposureCount: evidence.completedExposureCount, exercises: evidence.exercises });
   }
 
   if (signals.length === 0) {

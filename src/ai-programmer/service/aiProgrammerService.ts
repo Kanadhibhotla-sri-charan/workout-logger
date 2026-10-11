@@ -45,7 +45,7 @@ import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } fro
 import { clearGenerationFailure, findGenerationFailure, isGatedGenerationFailure, recordGenerationFailure } from './generationFailureMemory.js';
 import { buildGenerationRejectionDiagnostic, logGenerationRejection } from './generationDiagnostics.js';
 import { planSession, summarizeSessionPlanForLog, type SessionPlan } from '../planning/sessionPlanner.js';
-import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction } from '../planning/plannedContext.js';
+import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction, usesRotationShortlist } from '../planning/plannedContext.js';
 import { runProposalPipeline } from './proposalPipeline.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
@@ -360,9 +360,10 @@ export class AIProgrammerService {
     persist: { weekRunId: string; expiresAt: string } | null = null
   ): Promise<GenerateSessionResult> {
     const requestId = randomUUID();
-    const systemInstruction = plan ? buildPlannedProgrammerSystemInstruction() : buildProgrammerSystemInstruction();
+    const plannedContext = plan ? buildPlannedAIContext(context, plan) : null;
+    const systemInstruction = plannedContext ? buildPlannedProgrammerSystemInstruction(usesRotationShortlist(plannedContext)) : buildProgrammerSystemInstruction();
     const outputSchema = getProgrammerOutputSchema();
-    const aiContext = plan ? buildPlannedAIContext(context, plan) : context;
+    const aiContext = plannedContext ?? context;
     const providerRequest: AIProgrammerProviderRequest = { mode: 'generate_session', systemInstruction, context: aiContext, outputSchema, requestId };
     const providerResponse = await this.provider.generate(providerRequest);
     const diagnostics = buildTokenDiagnostics('generate_session', providerRequest, providerResponse);

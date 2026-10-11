@@ -41,8 +41,12 @@ import { ensureWeekProgramGenerated, isDayLocked, reconcileWeekProgram, type Fre
 import { ScheduleOperationError, moveActivity, swapDayActivities, type ScheduleOperationErrorCode } from '../../engine/scheduleOperations.js';
 import { resolveSelectedSession, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { todayForUser } from '../../lib/userTimezone.js';
+import { buildTrainingState } from '../../engine/trainingState.js';
+import { DAY_NOTE_MAX_LENGTH, DayNotesRepo } from '../../repositories/dayNotesRepo.js';
+import { INJURY_AREAS, INJURY_AREA_IDS, InjuryPausesRepo, type InjuryArea } from '../../repositories/injuryPausesRepo.js';
 import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS } from '../../engine/config.js';
-import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
+import { endReactiveDeload, getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
+import { PeriodizationEventsRepo } from '../../coaching/periodization/periodizationEventsRepo.js';
 import { buildFriendlyPlannedReasoning, buildFriendlySkipReasoning } from '../friendlyExplanation.js';
 import type { SkippedTarget } from '../../engine/workoutBuilder.js';
 import { aiWeekGenerationMode, isAiProgrammerEnabled } from '../../ai-programmer/provider/config.js';
@@ -582,12 +586,45 @@ function renderWeekDays(database: Database.Database, weekStart: string, program:
   });
 }
 
-function buildWeekResponse(database: Database.Database, weekStart: string, program: PersistedWeekProgram, profile: TrainingProfile | undefined) {
+/** Explicit mode (2026-10-11): days are generated one at a time, so no
+ * week program (and no saved target_allocations) exists and the goals
+ * summary was always empty. This derives it live instead: each target's
+ * weekly requirement from the deterministic planner as of the week's
+ * start (the same requiredDirectSets a saved week would carry), and its
+ * direct sets actually completed so far this calendar week. Read-only:
+ * no rotation record, nothing persisted. */
+function liveTargetAllocations(database: Database.Database, weekStart: string) {
+  const input = assembleWeeklyPlanInput(database, weekStart, defaultBudgetMinutes(database), weekStart);
+  const plan = buildWeeklyProgrammingPlan(input);
+  const today = todayForUser(database);
+  const asOf = today < weekStart ? weekStart : today > addDays(weekStart, 6) ? addDays(weekStart, 6) : today;
+  const done = new Map(buildTrainingState(database, asOf).weekly_exposure.map((e) => [targetKey(e), e.primary_sets]));
+  const targetGoalMap: TargetGoalMap = new Map(input.targets.map((t) => [targetKey(t), { goal_id: t.goal_id, is_specialization: t.is_specialization }]));
+  const { labels } = goalLabels(database);
+  return plan.targetAllocations.map((a) => {
+    const completed = done.get(targetKey(a)) ?? 0;
+    return enrichAllocation(
+      { ...a, deliveredDirectSets: Math.min(completed, a.requiredDirectSets), unmetDirectSets: Math.max(0, a.requiredDirectSets - completed), allocatedSessionDates: [] },
+      targetGoalMap,
+      labels
+    );
+  });
+}
+
+/** `saved: false` (explicit mode, no week program) derives the goals
+ * summary live; see liveTargetAllocations. */
+function buildWeekResponse(database: Database.Database, weekStart: string, program: PersistedWeekProgram, profile: TrainingProfile | undefined, saved = true) {
+  const live = !saved;
+  const notes = new Map(new DayNotesRepo(database).listBetween(weekStart, addDays(weekStart, 6)).map((n) => [n.date, n.note]));
   return {
     weekStart,
     weekEnd: addDays(weekStart, 6),
-    days: renderWeekDays(database, weekStart, program, profile),
-    targetAllocations: program.target_allocations ?? [],
+    // otherNote: the user's "Other" note for that date, if any.
+    days: renderWeekDays(database, weekStart, program, profile).map((d) => ({ ...d, otherNote: notes.get(d.date) ?? null })),
+    targetAllocations: live ? liveTargetAllocations(database, weekStart) : (program.target_allocations ?? []),
+    // 'completed': deliveredDirectSets counts sets actually logged this
+    // week; 'programmed': sets in the saved week program.
+    targetAllocationsBasis: live ? ('completed' as const) : ('programmed' as const),
     activeGoals: program.active_goals ?? [],
   };
 }
@@ -617,7 +654,7 @@ programmingRouter.get('/week', async (req, res, next) => {
 
     const user = new UsersRepo(database).getOrCreateDefault();
     const profile = new TrainingProfileRepo(database).get(user.id);
-    res.json({ ...buildWeekResponse(database, weekStart, program, profile), ...generationField(database, weekStart, saved) });
+    res.json({ ...buildWeekResponse(database, weekStart, program, profile, saved), ...generationField(database, weekStart, saved) });
   } catch (err) {
     // generate_week (2026-09-23): a real AI failure surfaces here as a
     // clear, typed error — never a silent fallback to the deterministic
@@ -628,6 +665,62 @@ programmingRouter.get('/week', async (req, res, next) => {
     }
     next(err);
   }
+});
+
+// PUT /api/programming/days/:date/note — the "Other" day note
+// (2026-10-11): free text about a day's non-logged activity (rehab, a
+// sport, an injury). An empty note deletes it. Changes nothing about the
+// day's scheduled activity or program; the AI Programmer reads recent
+// notes as context.
+programmingRouter.put('/days/:date/note', (req, res) => {
+  const database = db(req);
+  const date = req.params.date;
+  if (!isValidCalendarDate(date)) {
+    return res.status(400).json({ error: 'date must be a real calendar date in YYYY-MM-DD format' });
+  }
+  const note = req.body?.note;
+  if (typeof note !== 'string') {
+    return res.status(400).json({ error: 'note must be a string (empty to delete)' });
+  }
+  const text = note.trim();
+  if (text.length > DAY_NOTE_MAX_LENGTH) {
+    return res.status(400).json({ error: `note must be at most ${DAY_NOTE_MAX_LENGTH} characters` });
+  }
+  const repo = new DayNotesRepo(database);
+  if (text === '') repo.delete(date);
+  else repo.set(date, text);
+  res.json({ date, note: text === '' ? null : text });
+});
+
+// Injury pause (2026-10-11). GET lists every pausable body area and
+// whether it is paused; PUT /injuries/:area { paused, note? } pauses or
+// resumes one. While paused, AI generation plans no work for the area's
+// targets. Never touches existing sessions or proposals.
+programmingRouter.get('/injuries', (req, res) => {
+  const paused = new Map(new InjuryPausesRepo(db(req)).list().map((p) => [p.area, p]));
+  res.json({
+    areas: INJURY_AREA_IDS.map((id) => ({ id, label: INJURY_AREAS[id].label, paused: paused.has(id), since: paused.get(id)?.since ?? null, note: paused.get(id)?.note ?? null })),
+  });
+});
+
+programmingRouter.put('/injuries/:area', (req, res) => {
+  const database = db(req);
+  const area = req.params.area as InjuryArea;
+  if (!INJURY_AREA_IDS.includes(area)) {
+    return res.status(400).json({ error: `area must be one of ${INJURY_AREA_IDS.join('|')}` });
+  }
+  const { paused, note } = req.body ?? {};
+  if (typeof paused !== 'boolean') {
+    return res.status(400).json({ error: 'paused must be true or false' });
+  }
+  if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > DAY_NOTE_MAX_LENGTH)) {
+    return res.status(400).json({ error: `note must be a string of at most ${DAY_NOTE_MAX_LENGTH} characters` });
+  }
+  const repo = new InjuryPausesRepo(database);
+  if (paused) repo.pause(area, todayForUser(database), typeof note === 'string' && note.trim() ? note.trim() : null);
+  else repo.resume(area);
+  const current = repo.list().find((p) => p.area === area);
+  res.json({ id: area, label: INJURY_AREAS[area].label, paused: !!current, since: current?.since ?? null, note: current?.note ?? null });
 });
 
 const PRESCRIPTION_POLICIES = ['reuse', 'regenerate', 'schedule-only'] as const;
@@ -1106,7 +1199,40 @@ programmingRouter.get('/periodization', (req, res) => {
     reactiveTriggerStatus: programState.reactiveTriggerStatus,
     specializationTargetId: programState.specializationTargetId,
     explanation,
+    // The evidence behind an active reactive deload (2026-10-11): each
+    // declining target with its exercises' own trends, from the event
+    // that started it. Null when no reactive deload is active.
+    reactiveEvidence: programState.periodizationState === 'REACTIVE_DELOAD' ? reactiveDeloadEvidence(database, user.id) : null,
   });
+});
+
+/** The evidence of the event that started the current reactive deload,
+ * with display names added. */
+function reactiveDeloadEvidence(database: Database.Database, programId: string) {
+  const event = new PeriodizationEventsRepo(database).listForProgram(programId).filter((e) => e.triggerType === 'reactive_triggered').pop();
+  const evidence = event?.evidence as { signals?: Array<{ targetId: string; exercises?: Array<{ exerciseId: string }> }>; lookbackStart?: string; lookbackEnd?: string } | undefined;
+  if (!evidence) return null;
+  return {
+    lookbackStart: evidence.lookbackStart ?? null,
+    lookbackEnd: evidence.lookbackEnd ?? null,
+    signals: (evidence.signals ?? []).map((sig) => ({
+      ...sig,
+      targetName: resolveTargetName('physique_target', sig.targetId),
+      exercises: (sig.exercises ?? []).map((x) => ({ ...x, exerciseName: resolveExerciseName(x.exerciseId) })),
+    })),
+  };
+}
+
+// POST /api/programming/periodization/end-reactive-deload — ends an
+// active reactive deload early, at the user's request (2026-10-11). A
+// scheduled deload week is not affected. 409 when none is active.
+programmingRouter.post('/periodization/end-reactive-deload', (req, res) => {
+  const database = db(req);
+  const user = new UsersRepo(database).getOrCreateDefault();
+  const profile = new TrainingProfileRepo(database).get(user.id);
+  const ended = endReactiveDeload(database, { programId: user.id, referenceDate: todayForUser(database), weekBoundary: profile?.week_start_day ?? 'monday' });
+  if (!ended) return res.status(409).json({ error: 'No reactive deload is active.' });
+  res.json({ ended: true });
 });
 
 // Coaching Depth Batch 4 spec §7 "Add/remove preference", "Add/remove

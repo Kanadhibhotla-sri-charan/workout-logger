@@ -16,7 +16,10 @@
 //   2. Remove an entry whose exercise does not earn credit for its
 //      labelled target, or whose side credit would give work to a target
 //      the plan does not train (that target would otherwise be present
-//      in the session without its own plan).
+//      in the session without its own plan). With the wide exercise pool
+//      (exercisePool.ts), also remove an entry whose exercise is not one of
+//      its target's plan candidates (a rested or unlisted exercise), unless
+//      it is listed for another planned target Blueprint also credits it to.
 //   3. If what remains cannot fit the planned capacity (the session caps,
 //      counting each capacity group at its reserved size so completion
 //      can still fill it):
@@ -38,6 +41,7 @@ import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../con
 import type { AIProgrammerContext } from '../context/programmerContextTypes.js';
 import { creditedTargetKeys, keyOf } from '../validation/sharedCredit.js';
 import { boundDiagnosticIssues } from '../validation/diagnosticsBounds.js';
+import { isWidePoolContext } from '../context/exercisePool.js';
 import { groupExerciseAllocation, type CapacityGroup, type SessionPlan, type TargetPlan } from './sessionPlanner.js';
 
 export interface ConformanceResult {
@@ -56,6 +60,8 @@ export function conformProposalToPlan(proposal: AIWorkoutSessionProposal, plan: 
   let exercises: AIWorkoutExerciseProposal[] = [...proposal.exercises];
   const initialCount = exercises.length;
   const keyOfEntry = (e: AIWorkoutExerciseProposal) => keyOf(e.targetType, e.targetId);
+  const planned = plan.targets.filter(isPlanned);
+  const enforceCandidates = isWidePoolContext(context);
 
   // ---- rule 1: targets the plan does not train this session ----
   for (const [key, t] of planByKey) {
@@ -81,6 +87,19 @@ export function conformProposalToPlan(proposal: AIWorkoutSessionProposal, plan: 
       notes.push(`Plan conformance: removed ${e.exerciseId} from ${e.targetId} — it also credits ${uncovered.map((k) => k.split(':')[1]).join(', ')}, which the session plan does not train today.`);
       return false;
     }
+    // Wide exercise pool only: the plan's candidate lists are the rotation
+    // shortlist, so an exercise outside its target's list (rested, or never
+    // listed) is removed rather than re-entering through the AI's output. One
+    // exception: an exercise listed for another planned target that Blueprint
+    // also credits to this one is a genuine shared-credit choice and stays.
+    if (enforceCandidates && isPlanned(planByKey.get(key))) {
+      const listedFor = (t: TargetPlan) => t.candidates.some((c) => c.exerciseId === e.exerciseId);
+      const listed = listedFor(planByKey.get(key)!) || planned.some((u) => u.key !== key && credited.includes(u.key) && listedFor(u));
+      if (!listed) {
+        notes.push(`Plan conformance: removed ${e.exerciseId} from ${e.targetId} — it is not one of ${e.targetId}'s candidates in this session plan.`);
+        return false;
+      }
+    }
     return true;
   });
 
@@ -89,7 +108,6 @@ export function conformProposalToPlan(proposal: AIWorkoutSessionProposal, plan: 
   // entries, its reserved slots): a group keeps its reservation while any
   // member is present, so completion can still fill it.
   const targetById = new Map(plan.targets.map((t) => [t.targetId, t]));
-  const planned = plan.targets.filter(isPlanned);
   const membersOf = (g: CapacityGroup) => g.targetIds.map((id) => targetById.get(id)!);
   const creditsOf = (e: AIWorkoutExerciseProposal) => creditedTargetKeys(e, context.targets);
   const presentKeys = (exs: readonly AIWorkoutExerciseProposal[]) => new Set(exs.map(keyOfEntry));

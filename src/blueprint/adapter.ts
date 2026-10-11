@@ -21,6 +21,8 @@ import type {
   BlueprintManifest,
   BlueprintPhysiqueTarget,
   BlueprintProgramming,
+  BlueprintProgrammingProfiles,
+  BlueprintRepRangeOverride,
 } from './types.js';
 
 function deepFreeze<T>(value: T): T {
@@ -136,6 +138,17 @@ export const BlueprintAdapter = {
    * top of this. */
   getDevelopmentPackages(): BlueprintDevelopmentPackages {
     return programming.developmentPackages;
+  },
+
+  /** Blueprint's Programming Profile catalog and its first-match
+   * classification rules — see src/blueprint/programmingProfiles.ts. */
+  getProgrammingProfiles(): BlueprintProgrammingProfiles {
+    return programming.programmingProfiles as BlueprintProgrammingProfiles;
+  },
+
+  /** Blueprint's exercise-specific rep-range overrides (empty by design today). */
+  getRepRangeOverrides(): readonly BlueprintRepRangeOverride[] {
+    return (programming.repRanges as { overrides?: BlueprintRepRangeOverride[] } | null)?.overrides ?? [];
   },
 
   /** Coaching Depth Batch 5 (Phase 5): Blueprint's own real, vendored

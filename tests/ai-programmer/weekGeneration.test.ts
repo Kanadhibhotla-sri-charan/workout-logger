@@ -218,6 +218,20 @@ describe('GET /week and /today in explicit mode never generate', () => {
     expect(past).toMatchObject({ canGenerate: false, reason: 'outside_window' });
   });
 
+  it('an unsaved week still reports the goals summary: weekly requirement, sets done so far, nothing written', async () => {
+    const res = (await request(createApp(db)).get(`/api/programming/week?date=${MONDAY}`).expect(200)).body;
+    expect(res.targetAllocationsBasis).toBe('completed');
+    expect(programs().n).toBe(0);
+    const goal = res.targetAllocations.filter((a: any) => a.goal_label === 'Goal 1');
+    expect(goal.map((a: any) => a.target_id)).toContain('brachialis-arm-thickness');
+    for (const a of res.targetAllocations) {
+      expect(a.requiredDirectSets).toBeGreaterThanOrEqual(0);
+      expect(a.deliveredDirectSets).toBe(0); // nothing logged yet this week
+      expect(a.unmetDirectSets).toBe(a.requiredDirectSets);
+    }
+    expect(res.targetAllocations.some((a: any) => a.requiredDirectSets > 0)).toBe(true);
+  });
+
   it('a saved week stays readable exactly as in legacy mode (plus the generation field)', async () => {
     const repo = new WeeklyProgramRepo(db);
     const program = repo.create(MONDAY, addDays(MONDAY, 6));

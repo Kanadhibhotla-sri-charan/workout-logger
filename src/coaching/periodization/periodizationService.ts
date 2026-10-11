@@ -7,7 +7,7 @@
 import type Database from 'better-sqlite3';
 import { REACTIVE_TRIGGER } from '../../engine/config.js';
 import { DELOAD_POLICY } from '../../engine/config.js';
-import { daysBetween } from '../../engine/dateMath.js';
+import { addDays, daysBetween } from '../../engine/dateMath.js';
 import { DELOAD_REP_RANGE_BIAS, computeCooldownUntil, computeReactiveDeloadEndDate } from './deloadPolicy.js';
 import { PeriodizationEventsRepo } from './periodizationEventsRepo.js';
 import { evaluateReactiveDeloadTrigger, type ReactiveEvaluationResult } from './reactiveTrendEvaluator.js';
@@ -134,3 +134,30 @@ export function getPeriodizationContext(db: Database.Database, input: GetPeriodi
 // (never a fresh evaluation — e.g. a lightweight status endpoint) don't
 // need a second import.
 export { getActiveProgramState };
+
+/** Ends an active reactive deload early, at the owner's request
+ * (2026-10-11): the window closes yesterday, the cooldown is cleared, and
+ * a 'manual' event records it. A scheduled (calendar) deload is not
+ * affected. Returns false when no reactive deload is active. */
+export function endReactiveDeload(db: Database.Database, input: Omit<GetPeriodizationContextInput, 'defaultBlockLengthWeeks'>): boolean {
+  const state = getActiveProgramState(db, input.programId, input.referenceDate, input.weekBoundary);
+  if (!state || state.periodizationState !== 'REACTIVE_DELOAD') return false;
+  const after = updateReactiveState(db, input.programId, input.referenceDate, input.weekBoundary, {
+    reactiveTriggerStatus: 'clear',
+    reactiveDeloadEndDate: addDays(input.referenceDate, -1),
+    cooldownUntil: null,
+  });
+  new PeriodizationEventsRepo(db).record({
+    programId: input.programId,
+    previousState: 'REACTIVE_DELOAD',
+    newState: after.periodizationState,
+    triggerType: 'manual',
+    blockId: after.blockId,
+    blockNumber: after.blockNumber,
+    weekIndex: after.weekIndex,
+    evidence: { evaluationTimestamp: input.referenceDate },
+    appliedPolicy: null,
+    reason: 'Reactive deload ended early by the user.',
+  });
+  return true;
+}

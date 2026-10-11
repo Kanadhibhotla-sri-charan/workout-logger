@@ -24,7 +24,10 @@ export interface PlannedCandidateForAI {
   /** Other targets in this session this exercise also counts toward. */
   alsoCredits: string[];
   plausibleIntensityTechniques: readonly string[];
-  recentConsecutiveSessionsUsed: number;
+  /** Package exercise-pool mode. */
+  recentConsecutiveSessionsUsed?: number;
+  /** Wide exercise-pool mode (replaces recentConsecutiveSessionsUsed). */
+  recentSameTypeUsage?: { sessionsUsed: number; sessionsConsidered: number; lastUsedDate: string | null };
   recentHistory: ReadonlyArray<{ date: string; completedSets: number }>;
 }
 
@@ -87,6 +90,8 @@ export interface AIProgrammerPlannedContext {
   };
   trainingExperience: AIProgrammerContext['trainingExperience'];
   structuralAdvisories: AIProgrammerContext['structuralAdvisories'];
+  activityNotes: AIProgrammerContext['activityNotes'];
+  injuryPauses: AIProgrammerContext['injuryPauses'];
   intensityTechniqueCatalogue: AIProgrammerContext['intensityTechniqueCatalogue'];
   outputRequirements: AIProgrammerContext['outputRequirements'];
 }
@@ -94,6 +99,12 @@ export interface AIProgrammerPlannedContext {
 const isPlanned = (t: TargetPlan) => (t.status === 'required' || t.status === 'selected') && t.reservedExerciseSlots > 0;
 const pick = <T>(record: Readonly<Record<string, T>>, ids: readonly string[]): Record<string, T> =>
   Object.fromEntries(ids.filter((id) => id in record).map((id) => [id, record[id]!]));
+
+/** True when the planned context carries the wide exercise pool's rotation
+ * shortlist (its candidates carry recentSameTypeUsage) — selects rule 7's wording. */
+export function usesRotationShortlist(planned: AIProgrammerPlannedContext): boolean {
+  return planned.sessionPlan.targets.some((t) => t.candidates.some((c) => c.recentSameTypeUsage !== undefined));
+}
 
 export function buildPlannedAIContext(context: AIProgrammerContext, plan: SessionPlan): AIProgrammerPlannedContext {
   const planned = plan.targets.filter(isPlanned).sort((a, b) => a.rank! - b.rank!);
@@ -147,7 +158,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
           rirMax: authored.rirMax,
           alsoCredits: c.sideCredits.filter((k) => plannedKeys.has(k)).map((k) => k.slice(k.indexOf(':') + 1)),
           plausibleIntensityTechniques: v.plausibleIntensityTechniques,
-          recentConsecutiveSessionsUsed: v.recentConsecutiveSessionsUsed,
+          ...(v.recentSameTypeUsage ? { recentSameTypeUsage: v.recentSameTypeUsage } : { recentConsecutiveSessionsUsed: v.recentConsecutiveSessionsUsed }),
           recentHistory: target.exerciseHistory[c.exerciseId] ?? [],
         };
       }),
@@ -192,6 +203,8 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
     },
     trainingExperience: context.trainingExperience,
     structuralAdvisories: context.structuralAdvisories,
+    activityNotes: context.activityNotes,
+    injuryPauses: context.injuryPauses,
     intensityTechniqueCatalogue: pick(context.intensityTechniqueCatalogue, [...usedTechniques]),
     outputRequirements: context.outputRequirements,
   };
@@ -200,7 +213,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
 /** The system instruction for planned generation: the SessionPlan is the
  * structural contract; the AI makes the coaching choices inside it. A
  * separate, shorter instruction — not the legacy one with more prose. */
-export function buildPlannedProgrammerSystemInstruction(): string {
+export function buildPlannedProgrammerSystemInstruction(rotationShortlist = false): string {
   return [
     'You are the workout programmer for a single-user strength training application. Propose exactly ONE gym session for context.targetDate.',
     '',
@@ -215,9 +228,12 @@ export function buildPlannedProgrammerSystemInstruction(): string {
     '6. Each target\'s total sets reach its minimumSets, should fall within recommendedSets, and never exceed maximumSets. If context.coachingFoundation.programState shows a deload, these numbers already include it.',
     '',
     'Your coaching decisions (real judgment; cite the specific data behind each in programmingRationale):',
-    '7. Which candidates to use for each target — weigh recentHistory, recentConsecutiveSessionsUsed (a long streak is a reason to consider a fresh angle, never a requirement), coachingFoundation.historicalSummaries trends, and exercise variety.',
+    rotationShortlist
+      ? '7. Which candidates to use for each target. Each candidate list is already a rotation shortlist: each target\'s main compound lift stays for the training block, and its accessories are the ones that were not used in both of the last two sessions of this day type. Choose accessories that give a different angle from those sessions, using recentSameTypeUsage (sessionsUsed of sessionsConsidered, lastUsedDate), recentHistory and coachingFoundation.historicalSummaries trends.'
+      : '7. Which candidates to use for each target — weigh recentHistory, recentConsecutiveSessionsUsed (a long streak is a reason to consider a fresh angle, never a requirement), coachingFoundation.historicalSummaries trends, and exercise variety.',
     '8. Exercise order and pairing — two trained targets with opposite antagonistGroup can be sequenced as a superset when that genuinely helps.',
-    '9. Volume within each target\'s legal range — go below recommendedSets only for a concrete, cited reason (e.g. recoveryCaution "reduce" or recent heavy exposure), and never below minimumSets.',
+    '9. Volume within each target\'s legal range — go below recommendedSets only for a concrete, cited reason (e.g. recoveryCaution "reduce", recent heavy exposure, or pain or an injury reported in context.activityNotes), and never below minimumSets. During a deload, aim for recommendedSets: they already contain the deload\'s reduction, so the deload itself is not a reason to go lower.',
+    '9a. context.activityNotes are the user\'s own notes about recent days (rehab, a sport, an injury, how a session felt). Read them as recovery evidence: when a note reports pain, injury or unusual fatigue in a body part, favour the candidates that load it most gently and say so in recoveryConsiderations. A note is never logged sets and never changes the plan\'s structure. context.injuryPauses lists body areas the user has paused for injury; the plan already leaves their targets out, so among the remaining candidates prefer those that load a paused area least.',
     '10. Intensity techniques — only ids in an exercise\'s plausibleIntensityTechniques, looked up in context.intensityTechniqueCatalogue; a considered choice (weigh context.trainingExperience), never reflexive.',
     '11. Rationale — programmingRationale, goalAlignment (context.activeGoals in the order given), recoveryConsiderations and warnings, grounded in the data given.',
     '',

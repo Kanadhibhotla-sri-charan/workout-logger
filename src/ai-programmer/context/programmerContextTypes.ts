@@ -79,8 +79,17 @@ export interface AIProgrammerValidExerciseContext {
    * real, informational signal for deliberate rotation (a different
    * angle on the same muscle, avoiding staleness) — never a requirement
    * to swap; an exercise still being effective is reason enough to keep
-   * it. */
-  recentConsecutiveSessionsUsed: number;
+   * it. Package exercise-pool mode only; wide mode replaces it with
+   * recentSameTypeUsage. */
+  recentConsecutiveSessionsUsed?: number;
+  /** Wide exercise-pool mode only (exercisePool.ts): in how many of the last
+   * sessionsConsidered comparable sessions (same day type, upper counting as
+   * push and pull) this exercise was used, and when it was last used at all. */
+  recentSameTypeUsage?: { sessionsUsed: number; sessionsConsidered: number; lastUsedDate: string | null };
+  /** Wide exercise-pool mode only: where authoredPrescription came from —
+   * the Blueprint development package, or the Blueprint profile default
+   * (programmingProfiles.ts) for a primary-target exercise outside it. */
+  prescriptionSource?: 'package' | 'profile_default';
 }
 
 export interface AIProgrammerTargetContext {
@@ -196,6 +205,13 @@ export interface AIProgrammerMuscleGuidance {
    * inclusion. Always true when the session has no identity
    * (badminton/rest/unselected days, or a functional_goal target). */
   eligibleForThisSession: boolean;
+  /** True when this target's body area is paused for injury: it is then
+   * ineligible for every session. Absent otherwise. */
+  pausedForInjury?: true;
+  /** During a deload only (2026-10-11): this target's under-prescription
+   * tolerance (deloadAdequacyTolerance), replacing the default 50% so the
+   * deload is not applied twice. Absent outside a deload. */
+  adequacyTolerance?: number;
   /** decideVolume().reasoning, verbatim — full traceability from a
    * recommendation back to the deterministic decision that produced
    * it. */
@@ -297,6 +313,8 @@ export interface AIProgrammerProgrammingBrief {
    * every eligible priority target's own floor still requires more
    * time than this budget suggests. */
   approxSessionSetBudget: number;
+  /** True while a deload is active. Absent otherwise. */
+  deloadActive?: boolean;
   /** Push Generation Architectural Fix (2026-09-24): deterministic,
    * plain-language notes about a real, session-wide constraint that
    * makes it mathematically impossible for two or more eligible targets
@@ -486,6 +504,17 @@ export interface AIProgrammerContext {
    * advisory is evidence to weigh, not an instruction to obey). Empty
    * when nothing is currently flagged. */
   structuralAdvisories: readonly StructuralAdvisory[];
+
+  /** The user's own "Other" day notes from the last ACTIVITY_NOTES_DAYS
+   * days up to targetDate, oldest first: non-logged activity such as
+   * rehab, a sport or an injury, in their words. Context only; never
+   * counted as sets. */
+  activityNotes: ReadonlyArray<{ date: string; note: string }>;
+
+  /** Body areas the user has paused for injury (2026-10-11), with the
+   * physique targets each covers. Those targets are ineligible for every
+   * session (programmingBrief.muscles[].pausedForInjury). */
+  injuryPauses: ReadonlyArray<{ area: string; since: string; note: string | null; targetIds: readonly string[] }>;
 
   /** Context-bloat fix (2026-09-18): the full text for every intensity
    * technique referenced anywhere in `targets[].validExercises[].plausibleIntensityTechniques`,

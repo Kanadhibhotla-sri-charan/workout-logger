@@ -19,6 +19,12 @@
       <h2>This week's goals</h2>
       <div id="goal-summary"></div>
     </section>
+
+    <section>
+      <h2>Injury pause</h2>
+      <p class="faint">Tick a body area to pause it while it heals. AI workouts plan nothing for it, and avoid exercises that also work it, until you untick it.</p>
+      <div id="injury-pauses"></div>
+    </section>
   </main>
 
   <div id="day-modal-root"></div>
@@ -553,6 +559,10 @@
           : `${day.plannedWork.length} exercise${day.plannedWork.length === 1 ? '' : 's'} · ${formatDuration(day.estimatedMinutes)}`;
         head.appendChild(el('div', { class: 'wd-meta', text: meta }));
       }
+      if (day.otherNote) {
+        const preview = day.otherNote.length > 40 ? `${day.otherNote.slice(0, 40)}…` : day.otherNote;
+        head.appendChild(el('div', { class: 'wd-meta', text: `Other: ${preview}` }));
+      }
       btn.appendChild(head);
       btn.appendChild(buildDayStatusBadge(day));
 
@@ -722,10 +732,21 @@
       section.appendChild(el('p', { class: 'faint', text: `Current activity: ${formatDailyActivity(day.activity)}`, style: 'margin:0 0 0.4rem' }));
       section.appendChild(el('p', { class: 'faint', text: 'This changes only the current week — your recurring Training Profile schedule is unchanged.', style: 'margin:0 0 0.6rem' }));
 
-      const select = el('select', { 'aria-label': 'Change activity (this week only)' },
-        DAILY_ACTIVITY_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text, ...(day.activity === opt.value ? { selected: 'selected' } : {}) }))
-      );
+      // "Other" is not a scheduled activity: it opens a note about what
+      // was done (rehab, a sport, an injury) that the AI Programmer reads.
+      // Saving it leaves the day's activity and program unchanged.
+      const select = el('select', { 'aria-label': 'Change activity (this week only)' }, [
+        ...DAILY_ACTIVITY_OPTIONS.map((opt) => el('option', { value: opt.value, text: opt.text, ...(day.activity === opt.value ? { selected: 'selected' } : {}) })),
+        el('option', { value: 'other', text: 'Other (write what you did)' }),
+      ]);
       const statusEl = el('div');
+      const noteSection = buildOtherNoteSection(day);
+      select.addEventListener('change', () => {
+        const other = select.value === 'other';
+        noteSection.hidden = !other && !day.otherNote;
+        saveBtn.hidden = other;
+        if (other) noteSection.querySelector('textarea').focus();
+      });
 
       // Fix 7: ordinary activity changes never silently regenerate a
       // prescription — 'reuse' is tried first. If the backend reports
@@ -784,7 +805,35 @@
       }});
 
       const row = el('div', { class: 'btn-row' }, [select, saveBtn]);
-      section.append(row, statusEl);
+      section.append(row, statusEl, noteSection);
+      return section;
+    }
+
+    /** The "Other" note for one date: what was done and what happened, in
+     * the user's words. Shown whenever a note exists, or once "Other" is
+     * chosen. An empty note deletes it. */
+    function buildOtherNoteSection(day) {
+      const section = el('div', { style: 'margin-top:0.6rem' });
+      section.hidden = !day.otherNote;
+      section.appendChild(el('p', { class: 'faint', text: 'Other activity: write what you did and how it went (e.g. a rehab session, an injury, a sport). The AI Programmer reads this when planning; it does not change this day\'s schedule.', style: 'margin:0 0 0.4rem' }));
+      const textarea = el('textarea', {
+        rows: '3',
+        maxlength: '2000',
+        placeholder: 'e.g. 20 min knee rehab: banded leg extensions, wall sits. Left knee still sore on stairs.',
+        'aria-label': 'Other activity note',
+        style: 'width:100%;resize:vertical;font:inherit',
+      });
+      textarea.value = day.otherNote || '';
+      const statusEl = el('div');
+      const saveBtn = createButton({ label: 'Save note', variant: 'secondary', onClick: async () => {
+        const note = textarea.value.trim();
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/programming/days/${day.date}/note`, { method: 'PUT', body: { note } }), note ? 'Note saved.' : 'Note removed.');
+          closeDayModal();
+          await loadWeek();
+        } catch (err) { /* text stays in the box, unsaved */ }
+      }});
+      section.append(textarea, el('div', { class: 'btn-row', style: 'margin-top:0.4rem' }, [saveBtn]), statusEl);
       return section;
     }
 
@@ -1971,7 +2020,12 @@
 
         const card = createCard();
         card.appendChild(el('div', { class: 'card-title', text: label }));
-        card.appendChild(el('div', { class: 'card-subtitle', text: `Required: ${required} · Programmed: ${programmed}${unmet > 0 ? ` · Unmet: ${unmet}` : ''}` }));
+        // Explicit week mode: the figures are sets actually logged this
+        // week, not sets in a saved week program.
+        const completedBasis = weekData.targetAllocationsBasis === 'completed';
+        const deliveredLabel = completedBasis ? 'Done so far' : 'Programmed';
+        const unmetLabel = completedBasis ? 'Remaining' : 'Unmet';
+        card.appendChild(el('div', { class: 'card-subtitle', text: `Required: ${required} · ${deliveredLabel}: ${programmed}${unmet > 0 ? ` · ${unmetLabel}: ${unmet}` : ''}` }));
         const track = el('div', { class: 'summary-bar-track' });
         track.appendChild(el('div', { class: 'summary-bar-fill', style: `width:${pct}%` }));
         card.appendChild(track);
@@ -1980,8 +2034,40 @@
       container.appendChild(grid);
     }
 
+    /** Injury pause: one checkbox per body area; a change saves at once. */
+    async function loadInjuryPauses() {
+      const container = document.getElementById('injury-pauses');
+      try {
+        const { areas } = await api('/api/programming/injuries');
+        container.innerHTML = '';
+        const row = el('div', { class: 'btn-row' });
+        const statusEl = el('div');
+        for (const area of areas) {
+          const box = el('input', { type: 'checkbox', ...(area.paused ? { checked: 'checked' } : {}) });
+          box.addEventListener('change', async () => {
+            box.disabled = true;
+            try {
+              await api(`/api/programming/injuries/${area.id}`, { method: 'PUT', body: { paused: box.checked } });
+              showInlineStatus(statusEl, 'success', box.checked ? `${area.label} paused.` : `${area.label} resumed.`);
+            } catch (err) {
+              box.checked = !box.checked;
+              showInlineStatus(statusEl, 'error', err.message || 'Could not save.');
+            } finally {
+              box.disabled = false;
+            }
+          });
+          const since = area.paused && area.since ? ` (since ${formatDate(area.since)})` : '';
+          row.appendChild(el('label', { style: 'display:inline-flex;align-items:center;gap:0.35rem;margin-right:0.9rem' }, [box, document.createTextNode(area.label + since)]));
+        }
+        container.append(row, statusEl);
+      } catch (err) {
+        showError(container, "We couldn't load injury pauses.", loadInjuryPauses);
+      }
+    }
+
     loadWeek();
     loadAiNameCatalogs();
+    loadInjuryPauses();
   </script>
 </body>
 </html>

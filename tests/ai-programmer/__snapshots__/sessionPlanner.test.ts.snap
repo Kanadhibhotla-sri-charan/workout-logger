@@ -1521,7 +1521,7 @@ exports[`session planner — representative snapshots > triceps-back-depth / pus
   "identityMinimum": {
     "coveringTargetIds": [
       "triceps",
-      "triceps-long-head",
+      "lower-pec",
     ],
     "requiredTargets": 2,
     "satisfied": true,
@@ -1596,7 +1596,7 @@ exports[`session planner — representative snapshots > triceps-back-depth / pus
       "extra": 1,
       "id": "lower-pec",
       "max": 2,
-      "min": 1,
+      "min": 2,
       "rank": 3,
       "reserved": 1,
       "sharedWith": [
@@ -1754,7 +1754,7 @@ exports[`session planner — representative snapshots > triceps-back-depth / upp
   "identityMinimum": {
     "coveringTargetIds": [
       "triceps",
-      "triceps-long-head",
+      "back-thickness",
     ],
     "requiredTargets": 2,
     "satisfied": true,

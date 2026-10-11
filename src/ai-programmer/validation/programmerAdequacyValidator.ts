@@ -22,6 +22,7 @@ import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } fro
 import type { AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
 import { creditedSetsByTarget, creditedTargetKeys } from './sharedCredit.js';
+import { findMuscleGroupForTarget } from '../../blueprint/developmentPackages.js';
 
 export interface AdequacyValidationResult {
   ok: boolean;
@@ -42,6 +43,24 @@ export const MEANINGFUL_COVERAGE_MIN_SETS = 2;
  * session recognizably built around its identity does not require
  * hitting every single muscle it could touch). [DEFAULT]. */
 export const MIN_EXPECTED_COVERAGE_TARGETS = 2;
+
+/** The unit session-identity coverage is counted in (2026-10-09): a target's
+ * Blueprint development-package muscle group (biceps + brachialis are one,
+ * upper/mid/lower pec are one), or the target itself when it has none. One
+ * exercise whose shared credit reaches two targets of the same muscle group
+ * (a hammer curl: brachialis + biceps) covers ONE group, not two. Shared
+ * credit still counts in full toward each target's volume. Used by this
+ * validator and by the session planner's identity minimum, so the plan never
+ * promises coverage this check would reject. */
+export function identityGroupOf(targetId: string): string {
+  return findMuscleGroupForTarget(targetId)?.id ?? targetId;
+}
+
+/** How many distinct identity groups the session must cover meaningfully:
+ * MIN_EXPECTED_COVERAGE_TARGETS, or fewer when the identity names fewer groups. */
+export function requiredIdentityGroups(expectedCoverageTargetIds: readonly string[]): number {
+  return Math.min(MIN_EXPECTED_COVERAGE_TARGETS, new Set(expectedCoverageTargetIds.map(identityGroupOf)).size);
+}
 
 /** A single target consuming more than this fraction of the whole
  * session's total sets — while at least this many distinct targets are
@@ -67,6 +86,24 @@ const MAX_TOTAL_SETS_BUDGET_MULTIPLIER = 2;
  * entirely (rule 10: "omission never implies invalidity") rather than
  * being forced to half-cover everything. [DEFAULT]. */
 export const UNDER_PRESCRIPTION_TOLERANCE = 0.5;
+
+/** A target's under-prescription tolerance: its own deload tolerance when
+ * one is set (AIProgrammerMuscleGuidance.adequacyTolerance), else
+ * UNDER_PRESCRIPTION_TOLERANCE. */
+export function adequacyToleranceFor(guidance: Pick<AIProgrammerMuscleGuidance, 'adequacyTolerance'>): number {
+  return guidance.adequacyTolerance ?? UNDER_PRESCRIPTION_TOLERANCE;
+}
+
+/** During a deload (2026-10-11): the recommendation already carries the
+ * deload's reduction, so 50% of it was a second cut. The floor becomes the
+ * smaller of the deload recommendation and a normal week's floor (50% of
+ * the normal recommendation), expressed as a tolerance on the deload
+ * recommendation: the deload cuts once, and never asks for more than a
+ * normal week. */
+export function deloadAdequacyTolerance(deloadMinimum: number, normalMinimum: number): number {
+  if (deloadMinimum <= 0) return UNDER_PRESCRIPTION_TOLERANCE;
+  return Math.min(1, Math.max(UNDER_PRESCRIPTION_TOLERANCE, (UNDER_PRESCRIPTION_TOLERANCE * normalMinimum) / deloadMinimum));
+}
 
 function guidanceKey(g: Pick<AIProgrammerMuscleGuidance, 'targetType' | 'targetId'>): string {
   return `${g.targetType}:${g.targetId}`;
@@ -136,10 +173,10 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
     if (guidance.recoveryAdjustment === 'avoid') continue;
     const totalForTarget = totals.get(guidanceKey(guidance)) ?? 0;
     if (totalForTarget === 0) continue; // complete omission is checked separately (goal targets) or is a legitimate choice (non-goal)
-    const floor = guidance.recommendedSessionSets.min * UNDER_PRESCRIPTION_TOLERANCE;
+    const floor = guidance.recommendedSessionSets.min * adequacyToleranceFor(guidance);
     if (totalForTarget < floor) {
       errors.push(
-        `${guidance.targetType}:${guidance.targetId}: ${totalForTarget} sets is clearly inadequate volume — below ${Math.round(UNDER_PRESCRIPTION_TOLERANCE * 100)}% of this target's own deterministic guidance floor (recommended ${guidance.recommendedSessionSets.min}-${guidance.recommendedSessionSets.max} sets, ${guidance.developmentLevel} level)`
+        `${guidance.targetType}:${guidance.targetId}: ${totalForTarget} sets is clearly inadequate volume — below ${Math.round(adequacyToleranceFor(guidance) * 100)}% of this target's own deterministic guidance floor (recommended ${guidance.recommendedSessionSets.min}-${guidance.recommendedSessionSets.max} sets, ${guidance.developmentLevel} level)`
       );
     }
   }
@@ -164,10 +201,12 @@ export function validateProposalAdequacy(proposal: AIWorkoutSessionProposal, con
       const totalForTarget = [...totals.entries()].find(([key]) => key.endsWith(`:${targetId}`))?.[1] ?? 0;
       return covered && totalForTarget >= MEANINGFUL_COVERAGE_MIN_SETS;
     });
-    const required = Math.min(MIN_EXPECTED_COVERAGE_TARGETS, brief.session.expectedCoverageTargetIds.length);
-    if (coveredExpected.length < required) {
+    // Counted in distinct muscle groups (identityGroupOf), never raw targets.
+    const coveredGroups = [...new Set(coveredExpected.map(identityGroupOf))];
+    const required = requiredIdentityGroups(brief.session.expectedCoverageTargetIds);
+    if (coveredGroups.length < required) {
       errors.push(
-        `session identity "${brief.session.purpose}" expects meaningful coverage of at least ${required} of [${brief.session.expectedCoverageTargetIds.join(', ')}]; only ${coveredExpected.length} received >= ${MEANINGFUL_COVERAGE_MIN_SETS} sets ([${coveredExpected.join(', ')}])`
+        `session identity "${brief.session.purpose}" expects meaningful coverage of at least ${required} muscle groups among [${brief.session.expectedCoverageTargetIds.join(', ')}]; only ${coveredGroups.length} received >= ${MEANINGFUL_COVERAGE_MIN_SETS} sets ([${coveredExpected.join(', ')}] -> groups [${coveredGroups.join(', ')}])`
       );
     }
   }

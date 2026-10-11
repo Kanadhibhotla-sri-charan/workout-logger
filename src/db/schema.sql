@@ -642,3 +642,23 @@ CREATE TABLE IF NOT EXISTS ai_week_generation_day_failures (
   failed_at TEXT NOT NULL,
   PRIMARY KEY (target_date, context_hash)
 );
+
+-- "Other" day notes (2026-10-11): free text the user writes about a day's
+-- non-logged activity (rehab, a sport, an injury, how it felt). One note
+-- per date. Read by the AI Programmer as context; never counted as sets.
+CREATE TABLE IF NOT EXISTS day_notes (
+  date TEXT PRIMARY KEY, -- ISO date (YYYY-MM-DD)
+  note TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Injury pause (2026-10-11): a body area the user has paused for injury.
+-- While a row exists, AI generation plans no direct work for that area's
+-- targets and avoids exercises that credit them. Removing the row resumes.
+CREATE TABLE IF NOT EXISTS injury_pauses (
+  area TEXT PRIMARY KEY,
+  note TEXT,
+  since TEXT NOT NULL, -- ISO date the pause started
+  created_at TEXT NOT NULL
+);

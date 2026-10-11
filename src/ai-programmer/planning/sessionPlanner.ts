@@ -38,7 +38,7 @@ import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import { compareRankings, nonGoalRotation, rankTarget, type RankableTarget, type TargetRanking } from '../../engine/workoutBuilder.js';
 import { computeTargetFeasibility } from '../context/targetFeasibility.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance, AIProgrammerTargetContext } from '../context/programmerContextTypes.js';
-import { MEANINGFUL_COVERAGE_MIN_SETS, MIN_EXPECTED_COVERAGE_TARGETS, UNDER_PRESCRIPTION_TOLERANCE } from '../validation/programmerAdequacyValidator.js';
+import { adequacyToleranceFor, identityGroupOf, MEANINGFUL_COVERAGE_MIN_SETS, requiredIdentityGroups } from '../validation/programmerAdequacyValidator.js';
 import { creditedTargetKeys, keyOf } from '../validation/sharedCredit.js';
 import { boundDiagnosticIssues } from '../validation/diagnosticsBounds.js';
 
@@ -275,6 +275,7 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
   const purpose = brief.session.purpose;
   const expected = new Set(brief.session.expectedCoverageTargetIds);
   const guidanceByKey = new Map(brief.muscles.map((g) => [keyOf(g.targetType, g.targetId), g]));
+  const pausedKeys = new Set(brief.muscles.filter((g) => g.pausedForInjury).map((g) => keyOf(g.targetType, g.targetId)));
   const notes: string[] = [];
   const refusals: SessionPlanRefusal[] = [];
 
@@ -289,13 +290,15 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
     const guidance = guidanceByKey.get(key);
     if (!guidance) continue;
     const goal = target.goalId ? context.activeGoals.find((g) => g.goalId === target.goalId) ?? null : null;
-    const threshold = guidance.feasibility?.adequacyThreshold ?? guidance.recommendedSessionSets.min * UNDER_PRESCRIPTION_TOLERANCE;
+    const threshold = guidance.feasibility?.adequacyThreshold ?? guidance.recommendedSessionSets.min * adequacyToleranceFor(guidance);
     const cap = guidance.directSetsPerExposureCap;
     const baseCandidates: PlannedCandidate[] = [];
     for (const v of target.validExercises) {
       if (!v.authoredPrescription) continue;
       const credited = creditedTargetKeys({ exerciseId: v.exerciseId, targetType: target.targetType, targetId: target.targetId }, context.targets);
       if (!credited.includes(key)) continue;
+      // Injury pause: never an exercise that also credits a paused target.
+      if (credited.some((k) => pausedKeys.has(k))) continue;
       const ceiling = cap != null ? Math.min(v.authoredPrescription.sets, cap) : v.authoredPrescription.sets;
       if (ceiling <= 0) continue;
       // Sorted: a set, and its order must not depend on context.targets order.
@@ -304,7 +307,8 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
 
     let status: PlannedTargetStatus | null = null;
     let reason = '';
-    if (!guidance.eligibleForThisSession) [status, reason] = ['ineligible', `not compatible with the "${purpose}" session`];
+    if (guidance.pausedForInjury) [status, reason] = ['ineligible', 'body area paused for injury'];
+    else if (!guidance.eligibleForThisSession) [status, reason] = ['ineligible', `not compatible with the "${purpose}" session`];
     else if (guidance.recoveryAdjustment === 'avoid') [status, reason] = ['recovery_excused', 'recovery engine says avoid today'];
     else if (!guidance.feasibility) [status, reason] = ['unassessed', 'no feasibility data'];
     else if (!guidance.isGoalOriented && !expected.has(target.targetId)) [status, reason] = ['outside_identity', 'not a goal or an expected target of this session identity'];
@@ -396,7 +400,7 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
   const feasibilityWith = (w: Working, candidates: readonly PlannedCandidate[]) => {
     const ids = new Set(candidates.map((c) => c.exerciseId));
     const restricted: AIProgrammerTargetContext = { ...w.target, validExercises: w.target.validExercises.filter((v) => ids.has(v.exerciseId)) };
-    return computeTargetFeasibility(restricted, context.targets, w.guidance.recommendedSessionSets.min, w.guidance.directSetsPerExposureCap, UNDER_PRESCRIPTION_TOLERANCE);
+    return computeTargetFeasibility(restricted, context.targets, w.guidance.recommendedSessionSets.min, w.guidance.directSetsPerExposureCap, adequacyToleranceFor(w.guidance));
   };
 
   // ---- 4. joint capacity for a planned set (shared credit fills one slot for every target it credits) ----
@@ -598,10 +602,20 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
 
   // ---- 7. session identity minimum (the validator's own rule) ----
   const caps = sessionRealismCapFor(purpose, [...planned].map(idOf));
-  const requiredTargets = purpose !== null && expected.size > 0 ? Math.min(MIN_EXPECTED_COVERAGE_TARGETS, expected.size) : 0;
+  // Counted in distinct muscle groups, exactly as the validator counts it
+  // (identityGroupOf): the covering targets are the first ones in allocation
+  // order, at most one per group — ranking itself is unchanged.
+  const requiredTargets = purpose !== null && expected.size > 0 ? requiredIdentityGroups([...expected]) : 0;
   const allocationOrder = working.filter((w) => w.plan.rank !== null).sort((a, b) => a.plan.rank! - b.plan.rank!);
+  const coveredGroups = new Set<string>();
   const covering = allocationOrder
     .filter((w) => planned.has(w.key) && expected.has(w.target.targetId) && final.perTarget.get(w.key)!.reachSets >= MEANINGFUL_COVERAGE_MIN_SETS)
+    .filter((w) => {
+      const group = identityGroupOf(w.target.targetId);
+      if (coveredGroups.has(group)) return false;
+      coveredGroups.add(group);
+      return true;
+    })
     .slice(0, requiredTargets);
   for (const w of covering) w.plan.plannedMinimumSets = Math.max(w.plan.hardMinimumSets, MEANINGFUL_COVERAGE_MIN_SETS);
   const identitySatisfied = covering.length >= requiredTargets;

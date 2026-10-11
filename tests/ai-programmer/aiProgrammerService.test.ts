@@ -476,17 +476,16 @@ describe('AIProgrammerService', () => {
             targetDate: date,
             weekday,
             sessionFocus: ['push'],
-            // Two OTHER Push targets covered (mid-pec, upper-pec) — neither
-            // touches triceps or triceps-long-head at all — so the
-            // pre-existing, unrelated "session identity expects >= 2
-            // covered targets" rule is satisfied without involving the
-            // one thing this test is actually about. incline-dumbbell-press
-            // has no authored per-exercise ceiling (repair's generic
-            // 6-set application cap applies instead), avoiding any
-            // interaction with a tight per-exercise Blueprint ceiling.
+            // Two OTHER Push muscle groups covered (chest via mid-pec,
+            // shoulders via side-delt) — neither touches triceps or
+            // triceps-long-head at all — so the pre-existing, unrelated
+            // "session identity expects >= 2 covered muscle groups" rule
+            // (counted per muscle group since 2026-10-09, so two chest
+            // targets would no longer do) is satisfied without involving
+            // the one thing this test is actually about.
             exercises: [
               { ...validProposalJson().exercises[0], exerciseId: 'flat-barbell-bench-press', targetId: 'mid-pec', sets: 3 },
-              { ...validProposalJson().exercises[0], exerciseId: 'incline-dumbbell-press', targetId: 'upper-pec', sets: 5 },
+              { ...validProposalJson().exercises[0], exerciseId: 'dumbbell-lateral-raise', targetId: 'side-delt', sets: 3 },
             ],
           })
         )

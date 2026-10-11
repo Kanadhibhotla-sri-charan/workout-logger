@@ -332,3 +332,233 @@ locally (all states) and read-only on production.
   testing; isolated scratch checkout + DB copies for real-provider evals;
   never modify or approve users' proposals; commit/deploy only on explicit
   approval.
+
+---
+
+## 10. Exercise variety: wide pool and rotation shortlist (2026-10-09; revised 2026-10-11, see section 11)
+
+### 10.1 Why
+Committed proposals 9/28 → 10/9 repeated the same exercises: all four push
+days shared incline barbell press, flat barbell bench, cable fly, cable
+overhead extension, DB lateral raise and cable crunch. Cause: the planner only
+prescribes development-package exercises (46 of 123), so most targets had
+1-3 candidates. Contributing: the old repeat signal
+(`recentConsecutiveSessionsUsed`) reset whenever two exercises shared a
+target on one date, so heavily repeated exercises looked fresh.
+
+### 10.2 Approved decisions
+* Flag `AI_EXERCISE_POOL_MODE=package|wide`, default `package` (byte-identical
+  context). Wide applies only with planned generation on.
+* Non-package exercises are prescribed only for their Blueprint **primary**
+  target: reps from the Blueprint programming profile's primary range (the
+  rule the package reps were copied from; a test proves all 76 package rows
+  match), RIR from global principles (1-3), 3 sets compound / 2 isolation.
+  Package prescriptions unchanged. Deload rep bias applies to both.
+* *(Superseded 2026-10-11, see 11.1: packages no longer prescribe or anchor
+  anything in wide mode.)* Package primary compounds stay on the list for the
+  block (anchors).
+  Accessories used in both of the last two comparable sessions are rested
+  when an alternative exists; least recently used first. Comparable = same
+  day type, with upper counting as push and pull; a past date's type comes
+  from the targets it directly trained.
+* At most 4 prescribed exercises per target, widened only if the shortlist
+  would be less feasible than the full pool.
+* Repair, completion, feasibility and the planner see only the shortlist
+  (exercises left off it lose their prescription). Approval revalidation
+  builds the context without the shortlist.
+* New signal `recentSameTypeUsage {sessionsUsed, sessionsConsidered,
+  lastUsedDate}` replaces the run counter in wide mode; rule 7 reworded
+  positively. No equipment filter (user decision: overrides manually).
+
+### 10.3 Verification
+* Unit/integration: `tests/blueprint/programmingProfiles.test.ts`,
+  `tests/ai-programmer/exercisePool.test.ts`. Full suite: same 245
+  date-rotation failures by name, 0 new.
+* Replay of 10/5, 10/6, 10/8, 10/9 on a production copy, AI stubbed
+  (`tests/replay/exercisePoolReplay.test.ts`, skipped without `REPLAY_DB`):
+  no refusals, no search-limit notes, plan time unchanged (~0.2 s), planned
+  context +6-13 %, all stubbed generations pass in both modes.
+
+### 10.4 Pre-test fixes (2026-10-09, same branch)
+* **Candidate-list enforcement** (plan conformance, wide pool only): an AI
+  entry whose exercise is not one of its target's plan candidates (rested or
+  never listed) is removed. Kept only if listed for another planned target
+  that Blueprint also credits it to (genuine shared credit). Nothing is
+  substituted; validators unchanged. Package mode unchanged.
+* **One-exercise sessions — fixed (identity counted by muscle group)**: with
+  light weekly biceps volume, a single hammer curl (Blueprint credits
+  brachialis + biceps) used to pass adequacy in both modes, the identity rule
+  counting 2 covered targets. Identity coverage is now counted in distinct
+  Blueprint development-package muscle groups (`identityGroupOf`,
+  `requiredIdentityGroups` in programmerAdequacyValidator.ts), in the
+  validator and the planner's identity-minimum step together (covering
+  targets: first in allocation order, one per group). Ranking, the 8-target
+  cap, shared-credit volume accounting and goal checks unchanged. Applies in
+  every mode. Side effect: a "push" made only of chest work (e.g. bench +
+  incline) is now one group and rejected; one existing test fixture was moved
+  to chest + side-delt for that reason, and two planner snapshots changed
+  (push: triceps-long-head -> lower-pec as covering target, lower-pec
+  minimum 1 -> 2; upper: triceps-long-head -> back-thickness). All 17 stored
+  proposals still pass.
+* **Front delts / upper traps**: eligible whenever they have candidates;
+  ranking and the 8-target cap unchanged. Under the existing allocation
+  order (identity regions before accessory regions) they are selected on
+  every push / pull day while capacity allows — the same reason side-delt
+  and rear-delt are. No code forces them.
+
+### 10.5 Replay (production copy, AI stubbed)
+Oct 5/6/8/9, both modes: no refusals, no search-limit notes, largest group
+12 options (limit 20), plan time ~0.2 s, all stubbed generations pass.
+Sequential wide run from Oct 5: rotation visible day to day. Off-list
+injection: every rested/unlisted exercise removed by conformance.
+
+---
+
+## 11. Owner revisions and additions (2026-10-11, branch `exercise-variety`)
+
+### 11.1 Packages supply numbers only (wide mode)
+Owner's original design intent, restated: development packages give the
+weekly set NUMBERS (complete package for goal muscles, efficient for the
+rest); they never limit or bias which exercise is chosen. Package mode had
+been reading the packages' exercise lists as the candidate pool, which caused
+the repetition in section 10.1. Wide mode now ignores package exercise lists:
+* Every physique target's Blueprint primary-target exercises are prescribed
+  from the profile default (reps: programming-profile primary range, which
+  reproduces every authored package rep range; RIR 1-3 from global
+  principles; 3 sets compound / 2 isolation). Package exercises lose their
+  authored prescription in wide mode; package mode is unchanged.
+* Anchor: the Blueprint primary-target compound the target was most recently
+  trained with (then most use in the comparable sessions, then id); one per
+  target, none if no compound has been used. Accessories rotate as before.
+* The "package first" tie-break is removed.
+* Volume (weekly reference, per-session range, per-exposure cap, minimums)
+  still comes from the packages exactly as before.
+* Visible differences in the Oct 5-9 replay: same targets selected, 0
+  refusals, 0 search notes; mid-pec's anchor on 10/5 becomes flat DB press
+  (the compound used most recently); DB lateral raise maxSets 3 -> 2
+  (isolation default); hanging knee raise leaves the obliques list (its
+  Blueprint primary target is rectus abdominis). Off-list injection: every
+  rested/unlisted exercise still removed.
+
+### 11.2 Goals panel in explicit week mode
+`/week` in explicit mode has no saved week program, so "This week's goals"
+always showed "Not enough information yet." For an unsaved week the panel is
+now derived live (`liveTargetAllocations`, server/routes/programming.ts):
+Required = the deterministic planner's `requiredDirectSets` as of the week
+start; Done so far = direct sets logged this calendar week. Read-only (no
+rotation record, nothing persisted). Response field `targetAllocationsBasis`
+('completed' | 'programmed') switches the labels to "Done so far /
+Remaining". Saved weeks unchanged. `/today` does not compute it.
+
+### 11.3 "Other" day notes
+Free text for non-logged activity (rehab, a sport, an injury, how it felt).
+* Table `day_notes (date PK, note, created_at, updated_at)`; repo
+  `DayNotesRepo`; `PUT /api/programming/days/:date/note {note}` (empty
+  deletes; max 2000 chars). `/week` days carry `otherNote`.
+* UI: the day modal's activity dropdown has "Other (write what you did)",
+  which opens a note box. Saving a note never changes the day's activity or
+  program.
+* AI: `context.activityNotes` = notes dated targetDate-14 .. targetDate,
+  oldest first, passed through to the planned context; planned rule 9a tells
+  the model to read them as recovery evidence (gentler candidates / lower
+  volume within the legal range, cited in recoveryConsiderations). Never sets,
+  never structure. A new note changes the context hash, so a failed day can
+  be retried with it.
+
+### 11.4 Injury pause
+* Table `injury_pauses (area PK, note, since, created_at)`; repo
+  `InjuryPausesRepo`. Areas (by Blueprint target parent_region): chest,
+  shoulders, back, arms (arms + forearms), core, legs (quads, hamstrings,
+  hips, calves), neck.
+* `GET /api/programming/injuries`, `PUT /api/programming/injuries/:area
+  {paused}`. UI: "Injury pause" checkboxes on the Program page.
+* Effect (all pool modes): a paused area's targets get
+  `eligibleForThisSession=false` + `pausedForInjury`, leave the session's
+  expected coverage, are not demanded by the active-goal check, and are
+  planned as `ineligible` ("body area paused for injury"). The planner also
+  drops any candidate exercise whose Blueprint credit includes a paused
+  target. `context.injuryPauses` reaches the model with a one-line rule
+  (prefer candidates that load the paused area least).
+* Limits: a legs session with legs paused has nothing to plan (the planner
+  refuses; no paid call). The deterministic week planner (legacy mode) does
+  not read pauses. Indirect loading not modelled by Blueprint credit (e.g.
+  general bracing) is left to the model's choice.
+
+### 11.5 Verification
+* Tests: `tests/ai-programmer/activityNotes.test.ts` (6),
+  `tests/ai-programmer/injuryPause.test.ts` (13), exercisePool tests
+  rewritten for 11.1, explicit-mode goals-panel test in
+  `weekGeneration.test.ts`. Full suite 2222 tests: the same 245 known
+  date-rotation failures by name, 0 new. Typecheck clean.
+* Replay (production copy 2026-10-09, AI stubbed): see 11.1.
+
+### 11.6 Paid wide-mode test (one call, 2026-10-11)
+Run in an isolated scratch checkout on the VM (`~/wl-paid-test`) against a
+`.backup` copy of the production DB; production untouched. Flags: AI on,
+planned generation on, `AI_EXERCISE_POOL_MODE=wide`, model
+qwen/qwen3-next-80b-a3b-instruct. Legs paused in the copy (mirrors the
+owner's injury). Push, Mon 2026-10-12.
+* Tokens: 8,013 in / 1,590 out, finish "stop". Result: pending proposal,
+  passed schema, conformance, domain and adequacy validation.
+* 10 exercises / 23 sets: close-grip bench 3, skull crusher 2, overhead
+  triceps extension 2, cable shoulder press 3, incline cable press 3, cable
+  lateral raise 2, cable chest press 3, chest-biased DB pullover 2, Pallof
+  press 2, overhead press 1 (deterministic completion, front-delt short by
+  one set). Seven of the ten were not used in the last two push sessions.
+* Finding: a reactive deload is active (10/8-10/14). The plan's numbers
+  already include it (rule 6), yet the model cut every target to its
+  minimum (23 sets vs a recommended 37), citing the deload: a double
+  reduction. Pre-existing model behaviour, not caused by the pool change.
+  Also: its rationale mentions "rest-pause applied" with no technique in the
+  output. Open item for the owner.
+
+
+---
+
+## 12. Deload fixes (2026-10-11, owner-approved, same branch)
+
+### 12.1 Reactive deload measured per exercise
+Finding: the reactive trigger averaged estimated 1RM across ALL of a target's
+exercises, so an exercise swap read as a decline (back-thickness: seated cable
+row ~80 kg e1RM -> chest-supported DB row ~14 kg looked like an 80% drop), and
+lighter scheduled-deload sessions read as decline too. On 2026-10-06 a
+scheduled deload was running; on 2026-10-08 a reactive deload fired (5
+targets) through 2026-10-14: roughly two deload weeks back to back. Wide-mode
+rotation would make such false triggers routine.
+
+Fix (`reactiveTrendEvaluator.ts`): `targetDeclineEvidence` groups a target's
+completed exposures by exercise, drops sessions on deload dates
+(`deloadDatesInRange`, from the periodization event log), trends each exercise
+against itself, counts an exercise only with >= 3 sessions
+(`MIN_EXERCISE_POINTS_FOR_DECLINE`), and calls the target "down" when more than
+half of its counted exercises are down. Thresholds (2+ targets, 21-day
+lookback, 5% tolerance, cooldown) unchanged. Signals now carry per-exercise
+evidence. Re-run on the production copy: 10/6, 10/8 and 10/9 all "clear" (the
+10/8 trigger would not have fired).
+
+### 12.2 Deload applied once (planner floor)
+Finding (paid run, 11.6): the floor was 50% of a recommendation that the
+deload had already halved, so a model citing the deload could legally cut to a
+quarter of a normal session. Fix: during a deload each target's tolerance is
+`deloadAdequacyTolerance(deloadMin, normalMin)` = min(1, max(0.5, 0.5 x
+normalMin / deloadMin)), i.e. the floor is the smaller of the deload
+recommendation and a normal week's floor (it never asks for more than a normal
+week; a capped target such as triceps at 12 keeps its 6-set floor). Stored as
+`AIProgrammerMuscleGuidance.adequacyTolerance` (deload only) and used by the
+validator, planner, feasibility and shortlist (`adequacyToleranceFor`). Planned
+rule 9 adds: during a deload aim for recommendedSets; the deload itself is not
+a reason to go lower.
+
+### 12.3 Ending a reactive deload early
+`POST /api/programming/periodization/end-reactive-deload` (409 when none is
+active): closes the reactive window yesterday, clears the cooldown, records a
+'manual' event. Scheduled deload weeks are unaffected. `GET /periodization`
+now returns `reactiveEvidence` (the triggering event's signals with names); the
+Insights card lists the declining exercises and has an "End this deload now"
+button.
+
+### 12.4 Verification
+`tests/coaching/reactiveDeclinePerExercise.test.ts` (7),
+`tests/ai-programmer/deloadVolume.test.ts` (6). Full suite 2235 tests: the same
+245 known date-rotation failures, 0 new. Replay 10/10 (the replay stub now
+gives every member of a shared group one exercise before filling minimums).

@@ -24,9 +24,14 @@
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { lookupExercisePrescriptionAnyLevel, parseRange } from '../../blueprint/developmentPackages.js';
+import { defaultPrescriptionFor } from '../../blueprint/programmingProfiles.js';
+import { aiExercisePoolMode, isPlannedGenerationEnabled } from '../provider/config.js';
+import { applyExerciseShortlist } from './exercisePool.js';
 import { WEEKDAYS, type ActivityType, type BlueprintId, type Weekday } from '../../contracts/types.js';
 import type { TargetType } from '../../engine/goalResolver.js';
 import { addDays, daysBetween, isValidCalendarDate } from '../../engine/dateMath.js';
+import { DayNotesRepo } from '../../repositories/dayNotesRepo.js';
+import { InjuryPausesRepo, targetIdsForArea } from '../../repositories/injuryPausesRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import { applyRecoveryConstraint } from '../../engine/recoveryEngine.js';
 import { applyProjectedSessions, type ProjectedSession } from './projectedExposure.js';
@@ -42,7 +47,7 @@ import {
 import { developmentPackageLevelFor, getDevelopmentReference } from '../../engine/developmentReferenceEngine.js';
 import { classifyAestheticTrend, decideVolume } from '../../engine/volumeEngine.js';
 import { ABS_PHYSIQUE_TARGETS, ABS_SESSION_EXERCISE_SHARE_MAX, DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, PULL_PHYSIQUE_TARGETS, PUSH_PHYSIQUE_TARGETS, SESSION_PURPOSE_TARGETS, UNIVERSAL_PHYSIQUE_TARGETS } from '../../engine/config.js';
-import { UNDER_PRESCRIPTION_TOLERANCE } from '../validation/programmerAdequacyValidator.js';
+import { adequacyToleranceFor, deloadAdequacyTolerance } from '../validation/programmerAdequacyValidator.js';
 import { computeTargetFeasibility } from './targetFeasibility.js';
 import { applyDeloadSetVolumeReduction, DELOAD_REP_RANGE_BIAS } from '../../coaching/periodization/deloadPolicy.js';
 import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
@@ -164,7 +169,13 @@ export function buildTargetContexts(
   // authoredPrescription the exact same deterministic way deload
   // set-volume already is. Defaults to false so every existing call
   // site (tests) keeps its prior behavior.
-  deloadActive = false
+  deloadActive = false,
+  // Exercise-variety work (2026-10-09, revised 2026-10-11): 'wide'
+  // prescribes every exercise whose Blueprint PRIMARY target this is, via
+  // the Blueprint profile default (programmingProfiles.ts), for physique
+  // targets, and does not read package exercise lists. 'package' leaves
+  // the output byte-identical.
+  exercisePoolMode: 'package' | 'wide' = 'package'
 ): AIProgrammerTargetContext[] {
   return planInput.targets.map((t: TargetBuildContext) => {
     const targetLabel = t.target_type === 'physique_target' ? BlueprintAdapter.getTarget(t.target_id) : BlueprintAdapter.getFunctionalGoal(t.target_id);
@@ -210,8 +221,23 @@ export function buildTargetContexts(
     const validExercises: AIProgrammerValidExerciseContext[] = exercisesTrainingTarget(t.target_type, t.target_id).map((exerciseId) => {
       const exercise = BlueprintAdapter.getExercise(exerciseId);
       const prescriptionEntry = lookupExercisePrescriptionAnyLevel(t.target_id, exerciseId);
+      const role = roleFor(exerciseId, t.target_type, t.target_id) as 'primary' | 'secondary';
       let authoredPrescription: AIProgrammerValidExerciseContext['authoredPrescription'] = null;
-      if (prescriptionEntry) {
+      let prescriptionSource: AIProgrammerValidExerciseContext['prescriptionSource'];
+      // Wide mode (2026-10-11, owner decision): development packages supply
+      // only the volume numbers, never the exercise choice. Every physique
+      // target's Blueprint primary-target exercises are prescribed the same
+      // way, from the profile default; a package's exercise list is not read.
+      const widePhysique = exercisePoolMode === 'wide' && t.target_type === 'physique_target';
+      if (widePhysique && role === 'primary') {
+        const fallback = defaultPrescriptionFor(exerciseId);
+        if (fallback) {
+          const biasedReps = applyRepRangeBias(fallback.reps.min, fallback.reps.max, effectiveRepRangeBias);
+          authoredPrescription = { sets: fallback.sets, repsMin: biasedReps.min, repsMax: biasedReps.max, rirMin: fallback.rir.min, rirMax: fallback.rir.max };
+          prescriptionSource = 'profile_default';
+        }
+      }
+      if (prescriptionEntry && !widePhysique) {
         try {
           const reps = parseRange(prescriptionEntry.reps);
           const rir = parseRange(prescriptionEntry.rir);
@@ -240,11 +266,12 @@ export function buildTargetContexts(
       return {
         exerciseId,
         name: exercise?.name ?? exerciseId,
-        role: roleFor(exerciseId, t.target_type, t.target_id) as 'primary' | 'secondary',
+        role,
         equipment: exercise?.equipment ?? [],
         authoredPrescription,
         plausibleIntensityTechniques,
         recentConsecutiveSessionsUsed,
+        ...(prescriptionSource ? { prescriptionSource } : {}),
       };
     });
 
@@ -329,10 +356,14 @@ export function buildProgrammingBrief(
   // same small +step the deterministic engine takes instead of holding the
   // current volume forever. Was never passed here, so the AI brief always used
   // the novice path. Null keeps the previous behaviour.
-  trainingExperience: 'novice' | 'intermediate' | 'advanced' | null = null
+  trainingExperience: 'novice' | 'intermediate' | 'advanced' | null = null,
+  // Injury pause (2026-10-11): physique targets in a paused body area are
+  // ineligible for every session and drop out of the session's expected
+  // coverage. Empty keeps the previous behaviour.
+  pausedTargetIds: ReadonlySet<string> = new Set()
 ): AIProgrammerProgrammingBrief {
   const expectedCoverageTargetIds: readonly BlueprintId[] = sessionPurpose
-    ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS]
+    ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS].filter((id) => !pausedTargetIds.has(id))
     : [];
 
   const compatibleGymDaysThisWeek = (targetType: TargetType, targetId: BlueprintId): number => {
@@ -380,9 +411,16 @@ export function buildProgrammingBrief(
     const cap = developmentReference.direct_sets_per_exposure;
     const max = cap ?? Math.max(perExposureFloor, recommendedWeeklyPrimarySets);
     const min = Math.min(perExposureFloor, max);
+    // Deload (2026-10-11): the same min computed from the pre-deload weekly
+    // number, so the adequacy floor can be capped at a normal week's floor.
+    const normalPerExposureFloor = Math.max(0, Math.ceil(recommendedWeeklyPrimarySetsBeforeDeload / daysThisWeek));
+    const normalMin = Math.min(normalPerExposureFloor, cap ?? Math.max(normalPerExposureFloor, recommendedWeeklyPrimarySetsBeforeDeload));
+    const adequacyTolerance = periodization.deloadActive ? deloadAdequacyTolerance(min, normalMin) : undefined;
 
+    const pausedForInjury = t.targetType === 'physique_target' && pausedTargetIds.has(t.targetId);
     const eligibleForThisSession =
-      sessionPurpose === null || t.targetType !== 'physique_target' || isTargetCompatibleWithPurpose(t.targetType, t.targetId, sessionPurpose);
+      !pausedForInjury &&
+      (sessionPurpose === null || t.targetType !== 'physique_target' || isTargetCompatibleWithPurpose(t.targetType, t.targetId, sessionPurpose));
 
     // Rule 6 fix (2026-09-19): the exact same push/pull classification
     // the deterministic engine's own antagonist-pairing logic uses
@@ -411,6 +449,8 @@ export function buildProgrammingBrief(
       recommendedSessionSets: { min, max },
       recoveryAdjustment: t.recovery.priority_adjustment,
       eligibleForThisSession,
+      ...(pausedForInjury ? { pausedForInjury } : {}),
+      ...(adequacyTolerance !== undefined ? { adequacyTolerance } : {}),
       reasoning: volumeDecision.reasoning,
       antagonistGroup,
       // Push Generation Architectural Fix (2026-09-24), priority 2: the
@@ -419,7 +459,7 @@ export function buildProgrammingBrief(
       // real combination that can" — see targetFeasibility.ts's own doc
       // comment. Computed for every target, not only eligible ones, so a
       // consumer never has to guess why it's missing.
-      feasibility: computeTargetFeasibility(t, targets, min, developmentReference.direct_sets_per_exposure, UNDER_PRESCRIPTION_TOLERANCE),
+      feasibility: computeTargetFeasibility(t, targets, min, developmentReference.direct_sets_per_exposure, adequacyToleranceFor({ adequacyTolerance })),
     };
   });
 
@@ -467,6 +507,7 @@ export function buildProgrammingBrief(
     muscles,
     approxSessionSetBudget,
     feasibilityWarnings,
+    ...(periodization.deloadActive ? { deloadActive: true } : {}),
   };
 }
 
@@ -563,7 +604,17 @@ export interface BuildProgrammerContextInput {
    * every single-day generate_session call, which is therefore
    * unchanged. */
   projectedSessions?: readonly ProjectedSession[];
+  /** Exercise pool (2026-10-09, see exercisePool.ts). Defaults to
+   * AI_EXERCISE_POOL_MODE when planned generation is on, else 'package'. */
+  exercisePoolMode?: 'package' | 'wide';
+  /** Wide mode only: cut each target to its rotation shortlist (default
+   * true). Proposal approval passes false so it revalidates against every
+   * prescribable exercise, not against a shortlist that has since rotated. */
+  applyRotationShortlist?: boolean;
 }
+
+/** How far back the user's "Other" day notes reach into the AI context. */
+export const ACTIVITY_NOTES_DAYS = 14;
 
 export function buildProgrammerContext(db: Database.Database, input: BuildProgrammerContextInput): AIProgrammerContext {
   if (!isValidCalendarDate(input.targetDate)) {
@@ -670,12 +721,14 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     defaultBlockLengthWeeks: DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS,
   });
 
-  const targets: AIProgrammerTargetContext[] = buildTargetContexts(
+  const exercisePoolMode = input.exercisePoolMode ?? (isPlannedGenerationEnabled() ? aiExercisePoolMode() : 'package');
+  const poolTargets: AIProgrammerTargetContext[] = buildTargetContexts(
     planInput,
     input.targetDate,
     otherActivityToday,
     missingData,
-    periodization.deloadActive
+    periodization.deloadActive,
+    exercisePoolMode
   );
 
   // Session identity (repair): read the day's ALREADY-DECIDED purpose
@@ -700,16 +753,31 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   // own volume decision needs it as well as the context.
   const trainingExperience = readTrainingExperience(db, user.id, currentDate);
 
-  const programmingBrief = buildProgrammingBrief(
-    targets,
-    activeGoals,
-    sessionPurpose,
-    weeklyProgram?.sessions ?? [],
-    currentDate,
-    budgetMinutes,
-    { deloadActive: periodization.deloadActive },
-    trainingExperience
-  );
+  const injuryPausesRepo = new InjuryPausesRepo(db);
+  const injuryPauses = injuryPausesRepo.list();
+  const pausedTargetIds = injuryPausesRepo.pausedTargetIds();
+
+  const briefFor = (forTargets: readonly AIProgrammerTargetContext[]) =>
+    buildProgrammingBrief(
+      forTargets,
+      activeGoals,
+      sessionPurpose,
+      weeklyProgram?.sessions ?? [],
+      currentDate,
+      budgetMinutes,
+      { deloadActive: periodization.deloadActive },
+      trainingExperience,
+      pausedTargetIds
+    );
+  // Wide pool: the rotation shortlist is checked against the brief computed
+  // over the full pool (so it is never less feasible), then the final brief
+  // is computed over the shortlist itself.
+  const targets: AIProgrammerTargetContext[] =
+    exercisePoolMode === 'wide' && input.applyRotationShortlist !== false
+      ? applyExerciseShortlist(poolTargets, { history: planInput.targets, targetDate: input.targetDate, sessionPurpose, guidance: briefFor(poolTargets).muscles })
+      : poolTargets;
+
+  const programmingBrief = briefFor(targets);
   const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
 
   // Rule 6 fix: real, already-computed structural-balance advisories —
@@ -768,6 +836,8 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
     currentProgram: { weekProgramExists, targetDateLocked: false, lockReason: null },
     trainingExperience,
     structuralAdvisories,
+    injuryPauses: injuryPauses.map((p) => ({ area: p.area, since: p.since, note: p.note, targetIds: targetIdsForArea(p.area) })),
+    activityNotes: new DayNotesRepo(db).listBetween(addDays(input.targetDate, -ACTIVITY_NOTES_DAYS), input.targetDate),
     intensityTechniqueCatalogue,
     outputRequirements: {
       outputSchemaVersion: 'ai-workout-session-proposal.v1',

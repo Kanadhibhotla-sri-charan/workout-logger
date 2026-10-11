@@ -63,8 +63,28 @@
       }
       card.appendChild(el('div', { class: 'card-title', text: formatDeloadReason(data.deloadReason) }));
       card.appendChild(el('p', { class: 'muted', text: data.explanation || 'You are currently in a normal training state.', style: 'margin:0 0 0.2rem' }));
-      if (data.deloadEndDate) {
+      if (data.deloadEndDate && data.periodizationState === 'REACTIVE_DELOAD') {
         card.appendChild(el('p', { class: 'faint', text: `Expected through ${formatDate(data.deloadEndDate)}`, style: 'margin:0' }));
+      }
+      // The evidence behind a reactive deload: which exercises fell, from
+      // what to what (estimated 1RM, each exercise against itself).
+      const signals = (data.reactiveEvidence && data.reactiveEvidence.signals) || [];
+      if (signals.length > 0) {
+        card.appendChild(el('p', { class: 'faint', text: 'Why: these exercises trended down (estimated 1-rep max):', style: 'margin:0.6rem 0 0.2rem' }));
+        for (const s of signals) {
+          const parts = (s.exercises || []).filter((x) => x.trend === 'down').map((x) => `${x.exerciseName} ${x.first} → ${x.last} kg over ${x.points} sessions`);
+          card.appendChild(el('p', { class: 'faint', text: `• ${s.targetName}${parts.length ? ': ' + parts.join('; ') : ' (measured before the per-exercise fix)'}`, style: 'margin:0' }));
+        }
+      }
+      if (data.periodizationState === 'REACTIVE_DELOAD') {
+        const statusEl = el('div');
+        const btn = createButton({ label: 'End this deload now', variant: 'secondary', onClick: async () => {
+          try {
+            await withSaving(btn, statusEl, () => api('/api/programming/periodization/end-reactive-deload', { method: 'POST' }), 'Deload ended. New workouts use normal volume.');
+            await loadState();
+          } catch (err) { /* error shown in statusEl */ }
+        }});
+        card.append(el('div', { class: 'btn-row', style: 'margin-top:0.6rem' }, [btn]), statusEl);
       }
       container.appendChild(card);
     }

@@ -215,6 +215,32 @@ export interface BlueprintIntensityTechnique {
   suitable_when_stability_demand_at_most: DemandLevel;
 }
 
+/** One programming-profiles.yaml classification rule's match clause: every
+ * present field must hold (first matching rule wins, in file order). */
+export interface BlueprintProgrammingProfileMatch {
+  exercise_type?: ExerciseType;
+  coverage_categories_any?: string[];
+  stability_demand_at_least?: DemandLevel;
+}
+
+export interface BlueprintProgrammingProfile {
+  id: string;
+  name: string;
+  primary_range: [number, number];
+  acceptable_range: [number, number];
+}
+
+export interface BlueprintProgrammingProfiles {
+  profiles: BlueprintProgrammingProfile[];
+  classification: { defaults: Array<{ profile_id: string; match: BlueprintProgrammingProfileMatch }> };
+}
+
+export interface BlueprintRepRangeOverride {
+  exercise_id: string;
+  primary_range: [number, number];
+  acceptable_range: [number, number];
+}
+
 export interface BlueprintProgramming {
   physiqueTargets: BlueprintPhysiqueTarget[];
   globalPrinciples: BlueprintGlobalPrinciples;

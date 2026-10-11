@@ -28,6 +28,17 @@ export function aiWeekGenerationMode(): 'legacy' | 'explicit' {
   return process.env.AI_WEEK_GENERATION_MODE === 'explicit' ? 'explicit' : 'legacy';
 }
 
+/** Exercise pool mode (2026-10-09). 'package' (default): a target's
+ * prescribed exercises are only its Blueprint development-package
+ * exercises, exactly as before. 'wide': every Blueprint exercise whose
+ * primary target it is joins the pool (non-package ones with a
+ * Blueprint profile-default prescription), cut to a rotation shortlist
+ * per target (see exercisePool.ts). Setting it back to package is the
+ * rollback. */
+export function aiExercisePoolMode(): 'package' | 'wide' {
+  return process.env.AI_EXERCISE_POOL_MODE === 'wide' ? 'wide' : 'package';
+}
+
 export interface VelonaConfig {
   apiKey: string;
   baseUrl: string;
