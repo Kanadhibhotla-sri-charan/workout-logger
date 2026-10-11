@@ -830,6 +830,6 @@ Owner: "15 kg days are of dbs. 27 kg are of cables". Tagged through the PATCH
 API after a backup (deployment-backups/pre-ohe-equipment-20261011T163635Z.sqlite):
 09-07 (15/21/27 kg) cable, 09-15 (21/27/33 kg, has 27 kg sets) cable,
 10-01 (21/27 kg) cable, 09-21 and 09-28 (10-15 kg) dumbbell (09-11 was
-already dumbbell). 09-18 (21 kg x 8, then 15 kg x 15/12) mixes both weights
-and was left untagged pending the owner; 09-24 has no completed sets.
+already dumbbell). 09-18 (21 kg x 8, then 15 kg x 15/12) was tagged cable
+after the owner confirmed it; 09-24 has no completed sets.
 Result: cable series flat (27 -> 33 -> 27), dumbbell series 15x15 -> 15x12.
