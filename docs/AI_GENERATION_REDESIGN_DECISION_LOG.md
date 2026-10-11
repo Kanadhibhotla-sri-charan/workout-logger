@@ -648,3 +648,17 @@ shortlist (preferred first, disliked last).
 tests updated for the nav move. Full suite 2253 tests: the same 245 known
 date-rotation failures, 0 new. Replay 10/10. Pages rendered headlessly
 (jsdom) against a production-data copy: no script errors.
+
+### 13.6 Deployed 2026-10-11 07:10Z, and one real coach review
+* Commit `3672ad0`; backup `deployment-backups/pre-3672ad0-20261011T071014Z.sqlite`.
+  Tables `coach_reviews`, `coach_advice` created; `/api/insights` ~0.5 s cold;
+  pages 200. No flag needed (the review is only written on the user's click).
+* One paid `coach_review` call on a `.backup` copy on the VM (scratch, since
+  removed): 5,500 in / 578 out tokens, passed every check, grounded in the
+  facts (pushdown +62.6%, triceps 11/22, long head 4/12, cross-body hammer curl
+  -7.1% -> swap to cable rope hammer curl, check-ins overdue).
+* Flaw found and fixed (follow-up commit): it read the three deloads as "your
+  body needed rest". Reactive deloads now carry `confirmedByCurrentRule`
+  (re-evaluated at their start with the current rule); the instruction (5a)
+  says to describe an unconfirmed one as a measurement artifact, and Insights
+  labels it a false alarm.

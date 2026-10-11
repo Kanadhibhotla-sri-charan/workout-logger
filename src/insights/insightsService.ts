@@ -18,7 +18,7 @@ import { buildTrainingState } from '../engine/trainingState.js';
 import { programmingWeekStart } from '../engine/workoutBuilder.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../lib/dailyActivity.js';
 import { calculateBasicTrend } from '../coaching/history/trendCalculations.js';
-import { deloadDatesInRange } from '../coaching/periodization/reactiveTrendEvaluator.js';
+import { deloadDatesInRange, evaluateReactiveDeloadTrigger } from '../coaching/periodization/reactiveTrendEvaluator.js';
 import { PeriodizationEventsRepo } from '../coaching/periodization/periodizationEventsRepo.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { GoalsRepo } from '../repositories/goalsRepo.js';
@@ -272,6 +272,9 @@ export interface DeloadPeriod {
   start: string;
   end: string;
   kind: 'scheduled' | 'reactive';
+  /** Reactive only: whether the current trigger rule would still start
+   * this deload on its first day (false = an artifact of the old rule). */
+  confirmedByCurrentRule?: boolean;
 }
 
 /** Deload periods overlapping [start, end], from the periodization event
@@ -296,5 +299,8 @@ export function deloadHistory(db: Database.Database, start: string, end: string)
     if (prev && prev.kind === kind && addDays(prev.end, 1) >= from) prev.end = clipped > prev.end ? clipped : prev.end;
     else periods.push({ start: from, end: clipped, kind });
   });
+  for (const p of periods.filter((x) => x.kind === 'reactive')) {
+    p.confirmedByCurrentRule = evaluateReactiveDeloadTrigger(db, { programId, referenceDate: p.start, isInCooldown: false, isAlreadyInReactiveDeload: false }).triggered;
+  }
   return periods;
 }

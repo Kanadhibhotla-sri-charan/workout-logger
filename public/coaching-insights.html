@@ -259,7 +259,7 @@
       const container = document.getElementById('deload-history');
       container.innerHTML = '';
       if (!deloads || deloads.length === 0) return;
-      const parts = deloads.map((d) => `${d.kind === 'reactive' ? 'Recovery' : 'Scheduled'} deload ${formatDate(d.start)} – ${formatDate(d.end)}`);
+      const parts = deloads.map((d) => `${d.kind === 'reactive' ? 'Recovery' : 'Scheduled'} deload ${formatDate(d.start)} – ${formatDate(d.end)}${d.confirmedByCurrentRule === false ? ' (a false alarm: the current check finds no real drop)' : ''}`);
       container.appendChild(el('p', { class: 'faint', text: `Deloads in the last 6 weeks: ${parts.join('; ')}.`, style: 'margin:0.5rem 0 0' }));
     }
 

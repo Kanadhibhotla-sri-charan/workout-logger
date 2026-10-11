@@ -106,7 +106,7 @@ describe('volume, consistency, check-ins, deloads', () => {
     deloadEvent('2026-11-02', 'REACTIVE_DELOAD');
     deloadEvent('2026-11-03', 'REACTIVE_DELOAD');
     deloadEvent('2026-11-09', 'ACTIVE');
-    expect(deloadHistory(db, '2026-10-20', '2026-11-20')).toEqual([{ start: '2026-11-02', end: '2026-11-08', kind: 'reactive' }]);
+    expect(deloadHistory(db, '2026-10-20', '2026-11-20')).toEqual([{ start: '2026-11-02', end: '2026-11-08', kind: 'reactive', confirmedByCurrentRule: false }]); // no logged decline: a false alarm
   });
 
   it('GET /api/insights returns every section', async () => {
