@@ -833,3 +833,28 @@ API after a backup (deployment-backups/pre-ohe-equipment-20261011T163635Z.sqlite
 already dumbbell). 09-18 (21 kg x 8, then 15 kg x 15/12) was tagged cable
 after the owner confirmed it; 09-24 has no completed sets.
 Result: cable series flat (27 -> 33 -> 27), dumbbell series 15x15 -> 15x12.
+
+## 18. Reps in reserve (RIR) per set in the logger (2026-10-12)
+Context: reviewing Jul-Oct logs, effort could not be judged because no set
+had RIR (`workout_sets.rir` existed and the progression rule and history
+already read it, but the logger had no field). Owner: "there is no RIR slot
+for me to note in the app."
+
+Changes:
+- Logger (`public/logger.html`, `style.css`): an optional RIR box on every
+  set row (whole number, 0 = failure) with a one-line hint. A logged
+  exercise's table shows an RIR column when any set has one; Copy text adds
+  `@RIR n` to those sets.
+- API (`routes/workouts.ts`): POST/PATCH reject a set `rir` that is not a
+  whole number 0-10 or null (400). Missing RIR stays null, never 0.
+- Insights best set ends with `@ RIR n` when logged, so the coach review
+  sees effort; the coach instruction (rule 5b) says RIR 3+ on a stalled
+  exercise means harder sets first, RIR 0-1 means a real plateau.
+- Unchanged and now fed: double progression (`progressionEngine`) advances
+  only when the top of the range is reached at RIR <= Blueprint's typical
+  working max (a set without RIR counts on reps alone); history averages RIR.
+
+Tests: `tests/logging/setRir.test.ts`. Full suite 2276: 0 new failures vs the
+245 known baseline (two further date-dependent tests fail on 2026-10-12 with
+or without this change). Headless check: RIR boxes render, save, and show in
+the table.

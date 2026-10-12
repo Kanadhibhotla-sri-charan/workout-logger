@@ -21,6 +21,16 @@ export const workoutsRouter = Router();
  * absent -> undefined (keep / default), null -> clear, else validated.
  * Returns an error message for an invalid value. */
 type LogOptions = { equipment?: string | null; attachment?: string | null; rep_unit?: string | null };
+/** A set's `rir` (reps in reserve, 2026-10-12) is optional: null/absent,
+ * or a whole number 0-10. Returns an error message, or undefined. */
+function invalidSetRir(sets: unknown[]): string | undefined {
+  const bad = sets.findIndex((s) => {
+    const rir = (s as { rir?: unknown } | null)?.rir;
+    return rir !== undefined && rir !== null && !(Number.isInteger(rir) && (rir as number) >= 0 && (rir as number) <= 10);
+  });
+  return bad === -1 ? undefined : `sets[${bad}].rir must be a whole number from 0 to 10, or null`;
+}
+
 function parseLogOptions(body: Record<string, unknown> | undefined): { options: LogOptions; error?: string } {
   const options: LogOptions = {};
   const has = (k: string) => !!body && Object.prototype.hasOwnProperty.call(body, k);
@@ -245,6 +255,8 @@ workoutsRouter.post('/:id/exercises', (req, res) => {
   }
   const logOptions = parseLogOptions(req.body);
   if (logOptions.error) return res.status(400).json({ error: logOptions.error });
+  const rirError = invalidSetRir(sets);
+  if (rirError) return res.status(400).json({ error: rirError });
 
   const database = db(req);
   const repo = new WorkoutSessionsRepo(database);
@@ -306,6 +318,8 @@ workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
   if (!Array.isArray(sets) && !hasOptions) {
     return res.status(400).json({ error: 'sets (array), equipment, attachment or rep_unit is required' });
   }
+  const rirError = Array.isArray(sets) ? invalidSetRir(sets) : undefined;
+  if (rirError) return res.status(400).json({ error: rirError });
 
   const database = db(req);
   const repo = new WorkoutSessionsRepo(database);

@@ -278,7 +278,10 @@
         const table = el('table');
         const headRow = el('tr');
         const unitTh = el('th', { text: capitalize(repUnitOf(perf)) });
-        headRow.append(el('th', { text: 'Set' }), el('th', { text: 'Weight' }), unitTh, el('th', { text: 'Done' }));
+        const showRir = perf.sets.some((s) => s.rir !== null && s.rir !== undefined);
+        headRow.append(el('th', { text: 'Set' }), el('th', { text: 'Weight' }), unitTh);
+        if (showRir) headRow.appendChild(el('th', { text: 'RIR' }));
+        headRow.appendChild(el('th', { text: 'Done' }));
         onUnitChanged = () => { unitTh.textContent = capitalize(repUnitOf(perf)); };
         table.appendChild(headRow);
         for (const s of perf.sets) {
@@ -286,6 +289,7 @@
           row.appendChild(el('td', { text: String(s.set_number) }));
           row.appendChild(el('td', { text: s.weight ?? '—' }));
           row.appendChild(el('td', { text: s.reps ?? '—' }));
+          if (showRir) row.appendChild(el('td', { text: s.rir ?? '—' }));
           row.appendChild(el('td', { text: s.completed ? 'Yes' : 'No' }));
           table.appendChild(row);
         }
@@ -503,6 +507,10 @@
         const reps = el('input', { type: 'number', inputmode: 'numeric', placeholder: unit, 'aria-label': `Set ${set.set_number} ${unit}` });
         if (set.reps !== null) reps.value = set.reps;
         reps.addEventListener('input', () => { set.reps = reps.value === '' ? null : Number(reps.value); onDirty(); });
+        // Reps in reserve: how many more reps were left. Optional; 0 = failure.
+        const rir = el('input', { type: 'number', inputmode: 'numeric', min: '0', max: '10', step: '1', placeholder: 'RIR', class: 'set-rir', 'aria-label': `Set ${set.set_number} reps in reserve` });
+        if (set.rir !== null && set.rir !== undefined) rir.value = set.rir;
+        rir.addEventListener('input', () => { set.rir = rir.value === '' ? null : Number(rir.value); onDirty(); });
         const done = el('button', { type: 'button', class: 'set-done-toggle', 'aria-pressed': String(!!set.completed), 'aria-label': `Set ${set.set_number} done` }, [document.createTextNode('✓')]);
         done.addEventListener('click', () => { set.completed = !set.completed; done.setAttribute('aria-pressed', String(set.completed)); onDirty(); });
         const remove = createButton({ label: '×', variant: 'ghost', ariaLabel: `Remove set ${set.set_number}`, onClick: () => {
@@ -512,9 +520,10 @@
           renderSetEditor(container, state, onDirty);
           onDirty();
         }});
-        row.append(weight, reps, done, remove);
+        row.append(weight, reps, rir, done, remove);
         container.appendChild(row);
       });
+      if (state.sets.length) container.appendChild(el('p', { class: 'faint set-rir-hint', text: 'RIR = reps you could still have done (0 = failure). Optional; the last set matters most.' }));
     }
 
     function closeSubstituteModal() {
@@ -741,7 +750,7 @@
         const generatedMatch = generated ? generated.exercises.find((g) => g.exercise_id === perf.exercise_id) : null;
         const name = exerciseDisplayName(perf, generatedMatch);
         const unit = perf.rep_unit && perf.rep_unit !== 'reps' ? ` ${perf.rep_unit}` : '';
-        const setsText = perf.sets.map((s) => `${s.weight ?? '—'}×${s.reps ?? '—'}${unit}${s.completed ? '' : ' (skipped)'}`).join(', ');
+        const setsText = perf.sets.map((s) => `${s.weight ?? '—'}×${s.reps ?? '—'}${unit}${s.rir !== null && s.rir !== undefined ? ` @RIR ${s.rir}` : ''}${s.completed ? '' : ' (skipped)'}`).join(', ');
         const how = [perf.equipment, perf.attachment].filter(Boolean).join(', ');
         lines.push(`${name}${how ? ` (${how})` : ''} — ${perf.sets.length} set(s): ${setsText}`);
       }

@@ -97,13 +97,16 @@ export function strengthProgress(db: Database.Database, asOf: string, days = 56)
       if (sets.length === 0) continue;
       const loaded = sets.filter((s) => s.weight !== null && s.weight > 0);
       const countUnit = repUnitOf(perf);
+      // The set's logged reps in reserve, when there is one, so the coach
+      // review can tell a hard set from an easy one.
+      const rirNote = (s: { rir: number | null }) => (s.rir !== null && s.rir !== undefined ? ` @ RIR ${s.rir}` : '');
       // Weight x reps (estimated 1RM) only for reps; for steps, seconds or
       // metres the heaviest load carried/held, else the best count.
       const best = loaded.length > 0
         ? countUnit === 'reps'
-          ? loaded.map((s) => ({ value: s.weight! * (1 + s.reps! / 30), bestSet: `${s.weight} kg × ${s.reps}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
-          : loaded.map((s) => ({ value: s.weight!, bestSet: `${s.weight} kg × ${s.reps} ${countUnit}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
-        : sets.map((s) => ({ value: s.reps!, bestSet: `${s.reps} ${countUnit}`, unit: countUnit })).sort((a, b) => b.value - a.value)[0]!;
+          ? loaded.map((s) => ({ value: s.weight! * (1 + s.reps! / 30), bestSet: `${s.weight} kg × ${s.reps}${rirNote(s)}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
+          : loaded.map((s) => ({ value: s.weight!, bestSet: `${s.weight} kg × ${s.reps} ${countUnit}${rirNote(s)}`, unit: 'kg' as const })).sort((a, b) => b.value - a.value)[0]!
+        : sets.map((s) => ({ value: s.reps!, bestSet: `${s.reps} ${countUnit}${rirNote(s)}`, unit: countUnit })).sort((a, b) => b.value - a.value)[0]!;
       const key = progressSeriesKey({ exerciseId: perf.exercise_id, equipment: perf.equipment, attachment: perf.attachment, repUnit: countUnit });
       const dates = byExercise.get(key) ?? byExercise.set(key, new Map()).get(key)!;
       const prev = dates.get(session.date);
