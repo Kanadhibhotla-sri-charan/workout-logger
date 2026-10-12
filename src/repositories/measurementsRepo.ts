@@ -40,6 +40,11 @@ export class MeasurementsRepo {
     return this.db.prepare('SELECT * FROM measurements WHERE goal_id = ? ORDER BY date ASC').all(goalId) as Measurement[];
   }
 
+  /** Removes one reading (e.g. a typo). Returns false when none matched. */
+  delete(id: string): boolean {
+    return this.db.prepare('DELETE FROM measurements WHERE id = ?').run(id).changes > 0;
+  }
+
   list(): Measurement[] {
     return this.db.prepare('SELECT * FROM measurements ORDER BY date ASC').all() as Measurement[];
   }

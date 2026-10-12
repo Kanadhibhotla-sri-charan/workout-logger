@@ -858,3 +858,35 @@ Tests: `tests/logging/setRir.test.ts`. Full suite 2276: 0 new failures vs the
 245 known baseline (two further date-dependent tests fail on 2026-10-12 with
 or without this change). Headless check: RIR boxes render, save, and show in
 the table.
+
+## 19. Body measurements on the Goals page (2026-10-12)
+Context: the `measurements` table and API existed (goal phase review reads
+goal-tied readings) but no page could write them, so it was empty and
+physique change could not be judged. Owner approved building the form.
+
+Changes:
+- `src/contracts/measurementMetrics.ts`: presets (bodyweight kg; upper arm
+  relaxed/flexed, forearm, chest, shoulders, waist at navel, thigh, calf in
+  cm) and a direction per measurement: bigger = better, waist/hips/body fat
+  = smaller is better, bodyweight (or a typed name with "weight") = tracked,
+  not judged. Typed names use those keywords; anything else = bigger.
+- Goal phase review (`goalPhaseEngine.classifyMeasurementTrend`): uses that
+  direction; neutral metrics are skipped. Before, a shrinking waist counted
+  as "declining" and would have recommended "adjust". The strict first-vs-
+  last comparison (no noise band, section "Remediation §4") is unchanged;
+  the coach prompt says changes under 0.5 cm are tape error.
+- API (`routes/goals.ts`): POST validates date (YYYY-MM-DD, not future),
+  positive value, name 1-60 and unit 1-12 characters (trimmed); new
+  `DELETE /api/goals/measurements/:id` (typos) and
+  `GET /api/goals/measurements/summary` (presets + per-measurement series).
+- `insightsService.bodyMeasurements`: series by name (case-insensitive) and
+  unit; change = latest - first; verdict better/worse/same/not judged.
+- Goals page: "Body measurements" section with the form (date, preset or
+  typed name, value, unit, optional goal, note) and one card per measurement
+  (latest, change since first with verdict badge, all readings with delete).
+- Coach review facts gain `bodyMeasurements` (last 6 readings each, change
+  and verdict); instruction rule 5c.
+
+Tests: `tests/goals/bodyMeasurements.test.ts`. Full suite 2284: 0 new
+failures vs baseline (plus the two date-dependent ones noted in s18).
+Headless check of the Goals page: save, verdict, typed name, delete.

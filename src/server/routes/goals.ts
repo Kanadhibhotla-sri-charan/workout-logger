@@ -5,6 +5,8 @@ import { GoalEventsRepo } from '../../repositories/goalEventsRepo.js';
 import { matchGoalCandidates } from '../../engine/goalCreation.js';
 import { AestheticAssessmentsRepo, InvalidAssessmentRatingError } from '../../repositories/aestheticAssessmentsRepo.js';
 import { MeasurementsRepo } from '../../repositories/measurementsRepo.js';
+import { MAX_METRIC_NAME, MAX_UNIT, MEASUREMENT_PRESETS } from '../../contracts/measurementMetrics.js';
+import { bodyMeasurements } from '../../insights/insightsService.js';
 import { GoalPhaseRepo } from '../../repositories/goalPhaseRepo.js';
 import { GoalPhaseReviewsRepo, type ReviewRecommendation } from '../../repositories/goalPhaseReviewsRepo.js';
 import {
@@ -87,6 +89,25 @@ goalsRouter.post('/', (req, res) => {
   }
 });
 
+// Body measurement input (2026-10-12, Goals page form): a real calendar
+// date not in the future, a positive number, and short trimmed text.
+function parseMeasurement(body: Record<string, unknown> | undefined):
+  { date: string; metric_name: string; value: number; unit: string; notes: string | null } | { error: string } {
+  const { date, metric_name, value, unit, notes } = body ?? {};
+  if (typeof date !== 'string' || typeof metric_name !== 'string' || typeof value !== 'number' || typeof unit !== 'string') {
+    return { error: 'date (string), metric_name (string), value (number), and unit (string) are required' };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) return { error: 'date must be YYYY-MM-DD' };
+  if (date > new Date().toISOString().slice(0, 10)) return { error: 'date cannot be in the future' };
+  const name = metric_name.trim();
+  const u = unit.trim();
+  if (!name || name.length > MAX_METRIC_NAME) return { error: `metric_name must be 1-${MAX_METRIC_NAME} characters` };
+  if (!u || u.length > MAX_UNIT) return { error: `unit must be 1-${MAX_UNIT} characters` };
+  if (!Number.isFinite(value) || value <= 0) return { error: 'value must be a positive number' };
+  if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > 1000)) return { error: 'notes must be text up to 1000 characters' };
+  return { date, metric_name: name, value, unit: u, notes: typeof notes === 'string' && notes.trim() ? notes.trim() : null };
+}
+
 // A measurement need not belong to any one goal (spec: "do not assume
 // every measurement applies to every goal") — this top-level route
 // covers that case; /:id/measurements below covers the goal-scoped one.
@@ -94,20 +115,30 @@ goalsRouter.post('/', (req, res) => {
 // "/measurements" path is never swallowed as though "measurements"
 // were a goal id.
 goalsRouter.post('/measurements', (req, res) => {
-  const { goal_id, date, metric_name, value, unit, notes } = req.body ?? {};
-  if (typeof date !== 'string' || typeof metric_name !== 'string' || typeof value !== 'number' || typeof unit !== 'string') {
-    return res.status(400).json({ error: 'date (string), metric_name (string), value (number), and unit (string) are required' });
-  }
+  const { goal_id } = req.body ?? {};
+  const parsed = parseMeasurement(req.body);
+  if ('error' in parsed) return res.status(400).json({ error: parsed.error });
   if (goal_id !== undefined && goal_id !== null) {
     const goal = new GoalsRepo(db(req)).get(goal_id);
     if (!goal) return res.status(404).json({ error: 'goal not found' });
   }
-  const measurement = new MeasurementsRepo(db(req)).record({ goal_id: goal_id ?? null, date, metric_name, value, unit, notes });
+  const measurement = new MeasurementsRepo(db(req)).record({ goal_id: goal_id ?? null, ...parsed });
   res.status(201).json(measurement);
+});
+
+goalsRouter.delete('/measurements/:measurementId', (req, res) => {
+  if (!new MeasurementsRepo(db(req)).delete(req.params.measurementId)) return res.status(404).json({ error: 'measurement not found' });
+  res.status(204).end();
 });
 
 goalsRouter.get('/measurements', (req, res) => {
   res.json(new MeasurementsRepo(db(req)).list());
+});
+
+// Goals page (2026-10-12): the preset list for the form and each
+// measurement's readings with its change judged in the right direction.
+goalsRouter.get('/measurements/summary', (req, res) => {
+  res.json({ presets: MEASUREMENT_PRESETS, series: bodyMeasurements(db(req)) });
 });
 
 goalsRouter.get('/:id', (req, res) => {
@@ -217,11 +248,9 @@ goalsRouter.post('/:id/measurements', (req, res) => {
   const goal = repo.get(req.params.id);
   if (!goal) return res.status(404).json({ error: 'goal not found' });
 
-  const { date, metric_name, value, unit, notes } = req.body ?? {};
-  if (typeof date !== 'string' || typeof metric_name !== 'string' || typeof value !== 'number' || typeof unit !== 'string') {
-    return res.status(400).json({ error: 'date (string), metric_name (string), value (number), and unit (string) are required' });
-  }
-  const measurement = new MeasurementsRepo(db(req)).record({ goal_id: req.params.id, date, metric_name, value, unit, notes });
+  const parsed = parseMeasurement(req.body);
+  if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+  const measurement = new MeasurementsRepo(db(req)).record({ goal_id: req.params.id, ...parsed });
   res.status(201).json(measurement);
 });
 

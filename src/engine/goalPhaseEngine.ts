@@ -19,6 +19,7 @@ import { GoalsRepo } from '../repositories/goalsRepo.js';
 import type { Goal, Measurement, TrainingProfile } from '../contracts/types.js';
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { MeasurementsRepo } from '../repositories/measurementsRepo.js';
+import { measurementDirection } from '../contracts/measurementMetrics.js';
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 import { TrainingProfileRepo } from '../repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../repositories/usersRepo.js';
@@ -146,8 +147,13 @@ function classifyMeasurementTrend(measurements: readonly Measurement[]): Aesthet
   const metricTrends: AestheticProgressTrend[] = [];
   for (const list of byMetric.values()) {
     if (list.length < 2) continue;
+    // 2026-10-12: progress has a direction per metric (a smaller waist is
+    // progress; bodyweight is not judged). See measurementMetrics.ts.
+    const direction = measurementDirection(list[0]!.metric_name);
+    if (direction === 'neutral') continue;
     const sorted = [...list].sort((a, b) => a.date.localeCompare(b.date));
-    metricTrends.push(classifyValueTrend(sorted[0]!.value, sorted[sorted.length - 1]!.value));
+    const [first, last] = [sorted[0]!.value, sorted[sorted.length - 1]!.value];
+    metricTrends.push(direction === 'lower' ? classifyValueTrend(-first, -last) : classifyValueTrend(first, last));
   }
 
   if (metricTrends.length === 0) return 'insufficient_data';

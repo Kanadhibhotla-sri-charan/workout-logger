@@ -14,6 +14,13 @@
     <h1>Goals</h1>
     <div id="goal-list"></div>
 
+    <section id="measurements-section">
+      <h2>Body measurements</h2>
+      <p class="muted">The numbers behind your goals. Measure every two weeks, in the morning before eating, with the tape in the same spot each time.</p>
+      <div id="measurement-form"></div>
+      <div id="measurement-list"></div>
+    </section>
+
     <section>
       <h2>Describe what you want to improve</h2>
       <form id="nl-form">
@@ -350,6 +357,112 @@
       }
     }
 
+    // ---------- Body measurements (2026-10-12) ----------
+    // Readings are stored per measurement name and unit; the server judges
+    // each change in the right direction (bigger arms = better, smaller
+    // waist = better, bodyweight not judged). See measurementMetrics.ts.
+
+    const DIRECTION_TEXT = { higher: 'Bigger is better', lower: 'Smaller is better', neutral: 'Tracked, not judged' };
+    const VERDICT_BADGE = { better: 'badge-success', worse: 'badge-warning', same: 'badge-neutral', 'not judged': 'badge-neutral', 'one reading': 'badge-neutral' };
+    const OTHER_METRIC = '__other__';
+
+    async function loadMeasurements() {
+      const formRoot = document.getElementById('measurement-form');
+      const listRoot = document.getElementById('measurement-list');
+      showLoading(listRoot, 'Loading measurements…');
+      try {
+        const [summary, goals] = await Promise.all([api('/api/goals/measurements/summary'), api('/api/goals')]);
+        renderMeasurementForm(formRoot, summary.presets, goals.filter((g) => g.active));
+        renderMeasurementList(listRoot, summary.series);
+      } catch (err) {
+        showError(listRoot, "We couldn't load your measurements.", loadMeasurements);
+      }
+    }
+
+    function renderMeasurementForm(root, presets, activeGoals) {
+      root.innerHTML = '';
+      const card = createCard();
+      card.appendChild(el('div', { class: 'card-title', text: 'Log a measurement' }));
+      const date = el('input', { type: 'date', value: todayIso(), max: todayIso(), 'aria-label': 'Date' });
+      const metric = el('select', { 'aria-label': 'Measurement' });
+      for (const p of presets) metric.appendChild(el('option', { value: p.name, text: capitalize(p.name) }));
+      metric.appendChild(el('option', { value: OTHER_METRIC, text: 'Other (type a name)' }));
+      const customName = el('input', { type: 'text', maxlength: '60', placeholder: 'e.g. neck', 'aria-label': 'Measurement name', hidden: true });
+      const value = el('input', { type: 'number', inputmode: 'decimal', step: '0.1', min: '0', placeholder: 'e.g. 34.5', 'aria-label': 'Value' });
+      const unit = el('input', { type: 'text', maxlength: '12', value: presets[0]?.unit ?? 'cm', 'aria-label': 'Unit', style: 'width:5rem' });
+      const direction = el('p', { class: 'faint', style: 'margin:0.2rem 0 0' });
+      const syncPreset = () => {
+        const preset = presets.find((p) => p.name === metric.value);
+        customName.hidden = !!preset;
+        if (preset) unit.value = preset.unit;
+        direction.textContent = preset ? DIRECTION_TEXT[preset.better] : 'Waist, hips or body fat: smaller is better. A name with "weight": not judged. Other sizes: bigger is better.';
+      };
+      metric.addEventListener('change', syncPreset);
+      syncPreset();
+      const goal = el('select', { 'aria-label': 'Goal' });
+      goal.appendChild(el('option', { value: '', text: 'Not tied to a goal' }));
+      for (const g of activeGoals) goal.appendChild(el('option', { value: g.id, text: blueprintDisplayName(g.blueprint_ref) }));
+      const notes = el('input', { type: 'text', maxlength: '1000', placeholder: 'Optional, e.g. "left arm", "after training"', 'aria-label': 'Note' });
+      const statusEl = el('div');
+      const saveBtn = createButton({ label: 'Save measurement', onClick: async () => {
+        const name = metric.value === OTHER_METRIC ? customName.value.trim() : metric.value;
+        if (!name) return showInlineStatus(statusEl, 'error', 'Type a name for the measurement.');
+        if (value.value === '' || !(Number(value.value) > 0)) return showInlineStatus(statusEl, 'error', 'Enter the number you measured.');
+        try {
+          await withSaving(saveBtn, statusEl, () => api('/api/goals/measurements', { method: 'POST', body: {
+            date: date.value, metric_name: name, value: Number(value.value), unit: unit.value.trim(), goal_id: goal.value || null, notes: notes.value.trim() || null,
+          } }), 'Measurement saved.');
+          value.value = ''; notes.value = '';
+          renderMeasurementList(document.getElementById('measurement-list'), (await api('/api/goals/measurements/summary')).series);
+        } catch (err) { /* error shown inline; values kept */ }
+      }});
+      card.append(
+        el('label', { text: 'Date' }, [date]),
+        el('label', { text: 'Measurement' }, [metric]), customName, direction,
+        el('div', { style: 'display:flex;gap:0.5rem;align-items:flex-end' }, [el('label', { text: 'Value', style: 'flex:1' }, [value]), el('label', { text: 'Unit' }, [unit])]),
+        el('label', { text: 'Goal it reflects' }, [goal]),
+        el('label', { text: 'Note' }, [notes]),
+        el('div', { class: 'btn-row' }, [saveBtn]), statusEl,
+      );
+      root.appendChild(card);
+    }
+
+    function renderMeasurementList(root, series) {
+      root.innerHTML = '';
+      if (series.length === 0) return showEmpty(root, 'No measurements yet. Your first reading is the starting point; the second one shows the change.');
+      for (const s of series) {
+        const card = createCard();
+        const latest = s.readings[s.readings.length - 1];
+        const head = el('div', { class: 'card-row' });
+        head.appendChild(el('div', {}, [
+          el('div', { class: 'card-title', text: `${capitalize(s.metric)}: ${latest.value} ${s.unit}` }),
+          el('div', { class: 'card-subtitle', text: `${formatDate(latest.date)} · ${DIRECTION_TEXT[s.better]}${s.goals.length ? ` · ${s.goals.join(', ')}` : ''}` }),
+        ]));
+        head.appendChild(el('span', { class: `badge ${VERDICT_BADGE[s.verdict]}`, text: s.verdict === 'one reading' ? 'First reading' : capitalize(s.verdict) }));
+        card.appendChild(head);
+        if (s.change !== null) {
+          card.appendChild(el('p', { class: 'muted', style: 'margin:0.3rem 0 0', text: `${s.change > 0 ? '+' : ''}${s.change} ${s.unit} since ${formatDate(s.readings[0].date)} (${s.readings[0].value} ${s.unit}), ${s.readings.length} readings.` }));
+        }
+        const details = el('details');
+        details.appendChild(el('summary', { text: 'All readings' }));
+        for (const r of [...s.readings].reverse()) {
+          const statusEl = el('span', { class: 'faint' });
+          const del = createButton({ label: '×', variant: 'ghost', ariaLabel: `Delete ${s.metric} reading of ${formatDate(r.date)}`, onClick: async () => {
+            if (!window.confirm(`Delete the ${s.metric} reading of ${r.value} ${s.unit} on ${formatDate(r.date)}?`)) return;
+            try {
+              await api(`/api/goals/measurements/${r.id}`, { method: 'DELETE' });
+              renderMeasurementList(root, (await api('/api/goals/measurements/summary')).series);
+            } catch (err) { statusEl.textContent = ' Could not delete.'; }
+          }});
+          details.appendChild(el('div', { class: 'card-row', style: 'align-items:center' }, [
+            el('span', { text: `${formatDate(r.date)}: ${r.value} ${s.unit}${r.notes ? ` · ${r.notes}` : ''}` }), el('span', {}, [del, statusEl]),
+          ]));
+        }
+        card.appendChild(details);
+        root.appendChild(card);
+      }
+    }
+
     // ---------- Structured creation ----------
 
     document.getElementById('goal-type').addEventListener('change', loadBlueprintGoalOptions);
@@ -376,7 +489,7 @@
       }
     });
 
-    loadAllBlueprintGoals().then(loadGoals);
+    loadAllBlueprintGoals().then(() => { loadGoals(); loadMeasurements(); });
     loadBlueprintGoalOptions();
   </script>
 </body>

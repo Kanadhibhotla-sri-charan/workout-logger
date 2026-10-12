@@ -24,6 +24,7 @@ import { PeriodizationEventsRepo } from '../coaching/periodization/periodization
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { GoalsRepo } from '../repositories/goalsRepo.js';
 import { MeasurementsRepo } from '../repositories/measurementsRepo.js';
+import { measurementDirection, type MeasurementDirection } from '../contracts/measurementMetrics.js';
 import { TrainingProfileRepo } from '../repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../repositories/usersRepo.js';
 import { WeekActivityOverridesRepo } from '../repositories/weekActivityOverridesRepo.js';
@@ -289,6 +290,44 @@ export function goalCheckIns(db: Database.Database, asOf: string): GoalCheckIn[]
         measurements: measurements.listForGoal(g.id).length,
       };
     });
+}
+
+export interface MeasurementSeries {
+  metric: string;
+  unit: string;
+  /** Which way is progress (measurementMetrics.ts). */
+  better: MeasurementDirection;
+  /** Goals these readings are tied to (by goal_id), if any. */
+  goals: string[];
+  readings: Array<{ id: string; date: string; value: number; notes: string | null }>;
+  /** Latest minus first, rounded; null with one reading. */
+  change: number | null;
+  /** The change judged by `better`: 'better' | 'worse' | 'same', 'not judged'
+   * (neutral metric) or 'one reading'. */
+  verdict: 'better' | 'worse' | 'same' | 'not judged' | 'one reading';
+}
+
+/** Body measurements grouped by name and unit, oldest reading first.
+ * Different units are separate series and never compared. */
+export function bodyMeasurements(db: Database.Database): MeasurementSeries[] {
+  const goals = new Map(new GoalsRepo(db).list().map((g) => [g.id, goalDisplayName(g)]));
+  const series = new Map<string, MeasurementSeries>();
+  for (const m of new MeasurementsRepo(db).list()) {
+    const key = `${m.metric_name.toLowerCase()}|${m.unit}`;
+    const s = series.get(key) ?? series.set(key, { metric: m.metric_name, unit: m.unit, better: measurementDirection(m.metric_name), goals: [], readings: [], change: null, verdict: 'one reading' }).get(key)!;
+    s.readings.push({ id: m.id, date: m.date, value: m.value, notes: m.notes });
+    const goal = m.goal_id ? goals.get(m.goal_id) : undefined;
+    if (goal && !s.goals.includes(goal)) s.goals.push(goal);
+  }
+  for (const s of series.values()) {
+    s.readings.sort((a, b) => a.date.localeCompare(b.date));
+    if (s.readings.length < 2) continue;
+    s.change = round1(s.readings[s.readings.length - 1]!.value - s.readings[0]!.value);
+    s.verdict = s.better === 'neutral' ? 'not judged'
+      : s.change === 0 ? 'same'
+      : (s.change > 0) === (s.better === 'higher') ? 'better' : 'worse';
+  }
+  return [...series.values()];
 }
 
 export interface DeloadPeriod {
