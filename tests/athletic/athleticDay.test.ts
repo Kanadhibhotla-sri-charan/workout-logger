@@ -96,7 +96,7 @@ class FakeProvider implements AIProgrammerProvider {
   async generate(req: AIProgrammerProviderRequest): Promise<AIProgrammerProviderResponse> {
     this.requests.push(req);
     const ctx = req.context as any;
-    const body = ctx.schemaVersion === 'athletic-session-context.v2' ? athleticAnswer(ctx, this.tweak) : ctx.sessionPlan ? plannedOutput(ctx) : { nonsense: true };
+    const body = ctx.schemaVersion === 'athletic-session-context.v3' ? athleticAnswer(ctx, this.tweak) : ctx.sessionPlan ? plannedOutput(ctx) : { nonsense: true };
     return { provider: 'fake', model: 'fake-model', requestId: req.requestId, rawText: JSON.stringify(body) };
   }
 }
@@ -178,7 +178,7 @@ describe('generating an Athletic day', () => {
     pastAthleticDays(BUILD_UP_SESSIONS);
     const provider = new FakeProvider();
     const result = await new AIProgrammerService(db, provider).generateSession({ targetDate: THURSDAY });
-    expect(provider.requests[0]!.systemInstruction).toMatch(/athletic and strength coach/);
+    expect(provider.requests[0]!.systemInstruction).toMatch(/strength and conditioning coach.*not badminton skill or footwork/);
     const p = result.proposal;
     expect(p.sessionKind).toBe('athletic');
     expect(p.exercises.map((e) => e.block)).toEqual(BLOCK_ORDER);
@@ -294,6 +294,43 @@ describe('generating an Athletic day', () => {
     approveProposal(db, second.proposalId);
     new InjuryPausesRepo(db).pause('legs', MONDAY, null);
     expect(() => commitAIProposalToPlannedSession(db, second.proposalId, { intent: 'fill_existing_gym_day' })).toThrow(expect.objectContaining({ code: 'AI_ATHLETIC_PAUSED' }));
+  });
+});
+
+describe("the owner's gym and aims (2026-10-18)", () => {
+  const ids = (c: AthleticContext) => c.drills.map((d) => d.exerciseId);
+
+  it('drills needing equipment the user lacks are left out; drop landings use a bench, box jumps do not', () => {
+    const c = buildAthleticContext(db, THURSDAY); // profile: bench, no jump rope / plyo box / rowing machine
+    expect(ids(c)).not.toEqual(expect.arrayContaining(['jump-rope']));
+    expect(ids(c)).not.toContain('rowing-machine-intervals');
+    expect(ids(c)).not.toContain('box-jump');
+    expect(c.drills.find((d) => d.exerciseId === 'drop-landing')).toMatchObject({ setupNote: expect.stringMatching(/bench.*never jump onto it/) });
+    const user = new UsersRepo(db).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(db).get(user.id)!;
+    new TrainingProfileRepo(db).upsert(user.id, { ...profile, available_equipment: [...profile.available_equipment, 'jump rope'] });
+    expect(ids(buildAthleticContext(db, THURSDAY))).toContain('jump-rope');
+  });
+
+  it('avoided drills (shadowing) never appear, on the Athletic day or in add-ons', async () => {
+    const app = createApp(db);
+    for (const id of ['shadow-badminton-intervals', 'four-corner-shadow-footwork']) {
+      await request(app).put(`/api/programming/preferences/${id}`).send({ preference: 'avoided', reason: 'no court; never learned shadowing' }).expect(200);
+    }
+    expect(ids(buildAthleticContext(db, THURSDAY))).not.toEqual(expect.arrayContaining(['shadow-badminton-intervals']));
+    expect(ids(buildAthleticContext(db, THURSDAY))).not.toContain('four-corner-shadow-footwork');
+    for (const date of [MONDAY, '2026-10-20', '2026-10-23']) {
+      expect(planAthleticAddOn(db, date, 'push')!.exercises.map((e) => e.exerciseId)).not.toContain('shadow-badminton-intervals');
+    }
+  });
+
+  it('durability first: the context states the aims and orders the goals; the active add-on is ankle/landing work', () => {
+    const c = buildAthleticContext(db, THURSDAY);
+    expect(c.athlete).toMatch(/injury-free.*flexible.*fatigue resistance/);
+    expect(c.goals.map((g) => g.goalId).slice(0, 2)).toEqual(['ankle-resilience', 'landing-control']);
+    const tue = planAthleticAddOn(db, '2026-10-20', 'pull')!;
+    expect(tue.kind).toBe('active');
+    expect(BlueprintAdapter.getExercise(tue.exercises[0]!.exerciseId)!.functional_goals).toEqual(expect.arrayContaining([expect.stringMatching(/ankle-resilience|landing-control/)]));
   });
 });
 

@@ -1009,3 +1009,38 @@ without recovering.
 
 Tests: athleticDay.test.ts now 22; bodyMeasurements direction test.
 Full suite 2307: 0 new failures vs baseline.
+
+### 20.2 Owner's real context: durability, gym only, no shadowing (2026-10-18)
+Owner: recreational player who learns technique by playing; no court time
+for drills, only the gym among other people; does not know how to shadow.
+The Athletic day and add-ons are for a durable, flexible body, no further
+injuries and much better leg fatigue resistance (currently very low), not
+for technical/skill ability. Gym has benches, cables, a tyre (usually
+taken), sandbags, medicine balls of several weights, a jump rope; no box,
+no rowing machine. Floor space is fine for shuttle runs, lateral shuffles
+and lateral bounds (owner kept them).
+
+Changes:
+- Athletic context v3: `athlete` statement (the aims above, in order);
+  goals ordered durability first (ankle resilience, landing control,
+  mobility, conditioning, then power, agility); block purposes reworded
+  (quality = resilience, strength = strength + fatigue resistance).
+- Instruction: not skill/footwork training; power/agility drills are low
+  volume for tissue resilience; at least one strength lift in the upper
+  part of its rep range for fatigue resistance; conditioning favours
+  longer work intervals; favour `preferred` exercises.
+- Drills are filtered by the profile's equipment (bodyweight always
+  available; a drill needs any one of its listed items). Stand-in:
+  drop landing with a bench ("step off and land; never jump onto it");
+  box jump has none (a bench is not safe to jump onto). Rowing machine
+  intervals stay out (a cable row is not a substitute: it is back work,
+  not leg-driven endurance).
+- Active exercise preferences apply to drills and Athletic-day lifts:
+  'avoided' are left out, 'preferred' are marked.
+- Add-on 'active' = one ankle/landing-resilience drill + one
+  conditioning drill (was agility/power + conditioning); same filters.
+Data (owner-stated facts, applied after deploy with a backup): 'jump rope'
+added to available equipment; shadow-badminton-intervals and
+four-corner-shadow-footwork set to 'avoided' (permanent, reversible from
+the preferences).
+Tests: athleticDay.test.ts 25. Full suite 2310: 0 new failures.

@@ -25,7 +25,7 @@ import { LegTrainingRepo } from '../repositories/legTrainingRepo.js';
 import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 import type { AIWorkoutExerciseProposal } from '../ai-programmer/contracts/programmerTypes.js';
 import { weekGymDays } from '../ai-programmer/service/weekGeneration.js';
-import { athleticPaused, drillCatalogue, drillEntry, effectiveActivity, type AthleticDrillContext } from './athleticSession.js';
+import { athleticFilterFor, athleticPaused, drillCatalogue, drillEntry, effectiveActivity, type AthleticDrillContext } from './athleticSession.js';
 
 export const ADD_ON_MAX_SECONDS = 10 * 60;
 /** Modes that load the legs hard (impact or endurance). */
@@ -87,12 +87,19 @@ export function planAthleticAddOn(db: Database.Database, date: string, purpose: 
   const reason =
     kind === 'mobility'
       ? `Mobility only: ${before ? `${before} yesterday` : ''}${before && after ? ' and ' : ''}${after ? `${after} tomorrow` : ''}, so the legs recover.`
-      : 'Short footwork and conditioning: no hard leg day yesterday or tomorrow.';
+      : 'Short ankle/landing resilience and conditioning: no hard leg day yesterday or tomorrow.';
 
-  const catalogue = drillCatalogue(lastDoneDrills(db, date));
-  const leastRecent = (modes: readonly TrainingMode[]) =>
-    catalogue.filter((d) => modes.includes(d.mode)).sort((a, b) => (a.lastDone ?? '').localeCompare(b.lastDone ?? '') || a.exerciseId.localeCompare(b.exerciseId))[0];
-  const picks = (kind === 'mobility' ? [leastRecent(['mobility-dynamic']), leastRecent(['mobility-hold'])] : [leastRecent(['agility', 'power']), leastRecent(['conditioning'])]).filter(
+  // Only drills the user can do in their gym and has not set to avoid.
+  const catalogue = drillCatalogue(lastDoneDrills(db, date), athleticFilterFor(db, date));
+  const leastRecent = (modes: readonly TrainingMode[], goals?: readonly string[]) =>
+    catalogue
+      .filter((d) => modes.includes(d.mode) && (!goals || d.goals.some((g) => goals.includes(g))))
+      .sort((a, b) => (a.lastDone ?? '').localeCompare(b.lastDone ?? '') || a.exerciseId.localeCompare(b.exerciseId))[0];
+  // Active: resilience (ankle / landing control), not footwork skill (owner, 2026-10-18).
+  const picks = (kind === 'mobility'
+    ? [leastRecent(['mobility-dynamic']), leastRecent(['mobility-hold'])]
+    : [leastRecent(['power', 'agility'], ['ankle-resilience', 'landing-control']), leastRecent(['conditioning'])]
+  ).filter(
     (d): d is AthleticDrillContext => d !== undefined
   );
 
