@@ -123,6 +123,8 @@ in code form.
 | `gluteus medius` | `gluteus-medius-minimus` | physique_target (added 2026-10-11) |
 | `bottom-leg hip abductors` | `gluteus-medius-minimus` | physique_target (added 2026-10-11, see note) |
 | `obliques and lateral trunk` | `obliques` | physique_target (added 2026-10-11, see note) |
+| `hip abductors` | `gluteus-medius-minimus` | physique_target (added 2026-10-18, see note) |
+| `foot and ankle stabilizers` | `ankle-resilience` | functional_goal (added 2026-10-18, see note) |
 
 **Notes on the two judgment calls above** (everything else in this table
 is a direct or near-exact name match, not a judgment call):
@@ -144,6 +146,12 @@ is a direct or near-exact name match, not a judgment call):
   latae` (unmapped), the phrase names the abductor function, not TFL.
 - `obliques and lateral trunk` → `obliques` (copenhagen-plank): the phrase
   names obliques explicitly; "lateral trunk" adds no other canonical target.
+- `hip abductors` → `gluteus-medius-minimus` (2026-10-18 sync; lateral lunge,
+  hop and stick, four-corner footwork): same reasoning as `bottom-leg hip
+  abductors` above.
+- `foot and ankle stabilizers` → `ankle-resilience` (2026-10-18 sync; drills):
+  Blueprint's own functional goal for ankle and foot control; there is no
+  physique target for it.
 
 ### Explicitly left UNMAPPED (too generic or genuinely no canonical target)
 
@@ -156,6 +164,7 @@ is a direct or near-exact name match, not a judgment call):
 | `erectors` / `spinal erectors` | No canonical physique target for spinal erectors exists in Blueprint at all. |
 | `forearms` | Ambiguous between `forearm-flexors` and `forearm-extensors`. |
 | `hip musculature` | Too generic — could be several targets. |
+| `lower back` | Spinal erectors under another name (deep-squat-hold, 2026-10-18); no canonical target, same as `erectors`. |
 | `shoulders` | Ambiguous between `front-delt`/`side-delt`/`rear-delt`. |
 | `tensor fasciae latae` | No canonical target. |
 | `trunk musculature` | Too generic — could be `obliques`, `rectus-abdominis`, or spinal erectors (which itself has no target). |

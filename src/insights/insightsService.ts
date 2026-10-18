@@ -24,6 +24,7 @@ import { PeriodizationEventsRepo } from '../coaching/periodization/periodization
 import { AestheticAssessmentsRepo } from '../repositories/aestheticAssessmentsRepo.js';
 import { GoalsRepo } from '../repositories/goalsRepo.js';
 import { MeasurementsRepo } from '../repositories/measurementsRepo.js';
+import { isDrillId } from '../blueprint/athletic.js';
 import { measurementDirection, type MeasurementDirection } from '../contracts/measurementMetrics.js';
 import { TrainingProfileRepo } from '../repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../repositories/usersRepo.js';
@@ -94,6 +95,8 @@ export function strengthProgress(db: Database.Database, asOf: string, days = 56)
   const byExercise = new Map<string, Map<string, { value: number; bestSet: string; unit: 'kg' | RepUnit }>>();
   for (const session of repo.listSessionsInRange(start, asOf).filter((s) => s.status === 'completed')) {
     for (const perf of repo.getExercisePerformances(session.session_id)) {
+      // Athletic drills are not strength work; see athleticWork().
+      if (isDrillId(perf.exercise_id)) continue;
       const sets = perf.sets.filter((s) => s.completed && s.reps !== null && s.reps > 0);
       if (sets.length === 0) continue;
       const loaded = sets.filter((s) => s.weight !== null && s.weight > 0);
@@ -290,6 +293,65 @@ export function goalCheckIns(db: Database.Database, asOf: string): GoalCheckIn[]
         measurements: measurements.listForGoal(g.id).length,
       };
     });
+}
+
+export interface AthleticDrillSummary {
+  exerciseId: string;
+  name: string;
+  mode: string;
+  unit: RepUnit;
+  sessions: number;
+  lastDate: string;
+  /** Best single set (most reps or seconds), with load when one was used. */
+  best: string;
+  /** Last session's completed sets, e.g. "3 x 30 s". */
+  last: string;
+}
+
+export interface AthleticWork {
+  /** Days with at least one completed drill, per programming week (oldest first). */
+  weeks: Array<{ weekStart: string; sessions: number }>;
+  drills: AthleticDrillSummary[];
+}
+
+/** Athletic-day drills (2026-10-18): how often and how much, never
+ * strength maths. `weeks` programming weeks ending with asOf's week. */
+export function athleticWork(db: Database.Database, asOf: string, weeks: number): AthleticWork {
+  const currentWeek = programmingWeekStart(asOf);
+  const start = addDays(currentWeek, -7 * (weeks - 1));
+  const repo = new WorkoutSessionsRepo(db);
+  const days = new Set<string>();
+  const drills = new Map<string, AthleticDrillSummary & { bestValue: number }>();
+  for (const session of repo.listSessionsInRange(start, asOf).filter((s) => s.status === 'completed').sort((a, b) => a.date.localeCompare(b.date))) {
+    for (const perf of repo.getExercisePerformances(session.session_id)) {
+      if (!isDrillId(perf.exercise_id)) continue;
+      const sets = perf.sets.filter((s) => s.completed && s.reps !== null && s.reps > 0);
+      if (sets.length === 0) continue;
+      days.add(session.date);
+      const unit = repUnitOf(perf);
+      const suffix = unit === 'reps' ? '' : unit === 'seconds' ? ' s' : ` ${unit}`;
+      const top = [...sets].sort((a, b) => b.reps! - a.reps! || (b.weight ?? 0) - (a.weight ?? 0))[0]!;
+      const exercise = BlueprintAdapter.getExercise(perf.exercise_id);
+      const entry = drills.get(perf.exercise_id) ?? { exerciseId: perf.exercise_id, name: exercise?.name ?? perf.exercise_id, mode: exercise?.training_mode ?? '', unit, sessions: 0, lastDate: '', best: '', last: '', bestValue: -1 };
+      if (entry.lastDate !== session.date) entry.sessions += 1;
+      entry.lastDate = session.date;
+      entry.unit = unit;
+      const counts = [...new Set(sets.map((s) => s.reps))];
+      entry.last = counts.length === 1 ? `${sets.length} x ${counts[0]}${suffix}` : sets.map((s) => `${s.reps}${suffix}`).join(', ');
+      if (top.reps! > entry.bestValue) {
+        entry.bestValue = top.reps!;
+        entry.best = `${top.reps}${suffix}${top.weight ? ` @ ${top.weight} kg` : ''}`;
+      }
+      drills.set(perf.exercise_id, entry);
+    }
+  }
+  return {
+    weeks: Array.from({ length: weeks }, (_, i) => {
+      const weekStart = addDays(start, 7 * i);
+      return { weekStart, sessions: [...days].filter((d) => d >= weekStart && d <= addDays(weekStart, 6)).length };
+    }),
+    drills: [...drills.values()].sort((a, b) => b.lastDate.localeCompare(a.lastDate) || a.name.localeCompare(b.name)).map(({ bestValue: _bestValue, ...rest }) => rest),
+  };
 }
 
 export interface MeasurementSeries {

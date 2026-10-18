@@ -47,6 +47,8 @@ import { buildGenerationRejectionDiagnostic, logGenerationRejection } from './ge
 import { planSession, summarizeSessionPlanForLog, type SessionPlan } from '../planning/sessionPlanner.js';
 import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction, usesRotationShortlist } from '../planning/plannedContext.js';
 import { runProposalPipeline } from './proposalPipeline.js';
+import { ATHLETIC_OUTPUT_SCHEMA, buildAthleticContext, buildAthleticSystemInstruction, checkAthleticOutput, type AthleticContext } from '../../athletic/athleticSession.js';
+import { weekGymDays } from './weekGeneration.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { repairWeekReconciliation, repairGenerateWeek } from '../validation/programmerProposalRepair.js';
@@ -279,6 +281,26 @@ export class AIProgrammerService {
       throw new AIProposalAlreadyPendingError(input.targetDate, existing.id);
     }
 
+    // Athletic day (2026-10-18): requested explicitly, or the date's own
+    // rotation slot when leg training is athletic. Its own context, rules
+    // and checks (src/athletic/athleticSession.ts).
+    const rotationPurpose = weekGymDays(this.db, programmingWeekStart(input.targetDate)).find((d) => d.date === input.targetDate)?.purpose ?? null;
+    if ((input.requestedSessionPurpose ?? rotationPurpose) === 'athletic') {
+      observed.sessionPurpose = 'athletic';
+      const context = buildAthleticContext(this.db, input.targetDate);
+      observed.contextHash = context.contextHash;
+      const previousFailure = findGenerationFailure(this.db, input.targetDate, context.contextHash);
+      if (previousFailure && input.confirmRetry !== true) throw new AIGenerationPreviouslyFailedError(input.targetDate, previousFailure);
+      try {
+        const result = await this.generateAthleticFromContext(context);
+        clearGenerationFailure(this.db, input.targetDate, context.contextHash);
+        return result;
+      } catch (err) {
+        if (isGatedGenerationFailure(err)) recordGenerationFailure(this.db, input.targetDate, context.contextHash, err);
+        throw err;
+      }
+    }
+
     const context: AIProgrammerContext = buildProgrammerContext(this.db, {
       targetDate: input.targetDate,
       requestedSessionPurpose: input.requestedSessionPurpose,
@@ -318,6 +340,69 @@ export class AIProgrammerService {
     }
     clearGenerationFailure(this.db, input.targetDate, context.contextHash);
     return result;
+  }
+
+  /** Athletic day (2026-10-18): one paid call with the Athletic context,
+   * then checkAthleticOutput, then the same proposal storage as any day.
+   * Also used by an explicit week run for the week's Athletic day. */
+  async generateAthleticFromContext(context: AthleticContext, persist: { weekRunId: string; expiresAt: string } | null = null): Promise<GenerateSessionResult> {
+    if (!isAiProgrammerEnabled()) throw new AIProgrammerDisabledError();
+    const requestId = randomUUID();
+    const providerRequest: AIProgrammerProviderRequest = {
+      mode: 'generate_session',
+      systemInstruction: buildAthleticSystemInstruction(),
+      context,
+      outputSchema: ATHLETIC_OUTPUT_SCHEMA,
+      requestId,
+    };
+    const providerResponse = await this.provider.generate(providerRequest);
+    const diagnostics = buildTokenDiagnostics('generate_session', providerRequest, providerResponse);
+    logTokenDiagnostics(diagnostics);
+
+    let parsedJson: unknown = providerResponse.parsedJson;
+    if (parsedJson === undefined) {
+      try {
+        parsedJson = JSON.parse(providerResponse.rawText);
+      } catch {
+        if (isLikelyTruncatedOutput(providerResponse.finishReason, providerResponse.usage?.outputTokens, providerResponse.requestDiagnostics?.configuredMaxOutputTokens)) {
+          throw new AIProviderOutputTruncatedError({
+            mode: 'generate_session',
+            finishReason: providerResponse.finishReason,
+            completionTokens: providerResponse.usage?.outputTokens,
+            configuredMaxOutputTokens: providerResponse.requestDiagnostics?.configuredMaxOutputTokens,
+          });
+        }
+        throw new AIOutputSchemaInvalidError(['provider response was not valid JSON']);
+      }
+    }
+
+    const check = checkAthleticOutput(parsedJson, context);
+    if (!check.ok) {
+      if (check.stage === 'schema') throw new AIOutputSchemaInvalidError(check.errors);
+      throw new AIOutputDomainInvalidError(check.errors);
+    }
+    if (check.repairs.length > 0) console.log('[ai-programmer] athletic repairs', JSON.stringify({ targetDate: context.targetDate, repairs: check.repairs }));
+
+    const proposal: AIWorkoutSessionProposal = { ...check.proposal, proposalId: randomUUID() };
+    const record = new AIProposalRepo(this.db).create({
+      proposal,
+      contextHash: context.contextHash,
+      blueprintCommit: BlueprintAdapter.getManifest().sourceCommit,
+      modelProvider: providerResponse.provider,
+      modelName: providerResponse.model,
+      requestId: providerResponse.requestId,
+      ...(persist ? { weekRunId: persist.weekRunId, expiresAt: persist.expiresAt } : {}),
+    });
+    return {
+      proposal,
+      proposalId: record.id,
+      status: record.status,
+      contextHash: context.contextHash,
+      provider: providerResponse.provider,
+      model: providerResponse.model,
+      requestId: providerResponse.requestId,
+      diagnostics,
+    };
   }
 
   /** The deterministic session plan for this context, or null if the

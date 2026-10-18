@@ -239,7 +239,7 @@ export const FORBIDDEN_BODY_FOCUS_BY_DAY: Partial<Record<Weekday, readonly strin
  * distinguish a push muscle (triceps) from a pull muscle (biceps).
  * See src/engine/sessionPurpose.ts for how these are actually assigned
  * to specific weekdays. */
-export type SessionPurpose = 'push' | 'pull' | 'legs' | 'upper';
+export type SessionPurpose = 'push' | 'pull' | 'legs' | 'upper' | 'athletic';
 
 /** [SPEC] The exact rotation order §5's PPL+Upper structure implies —
  * push, then pull, then legs, then upper — applied to the user's
@@ -249,6 +249,11 @@ export type SessionPurpose = 'push' | 'pull' | 'legs' | 'upper';
  * about the well-known, standard order a 4-day PPL+Upper split itself
  * runs in). */
 export const SESSION_PURPOSE_ROTATION: readonly SessionPurpose[] = ['push', 'pull', 'legs', 'upper'];
+
+/** [OWNER] Leg training 'athletic' (2026-10-18): the Legs slot becomes an
+ * Athletic day — badminton-oriented drills and whole-body conditioning
+ * (src/athletic/), no physique targets. Push, Pull and Upper unchanged. */
+export const ATHLETIC_SESSION_PURPOSE_ROTATION: readonly SessionPurpose[] = ['push', 'pull', 'athletic', 'upper'];
 
 /** [DEFAULT] Blueprint physique_target ids (verified against
  * src/blueprint/snapshot/programming.json's physiqueTargets list) a
@@ -301,6 +306,8 @@ export const SESSION_PURPOSE_TARGETS: Record<SessionPurpose, readonly string[]> 
   pull: PULL_PHYSIQUE_TARGETS,
   legs: LEGS_PHYSIQUE_TARGETS,
   upper: UPPER_PHYSIQUE_TARGETS,
+  // Drills only (functional goals); no physique target trains on it.
+  athletic: [],
 };
 
 /** [DEFAULT] §2.1: natural-language goal matching needs *some* minimum

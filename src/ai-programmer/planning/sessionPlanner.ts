@@ -308,6 +308,7 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
     let status: PlannedTargetStatus | null = null;
     let reason = '';
     if (guidance.pausedForInjury) [status, reason] = ['ineligible', 'body area paused for injury'];
+    else if (guidance.trainedAthletically) [status, reason] = ['ineligible', 'legs are trained athletically (Athletic day), not for size'];
     else if (!guidance.eligibleForThisSession) [status, reason] = ['ineligible', `not compatible with the "${purpose}" session`];
     else if (guidance.recoveryAdjustment === 'avoid') [status, reason] = ['recovery_excused', 'recovery engine says avoid today'];
     else if (!guidance.feasibility) [status, reason] = ['unassessed', 'no feasibility data'];

@@ -63,10 +63,13 @@ const SECONDARY_TARGET_MAP: Record<string, MappedTarget> = {
   'gluteus medius': { target_type: 'physique_target', target_id: 'gluteus-medius-minimus' },
   'bottom-leg hip abductors': { target_type: 'physique_target', target_id: 'gluteus-medius-minimus' },
   'obliques and lateral trunk': { target_type: 'physique_target', target_id: 'obliques' },
+  // Added with the 2026-10-18 Blueprint sync (89dd2d6, athletic drills).
+  'hip abductors': { target_type: 'physique_target', target_id: 'gluteus-medius-minimus' },
+  'foot and ankle stabilizers': { target_type: 'functional_goal', target_id: 'ankle-resilience' },
 
   // Deliberately UNMAPPED (documented in docs/SECONDARY_TARGET_MAPPING.md):
   // brachioradialis, calves, chest, elbow flexors, erectors,
-  // spinal erectors, forearms, hip musculature, shoulders,
+  // spinal erectors, forearms, hip musculature, lower back, shoulders,
   // tensor fasciae latae, trunk musculature.
   // Absent from this object entirely — see resolveSecondaryTarget below.
 };

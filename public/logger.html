@@ -32,6 +32,8 @@
     // longer knows about (page reload, reopened session, app restart).
     // Never depends on `generated`/`substitutions` as the only source.
     let exerciseNamesById = new Map();
+    // Athletic drills (2026-10-18): Blueprint mode prescription per drill id.
+    let drillById = new Map();
     let dirty = false; // unsaved set values entered but not yet saved (spec §62)
     let startedAt = Date.now();
     let elapsedTimer = null;
@@ -128,6 +130,7 @@
         ]);
         exerciseNamesById = new Map([...blueprintExercises, ...outsideExercises].map((e) => [e.id, e.name]));
         exerciseEquipmentById = new Map(blueprintExercises.map((e) => [e.id, e.equipment || []]));
+        drillById = new Map(blueprintExercises.filter((e) => e.drill).map((e) => [e.id, e.drill]));
       } catch (err) {
         exerciseNamesById = new Map();
       }
@@ -250,12 +253,15 @@
       // see aiProposalLifecycle.ts) — shown as "Planned" the same way a
       // deterministic `generatedMatch` already was, so an AI-planned
       // exercise isn't silently missing its own prescription display.
+      const drill = drillById.get(perf.exercise_id);
+      if (drill) card.appendChild(el('p', { class: 'faint drill-note', style: 'margin:0.2rem 0 0', text: describeDrill(drill) }));
       const plannedSource = generatedMatch || (perf.target_sets != null ? perf : null);
       if (plannedSource) {
         const completed = perf.sets.filter((s) => s.completed).length;
         const skipped = perf.sets.length - completed;
         const pva = el('div', { class: 'planned-vs-actual' });
-        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Planned' }), document.createTextNode(formatSets(plannedSource.target_sets, plannedSource.target_reps_min, plannedSource.target_reps_max))]));
+        const plannedUnit = repUnitOf(perf) !== 'reps' ? ` ${repUnitOf(perf)}` : '';
+        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Planned' }), document.createTextNode(formatSets(plannedSource.target_sets, plannedSource.target_reps_min, plannedSource.target_reps_max) + plannedUnit + (drill && drill.perSide ? ' per side' : ''))]));
         pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(`${completed} completed${skipped ? `, ${skipped} skipped` : ''}`)]));
         card.appendChild(pva);
         if (generatedMatch && generatedMatch.previous_performance) {
@@ -278,7 +284,7 @@
         const table = el('table');
         const headRow = el('tr');
         const unitTh = el('th', { text: capitalize(repUnitOf(perf)) });
-        const showRir = perf.sets.some((s) => s.rir !== null && s.rir !== undefined);
+        const showRir = !drill && perf.sets.some((s) => s.rir !== null && s.rir !== undefined);
         headRow.append(el('th', { text: 'Set' }), el('th', { text: 'Weight' }), unitTh);
         if (showRir) headRow.appendChild(el('th', { text: 'RIR' }));
         headRow.appendChild(el('th', { text: 'Done' }));
@@ -297,7 +303,7 @@
         return card;
       }
 
-      const state = { sets: perf.sets.map((s) => ({ ...s })), unit: repUnitOf(perf) };
+      const state = { sets: perf.sets.map((s) => ({ ...s })), unit: repUnitOf(perf), noRir: !!drill };
       const setsContainer = el('div');
       renderSetEditor(setsContainer, state, () => { dirty = true; });
       onUnitChanged = () => { state.unit = repUnitOf(perf); renderSetEditor(setsContainer, state, () => { dirty = true; }); };
@@ -495,12 +501,19 @@
       return sets;
     }
 
+    // "Drill · 3–5 sets × 3–6 reps per side · rest 90–180 s. Effort: ..."
+    function describeDrill(drill) {
+      const unit = drill.unit === 'seconds' ? 's' : 'reps';
+      return `Drill · ${drill.sets[0]}–${drill.sets[1]} sets × ${drill.amount[0]}–${drill.amount[1]} ${unit}${drill.perSide ? ' per side' : ''} · rest ${drill.restSeconds[0]}–${drill.restSeconds[1]} s. Effort: ${drill.effort}`;
+    }
+
     function renderSetEditor(container, state, onDirty) {
       container.innerHTML = '';
       state.sets.forEach((set, i) => {
-        const row = el('div', { class: 'set-row' });
+        // Drills have an effort note instead of RIR (no RIR box).
+        const row = el('div', { class: state.noRir ? 'set-row no-rir' : 'set-row' });
         row.appendChild(el('div', { class: 'set-index', text: `#${set.set_number}` }));
-        const weight = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'kg', 'aria-label': `Set ${set.set_number} weight` });
+        const weight = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: state.noRir ? 'kg (opt.)' : 'kg', 'aria-label': `Set ${set.set_number} weight` });
         if (set.weight !== null) weight.value = set.weight;
         weight.addEventListener('input', () => { set.weight = weight.value === '' ? null : Number(weight.value); onDirty(); });
         const unit = state.unit || 'reps';
@@ -520,10 +533,11 @@
           renderSetEditor(container, state, onDirty);
           onDirty();
         }});
-        row.append(weight, reps, rir, done, remove);
+        if (state.noRir) row.append(weight, reps, done, remove);
+        else row.append(weight, reps, rir, done, remove);
         container.appendChild(row);
       });
-      if (state.sets.length) container.appendChild(el('p', { class: 'faint set-rir-hint', text: 'RIR = reps you could still have done (0 = failure). Optional; the last set matters most.' }));
+      if (state.sets.length && !state.noRir) container.appendChild(el('p', { class: 'faint set-rir-hint', text: 'RIR = reps you could still have done (0 = failure). Optional; the last set matters most.' }));
     }
 
     function closeSubstituteModal() {

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
+import { modePrescriptionFor } from '../../blueprint/programmingProfiles.js';
 
 export const blueprintRouter = Router();
 
@@ -10,6 +11,9 @@ blueprintRouter.get('/exercises', (req, res) => {
     body_regions: e.body_regions,
     equipment: e.equipment,
     exercise_type: e.exercise_type,
+    // Athletic drills (2026-10-18): the Blueprint mode prescription the
+    // logger shows in place of reps/RIR. Absent for every other exercise.
+    ...(e.training_mode ? { training_mode: e.training_mode, drill: modePrescriptionFor(e.id) } : {}),
   }));
   res.json(exercises);
 });

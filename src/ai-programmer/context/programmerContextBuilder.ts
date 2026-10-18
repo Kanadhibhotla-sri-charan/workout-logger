@@ -33,6 +33,7 @@ import { addDays, daysBetween, isValidCalendarDate } from '../../engine/dateMath
 import { DayNotesRepo } from '../../repositories/dayNotesRepo.js';
 import { CoachRepo } from '../../repositories/coachRepo.js';
 import { InjuryPausesRepo, targetIdsForArea } from '../../repositories/injuryPausesRepo.js';
+import { LegTrainingRepo } from '../../repositories/legTrainingRepo.js';
 import { applyWeekOverrides, deriveDailyActivity } from '../../lib/dailyActivity.js';
 import { applyRecoveryConstraint } from '../../engine/recoveryEngine.js';
 import { applyProjectedSessions, type ProjectedSession } from './projectedExposure.js';
@@ -82,7 +83,7 @@ import {
 } from './programmerContextTypes.js';
 import { newId } from '../../repositories/ids.js';
 
-const SESSION_PURPOSES: readonly SessionPurpose[] = ['push', 'pull', 'legs', 'upper'];
+const SESSION_PURPOSES: readonly SessionPurpose[] = ['push', 'pull', 'legs', 'upper', 'athletic'];
 function isSessionPurpose(value: string): value is SessionPurpose {
   return (SESSION_PURPOSES as readonly string[]).includes(value);
 }
@@ -370,10 +371,13 @@ export function buildProgrammingBrief(
   // Injury pause (2026-10-11): physique targets in a paused body area are
   // ineligible for every session and drop out of the session's expected
   // coverage. Empty keeps the previous behaviour.
-  pausedTargetIds: ReadonlySet<string> = new Set()
+  pausedTargetIds: ReadonlySet<string> = new Set(),
+  // Leg training 'athletic' (2026-10-18): leg physique targets get no
+  // muscle-growth volume in any session. Empty keeps the previous behaviour.
+  athleticLegTargetIds: ReadonlySet<string> = new Set()
 ): AIProgrammerProgrammingBrief {
   const expectedCoverageTargetIds: readonly BlueprintId[] = sessionPurpose
-    ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS].filter((id) => !pausedTargetIds.has(id))
+    ? [...SESSION_PURPOSE_TARGETS[sessionPurpose], ...UNIVERSAL_PHYSIQUE_TARGETS].filter((id) => !pausedTargetIds.has(id) && !athleticLegTargetIds.has(id))
     : [];
 
   const compatibleGymDaysThisWeek = (targetType: TargetType, targetId: BlueprintId): number => {
@@ -428,8 +432,10 @@ export function buildProgrammingBrief(
     const adequacyTolerance = periodization.deloadActive ? deloadAdequacyTolerance(min, normalMin) : undefined;
 
     const pausedForInjury = t.targetType === 'physique_target' && pausedTargetIds.has(t.targetId);
+    const trainedAthletically = t.targetType === 'physique_target' && athleticLegTargetIds.has(t.targetId);
     const eligibleForThisSession =
       !pausedForInjury &&
+      !trainedAthletically &&
       (sessionPurpose === null || t.targetType !== 'physique_target' || isTargetCompatibleWithPurpose(t.targetType, t.targetId, sessionPurpose));
 
     // Rule 6 fix (2026-09-19): the exact same push/pull classification
@@ -460,6 +466,7 @@ export function buildProgrammingBrief(
       recoveryAdjustment: t.recovery.priority_adjustment,
       eligibleForThisSession,
       ...(pausedForInjury ? { pausedForInjury } : {}),
+      ...(trainedAthletically ? { trainedAthletically } : {}),
       ...(adequacyTolerance !== undefined ? { adequacyTolerance } : {}),
       reasoning: volumeDecision.reasoning,
       antagonistGroup,
@@ -766,6 +773,7 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const injuryPausesRepo = new InjuryPausesRepo(db);
   const injuryPauses = injuryPausesRepo.list();
   const pausedTargetIds = injuryPausesRepo.pausedTargetIds();
+  const athleticLegTargetIds = new LegTrainingRepo(db).athleticLegTargetIds();
 
   const briefFor = (forTargets: readonly AIProgrammerTargetContext[]) =>
     buildProgrammingBrief(
@@ -777,7 +785,8 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
       budgetMinutes,
       { deloadActive: periodization.deloadActive },
       trainingExperience,
-      pausedTargetIds
+      pausedTargetIds,
+      athleticLegTargetIds
     );
   // Wide pool: the rotation shortlist is checked against the brief computed
   // over the full pool (so it is never less feasible), then the final brief

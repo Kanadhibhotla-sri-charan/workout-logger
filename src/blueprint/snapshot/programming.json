@@ -358,10 +358,226 @@
         ],
         "rep_range_reason": "A general compound-movement range, used when a compound exercise doesn't carry the heavy-compound or stable-compound coverage category specifically.",
         "guidance_note": "This doesn't fit neatly into the usual heavy- or stable-compound pattern — treat the ranges here as a reasonable starting point and adjust based on how it actually feels to load and control."
+      },
+      {
+        "id": "power",
+        "training_mode": "power",
+        "name": "Power / plyometric",
+        "summary": "Explosive jumping, bounding and landing work, trained for speed and quality of each rep rather than fatigue.",
+        "unit": "reps",
+        "primary_range": [
+          3,
+          6
+        ],
+        "acceptable_range": [
+          2,
+          8
+        ],
+        "sets": [
+          3,
+          5
+        ],
+        "rest_seconds": [
+          90,
+          180
+        ],
+        "frequency_per_week": [
+          2,
+          3
+        ],
+        "effort": "Maximal intent on every rep, stopping well before height, speed or landing quality drops. Never trained to failure.",
+        "rep_range_reason": "Low reps with full rest keep every rep fast and well landed; fatigue makes jumps slower and landings sloppier, which defeats the purpose.",
+        "guidance_note": "Do these early in a session while fresh, and progress by quality and height before adding more reps."
+      },
+      {
+        "id": "agility",
+        "training_mode": "agility",
+        "name": "Agility / footwork",
+        "summary": "Short, sharp change-of-direction and footwork bursts, trained for speed and control.",
+        "unit": "seconds",
+        "primary_range": [
+          5,
+          15
+        ],
+        "acceptable_range": [
+          5,
+          20
+        ],
+        "sets": [
+          4,
+          8
+        ],
+        "rest_seconds": [
+          30,
+          90
+        ],
+        "frequency_per_week": [
+          2,
+          3
+        ],
+        "effort": "Fast and sharp but controlled; end the set when foot speed or balance starts to drop.",
+        "rep_range_reason": "Short bursts with enough rest keep the footwork quick and precise rather than turning it into tired conditioning.",
+        "guidance_note": "Stay low and light on the feet; speed comes after clean, balanced movement."
+      },
+      {
+        "id": "movement-strength",
+        "training_mode": "movement-strength",
+        "name": "Movement strength",
+        "summary": "Controlled strength work in athletic positions such as lateral and split stances, where position and balance matter as much as load.",
+        "unit": "reps",
+        "primary_range": [
+          6,
+          10
+        ],
+        "acceptable_range": [
+          5,
+          12
+        ],
+        "sets": [
+          2,
+          4
+        ],
+        "rest_seconds": [
+          60,
+          120
+        ],
+        "frequency_per_week": [
+          2,
+          3
+        ],
+        "effort": "Controlled reps stopping 2 to 3 reps short of failure, keeping the knee, hip and trunk in good position throughout.",
+        "rep_range_reason": "A moderate range builds strength in the position without fatigue degrading balance and alignment.",
+        "guidance_note": "Own the position first; add load only once every rep looks the same."
+      },
+      {
+        "id": "mobility-hold",
+        "training_mode": "mobility-hold",
+        "name": "Mobility hold",
+        "summary": "Held stretches and positions that build comfortable range of motion.",
+        "unit": "seconds",
+        "primary_range": [
+          30,
+          60
+        ],
+        "acceptable_range": [
+          20,
+          90
+        ],
+        "sets": [
+          2,
+          3
+        ],
+        "rest_seconds": [
+          15,
+          30
+        ],
+        "frequency_per_week": [
+          3,
+          7
+        ],
+        "effort": "A clear but comfortable stretch, breathing slowly; never push into pain.",
+        "rep_range_reason": "Holds of half a minute or more give time to relax into the position.",
+        "guidance_note": "Frequency matters more than intensity; short regular sessions work better than occasional hard stretching."
+      },
+      {
+        "id": "mobility-dynamic",
+        "training_mode": "mobility-dynamic",
+        "name": "Mobility drill",
+        "summary": "Controlled, moving mobility drills that take a joint through its range repeatedly.",
+        "unit": "reps",
+        "primary_range": [
+          6,
+          10
+        ],
+        "acceptable_range": [
+          5,
+          12
+        ],
+        "sets": [
+          2,
+          3
+        ],
+        "rest_seconds": [
+          15,
+          45
+        ],
+        "frequency_per_week": [
+          3,
+          7
+        ],
+        "effort": "Smooth, controlled reps through the range you own, easing slightly deeper over the sets; no bouncing.",
+        "rep_range_reason": "Enough reps to explore the range without turning the drill into a strength set.",
+        "guidance_note": "Works well as a warm-up before court sessions or lower-body training."
+      },
+      {
+        "id": "conditioning",
+        "training_mode": "conditioning",
+        "name": "Conditioning intervals",
+        "summary": "Repeated work intervals that build the endurance to keep moving hard through long rallies and sessions.",
+        "unit": "seconds",
+        "primary_range": [
+          20,
+          60
+        ],
+        "acceptable_range": [
+          15,
+          120
+        ],
+        "sets": [
+          6,
+          10
+        ],
+        "rest_seconds": [
+          20,
+          90
+        ],
+        "frequency_per_week": [
+          1,
+          3
+        ],
+        "effort": "Hard but repeatable, roughly 7 to 8 out of 10, finishing every round at a similar pace.",
+        "rep_range_reason": "Intervals of 20 to 60 seconds with short rests mirror the stop-start demand of rallies while staying repeatable.",
+        "guidance_note": "Progress by adding rounds or shortening rest, one change at a time."
       }
     ],
     "classification": {
       "defaults": [
+        {
+          "profile_id": "power",
+          "match": {
+            "training_mode": "power"
+          }
+        },
+        {
+          "profile_id": "agility",
+          "match": {
+            "training_mode": "agility"
+          }
+        },
+        {
+          "profile_id": "movement-strength",
+          "match": {
+            "training_mode": "movement-strength"
+          }
+        },
+        {
+          "profile_id": "mobility-hold",
+          "match": {
+            "training_mode": "mobility-hold"
+          }
+        },
+        {
+          "profile_id": "mobility-dynamic",
+          "match": {
+            "training_mode": "mobility-dynamic"
+          }
+        },
+        {
+          "profile_id": "conditioning",
+          "match": {
+            "training_mode": "conditioning"
+          }
+        },
         {
           "profile_id": "heavy-free-weight-compound",
           "match": {
@@ -1082,6 +1298,48 @@
       "parent_region": "core",
       "definition": "Trunk bracing that resists sideways bending, trained through unilaterally-loaded carries that make the trunk resist being pulled toward the loaded side, or side-lying holds such as the side plank that resist bending toward the floor.",
       "why_it_matters": "Lateral trunk control and durability — relevant to single-side carrying and loading tasks a bilateral, symmetric lift never challenges. Carries add grip endurance as a side effect."
+    },
+    {
+      "id": "lower-body-power",
+      "name": "Lower-Body Power",
+      "parent_region": "quads",
+      "definition": "Explosive force from the legs, trained through jumping, bounding and quick bouncing drills performed fast and fresh.",
+      "why_it_matters": "The explosive push-off behind fast first steps, jumping smashes and reaching shots, trained for speed rather than muscle size."
+    },
+    {
+      "id": "agility-change-of-direction",
+      "name": "Agility & Change of Direction",
+      "parent_region": "hips",
+      "definition": "Quick, balanced footwork and fast changes of direction, trained through shuffles, bounds and court footwork patterns.",
+      "why_it_matters": "Court coverage depends on moving the feet quickly and changing direction without losing balance."
+    },
+    {
+      "id": "landing-control",
+      "name": "Landing Control",
+      "parent_region": "quads",
+      "definition": "Absorbing force safely on one or two legs, trained through landing, hopping and lunging drills with the knee kept in line over the toes.",
+      "why_it_matters": "Landing and stopping well is relevant to knee and ankle resilience in sports with constant jumping, lunging and stopping."
+    },
+    {
+      "id": "ankle-resilience",
+      "name": "Ankle Resilience",
+      "parent_region": "calves",
+      "definition": "Ankle range, stiffness and control, trained through quick bouncing, single-leg landing, mobility and calf and shin strength work.",
+      "why_it_matters": "Springy, mobile and well-controlled ankles support quick footwork and are relevant to ankle-sprain resilience."
+    },
+    {
+      "id": "lower-body-mobility",
+      "name": "Lower-Body Mobility",
+      "parent_region": "hips",
+      "definition": "Comfortable range of motion at the hips and legs, trained through held stretches and controlled mobility drills.",
+      "why_it_matters": "Deep lunges, low pick-ups and fast direction changes need comfortable hip and leg range."
+    },
+    {
+      "id": "full-body-conditioning",
+      "name": "Full-Body Conditioning",
+      "parent_region": "full-body",
+      "definition": "Whole-body endurance, trained through repeated intervals of running, skipping, rowing and court-movement drills.",
+      "why_it_matters": "The endurance to keep moving hard through long rallies and full sessions."
     }
   ],
   "developmentPackages": {

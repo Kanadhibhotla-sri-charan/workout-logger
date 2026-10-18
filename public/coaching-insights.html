@@ -56,6 +56,12 @@
     </section>
 
     <section>
+      <h2>Athletic work</h2>
+      <p class="faint">Athletic-day drills: badminton fitness, mobility and conditioning. Tracked by how often and how much, not by strength numbers.</p>
+      <div id="athletic-section"></div>
+    </section>
+
+    <section>
       <h2>Goal check-ins</h2>
       <div id="checkins-section"></div>
     </section>
@@ -241,7 +247,7 @@
     let showAllExercises = false;
 
     async function loadInsights() {
-      const ids = ['strength-section', 'volume-section', 'consistency-section', 'checkins-section'];
+      const ids = ['strength-section', 'volume-section', 'consistency-section', 'athletic-section', 'checkins-section'];
       for (const id of ids) showLoading(document.getElementById(id), 'Loading…');
       try {
         insightsData = await api('/api/insights');
@@ -249,6 +255,7 @@
         renderStrength();
         renderVolume(insightsData.volume);
         renderConsistency(insightsData.consistency);
+        renderAthletic(insightsData.athletic);
         renderCheckIns(insightsData.goalCheckIns);
       } catch (err) {
         for (const id of ids) showError(document.getElementById(id), 'We could not load insights.', loadInsights);
@@ -375,6 +382,26 @@
         grid.appendChild(card);
       });
       container.appendChild(grid);
+    }
+
+    function renderAthletic(athletic) {
+      const container = document.getElementById('athletic-section');
+      container.innerHTML = '';
+      if (!athletic || athletic.drills.length === 0) {
+        showEmpty(container, 'No drills logged yet. Athletic days appear here once you log them.');
+        return;
+      }
+      const weeks = athletic.weeks.map((w, i) => `${i === athletic.weeks.length - 1 ? 'This week' : formatDate(w.weekStart)}: ${w.sessions}`).join(' · ');
+      container.appendChild(el('p', { class: 'muted', style: 'margin:0 0 0.4rem', text: `Days with drills, by week: ${weeks}` }));
+      for (const d of athletic.drills) {
+        const card = createCard();
+        const row = el('div', { class: 'progress-row' });
+        row.appendChild(el('div', { class: 'card-title', text: d.name }));
+        row.appendChild(el('span', { class: 'badge badge-neutral', text: `${d.sessions} session${d.sessions === 1 ? '' : 's'}` }));
+        card.appendChild(row);
+        card.appendChild(el('p', { class: 'muted', style: 'margin:0.3rem 0 0', text: `Last ${formatDate(d.lastDate)}: ${d.last}. Best set: ${d.best}.` }));
+        container.appendChild(card);
+      }
     }
 
     function renderCheckIns(goals) {

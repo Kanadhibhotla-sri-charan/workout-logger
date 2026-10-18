@@ -7,7 +7,7 @@ import { isValidCalendarDate } from '../../engine/dateMath.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { WeeklyProgramRepo } from '../../repositories/weeklyProgramRepo.js';
-import { consistency, deloadHistory, goalCheckIns, strengthProgress, volumeHistory, type WeekRequirement } from '../../insights/insightsService.js';
+import { athleticWork, consistency, deloadHistory, goalCheckIns, strengthProgress, volumeHistory, type WeekRequirement } from '../../insights/insightsService.js';
 import { addDays } from '../../engine/dateMath.js';
 import { liveTargetAllocations } from './programming.js';
 
@@ -58,6 +58,7 @@ insightsRouter.get('/', (req, res) => {
     volume: volumeHistory(database, asOf, INSIGHTS_WEEKS, (weekStart) => weekRequirement(database, weekStart, currentWeekStart)),
     consistency: consistency(database, asOf, INSIGHTS_WEEKS),
     goalCheckIns: goalCheckIns(database, asOf),
+    athletic: athleticWork(database, asOf, INSIGHTS_WEEKS),
     deloads: deloadHistory(database, addDays(currentWeekStart, -7 * (INSIGHTS_WEEKS - 1)), asOf),
   });
 });

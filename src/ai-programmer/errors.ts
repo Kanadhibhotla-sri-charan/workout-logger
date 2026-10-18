@@ -49,7 +49,8 @@ export type AIProgrammerErrorCode =
   | 'AI_WEEK_GENERATION_BACKOFF'
   | 'AI_WEEK_GENERATION_IN_PROGRESS'
   | 'AI_COACH_REVIEW_OUTPUT_INVALID'
-  | 'AI_COACH_REVIEW_EXISTS';
+  | 'AI_COACH_REVIEW_EXISTS'
+  | 'AI_ATHLETIC_PAUSED';
 
 /** Base class for every error this integration throws. `statusCode` is
  * the HTTP status the route layer maps it to; `publicMessage` is what a

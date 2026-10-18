@@ -584,6 +584,86 @@
     "_file": "arms.yaml"
   },
   {
+    "id": "box-jump",
+    "name": "Box Jump",
+    "summary": "A two-foot jump onto a box, landing softly on top, for vertical power with a low landing impact.",
+    "why_this_exists": "Jumping onto a box trains explosive vertical leg drive, useful for jump smashes and overhead reaches, while the box shortens the fall and softens the landing.",
+    "body_regions": [
+      "quads",
+      "hips"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes"
+    ],
+    "secondary_targets": [
+      "calves",
+      "hamstrings"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "lower-body-power"
+    ],
+    "movement_patterns": [
+      "jump and land",
+      "two-foot jump onto a box"
+    ],
+    "equipment": [
+      "plyo box"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "skill-coordination"
+    ],
+    "training_mode": "power",
+    "resistance_profile": "Bodyweight; box height sets the challenge, and stepping down keeps landing impact low.",
+    "stability_demand": "medium",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "medium",
+    "best_used_when": [
+      "Vertical jumping power is the goal and a stable box is available."
+    ],
+    "less_suitable_when": [
+      "No stable box is available, or the shins and knees need protecting from a missed jump."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds vertical jumping power.",
+    "advantages": [],
+    "limitations": [
+      "A missed jump onto a hard box can catch the shins, so box height must stay well within ability.",
+      "Height is limited by hip mobility on landing as much as by power, so a higher box is not always a better jump."
+    ],
+    "technique_cues": [
+      "Stand about a foot from a stable box with the feet hip width apart.",
+      "Dip quickly into a quarter squat while swinging the arms back.",
+      "Swing the arms forward and jump up onto the box, landing softly on the whole foot in the same quarter-squat position.",
+      "Stand tall on the box, then step down rather than jumping down."
+    ],
+    "common_mistakes": [
+      "Choosing a box so high you land in a deep squat: it tests hip mobility, not power, and raises the risk of a missed jump.",
+      "Jumping down off the box: adds landing impact the drill is meant to avoid.",
+      "Knees caving inward on landing: the main joint risk in two-foot jumping."
+    ],
+    "programming_notes": [
+      "Raise the box only when every landing is quiet and in a quarter squat."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A heavy squat pattern for underlying leg strength."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=NvNrsZqrvaY",
+    "video_creator": "Your House Fitness",
+    "video_title": "How to Do Box Jumps",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "bulgarian-split-squat-hip-dominant",
     "name": "Bulgarian Split Squat (Long-Stance, Hip-Dominant Execution)",
     "summary": "A long-stance, hip-dominant unilateral pattern biasing the glutes and hamstrings, distinct from the quads module's short-stance version.",
@@ -783,6 +863,91 @@
     "video_verified_on": "2026-08-28",
     "video_verification_method": "metadata",
     "_file": "quads.yaml"
+  },
+  {
+    "id": "burpee",
+    "name": "Burpee",
+    "summary": "A squat, kick back to a plank, return and jump, repeated in timed rounds for whole-body conditioning.",
+    "why_this_exists": "It works the legs, chest, shoulders and trunk together in one movement, making it a whole-body conditioning option with no equipment.",
+    "body_regions": [
+      "full-body"
+    ],
+    "primary_targets": [
+      "quads",
+      "chest",
+      "shoulders",
+      "cardiovascular system"
+    ],
+    "secondary_targets": [
+      "triceps",
+      "trunk musculature",
+      "glutes"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "full-body-conditioning"
+    ],
+    "movement_patterns": [
+      "full-body conditioning",
+      "squat, plank and jump"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "conditioning",
+    "resistance_profile": "Bodyweight; pace and whether the push-up and jump are included set the intensity.",
+    "stability_demand": "medium",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "high",
+    "best_used_when": [
+      "Whole-body conditioning is wanted with no equipment and little space."
+    ],
+    "less_suitable_when": [
+      "Wrists or lower back are sore; the plank and quick floor transitions will aggravate them."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds whole-body endurance.",
+    "advantages": [],
+    "limitations": [
+      "Form tends to break down quickly under fatigue, especially the plank position.",
+      "The quick floor transitions load the wrists."
+    ],
+    "technique_cues": [
+      "Stand with the feet hip width apart, then squat and place the hands on the floor.",
+      "Jump or step the feet back into a straight plank.",
+      "Jump or step the feet back in toward the hands.",
+      "Stand and jump up with the arms overhead, landing softly into the next rep."
+    ],
+    "common_mistakes": [
+      "Letting the hips sag in the plank: the lower back takes strain.",
+      "Landing heavily from the jump: increases impact on the knees and ankles.",
+      "Rushing reps with sloppy positions: speed should never cost the plank or the landing."
+    ],
+    "programming_notes": [
+      "Step back and in instead of jumping to make it easier; add a push-up to make it harder."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Mobility work for the hips and shoulders afterwards."
+    ],
+    "overlaps_with": [
+      "mountain-climber"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=qLBImHhCXSw",
+    "video_creator": "Well+Good",
+    "video_title": "How To Do A Burpee | The Right Way | Well+Good",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
   },
   {
     "id": "cable-band-external-rotation",
@@ -2565,6 +2730,178 @@
     "_file": "hips.yaml"
   },
   {
+    "id": "cossack-squat",
+    "name": "Cossack Squat",
+    "summary": "A side-to-side squat that shifts the hips deep over one bent leg while the other stays straight with the toes up.",
+    "why_this_exists": "It combines inner-thigh and hip range with single-leg control in a wide stance, close to the low side reach of badminton.",
+    "body_regions": [
+      "hips",
+      "quads"
+    ],
+    "primary_targets": [
+      "adductors (mobility)",
+      "hips (mobility)"
+    ],
+    "secondary_targets": [
+      "quads",
+      "glutes"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "lower-body-mobility"
+    ],
+    "movement_patterns": [
+      "mobility drill",
+      "side-to-side deep squat"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "alternating",
+    "coverage_categories": [
+      "low-setup",
+      "skill-coordination",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "mobility-dynamic",
+    "resistance_profile": "Bodyweight; depth and how much support is used set the challenge.",
+    "stability_demand": "medium",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Inner-thigh and hip range in a wide stance is wanted, as a warm-up or mobility drill."
+    ],
+    "less_suitable_when": [
+      "The groin is strained or sore; reduce the range or skip it."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds wide-stance hip and inner-thigh range.",
+    "advantages": [],
+    "limitations": [
+      "Ankle and hip mobility often stop depth before strength does.",
+      "Balance in the bottom position takes practice; holding a support helps at first."
+    ],
+    "technique_cues": [
+      "Take a very wide stance with the toes slightly turned out.",
+      "Shift the hips over one leg and sit down as deep as you can, keeping that heel flat.",
+      "Keep the other leg straight with the toes pointing up and the chest up.",
+      "Shift across through the middle to the other side under control."
+    ],
+    "common_mistakes": [
+      "The bent-leg heel lifting: the load shifts onto the toes and the knee.",
+      "Rounding the back to get lower: depth should come from the hips.",
+      "Bouncing at the bottom: the stretch is no longer controlled, which strains the groin."
+    ],
+    "programming_notes": [
+      "Hold a post or a counterweight in front at first to stay balanced in the bottom."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A lateral lunge for strength in a similar position."
+    ],
+    "overlaps_with": [
+      "lateral-lunge"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=Uc1BZUg7sgA",
+    "video_creator": "Hyper Strength & Conditioning",
+    "video_title": "How to Cossack Squat Tutorial",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
+    "id": "couch-stretch",
+    "name": "Couch Stretch (Hip Flexor)",
+    "summary": "A kneeling stretch with the back foot raised against a wall or bench, stretching the front of the hip and thigh.",
+    "why_this_exists": "Lunging repeatedly and sitting for long periods both tighten the front of the hip. This stretch targets the hip flexors and quads directly.",
+    "body_regions": [
+      "hips",
+      "quads"
+    ],
+    "primary_targets": [
+      "hip flexors",
+      "quads (rectus femoris)"
+    ],
+    "secondary_targets": [],
+    "physique_targets": [],
+    "functional_goals": [
+      "lower-body-mobility"
+    ],
+    "movement_patterns": [
+      "mobility hold",
+      "kneeling hip-flexor stretch"
+    ],
+    "equipment": [
+      "wall",
+      "bench"
+    ],
+    "equipment_setups": [
+      [
+        "wall"
+      ],
+      [
+        "bench"
+      ]
+    ],
+    "exercise_type": "isolation",
+    "laterality": "unilateral",
+    "coverage_categories": [
+      "low-setup",
+      "low-fatigue",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "mobility-hold",
+    "resistance_profile": "Bodyweight stretch; how upright the torso is and how far the hips push forward set the intensity.",
+    "stability_demand": "low",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "The front of the hips and thighs feels tight, after court sessions or long periods of sitting."
+    ],
+    "less_suitable_when": [
+      "Kneeling on the back knee is painful; use a pad or a standing hip-flexor stretch instead."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds range at the front of the hip.",
+    "advantages": [],
+    "limitations": [
+      "The back knee takes pressure, so it usually needs a pad.",
+      "The stretch is intense for very tight lifters, who need to start more upright and less deep."
+    ],
+    "technique_cues": [
+      "Kneel with one knee close to a wall or bench and that foot resting up against it behind you.",
+      "Step the other foot forward into a half-kneeling position.",
+      "Squeeze the glute of the kneeling leg and tuck the pelvis slightly under.",
+      "Bring the torso upright until a strong but comfortable stretch is felt at the front of the hip and thigh."
+    ],
+    "common_mistakes": [
+      "Arching the lower back to get upright: the stretch moves away from the hip flexors into the lower back.",
+      "Skipping the glute squeeze and pelvic tuck: most of the hip-flexor stretch is lost.",
+      "Going straight to the deepest position: start with the torso leaning forward and progress."
+    ],
+    "programming_notes": [
+      "Hold each side for the same time; spend longer on the tighter side if one is clearly worse."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A deep squat hold for overall hip range."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=VZaWm5WjcX4",
+    "video_creator": "Mobility Doc",
+    "video_title": "Couch Stretch: How to",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "cross-body-hammer-curl",
     "name": "Cross-Body Hammer Curl",
     "summary": "A diagonal-path hammer curl variation toward the opposite shoulder, for a different line of pull once straight hammer curls plateau.",
@@ -2894,6 +3231,87 @@
     "_file": "chest.yaml"
   },
   {
+    "id": "deep-squat-hold",
+    "name": "Deep Squat Hold",
+    "summary": "Sitting in the bottom of a deep bodyweight squat and holding it, to build comfortable hip, knee and ankle range.",
+    "why_this_exists": "Low lunges and pick-ups in badminton need comfortable range at the hips and ankles. Holding a deep squat builds that range without equipment.",
+    "body_regions": [
+      "hips"
+    ],
+    "primary_targets": [
+      "hips (mobility)",
+      "ankles (mobility)"
+    ],
+    "secondary_targets": [
+      "adductors",
+      "lower back"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "lower-body-mobility"
+    ],
+    "movement_patterns": [
+      "mobility hold",
+      "deep squat position"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "low-fatigue",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "mobility-hold",
+    "resistance_profile": "Bodyweight; holding a support makes it easier, letting go makes it harder.",
+    "stability_demand": "low",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Hip and ankle range for low positions is wanted, as a warm-up or daily mobility habit."
+    ],
+    "less_suitable_when": [
+      "Knee pain appears in deep bending; work in a shallower range or with a raised heel."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds comfortable range in a deep squat.",
+    "advantages": [],
+    "limitations": [
+      "Ankle stiffness often limits depth before the hips do, which a heel lift can work around.",
+      "It builds range, not strength or power."
+    ],
+    "technique_cues": [
+      "Stand with the feet a little wider than the hips and the toes slightly turned out.",
+      "Lower into the deepest squat you can hold with the heels down, holding a post or door frame if needed.",
+      "Let the elbows gently push the knees out while keeping the chest up.",
+      "Breathe slowly and relax into the position for the whole hold."
+    ],
+    "common_mistakes": [
+      "Heels lifting off the floor: the stretch moves away from the ankles and the position becomes unstable.",
+      "Forcing depth into pain: mobility work should be a clear but comfortable stretch.",
+      "Holding the breath: the muscles stay tense and the position does not relax."
+    ],
+    "programming_notes": [
+      "A plate or wedge under the heels is a fine starting point; reduce it as ankle range improves."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Knee-to-wall ankle mobility for ankle range specifically."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=hOur_s-Rdnk",
+    "video_creator": "Swift Movement Academy",
+    "video_title": "How To Do a Deep Squat Mobility Hold",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "dip-chest-biased",
     "name": "Dip (Chest-Biased, Forward Lean)",
     "summary": "A bodyweight press that, with a forward torso lean, is one of the few ways to load the lower chest heavily.",
@@ -3142,6 +3560,88 @@
     "video_verified_on": "2026-08-28",
     "video_verification_method": "metadata",
     "_file": "arms.yaml"
+  },
+  {
+    "id": "drop-landing",
+    "name": "Drop Landing",
+    "summary": "Stepping off a low box and landing on both feet in a quiet, balanced quarter squat.",
+    "why_this_exists": "Badminton involves constant landing and stopping. Drop landings teach the legs to absorb force in a safe, repeatable position before faster jumping is added.",
+    "body_regions": [
+      "quads",
+      "hips"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes"
+    ],
+    "secondary_targets": [
+      "calves",
+      "hamstrings"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "landing-control"
+    ],
+    "movement_patterns": [
+      "jump and land",
+      "step-off landing"
+    ],
+    "equipment": [
+      "plyo box"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "skill-coordination"
+    ],
+    "training_mode": "power",
+    "resistance_profile": "Bodyweight; box height sets the landing force.",
+    "stability_demand": "medium",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Landing technique needs building before or alongside jumping drills."
+    ],
+    "less_suitable_when": [
+      "Knees are currently painful under impact; strength work comes first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds safe landing mechanics.",
+    "advantages": [],
+    "limitations": [
+      "Box height must stay low at first; too high a drop increases landing force faster than technique improves.",
+      "It trains absorbing force, not producing it."
+    ],
+    "technique_cues": [
+      "Stand on a low box with the feet hip width apart.",
+      "Step off with one foot, without jumping up first.",
+      "Land on both feet at the same time, sinking into a quarter squat with the hips back and the knees over the toes.",
+      "Hold the landing for two seconds, quietly and without wobbling."
+    ],
+    "common_mistakes": [
+      "Landing stiff-legged: the joints take the force instead of the muscles absorbing it.",
+      "Knees caving inward: the main knee-injury risk in landing.",
+      "Landing loudly on the heels: shows the force is not being absorbed through the ankles, knees and hips."
+    ],
+    "programming_notes": [
+      "Progress box height slowly, then add single-leg landings or a jump straight after the landing."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Box jumps once landings are consistent."
+    ],
+    "overlaps_with": [
+      "single-leg-hop-and-stick"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=5hU-Y9FuwrE",
+    "video_creator": "Alex Bunt",
+    "video_title": "Box Drop Land",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
   },
   {
     "id": "dumbbell-curl",
@@ -4039,6 +4539,93 @@
     "_file": "chest.yaml"
   },
   {
+    "id": "four-corner-shadow-footwork",
+    "name": "Four-Corner Shadow Footwork",
+    "summary": "Moving from the base to each corner of the badminton court and back without a shuttle, rehearsing real footwork patterns.",
+    "why_this_exists": "Shadow footwork rehearses the exact steps of badminton: split-step, lunge to the net, and recovery to the rear court. It trains movement speed and pattern without needing a partner or shuttle.",
+    "body_regions": [
+      "full-body",
+      "hips",
+      "quads"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes",
+      "calves"
+    ],
+    "secondary_targets": [
+      "hip abductors",
+      "trunk musculature"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "agility-change-of-direction",
+      "full-body-conditioning"
+    ],
+    "movement_patterns": [
+      "multidirectional footwork",
+      "split-step, lunge and recovery"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "skill-coordination",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "agility",
+    "resistance_profile": "Bodyweight; speed, distance covered and how many corners each set includes set the challenge.",
+    "stability_demand": "medium",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "medium",
+    "best_used_when": [
+      "Badminton-specific footwork speed and pattern are the goal, on or off court."
+    ],
+    "less_suitable_when": [
+      "The basic footwork patterns are not yet learned; slow, walked-through repetitions come first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds badminton footwork speed and pattern.",
+    "advantages": [],
+    "limitations": [
+      "Done fast and long it turns into conditioning, which is useful but no longer trains crisp footwork.",
+      "It needs a court or a similar marked-out space to be specific."
+    ],
+    "technique_cues": [
+      "Start in the middle of the court in a ready stance and split-step as if the shuttle is being hit.",
+      "Move to one corner using the footwork you would use in a rally, finishing with a lunge or a jumping reach.",
+      "Push back to the base position quickly and split-step again.",
+      "Work through the corners in a set or random order, keeping every step low and balanced."
+    ],
+    "common_mistakes": [
+      "Skipping the split-step: the first step to each corner gets slower, which is the main point of the drill.",
+      "Lunging with the front knee caving inward: loads the knee badly at the moment of highest force.",
+      "Drifting back slowly to the base: the recovery step is half of real court movement."
+    ],
+    "programming_notes": [
+      "For footwork quality use short sets with full rest; for conditioning see the shadow-badminton intervals record."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Lateral bounds or split-squat jumps for power."
+    ],
+    "overlaps_with": [
+      "shadow-badminton-intervals"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=fBa08o5GEqw",
+    "video_creator": "Badminton Insight",
+    "video_title": "4 Corner Footwork - A Step-By-Step Badminton Tutorial!",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "front-squat",
     "name": "Front Squat",
     "summary": "The front-loaded bar position keeps the torso more upright, shifting more mechanical-tension demand onto the quads than a back squat.",
@@ -4710,6 +5297,86 @@
     "video_verified_on": "2026-08-28",
     "video_verification_method": "metadata",
     "_file": "chest.yaml"
+  },
+  {
+    "id": "hip-90-90-switches",
+    "name": "90/90 Hip Switches",
+    "summary": "Sitting with both knees bent at 90 degrees and rotating the legs from side to side, working hip rotation in both directions.",
+    "why_this_exists": "Changing direction and lunging need the hips to rotate freely both ways. This drill works internal and external hip rotation without equipment.",
+    "body_regions": [
+      "hips"
+    ],
+    "primary_targets": [
+      "hip rotators (mobility)"
+    ],
+    "secondary_targets": [
+      "glutes",
+      "adductors"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "lower-body-mobility"
+    ],
+    "movement_patterns": [
+      "mobility drill",
+      "seated hip rotation"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "isolation",
+    "laterality": "alternating",
+    "coverage_categories": [
+      "low-setup",
+      "low-fatigue",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "mobility-dynamic",
+    "resistance_profile": "Bodyweight; hand support and how upright the torso is set the challenge.",
+    "stability_demand": "low",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Hip rotation range is wanted, as a warm-up or daily mobility drill."
+    ],
+    "less_suitable_when": [
+      "Sitting on the floor with bent knees is painful for the knees; use a raised seat."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds hip rotation range.",
+    "advantages": [],
+    "limitations": [
+      "Very tight hips need hand support behind the body at first.",
+      "It builds range, not strength."
+    ],
+    "technique_cues": [
+      "Sit on the floor with both knees bent at about 90 degrees, one leg in front and one to the side.",
+      "Sit tall, using the hands behind you for support if needed.",
+      "Lift both knees and rotate them to the other side so the legs swap positions.",
+      "Keep the movement slow and controlled, sitting tall at each end."
+    ],
+    "common_mistakes": [
+      "Collapsing the torso backward: the hips stop doing the rotation.",
+      "Swinging the legs with momentum: control is lost through the part of the range that needs the most work.",
+      "Forcing the knees down to the floor: strains the knees instead of moving the hips."
+    ],
+    "programming_notes": [
+      "Progress by removing the hand support, then by leaning forward over the front leg at each end."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A couch stretch for the front of the hip."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=HUZimFZJZWU",
+    "video_creator": "Alejandro Matias",
+    "video_title": "How to Do the 90/90 Switch for Hip Mobility (Step-by-Step Tutorial)",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
   },
   {
     "id": "hip-abduction",
@@ -5548,6 +6215,169 @@
     "_file": "neck.yaml"
   },
   {
+    "id": "jump-rope",
+    "name": "Jump Rope",
+    "summary": "Skipping with a rope in timed rounds, building conditioning, foot speed and springy ankles.",
+    "why_this_exists": "Skipping builds endurance and quick, light footwork at the same time, with minimal equipment.",
+    "body_regions": [
+      "full-body",
+      "calves"
+    ],
+    "primary_targets": [
+      "calves",
+      "cardiovascular system"
+    ],
+    "secondary_targets": [
+      "shoulders",
+      "forearms",
+      "quads"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "full-body-conditioning",
+      "ankle-resilience"
+    ],
+    "movement_patterns": [
+      "full-body conditioning",
+      "skipping"
+    ],
+    "equipment": [
+      "jump rope"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "skill-coordination"
+    ],
+    "training_mode": "conditioning",
+    "resistance_profile": "Bodyweight; pace and the length of each round set the intensity.",
+    "stability_demand": "low",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "medium",
+    "best_used_when": [
+      "Conditioning with light, quick footwork is wanted with minimal equipment."
+    ],
+    "less_suitable_when": [
+      "The calves or Achilles are sore; repeated impact will aggravate them."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds endurance and foot speed.",
+    "advantages": [],
+    "limitations": [
+      "The repeated impact loads the calves and Achilles, so volume has to build gradually.",
+      "Tripping breaks up the rounds while the skill is still being learned."
+    ],
+    "technique_cues": [
+      "Hold the handles at hip height with the elbows close to the sides.",
+      "Turn the rope with the wrists, not the whole arms.",
+      "Jump just high enough to clear the rope, landing softly on the balls of the feet.",
+      "Keep a steady rhythm for each work interval, then rest."
+    ],
+    "common_mistakes": [
+      "Jumping too high: wastes energy and increases landing impact.",
+      "Swinging the rope with the whole arms: the shoulders tire quickly and the rhythm breaks.",
+      "Landing flat-footed or on the heels: removes the springy contact and jars the joints."
+    ],
+    "programming_notes": [
+      "Learn the basic bounce first; add alternating feet and high knees once rounds flow without tripping."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Mobility work for the calves and ankles afterwards."
+    ],
+    "overlaps_with": [
+      "pogo-hops"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=_UTR1VWg8WY",
+    "video_creator": "Always Ghadi",
+    "video_title": "How to Jump Rope for Beginners (Step-by-Step Tutorial to Learn Fast)",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
+    "id": "knee-to-wall-ankle-mobility",
+    "name": "Knee-to-Wall Ankle Mobility",
+    "summary": "Driving the knee forward toward a wall over a planted foot, to build forward ankle bend.",
+    "why_this_exists": "Deep lunges and quick footwork need the shin to travel forward over the foot. This drill builds that ankle range directly.",
+    "body_regions": [
+      "calves"
+    ],
+    "primary_targets": [
+      "ankle (dorsiflexion range)",
+      "calves (mobility)"
+    ],
+    "secondary_targets": [],
+    "physique_targets": [],
+    "functional_goals": [
+      "ankle-resilience"
+    ],
+    "movement_patterns": [
+      "ankle dorsiflexion",
+      "knee-to-wall mobilisation"
+    ],
+    "equipment": [
+      "wall"
+    ],
+    "exercise_type": "isolation",
+    "laterality": "unilateral",
+    "coverage_categories": [
+      "low-setup",
+      "low-fatigue",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "mobility-dynamic",
+    "resistance_profile": "Bodyweight; the distance of the foot from the wall sets the range worked.",
+    "stability_demand": "low",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Ankle stiffness limits lunge depth or squat depth, or as a warm-up before court work."
+    ],
+    "less_suitable_when": [
+      "The ankle is acutely injured or swollen; get it assessed first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds forward ankle range.",
+    "advantages": [],
+    "limitations": [
+      "It addresses ankle range only, not strength or stability.",
+      "Gains come from regular practice rather than single sessions."
+    ],
+    "technique_cues": [
+      "Face a wall in a half-kneeling or split stance with the front foot a few centimetres from the wall.",
+      "Keep the front heel flat on the floor.",
+      "Drive the knee forward over the middle toes to touch the wall, then return.",
+      "Move the foot slightly further back as the knee reaches the wall easily."
+    ],
+    "common_mistakes": [
+      "Letting the heel lift: the ankle stops bending and the drill does nothing.",
+      "Letting the knee drift inward: the foot arch collapses instead of the ankle bending.",
+      "Rushing the reps: short, bouncy reps work less range than slow controlled ones."
+    ],
+    "programming_notes": [
+      "Work both ankles; spend more reps on the stiffer side."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Pogo hops once ankle range improves."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=NqgwyM9hXMI",
+    "video_creator": "Victoria Park Osteopaths",
+    "video_title": "Knee-to-Wall Ankle Mobility Exercise",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "lat-pulldown-wide-pronated",
     "name": "Lat Pulldown (Wide, Pronated Grip)",
     "summary": "A vertical pull with adjustable load and a wide overhand grip, the default most people mean by \"lat pulldown.\"",
@@ -5630,6 +6460,186 @@
     "_file": "back.yaml"
   },
   {
+    "id": "lateral-bound",
+    "name": "Lateral Bound (Skater Jump)",
+    "summary": "A sideways jump from one leg to the other, sticking each landing, for side-to-side power and control.",
+    "why_this_exists": "Badminton movement is heavily sideways. Bounding from one leg to the other trains lateral push-off power and the control to stop on a single leg.",
+    "body_regions": [
+      "hips",
+      "quads"
+    ],
+    "primary_targets": [
+      "glutes",
+      "quads",
+      "hip abductors"
+    ],
+    "secondary_targets": [
+      "calves",
+      "adductors"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "lower-body-power",
+      "agility-change-of-direction"
+    ],
+    "movement_patterns": [
+      "lateral locomotion",
+      "single-leg jump and land"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "alternating",
+    "coverage_categories": [
+      "low-setup",
+      "skill-coordination",
+      "unilateral",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "power",
+    "resistance_profile": "Bodyweight; distance and speed of each bound set the intensity.",
+    "stability_demand": "high",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "medium",
+    "best_used_when": [
+      "Side-to-side push-off power and single-leg landing control are the goal."
+    ],
+    "less_suitable_when": [
+      "Single-leg balance is not yet steady; lateral lunges build the position first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds lateral power and single-leg landing control.",
+    "advantages": [],
+    "limitations": [
+      "Each landing loads one knee and ankle sideways, so it needs a non-slip surface and a gradual build-up of distance.",
+      "It is easy to sacrifice landing control for distance without noticing."
+    ],
+    "technique_cues": [
+      "Stand on one leg with a soft knee and hips back, as if in a shallow single-leg squat.",
+      "Push off sideways from that leg, swinging the arms across to help.",
+      "Land on the opposite leg with a soft knee, hips back and the knee tracking over the toes.",
+      "Hold the landing for a second before bounding back the other way."
+    ],
+    "common_mistakes": [
+      "Landing with the knee caving inward: the main injury risk in lateral jumping.",
+      "Bounding too far to stick the landing: the extra distance comes at the cost of the control the drill trains.",
+      "Standing tall on landing: the hips and knees stop absorbing force and the joints take it instead."
+    ],
+    "programming_notes": [
+      "Progress distance first, then speed: stick every landing before linking bounds continuously."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A lateral lunge for strength in the same position."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=niEGdFUQ6sY",
+    "video_creator": "LPS Athletic",
+    "video_title": "How to Lateral Bound",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
+    "id": "lateral-lunge",
+    "name": "Lateral Lunge",
+    "summary": "A wide side step into a deep single-leg bend, pushing back to standing, for strength in the side lunge position.",
+    "why_this_exists": "Reaching wide for a shuttle puts the legs in a deep side-lunge position. Training strength and control there prepares the hips, knees and inner thighs for it.",
+    "body_regions": [
+      "quads",
+      "hips"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes",
+      "adductors"
+    ],
+    "secondary_targets": [
+      "hamstrings",
+      "hip abductors"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "landing-control",
+      "agility-change-of-direction"
+    ],
+    "movement_patterns": [
+      "unilateral knee- and hip-dominant",
+      "lateral lunge"
+    ],
+    "equipment": [
+      "bodyweight",
+      "dumbbell"
+    ],
+    "equipment_setups": [
+      [
+        "bodyweight"
+      ],
+      [
+        "dumbbell"
+      ]
+    ],
+    "exercise_type": "compound",
+    "laterality": "alternating",
+    "coverage_categories": [
+      "unilateral",
+      "low-setup",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "movement-strength",
+    "resistance_profile": "Bodyweight, or a dumbbell held at the chest once bodyweight is easy; hardest at the bottom of the side lunge.",
+    "stability_demand": "medium",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "medium",
+    "best_used_when": [
+      "Strength and control in the wide side-lunge position are wanted, as used when reaching for a shuttle."
+    ],
+    "less_suitable_when": [
+      "Inner-thigh or groin discomfort limits the stance width; start narrower and build range."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds strength and control in the side-lunge position.",
+    "advantages": [],
+    "limitations": [
+      "Groin and inner-thigh flexibility limit how deep and wide the lunge can go at first.",
+      "Each side is trained separately, which doubles the time per set."
+    ],
+    "technique_cues": [
+      "Stand tall with the feet together, holding a dumbbell at the chest if using one.",
+      "Take a wide step to one side and sit the hips back over that foot, keeping the other leg straight.",
+      "Lower until the working thigh is close to parallel, with the knee tracking over the toes and the foot flat.",
+      "Push off the working foot to return to standing, then repeat to the other side."
+    ],
+    "common_mistakes": [
+      "The working knee caving inward or drifting past the toes: shifts load onto the knee joint.",
+      "Rounding the back to get lower: depth should come from the hips, not the spine.",
+      "Lifting the heel of the working foot: the load moves onto the toes and the knee."
+    ],
+    "programming_notes": [
+      "Build depth and control with bodyweight before adding a dumbbell."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Lateral bounds for side-to-side power."
+    ],
+    "overlaps_with": [
+      "cossack-squat"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=73eKch1SMx0",
+    "video_creator": "LivestrongWoman",
+    "video_title": "How to Do a Lateral Lunge | Sleek/Strong With Rachel Cosgrove",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "lateral-neck-flexion",
     "name": "Lateral Neck Flexion",
     "summary": "Covers side-to-side neck strength, which straight flexion and extension leave out.",
@@ -5710,6 +6720,89 @@
     "video_verified_on": "2026-08-28",
     "video_verification_method": "metadata",
     "_file": "neck.yaml"
+  },
+  {
+    "id": "lateral-shuffle",
+    "name": "Lateral Shuffle",
+    "summary": "Quick sideways steps in an athletic stance without the feet crossing or clicking together.",
+    "why_this_exists": "Side-to-side court coverage depends on staying low and moving the feet quickly without crossing them. The shuffle trains that pattern directly.",
+    "body_regions": [
+      "hips",
+      "quads"
+    ],
+    "primary_targets": [
+      "hip abductors",
+      "glutes",
+      "quads"
+    ],
+    "secondary_targets": [
+      "adductors",
+      "calves"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "agility-change-of-direction"
+    ],
+    "movement_patterns": [
+      "lateral locomotion",
+      "athletic stance shuffle"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "skill-coordination",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "agility",
+    "resistance_profile": "Bodyweight; speed and the sharpness of each change of direction set the challenge.",
+    "stability_demand": "medium",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Quick side-to-side footwork is the goal, as a warm-up or agility block."
+    ],
+    "less_suitable_when": [
+      "There is not enough clear floor space for a few metres of movement each way."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds side-to-side footwork speed.",
+    "advantages": [],
+    "limitations": [
+      "It trains the pattern and speed rather than strength; it needs pairing with strength work for the legs.",
+      "Fatigue quickly makes the stance rise and the steps sloppy."
+    ],
+    "technique_cues": [
+      "Set an athletic stance: feet wider than the hips, knees bent, hips back and chest up.",
+      "Push off the trailing foot to move sideways, keeping the feet apart.",
+      "Stay at the same height throughout, without bobbing up and down.",
+      "Change direction by planting the outside foot and pushing back the other way."
+    ],
+    "common_mistakes": [
+      "Clicking the feet together or crossing them: the base narrows and balance is lost on the change of direction.",
+      "Standing up tall as you move: slows the first step and removes the low, ready position.",
+      "Leaning the torso into the direction of travel: the change of direction gets slower and less balanced."
+    ],
+    "programming_notes": [
+      "Short sets over a few metres with full changes of direction work better than long continuous shuffling."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A lateral lunge for strength in the same stance."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=W6wgZU8Ioos",
+    "video_creator": "XIP Training Systems",
+    "video_title": "Lateral Shuffle - The Right Way",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
   },
   {
     "id": "leg-extension",
@@ -6561,6 +7654,90 @@
     "_file": "arms.yaml"
   },
   {
+    "id": "mountain-climber",
+    "name": "Mountain Climber",
+    "summary": "Driving the knees toward the chest one at a time from a high plank, in fast timed rounds.",
+    "why_this_exists": "It builds endurance and quick leg turnover while the trunk holds a plank, with no equipment.",
+    "body_regions": [
+      "full-body",
+      "core"
+    ],
+    "primary_targets": [
+      "hip flexors",
+      "trunk musculature",
+      "cardiovascular system"
+    ],
+    "secondary_targets": [
+      "shoulders",
+      "quads"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "full-body-conditioning"
+    ],
+    "movement_patterns": [
+      "full-body conditioning",
+      "alternating knee drives from a plank"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "alternating",
+    "coverage_categories": [
+      "low-setup",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "conditioning",
+    "resistance_profile": "Bodyweight; pace sets the intensity.",
+    "stability_demand": "medium",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "medium",
+    "best_used_when": [
+      "Conditioning with no equipment and very little space is wanted."
+    ],
+    "less_suitable_when": [
+      "Wrists or shoulders are sore; the plank position keeps them loaded throughout."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds endurance and trunk control under fatigue.",
+    "advantages": [],
+    "limitations": [
+      "The wrists and shoulders carry bodyweight the whole time.",
+      "The hips tend to bounce up and down as fatigue sets in."
+    ],
+    "technique_cues": [
+      "Set up in a high plank with the hands under the shoulders and the body in a straight line.",
+      "Drive one knee toward the chest, then switch legs quickly.",
+      "Keep the hips level and the shoulders over the hands.",
+      "Keep a fast, steady rhythm for the whole interval."
+    ],
+    "common_mistakes": [
+      "Hips piking up high: shortens the lever and the trunk does less work.",
+      "Hips sagging: the lower back takes strain.",
+      "Feet only shuffling a few centimetres: the knee drive is the main work."
+    ],
+    "programming_notes": [
+      "Slow the tempo to make it more of a trunk exercise, or speed it up for conditioning."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Hip-flexor and hip mobility work afterwards."
+    ],
+    "overlaps_with": [
+      "burpee"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=De3Gl-nC7IQ",
+    "video_creator": "Nick Tumminello - Trainer of Trainers",
+    "video_title": "How to do Mountain Climbers Exercise the RIGHT way.",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "neck-extension",
     "name": "Neck Extension",
     "summary": "Loads the back of the neck, the region most responsible for visible neck thickness.",
@@ -7409,6 +8586,89 @@
     "video_verified_on": "2026-10-09",
     "video_verification_method": "metadata",
     "_file": "core.yaml"
+  },
+  {
+    "id": "pogo-hops",
+    "name": "Pogo Hops",
+    "summary": "Quick, small, stiff-ankled bounces on the balls of the feet, training springy, reactive ankles.",
+    "why_this_exists": "Badminton footwork relies on quick, springy steps and split-steps. Short ground-contact hops train the lower legs to absorb and return force quickly.",
+    "body_regions": [
+      "calves",
+      "quads"
+    ],
+    "primary_targets": [
+      "calves (gastrocnemius and soleus)"
+    ],
+    "secondary_targets": [
+      "quads",
+      "foot and ankle stabilizers"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "ankle-resilience",
+      "lower-body-power"
+    ],
+    "movement_patterns": [
+      "jump and land",
+      "quick ankle bounces"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "power",
+    "resistance_profile": "Bodyweight; ground-contact speed, not height, sets the challenge.",
+    "stability_demand": "low",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Quick, reactive ankles are wanted as part of a warm-up or before court work."
+    ],
+    "less_suitable_when": [
+      "The Achilles or calves are sore; calf raises build tolerance first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds reactive ankle and calf stiffness.",
+    "advantages": [],
+    "limitations": [
+      "The repeated impact builds up quickly in the Achilles and calves, so volume has to increase gradually.",
+      "It trains small, fast bounces, not maximal jumping height."
+    ],
+    "technique_cues": [
+      "Stand tall with the feet about hip width apart and the knees almost straight.",
+      "Bounce up and down on the balls of the feet, keeping the heels just off the floor.",
+      "Keep each ground contact as short and quiet as possible, letting the ankles do the work.",
+      "Stop the set when the bounces lose their rhythm or get loud."
+    ],
+    "common_mistakes": [
+      "Bending the knees a lot on each bounce: the knees and hips take over and the ankle stiffness the drill trains is lost.",
+      "Letting the heels slam down: removes the springy contact and increases impact on the heel and Achilles.",
+      "Doing long sets: once contacts slow down it is no longer the reactive quality being trained."
+    ],
+    "programming_notes": [
+      "Progress from two feet to forward, sideways and then single-leg pogos."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A loaded calf raise for strength."
+    ],
+    "overlaps_with": [
+      "jump-rope"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=c2LBofIzUqs",
+    "video_creator": "Live Lean TV Daily Exercises",
+    "video_title": "How To Do Pogo Hops | Exercise Demonstration Video and Guide",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
   },
   {
     "id": "preacher-curl",
@@ -8516,6 +9776,9 @@
     "physique_targets": [
       "quads"
     ],
+    "functional_goals": [
+      "landing-control"
+    ],
     "movement_patterns": [
       "unilateral knee-dominant",
       "stepping backward"
@@ -8860,6 +10123,89 @@
     "video_verified_on": "2026-08-28",
     "video_verification_method": "metadata",
     "_file": "hamstrings.yaml"
+  },
+  {
+    "id": "rowing-machine-intervals",
+    "name": "Rowing Machine Intervals",
+    "summary": "Hard rowing intervals on an indoor rowing machine, driving with the legs and finishing with the arms.",
+    "why_this_exists": "Rowing works the legs, back and arms together with low impact, so it builds whole-body endurance without the joint load of running and jumping.",
+    "body_regions": [
+      "full-body",
+      "back"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes",
+      "lats",
+      "cardiovascular system"
+    ],
+    "secondary_targets": [
+      "hamstrings",
+      "biceps",
+      "trunk musculature"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "full-body-conditioning"
+    ],
+    "movement_patterns": [
+      "full-body conditioning",
+      "rowing stroke"
+    ],
+    "equipment": [
+      "rowing machine"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup"
+    ],
+    "training_mode": "conditioning",
+    "resistance_profile": "Machine; stroke power and stroke rate set the intensity.",
+    "stability_demand": "low",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "high",
+    "best_used_when": [
+      "Whole-body conditioning with low impact on the knees and ankles is wanted."
+    ],
+    "less_suitable_when": [
+      "The lower back is sore; poor rowing form loads it heavily."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds whole-body endurance.",
+    "advantages": [],
+    "limitations": [
+      "It needs a rowing machine.",
+      "Poor technique shifts the work onto the arms and lower back."
+    ],
+    "technique_cues": [
+      "Strap the feet in, sit tall and hold the handle with straight arms, shins near vertical.",
+      "Drive with the legs first, keeping the arms straight.",
+      "As the legs straighten, lean back slightly and pull the handle to the lower ribs.",
+      "Return in reverse: arms out, lean forward, then bend the knees."
+    ],
+    "common_mistakes": [
+      "Pulling with the arms before the legs drive: the arms tire and the legs do little.",
+      "Bending the knees before the hands pass them on the way back: the handle has to travel over the knees.",
+      "Rounding the back at the front of the stroke: loads the lower back."
+    ],
+    "programming_notes": [
+      "Track distance or average pace per interval to see progress."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Lower-body mobility work afterwards."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=Hw4pt9oXu_o",
+    "video_creator": "Chris Liddle: Fitness, Growth, and Skills",
+    "video_title": "How to Use a Rowing Machine | Proper Rowing Technique for Beginners",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
   },
   {
     "id": "russian-twist",
@@ -9363,6 +10709,173 @@
     "_file": "shoulders.yaml"
   },
   {
+    "id": "shadow-badminton-intervals",
+    "name": "Shadow Badminton Intervals",
+    "summary": "Continuous shadow footwork and swings around the court in timed rounds, as badminton-specific conditioning.",
+    "why_this_exists": "Moving around the court with racket swings in rally-length bursts builds endurance in the exact movements of a match.",
+    "body_regions": [
+      "full-body"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes",
+      "calves",
+      "cardiovascular system"
+    ],
+    "secondary_targets": [
+      "shoulders",
+      "trunk musculature"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "full-body-conditioning"
+    ],
+    "movement_patterns": [
+      "multidirectional footwork",
+      "shadow rallies"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "skill-coordination",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "conditioning",
+    "resistance_profile": "Bodyweight (a racket is optional); speed and interval length set the intensity.",
+    "stability_demand": "medium",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "high",
+    "best_used_when": [
+      "Badminton-specific endurance is wanted, on or off court."
+    ],
+    "less_suitable_when": [
+      "The footwork patterns are not yet learned; four-corner shadow footwork at a slower pace comes first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds badminton-specific endurance.",
+    "advantages": [],
+    "limitations": [
+      "As fatigue builds, footwork quality drops, so interval length must match current fitness.",
+      "It needs a court or similar space to be specific."
+    ],
+    "technique_cues": [
+      "Start each round at the base position in a ready stance.",
+      "Move to corners in a random or set order, adding a shadow swing at each one.",
+      "Recover to the base and split-step before every movement.",
+      "Keep the pace hard but repeatable for the whole interval."
+    ],
+    "common_mistakes": [
+      "Letting the footwork get sloppy to keep the pace: rehearses bad movement under fatigue.",
+      "Skipping the split-step: removes the most badminton-specific part of the drill.",
+      "Making rounds much longer than real rallies: it turns into steady cardio rather than rally-style conditioning."
+    ],
+    "programming_notes": [
+      "Match the work interval to typical rally length and keep rests short to build match endurance."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Lower-body mobility work afterwards."
+    ],
+    "overlaps_with": [
+      "four-corner-shadow-footwork"
+    ],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=JldE-PrdB9M",
+    "video_creator": "Badminton Justin",
+    "video_title": "Badminton Footwork Drills ANYWHERE [What is Shadow Footwork?]",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
+    "id": "shuttle-run",
+    "name": "Shuttle Run",
+    "summary": "Running back and forth between two markers in timed intervals, with fast turns at each end.",
+    "why_this_exists": "Repeated sprints with sharp turns build the endurance to keep moving at speed through long rallies, with only open space needed.",
+    "body_regions": [
+      "full-body",
+      "quads"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes",
+      "hamstrings",
+      "cardiovascular system"
+    ],
+    "secondary_targets": [
+      "calves"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "full-body-conditioning"
+    ],
+    "movement_patterns": [
+      "running",
+      "sprint and turn"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "bilateral",
+    "coverage_categories": [
+      "low-setup",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "conditioning",
+    "resistance_profile": "Bodyweight; distance between markers and number of turns set the intensity.",
+    "stability_demand": "medium",
+    "skill_demand": "low",
+    "setup_time": "low",
+    "fatigue_cost": "high",
+    "best_used_when": [
+      "Repeated-sprint endurance is wanted and there is open space of 10 to 20 metres."
+    ],
+    "less_suitable_when": [
+      "Hamstrings are tight or recently strained; sprinting can aggravate them."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds repeated-sprint endurance.",
+    "advantages": [],
+    "limitations": [
+      "Sprinting and sharp turns carry a hamstring and ankle strain risk without a thorough warm-up.",
+      "It needs open, non-slip space."
+    ],
+    "technique_cues": [
+      "Set two markers 10 to 20 metres apart and start in a ready stance behind one.",
+      "Run hard to the far marker, staying low as you approach it.",
+      "Plant the outside foot, touch the line, and push back the other way.",
+      "Keep each interval at a pace you can repeat for every round."
+    ],
+    "common_mistakes": [
+      "Skipping the warm-up: cold sprinting is the main cause of hamstring strains in this drill.",
+      "Turning upright with straight legs: slows the turn and loads the knees.",
+      "Starting the first round flat out: later rounds collapse and the session loses its endurance value."
+    ],
+    "programming_notes": [
+      "Shorter distances mean more turns and more change-of-direction work; longer distances mean more running speed."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Mobility work for the hips and hamstrings afterwards."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=UPnXbZzTT2k",
+    "video_creator": "Clark Atlanta University Sports-Performance",
+    "video_title": "The 300 Yard Shuttle Conditioning Drill",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "side-lying-hip-abduction",
     "name": "Side-Lying Hip Abduction",
     "summary": "A floor-based hip abduction lying on one side, the no-equipment way to train the gluteus medius and minimus directly.",
@@ -9713,6 +11226,9 @@
     "physique_targets": [
       "gastrocnemius"
     ],
+    "functional_goals": [
+      "ankle-resilience"
+    ],
     "movement_patterns": [
       "unilateral ankle plantarflexion"
     ],
@@ -9857,6 +11373,91 @@
     "video_verified_on": "2026-10-08",
     "video_verification_method": "metadata",
     "_file": "hips.yaml"
+  },
+  {
+    "id": "single-leg-hop-and-stick",
+    "name": "Single-Leg Hop and Stick",
+    "summary": "A small hop forward or sideways on one leg, landing and holding the landing still on the same leg.",
+    "why_this_exists": "Badminton often ends a movement on one leg. Hopping and sticking the landing trains single-leg landing control and ankle and knee stability.",
+    "body_regions": [
+      "calves",
+      "quads"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes",
+      "calves"
+    ],
+    "secondary_targets": [
+      "foot and ankle stabilizers",
+      "hip abductors"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "landing-control",
+      "ankle-resilience"
+    ],
+    "movement_patterns": [
+      "jump and land",
+      "single-leg hop and hold"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "unilateral",
+    "coverage_categories": [
+      "unilateral",
+      "low-setup",
+      "skill-coordination",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "power",
+    "resistance_profile": "Bodyweight; hop distance and direction set the challenge.",
+    "stability_demand": "high",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "low",
+    "best_used_when": [
+      "Single-leg landing control and ankle stability are the goal, as part of a warm-up or power block."
+    ],
+    "less_suitable_when": [
+      "Single-leg balance on a flat floor is not yet steady; balance work comes first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds single-leg landing control.",
+    "advantages": [],
+    "limitations": [
+      "It needs good single-leg balance first, and the landing loads one ankle and knee at a time.",
+      "Distance has to stay small until every landing is stuck."
+    ],
+    "technique_cues": [
+      "Stand on one leg with a soft knee and the hips slightly back.",
+      "Hop a short distance forward or sideways.",
+      "Land on the same leg with a soft knee, the knee over the toes, and the hips back.",
+      "Hold the landing still for two to three seconds before the next hop."
+    ],
+    "common_mistakes": [
+      "The knee caving inward on landing: the main knee-injury risk the drill is meant to train against.",
+      "Hopping too far to stick it: wobbling landings mean the distance is ahead of the control.",
+      "Landing on the heel with a straight knee: the joints take the impact instead of the muscles."
+    ],
+    "programming_notes": [
+      "Start with small forward hops, then add sideways and diagonal directions."
+    ],
+    "alternatives": [],
+    "complements": [
+      "Single-leg calf raises for ankle strength."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=CYb0YKAKtIA",
+    "video_creator": "Alex Bunt",
+    "video_title": "Single-Leg Forward Hop & Stick",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
   },
   {
     "id": "single-leg-romanian-deadlift",
@@ -10520,6 +12121,88 @@
     "_file": "quads.yaml"
   },
   {
+    "id": "split-squat-jump",
+    "name": "Split-Squat Jump",
+    "summary": "An explosive jump from a split stance, switching legs in the air and landing softly in the opposite split.",
+    "why_this_exists": "Badminton lunges and push-offs happen from a split stance. Jumping from that position trains fast, powerful leg drive and a controlled landing with only bodyweight.",
+    "body_regions": [
+      "quads",
+      "hips"
+    ],
+    "primary_targets": [
+      "quads",
+      "glutes"
+    ],
+    "secondary_targets": [
+      "calves",
+      "hamstrings"
+    ],
+    "physique_targets": [],
+    "functional_goals": [
+      "lower-body-power"
+    ],
+    "movement_patterns": [
+      "jump and land",
+      "split stance, switching legs in the air"
+    ],
+    "equipment": [
+      "bodyweight"
+    ],
+    "exercise_type": "compound",
+    "laterality": "alternating",
+    "coverage_categories": [
+      "low-setup",
+      "skill-coordination",
+      "equipment-limited-substitute"
+    ],
+    "training_mode": "power",
+    "resistance_profile": "Bodyweight; the landing absorbs more force than the jump produces, so landing control sets the limit.",
+    "stability_demand": "high",
+    "skill_demand": "medium",
+    "setup_time": "low",
+    "fatigue_cost": "medium",
+    "best_used_when": [
+      "Explosive leg drive from a split stance is wanted with no equipment, early in a session while fresh."
+    ],
+    "less_suitable_when": [
+      "Knees or ankles are sore, or a soft, balanced landing is not yet reliable; split squats and lunges build the base first."
+    ],
+    "mirror_effect": "Not a physique exercise; it builds explosive leg drive and landing control rather than muscle size.",
+    "advantages": [],
+    "limitations": [
+      "Landing force is high, so knee or ankle discomfort, or a hard floor, limits how many quality reps are possible.",
+      "Balance on landing usually fails before power does when learning it."
+    ],
+    "technique_cues": [
+      "Start in a split stance with the front knee bent, back knee just off the floor, and torso upright.",
+      "Drive hard through both feet and swing the arms up to jump straight up.",
+      "Switch legs in the air so the opposite leg lands in front.",
+      "Land softly on the balls of the feet into the same split depth, then pause or go straight into the next rep."
+    ],
+    "common_mistakes": [
+      "Landing stiff-legged: the knees and ankles take the impact instead of the muscles absorbing it.",
+      "Front knee collapsing inward on landing: loads the knee awkwardly and is the main injury risk of the drill.",
+      "Rushing reps once tired: jumps get lower and landings sloppier, which turns power work into conditioning."
+    ],
+    "programming_notes": [
+      "Learn it with a pause in the split after every landing before moving to continuous reps."
+    ],
+    "alternatives": [],
+    "complements": [
+      "A heavy single-leg strength exercise such as a split squat."
+    ],
+    "overlaps_with": [],
+    "evidence_notes": [],
+    "review_status": "needs-review",
+    "video_link": "https://www.youtube.com/watch?v=rQVUltB7aUc",
+    "video_creator": "Absolute MMA",
+    "video_title": "How to Do the Split Squat Jump",
+    "video_status": "verified",
+    "video_verified_on": "2026-10-18",
+    "video_verification_method": "metadata",
+    "_file": "athletic.yaml"
+  },
+  {
     "id": "standing-cable-hip-flexion",
     "name": "Standing Cable Hip Flexion",
     "summary": "Trains hip flexion under load, which most lower-body routines leave entirely to stretching.",
@@ -10805,6 +12488,9 @@
     ],
     "physique_targets": [
       "quads"
+    ],
+    "functional_goals": [
+      "landing-control"
     ],
     "movement_patterns": [
       "unilateral knee-dominant",
@@ -11412,6 +13098,9 @@
       "tibialis anterior"
     ],
     "secondary_targets": [],
+    "functional_goals": [
+      "ankle-resilience"
+    ],
     "movement_patterns": [
       "ankle dorsiflexion"
     ],
@@ -11684,6 +13373,9 @@
     ],
     "physique_targets": [
       "quads"
+    ],
+    "functional_goals": [
+      "landing-control"
     ],
     "movement_patterns": [
       "unilateral knee-dominant",

@@ -138,7 +138,7 @@ export function validateExerciseAgainstTargets(
   if (exercise.repsMax > MAX_REPS) {
     errors.push(`${path}: repsMax (${exercise.repsMax}) exceeds the application safety ceiling of ${MAX_REPS}`);
   }
-  if (exercise.rirMax > MAX_RIR) {
+  if (exercise.rirMax !== null && exercise.rirMax > MAX_RIR) {
     errors.push(`${path}: rirMax (${exercise.rirMax}) exceeds the application safety ceiling of ${MAX_RIR}`);
   }
   if (exercise.restSeconds !== undefined && exercise.restSeconds > MAX_REST_SECONDS) {

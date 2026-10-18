@@ -1,3 +1,4 @@
+import { modePrescriptionFor } from '../blueprint/programmingProfiles.js';
 import type Database from 'better-sqlite3';
 import { resolveExercise } from '../engine/exerciseUniverse.js';
 import type {
@@ -317,7 +318,8 @@ export class WorkoutSessionsRepo {
       target_id: input.target_id ?? null,
       equipment: input.equipment !== undefined ? input.equipment : this.lastEquipmentFor(input.exercise_id),
       attachment: input.attachment !== undefined ? input.attachment : this.lastLogOptionFor(input.exercise_id, 'attachment'),
-      rep_unit: input.rep_unit !== undefined ? input.rep_unit : this.lastLogOptionFor(input.exercise_id, 'rep_unit'),
+      // A drill's first log uses its Blueprint unit (reps or seconds).
+      rep_unit: input.rep_unit !== undefined ? input.rep_unit : (this.lastLogOptionFor(input.exercise_id, 'rep_unit') ?? modePrescriptionFor(input.exercise_id)?.unit ?? null),
     };
 
     const tx = this.db.transaction(() => {

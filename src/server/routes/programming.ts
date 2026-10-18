@@ -44,6 +44,7 @@ import { todayForUser } from '../../lib/userTimezone.js';
 import { buildTrainingState } from '../../engine/trainingState.js';
 import { DAY_NOTE_MAX_LENGTH, DayNotesRepo } from '../../repositories/dayNotesRepo.js';
 import { INJURY_AREAS, INJURY_AREA_IDS, InjuryPausesRepo, type InjuryArea } from '../../repositories/injuryPausesRepo.js';
+import { LEG_TRAINING_MODES, LegTrainingRepo, type LegTrainingMode } from '../../repositories/legTrainingRepo.js';
 import { DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS } from '../../engine/config.js';
 import { endReactiveDeload, getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
 import { PeriodizationEventsRepo } from '../../coaching/periodization/periodizationEventsRepo.js';
@@ -727,6 +728,24 @@ programmingRouter.put('/injuries/:area', (req, res) => {
   else repo.resume(area);
   const current = repo.list().find((p) => p.area === area);
   res.json({ id: area, label: INJURY_AREAS[area].label, paused: !!current, since: current?.since ?? null, note: current?.note ?? null });
+});
+
+// Leg training mode (2026-10-18). GET returns it; PUT { mode } sets
+// 'hypertrophy' (legs trained for size, a Legs day) or 'athletic' (no leg
+// size work; the Legs slot becomes an Athletic day of drills and
+// conditioning). Never touches existing sessions or proposals.
+programmingRouter.get('/leg-training', (req, res) => {
+  res.json({ mode: new LegTrainingRepo(db(req)).get() });
+});
+
+programmingRouter.put('/leg-training', (req, res) => {
+  const { mode } = req.body ?? {};
+  if (!(LEG_TRAINING_MODES as readonly unknown[]).includes(mode)) {
+    return res.status(400).json({ error: `mode must be one of ${LEG_TRAINING_MODES.join('|')}` });
+  }
+  const repo = new LegTrainingRepo(db(req));
+  if (!repo.set(mode as LegTrainingMode)) return res.status(409).json({ error: 'set up your training profile first' });
+  res.json({ mode: repo.get() });
 });
 
 const PRESCRIPTION_POLICIES = ['reuse', 'regenerate', 'schedule-only'] as const;

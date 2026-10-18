@@ -569,6 +569,7 @@ const WEEK_GENERATION_DAY_STATUS = {
   failed_quality: { label: 'Failed the quality checks', tone: 'danger' },
   gated: { label: 'Not retried — the same request already failed', tone: 'warning' },
   failed_provider: { label: 'AI provider unavailable', tone: 'danger' },
+  injury_pause: { label: 'Rest day — Legs injury pause is on', tone: 'rest' },
   not_generated: { label: 'Not generated', tone: 'neutral' },
 };
 function weekGenerationView(generation) {

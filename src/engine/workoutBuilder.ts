@@ -50,6 +50,7 @@ import { ABS_PHYSIQUE_TARGETS, DEFAULT_PROGRAM_BLOCK_LENGTH_WEEKS, EXPOSURE_COEF
 import { isBodyFocusAllowedOnDay, isLowerBodyPhysiqueTarget, type FittableItem } from './constraintEngine.js';
 import { addDays, daysBetween } from './dateMath.js';
 import { assignSessionPurposes, isTargetCompatibleWithPurpose, type SessionPurpose } from './sessionPurpose.js';
+import { LegTrainingRepo } from '../repositories/legTrainingRepo.js';
 import { exercisesTrainingTarget, selectExercise, AllCandidatesAvoidedError, type ExerciseSelectionResult, type ExercisePreferenceLevel } from './exerciseSelector.js';
 import { evaluateSessionPairings } from './exercisePairing.js';
 import { calculateExerciseExposure } from './exposureEngine.js';
@@ -563,6 +564,9 @@ export interface WeeklyPlanInput {
    * these input values themselves. */
   targets: readonly TargetBuildContext[];
   recurring_badminton_days?: readonly Weekday[];
+  /** Leg training mode (2026-10-18); absent = 'hypertrophy'. 'athletic'
+   * puts an Athletic day in the Legs slot of the rotation. */
+  leg_training?: 'hypertrophy' | 'athletic';
   /** Cross-Week Planning Horizon (Consolidated Fix §7 remains intact —
    * this is NOT time-based candidate elimination; see this module's own
    * `assertNoContradictoryProgramState`-adjacent notes and
@@ -1036,7 +1040,7 @@ export function buildWeeklyProgrammingPlan(input: WeeklyPlanInput): WeeklyProgra
   const classificationByTarget = new Map<string, TargetClassification>();
 
   const orderedGymDays = WEEKDAYS.filter((d) => input.available_training_days.includes(d));
-  const { purposes: sessionPurposes, reasoning: purposeReasoning } = assignSessionPurposes(orderedGymDays, input.recurring_badminton_days ?? []);
+  const { purposes: sessionPurposes, reasoning: purposeReasoning } = assignSessionPurposes(orderedGymDays, input.recurring_badminton_days ?? [], input.leg_training ?? 'hypertrophy');
   if (orderedGymDays.length > 0) log.push(purposeReasoning);
 
   const dateForWeekday = new Map<Weekday, string>(WEEKDAYS.map((d, i) => [d, addDays(input.weekStart, i)]));
@@ -2878,7 +2882,10 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
   );
   const nextWeekOrderedGymDays = WEEKDAYS.filter((d) => nextWeekEffective.trainingDays.includes(d));
   const nextWeekRecurringBadmintonDays = nextWeekEffective.otherActivitySchedule.filter((a) => a.activity_type === 'badminton').map((a) => a.day);
-  const { purposes: nextWeekSessionPurposes } = assignSessionPurposes(nextWeekOrderedGymDays, nextWeekRecurringBadmintonDays);
+  const legTrainingRepo = new LegTrainingRepo(db);
+  const legTraining = legTrainingRepo.get();
+  const athleticLegTargets = legTrainingRepo.athleticLegTargetIds();
+  const { purposes: nextWeekSessionPurposes } = assignSessionPurposes(nextWeekOrderedGymDays, nextWeekRecurringBadmintonDays, legTraining);
 
   // The immediately preceding real week's own already-persisted
   // WeeklyPlanTargetAllocation[] (programs.target_allocations_json) —
@@ -2944,8 +2951,10 @@ export function assembleWeeklyPlanInput(db: Database.Database, date: string, bud
     defaultSessionMinutes: state.training_profile?.default_session_duration_minutes ?? budgetMinutes,
     available_equipment: state.training_profile?.available_equipment ?? [],
     available_training_days: effective.trainingDays,
-    targets,
+    // Leg training 'athletic' (2026-10-18): leg muscles get no growth volume.
+    targets: legTraining === 'athletic' ? targets.filter((t) => !(t.target_type === 'physique_target' && athleticLegTargets.has(t.target_id))) : targets,
     recurring_badminton_days: recurringBadmintonDays,
+    leg_training: legTraining,
     nextWeekOrderedGymDays,
     nextWeekSessionPurposes,
     carryoverByTarget,

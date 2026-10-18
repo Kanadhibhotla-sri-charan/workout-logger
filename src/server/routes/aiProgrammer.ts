@@ -98,7 +98,7 @@ function requireEnabled(): void {
   }
 }
 
-const REQUESTABLE_SESSION_PURPOSES = ['push', 'pull', 'legs', 'upper'] as const;
+const REQUESTABLE_SESSION_PURPOSES = ['push', 'pull', 'legs', 'upper', 'athletic'] as const;
 
 aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
   const { targetDate, timezone, requestedSessionPurpose, confirmRetry } = req.body ?? {};

@@ -31,6 +31,8 @@ import { UsersRepo } from '../../repositories/usersRepo.js';
 import { WeekActivityOverridesRepo } from '../../repositories/weekActivityOverridesRepo.js';
 import { WeekGenerationRunRepo, type WeekRunDay, type WeekRunFailureClass, type WeekRunRecord } from '../../repositories/weekGenerationRunRepo.js';
 import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
+import { LegTrainingRepo } from '../../repositories/legTrainingRepo.js';
+import { athleticPaused, buildAthleticContext } from '../../athletic/athleticSession.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
 import type { ProjectedSession } from '../context/projectedExposure.js';
 import {
@@ -97,7 +99,7 @@ export function weekGymDays(db: Database.Database, weekStart: string): WeekGymDa
   const effective = applyWeekOverrides(profile.training_days, profile.other_activity_schedule, overrides);
   const orderedGymDays = WEEKDAYS.filter((d) => effective.trainingDays.includes(d));
   const badmintonDays = effective.otherActivitySchedule.filter((a) => a.activity_type === 'badminton').map((a) => a.day);
-  const { purposes } = assignSessionPurposes(orderedGymDays, badmintonDays);
+  const { purposes } = assignSessionPurposes(orderedGymDays, badmintonDays, new LegTrainingRepo(db).get());
   return orderedGymDays.map((weekday) => ({ date: addDays(weekStart, WEEKDAYS.indexOf(weekday)), weekday, purpose: purposes.get(weekday) ?? null }));
 }
 
@@ -165,7 +167,13 @@ export function startWeekGeneration(
   const gymDays = weekGymDays(db, weekStart);
   const ineligible: Array<{ date: string; reason: string }> = [];
   const days: WeekRunDay[] = [];
+  const legsPaused = athleticPaused(db);
   for (const day of gymDays) {
+    // Athletic day while the Legs injury pause is on: a rest day, never generated.
+    if (day.purpose === 'athletic' && legsPaused) {
+      ineligible.push({ date: day.date, reason: 'injury_pause' });
+      continue;
+    }
     const e = dayEligibility(db, day.date, today, now);
     if (e.eligible) days.push({ date: day.date, purpose: day.purpose, outcome: 'planned' });
     else ineligible.push({ date: day.date, reason: e.reason });
@@ -275,6 +283,23 @@ async function executeRun(db: Database.Database, service: AIProgrammerService, r
     }
 
     try {
+      if (day.purpose === 'athletic') {
+        const context = buildAthleticContext(db, day.date);
+        day.contextHash = context.contextHash;
+        const previous = repo.dayFailure(day.date, context.contextHash);
+        if (previous && !options.confirmRetry) {
+          day.outcome = 'gated';
+          day.code = previous.code;
+          continue;
+        }
+        const result = await withHeartbeat(repo, run.id, days, () =>
+          service.generateAthleticFromContext(context, { weekRunId: run.id, expiresAt: endOfLocalDateIso(day.date, timeZone) })
+        );
+        if (previous) repo.clearDayFailure(day.date, context.contextHash);
+        day.outcome = 'proposal_pending';
+        day.proposalId = result.proposalId;
+        continue;
+      }
       const projected = projectedSessionsBefore(db, run.weekStart, day.date);
       const context = buildProgrammerContext(db, {
         targetDate: day.date,
@@ -344,6 +369,7 @@ export type WeekDayGenerationStatus =
   | 'failed_quality'
   | 'gated'
   | 'failed_provider'
+  | 'injury_pause'
   | 'not_generated';
 
 export interface WeekGenerationState {
@@ -369,6 +395,7 @@ export function readWeekGenerationState(db: Database.Database, weekStart: string
   const running = runningRaw && runningRaw.heartbeatAt >= staleBefore ? runningRaw : undefined;
   const lastRun = running ?? repo.latestFinished(weekStart);
 
+  const legsPaused = athleticPaused(db);
   const perDay = weekGymDays(db, weekStart).map((day) => {
     const base = { date: day.date, weekday: day.weekday, purpose: day.purpose };
     const daySessions = sessions.listSessionsByDate(day.date);
@@ -379,6 +406,7 @@ export function readWeekGenerationState(db: Database.Database, weekStart: string
     if (latest && latestStatus === 'pending') return { ...base, status: 'proposal_pending' as const, proposalId: latest.id };
     if (latest && latestStatus === 'approved') return { ...base, status: 'approved' as const, proposalId: latest.id };
     if (day.date < today) return { ...base, status: 'past' as const };
+    if (day.purpose === 'athletic' && legsPaused) return { ...base, status: 'injury_pause' as const };
     const runDay = lastRun?.days.find((d) => d.date === day.date);
     if (running && runDay?.outcome === 'planned') return { ...base, status: 'generating' as const };
     if (runDay && ['refused', 'failed_quality', 'gated', 'failed_provider'].includes(runDay.outcome)) {

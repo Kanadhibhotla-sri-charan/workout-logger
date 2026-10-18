@@ -13,6 +13,9 @@ export type DemandLevel = 'low' | 'medium' | 'high';
 export type ReviewStatus = 'draft' | 'needs-review' | 'reviewed';
 export type VideoStatus = 'verified' | 'needs-review' | 'broken';
 
+export const TRAINING_MODES = ['power', 'agility', 'movement-strength', 'mobility-hold', 'mobility-dynamic', 'conditioning'] as const;
+export type TrainingMode = (typeof TRAINING_MODES)[number];
+
 export interface BlueprintExercise {
   id: string;
   name: string;
@@ -29,6 +32,9 @@ export interface BlueprintExercise {
   /** Absent entirely on ~94% of records, same reasoning as
    * physique_targets — read via `e.functional_goals ?? null`. */
   functional_goals?: string[] | null;
+  /** Athletic drill mode (Blueprint 89dd2d6). Absent = hypertrophy-oriented
+   * record. A drill is recommended only for the functional goals it carries. */
+  training_mode?: TrainingMode | null;
   aesthetic_characteristics: string[] | null;
   movement_patterns: string[];
   equipment: string[];
@@ -221,6 +227,7 @@ export interface BlueprintProgrammingProfileMatch {
   exercise_type?: ExerciseType;
   coverage_categories_any?: string[];
   stability_demand_at_least?: DemandLevel;
+  training_mode?: TrainingMode;
 }
 
 export interface BlueprintProgrammingProfile {
@@ -228,6 +235,14 @@ export interface BlueprintProgrammingProfile {
   name: string;
   primary_range: [number, number];
   acceptable_range: [number, number];
+  /** Athletic-mode profiles only (Blueprint 89dd2d6); hypertrophy profiles omit these. */
+  training_mode?: TrainingMode;
+  /** What primary_range counts. Absent = reps. */
+  unit?: 'reps' | 'seconds';
+  sets?: [number, number];
+  rest_seconds?: [number, number];
+  effort?: string;
+  frequency_per_week?: [number, number];
 }
 
 export interface BlueprintProgrammingProfiles {

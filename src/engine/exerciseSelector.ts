@@ -28,6 +28,7 @@
 
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { resolveSecondaryTarget } from '../blueprint/secondaryTargetMapping.js';
+import { isDrill } from '../blueprint/athletic.js';
 import type { DemandLevel } from '../blueprint/types.js';
 import type { BlueprintId } from '../contracts/types.js';
 import type { TargetPriorityTier, TargetType } from './goalResolver.js';
@@ -176,6 +177,9 @@ export type ExerciseTargetRole = 'primary' | 'secondary' | 'none';
 export function roleFor(exerciseId: BlueprintId, targetType: TargetType, targetId: BlueprintId): ExerciseTargetRole {
   const exercise = BlueprintAdapter.getExercise(exerciseId);
   if (!exercise) return 'none';
+  // Athletic drills answer only the functional goals they carry (Blueprint
+  // drill isolation): never a physique target, never via a secondary phrase.
+  if (isDrill(exercise)) return targetType === 'functional_goal' && (exercise.functional_goals ?? []).includes(targetId) ? 'primary' : 'none';
 
   const primaryIds = targetType === 'physique_target' ? (exercise.physique_targets ?? []) : (exercise.functional_goals ?? []);
   if (primaryIds.includes(targetId)) return 'primary';

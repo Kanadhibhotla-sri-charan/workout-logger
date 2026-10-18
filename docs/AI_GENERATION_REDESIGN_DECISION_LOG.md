@@ -890,3 +890,78 @@ Changes:
 Tests: `tests/goals/bodyMeasurements.test.ts`. Full suite 2284: 0 new
 failures vs baseline (plus the two date-dependent ones noted in s18).
 Headless check of the Goals page: save, verdict, typed name, delete.
+
+## 20. Legs for badminton: Athletic day, Blueprint 89dd2d6 (2026-10-18)
+Owner: legs are not to be trained for size like other muscles but to be
+fit and flexible for badminton; the leg day leaves the weight-training
+routine and becomes an endurance day, whole-body where possible, legs-only
+otherwise; the programmer generates it on request; Push, Pull and Upper
+stay as they are. Owner choice for the Legs injury pause: while it is on,
+the Athletic day is a rest day.
+
+Blueprint sync b90c302 -> 89dd2d6 (143 -> 163 records): 20 drills with a
+`training_mode` (power, agility, movement-strength, mobility-hold,
+mobility-dynamic, conditioning), six athletic functional goals, mode
+prescription profiles (unit reps/seconds, sets, rest, effort, frequency;
+no RIR). Fixes the sync needed:
+- `programmingProfiles.matchesProfileRule`: exact training_mode match, as
+  in Blueprint (without it a heavy compound resolved to power 3-6).
+  `modePrescriptionFor(id)` ports Blueprint's ModePrescription.
+- Drill isolation (`src/blueprint/athletic.ts`): `roleFor` gives a drill a
+  role only for the athletic goals it carries, so no physique pool,
+  substitute list or shortlist ever contains one; `calculateExerciseExposure`
+  credits a drill only to its functional goals (its secondary muscle phrases
+  are not muscle volume).
+- Secondary phrases: `hip abductors` -> gluteus-medius-minimus,
+  `foot and ankle stabilizers` -> ankle-resilience (functional goal),
+  `lower back` unmapped (docs/SECONDARY_TARGET_MAPPING.md).
+
+Leg training setting (`training_profiles.leg_training`, default
+'hypertrophy'; `LegTrainingRepo`; GET/PUT /api/programming/leg-training;
+"Leg training" section on the Program page). In 'athletic':
+- Rotation push/pull/athletic/upper (`ATHLETIC_SESSION_PURPOSE_ROTATION`,
+  `assignSessionPurposes(..., legTraining)`); the Athletic day follows the
+  Legs day rules (never Monday, off badminton days when possible).
+- Leg physique targets are removed from the plan input
+  (`assembleWeeklyPlanInput`), so no session, Program goals panel or
+  Insights requirement includes leg growth volume; the AI brief also marks
+  any leg target `trainedAthletically` (ineligible) as a second guard.
+- `SessionPurpose` gains 'athletic': no physique target (abs included) is
+  compatible with it, and athletic goals are compatible only with it.
+
+Athletic day generation (`src/athletic/athleticSession.ts`):
+- Context: all 20 drills with their mode prescriptions, block, goals,
+  last-done date; the six goals with last trained date; 28 days of drill
+  history; yesterday/tomorrow activity; notes; injury pauses.
+- Shape: warm-up (mobility-dynamic, 1-3) -> quality (power / agility /
+  movement-strength, 1-4) -> conditioning (whole body, 1-2) -> cool-down
+  (mobility-hold, 1-2); at most 9 drills.
+- Checks (`checkAthleticOutput`): drills only, no repeats, block counts,
+  total; numbers clamped into the drill's ranges and order fixed to the
+  block order (noted in warnings); goal must be one the drill carries.
+- Stored as a normal proposal with `sessionKind: 'athletic'`; drills have
+  `repUnit` and `block`, `rirMin/rirMax` null (type now nullable).
+- `generateSession`: requestedSessionPurpose 'athletic' (route accepts it),
+  or the date's rotation slot is athletic -> Athletic path, same duplicate
+  guard and same-context retry gate. Week runs use it for the Athletic day.
+- Legs injury pause on -> `AI_ATHLETIC_PAUSED` (409) before any paid call;
+  week run skips the day; per-day status `injury_pause` ("Rest day — Legs
+  injury pause is on"); commit of an approved Athletic proposal re-checks
+  against a fresh Athletic context, so it is refused too.
+- Commit writes `rep_unit` per drill, RIR null.
+
+Logger/Insights/coach:
+- /api/blueprint/exercises adds `training_mode` and `drill` (prescription).
+- Logger: drill note ("Drill · sets × amount per side · rest. Effort: ..."),
+  planned amount with unit, no RIR box for drills, weight optional; a drill
+  logged by hand starts in its Blueprint unit.
+- Insights: drills excluded from strength progress; new `athletic` section
+  (days with drills per week; per drill sessions, last, best set).
+- Coach review facts: `legTraining`, `athletic`; rule 5d.
+
+Not changed: physique-session rules and validators, generate_week legacy
+contract, deterministic engine behaviour for 'hypertrophy'.
+Tests: `tests/athletic/athleticDay.test.ts` (16); Insights section list
+updated. Full suite 2300: 0 new failures vs baseline. Headless check on a
+copy of the production DB: Program (setting, Thursday Athletic +
+injury_pause), Logger (drill note, seconds, no RIR), Insights section.

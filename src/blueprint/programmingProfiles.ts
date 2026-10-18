@@ -9,7 +9,7 @@
 // (tests/blueprint/programmingProfiles.test.ts checks that).
 
 import { BlueprintAdapter } from './adapter.js';
-import type { BlueprintExercise, BlueprintProgrammingProfileMatch, DemandLevel } from './types.js';
+import type { BlueprintExercise, BlueprintProgrammingProfile, BlueprintProgrammingProfileMatch, DemandLevel, TrainingMode } from './types.js';
 
 const DEMAND_LEVELS: readonly DemandLevel[] = ['low', 'medium', 'high'];
 
@@ -18,6 +18,10 @@ const DEMAND_LEVELS: readonly DemandLevel[] = ['low', 'medium', 'high'];
 const FALLBACK_PRIMARY_RANGE: [number, number] = [8, 15];
 
 function matchesProfileRule(exercise: BlueprintExercise, match: BlueprintProgrammingProfileMatch): boolean {
+  // Athletic training modes (Blueprint 89dd2d6): a mode rule matches only
+  // records of that mode, and a record with a mode never falls into the
+  // hypertrophy rules. Records without a mode are unaffected.
+  if ((match.training_mode ?? null) !== (exercise.training_mode ?? null)) return false;
   if (match.exercise_type && exercise.exercise_type !== match.exercise_type) return false;
   if (match.coverage_categories_any && !match.coverage_categories_any.some((c) => exercise.coverage_categories.includes(c))) return false;
   if (match.stability_demand_at_least && DEMAND_LEVELS.indexOf(exercise.stability_demand) < DEMAND_LEVELS.indexOf(match.stability_demand_at_least)) return false;
@@ -29,10 +33,47 @@ function matchesProfileRule(exercise: BlueprintExercise, match: BlueprintProgram
 export function resolvePrimaryRepRange(exercise: BlueprintExercise): [number, number] {
   const override = BlueprintAdapter.getRepRangeOverrides().find((o) => o.exercise_id === exercise.id);
   if (override) return override.primary_range;
+  return resolveProgrammingProfile(exercise)?.primary_range ?? FALLBACK_PRIMARY_RANGE;
+}
+
+/** The Blueprint profile an exercise resolves to (first matching rule). */
+export function resolveProgrammingProfile(exercise: BlueprintExercise): BlueprintProgrammingProfile | undefined {
   const { profiles, classification } = BlueprintAdapter.getProgrammingProfiles();
   const rule = classification.defaults.find((r) => matchesProfileRule(exercise, r.match));
-  const profile = rule ? profiles.find((p) => p.id === rule.profile_id) : undefined;
-  return profile?.primary_range ?? FALLBACK_PRIMARY_RANGE;
+  return rule ? profiles.find((p) => p.id === rule.profile_id) : undefined;
+}
+
+/** An athletic drill's prescription (Blueprint's ModePrescription): what
+ * the amount counts, its ranges, whether it is per side, sets/rounds, rest,
+ * effort and weekly frequency. Null for a record without a training mode. */
+export interface ModePrescription {
+  mode: TrainingMode;
+  unit: 'reps' | 'seconds';
+  amount: [number, number];
+  acceptableAmount: [number, number];
+  perSide: boolean;
+  sets: [number, number];
+  restSeconds: [number, number];
+  effort: string;
+  frequencyPerWeek: [number, number];
+}
+
+export function modePrescriptionFor(exerciseId: string): ModePrescription | null {
+  const exercise = BlueprintAdapter.getExercise(exerciseId);
+  if (!exercise?.training_mode) return null;
+  const profile = resolveProgrammingProfile(exercise);
+  if (!profile?.training_mode) return null;
+  return {
+    mode: exercise.training_mode,
+    unit: profile.unit ?? 'reps',
+    amount: profile.primary_range,
+    acceptableAmount: profile.acceptable_range,
+    perSide: exercise.laterality !== 'bilateral',
+    sets: profile.sets ?? [1, 1],
+    restSeconds: profile.rest_seconds ?? [0, 0],
+    effort: profile.effort ?? '',
+    frequencyPerWeek: profile.frequency_per_week ?? [1, 1],
+  };
 }
 
 /** Sets for an exercise with no package prescription: 3 for a compound, 2

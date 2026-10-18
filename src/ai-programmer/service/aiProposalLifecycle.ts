@@ -19,6 +19,7 @@ import { findActiveGymSessionConflict, logSessionConflict } from '../../engine/s
 import { WEEKDAYS } from '../../contracts/types.js';
 import { programmingWeekStart, weekdayOfDate } from '../../engine/workoutBuilder.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
+import { buildAthleticContext, revalidateAthleticProposal } from '../../athletic/athleticSession.js';
 import {
   AICommitIntentMismatchError,
   AIProposalCommitFailedError,
@@ -271,7 +272,10 @@ export function commitAIProposalToPlannedSession(
   // isn't valid JSON; that surfaces via loadCurrent() above and is left
   // to propagate to the route's generic 500 handler, since a row this
   // codebase itself wrote should never actually be malformed JSON.
-  const structural = validateProposalSchema(record.proposal);
+  // Athletic day (2026-10-18): checked by its own rules against a fresh
+  // Athletic context (which also refuses while the Legs pause is on).
+  const athletic = record.proposal.sessionKind === 'athletic';
+  const structural = athletic ? { ok: true as const, value: record.proposal, errors: [] as string[] } : validateProposalSchema(record.proposal);
   if (!structural.ok || !structural.value) {
     throw new AIProposalValidationFailedError(proposalId, structural.errors);
   }
@@ -314,7 +318,11 @@ export function commitAIProposalToPlannedSession(
   // (it throws AITargetNotEditableError, itself an AIProgrammerError
   // with its own 409 status, if either fails) rather than duplicating
   // that logic here.
-  const context = buildProgrammerContext(db, { targetDate: proposal.targetDate, applyRotationShortlist: false });
+  if (athletic) {
+    const errors = revalidateAthleticProposal(proposal, buildAthleticContext(db, proposal.targetDate));
+    if (errors.length > 0) throw new AIProposalStaleError(proposalId, errors);
+  }
+  const context = athletic ? null : buildProgrammerContext(db, { targetDate: proposal.targetDate, applyRotationShortlist: false });
 
   // Full domain revalidation against the FRESH context — this is what
   // catches a changed authored prescription, an exercise that is no
@@ -327,7 +335,7 @@ export function commitAIProposalToPlannedSession(
   // `BlueprintAdapter.isKnownExercise()` (called inside
   // validateProposalDomain) never treats an outside-Blueprint exercise
   // as known, regardless of its own approval state.
-  const domain = validateProposalDomain(proposal, context, db);
+  const domain = context ? validateProposalDomain(proposal, context, db) : { ok: true, value: proposal, errors: [] as string[] };
   if (!domain.ok || !domain.value) {
     throw new AIProposalStaleError(proposalId, domain.errors);
   }
@@ -436,6 +444,8 @@ export function commitAIProposalToPlannedSession(
           // target_type/target_id pair to query feasible alternatives.
           target_type: exercise.targetType,
           target_id: exercise.targetId,
+          // A drill's amount is reps or seconds (Athletic day).
+          ...(exercise.repUnit ? { rep_unit: exercise.repUnit } : {}),
           sets: Array.from({ length: exercise.sets }, (_, setIndex) => ({
             set_number: setIndex + 1,
             weight: null,

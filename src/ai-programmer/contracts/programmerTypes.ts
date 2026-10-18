@@ -28,11 +28,16 @@ export interface AIWorkoutExerciseProposal {
   sets: number;
   repsMin: number;
   repsMax: number;
-  rirMin: number;
-  rirMax: number;
+  /** Null only on an athletic-session drill (2026-10-18): drills have an
+   * effort instruction instead of RIR. */
+  rirMin: number | null;
+  rirMax: number | null;
   restSeconds?: number;
   rationale: string[];
   source: 'blueprint';
+  /** Athletic sessions only: what repsMin/repsMax count, and the block. */
+  repUnit?: 'reps' | 'seconds';
+  block?: 'warmup' | 'quality' | 'conditioning' | 'cooldown';
 }
 
 /** The complete AI output for `mode: "generate_session"`. A proposal
@@ -45,6 +50,9 @@ export interface AIWorkoutSessionProposal {
   targetDate: string;
   weekday: string;
   sessionFocus: string[];
+  /** 'athletic' (2026-10-18): an Athletic-day proposal (drills only,
+   * src/athletic/). Absent = the normal physique session. */
+  sessionKind?: 'athletic';
   exercises: AIWorkoutExerciseProposal[];
   programmingRationale: string[];
   goalAlignment: string[];

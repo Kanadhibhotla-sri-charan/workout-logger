@@ -28,6 +28,7 @@
 
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { normalizeTargetPhrase, resolveSecondaryTarget } from '../blueprint/secondaryTargetMapping.js';
+import { isDrill } from '../blueprint/athletic.js';
 import type { BlueprintId, TrainingExposure, Weekday } from '../contracts/types.js';
 import { EXPOSURE_COEFFICIENTS } from './config.js';
 import { isDateInRange, rollingRangeEnding, weekRangeContaining } from './dateMath.js';
@@ -91,7 +92,10 @@ export function calculateExerciseExposure(
   const secondaryTargets: Array<{ target_type: TargetType; target_id: BlueprintId }> = [];
   const unmapped: string[] = [];
   const seenSecondaryKeys = new Set<string>();
-  for (const phrase of exercise.secondary_targets ?? []) {
+  // An athletic drill credits only its own functional goals: conditioning
+  // or plyometric sets are not muscle-building volume (Blueprint drill
+  // isolation), so its secondary muscle phrases are not counted.
+  for (const phrase of isDrill(exercise) ? [] : (exercise.secondary_targets ?? [])) {
     const resolved = resolveSecondaryTarget(phrase);
     if (!resolved) {
       const normalized = normalizeTargetPhrase(phrase);

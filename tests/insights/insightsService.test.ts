@@ -112,7 +112,7 @@ describe('volume, consistency, check-ins, deloads', () => {
   it('GET /api/insights returns every section', async () => {
     log('2026-11-16', 'cable-pushdown', [[30, 10]]);
     const body = (await request(createApp(db)).get('/api/insights').expect(200)).body;
-    expect(Object.keys(body).sort()).toEqual(['asOf', 'consistency', 'deloads', 'goalCheckIns', 'strength', 'volume']);
+    expect(Object.keys(body).sort()).toEqual(['asOf', 'athletic', 'consistency', 'deloads', 'goalCheckIns', 'strength', 'volume']);
     expect(body.volume.find((r: any) => r.targetId === 'triceps').weeks.map((w: any) => w.weekStart)).toEqual(['2026-11-16']);
     await request(createApp(db)).get('/api/insights?date=2026-13-01').expect(400);
   });

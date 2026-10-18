@@ -104,9 +104,10 @@ describe('mapping completeness — no new, undocumented phrase silently falls th
     'rectus abdominis', 'serratus anterior', 'soleus', 'traps', 'triceps', 'upper chest',
     'upper trapezius', 'wrist extensors', 'external rotators',
     'gluteus medius', 'bottom-leg hip abductors', 'obliques and lateral trunk', // 2026-10-11 sync
+    'hip abductors', 'foot and ankle stabilizers', // 2026-10-18 sync
     // deliberately unmapped
     'brachioradialis', 'calves', 'chest', 'elbow flexors', 'erectors', 'spinal erectors',
-    'forearms', 'hip musculature', 'shoulders', 'tensor fasciae latae', 'trunk musculature',
+    'forearms', 'hip musculature', 'lower back', 'shoulders', 'tensor fasciae latae', 'trunk musculature',
   ]);
 
   it('every secondary_targets phrase across the real Blueprint snapshot is either mapped or documented as unmapped', () => {

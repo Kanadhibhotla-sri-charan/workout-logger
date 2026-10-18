@@ -21,6 +21,12 @@
     </section>
 
     <section>
+      <h2>Leg training</h2>
+      <p class="faint">How legs are trained. Athletic: no leg size work on any day; the Legs day becomes an Athletic day of badminton drills and whole-body conditioning. Push, Pull and Upper do not change.</p>
+      <div id="leg-training"></div>
+    </section>
+
+    <section>
       <h2>Injury pause</h2>
       <p class="faint">Tick a body area to pause it while it heals. AI workouts plan nothing for it, and avoid exercises that also work it, until you untick it.</p>
       <div id="injury-pauses"></div>
@@ -1082,6 +1088,8 @@
       return AI_STATUS_LABELS[status] || capitalize(status);
     }
 
+    const ATHLETIC_BLOCK_LABELS = { warmup: 'Warm-up', quality: 'Speed & power', conditioning: 'Conditioning', cooldown: 'Cool-down' };
+
     function buildAiExerciseCard(item, pendingReview) {
       const card = createCard();
       card.classList.add('exercise-card');
@@ -1091,10 +1099,12 @@
       left.appendChild(el('div', { class: 'exercise-name', text: resolveExerciseDisplayName(item.exerciseId) }));
       left.appendChild(el('div', { class: 'exercise-targets', text: `${resolveTargetDisplayName(item.targetType, item.targetId)} · ${capitalize(item.role)}` }));
       header.appendChild(left);
-      header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(item.sets, item.repsMin, item.repsMax) }));
+      // An Athletic-day drill counts reps or seconds and has no RIR.
+      const unitSuffix = item.repUnit === 'seconds' ? ' s' : '';
+      header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(item.sets, item.repsMin, item.repsMax) + unitSuffix }));
       card.appendChild(header);
 
-      const metaParts = [formatRirRange(item.rirMin, item.rirMax)];
+      const metaParts = item.block ? [ATHLETIC_BLOCK_LABELS[item.block] || capitalize(item.block)] : [formatRirRange(item.rirMin, item.rirMax)];
       const restText = formatRestSeconds(item.restSeconds);
       if (restText) metaParts.push(restText);
       card.appendChild(el('p', { class: 'faint', text: metaParts.join(' · '), style: 'margin:0.25rem 0 0' }));
@@ -1228,11 +1238,13 @@
       // generate with AI_GENERATION_PREVIOUSLY_FAILED — the only state in
       // which the explicit "Try again anyway" action is offered.
       let sameContextRetryOffered = false;
+      // Athletic (2026-10-18): drills and conditioning; offered instead of
+      // Legs when leg training is athletic.
       const SESSION_PURPOSE_OPTIONS = [
         { value: '', text: 'Let AI decide' },
         { value: 'push', text: 'Push' },
         { value: 'pull', text: 'Pull' },
-        { value: 'legs', text: 'Legs' },
+        legTrainingMode === 'athletic' ? { value: 'athletic', text: 'Athletic (drills + conditioning)' } : { value: 'legs', text: 'Legs' },
         { value: 'upper', text: 'Upper' },
       ];
       const noticeEl = el('div');
@@ -2037,6 +2049,42 @@
       container.appendChild(grid);
     }
 
+    /** Leg training (2026-10-18): Size or Athletic; a change saves at once. */
+    let legTrainingMode = 'hypertrophy';
+    async function loadLegTraining() {
+      const container = document.getElementById('leg-training');
+      try {
+        legTrainingMode = (await api('/api/programming/leg-training')).mode;
+        container.innerHTML = '';
+        const statusEl = el('div');
+        const row = el('div', { class: 'btn-row' });
+        const options = [
+          { value: 'athletic', text: 'Athletic (badminton fitness, mobility, conditioning)' },
+          { value: 'hypertrophy', text: 'Size (a Legs day like the other muscles)' },
+        ];
+        for (const opt of options) {
+          const radio = el('input', { type: 'radio', name: 'leg-training', value: opt.value, ...(legTrainingMode === opt.value ? { checked: 'checked' } : {}) });
+          radio.addEventListener('change', async () => {
+            if (!radio.checked) return;
+            const previous = legTrainingMode;
+            try {
+              legTrainingMode = (await api('/api/programming/leg-training', { method: 'PUT', body: { mode: opt.value } })).mode;
+              showInlineStatus(statusEl, 'success', 'Saved. Days not yet generated follow the new setting.');
+              loadWeek();
+            } catch (err) {
+              legTrainingMode = previous;
+              container.querySelector(`input[value="${previous}"]`).checked = true;
+              showInlineStatus(statusEl, 'error', err.message || 'Could not save.');
+            }
+          });
+          row.appendChild(el('label', { style: 'display:inline-flex;align-items:center;gap:0.35rem;margin-right:0.9rem' }, [radio, document.createTextNode(opt.text)]));
+        }
+        container.append(row, statusEl);
+      } catch (err) {
+        showError(container, "We couldn't load the leg training setting.", loadLegTraining);
+      }
+    }
+
     /** Injury pause: one checkbox per body area; a change saves at once. */
     async function loadInjuryPauses() {
       const container = document.getElementById('injury-pauses');
@@ -2070,6 +2118,7 @@
 
     loadWeek();
     loadAiNameCatalogs();
+    loadLegTraining();
     loadInjuryPauses();
   </script>
 </body>

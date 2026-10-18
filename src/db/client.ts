@@ -110,6 +110,8 @@ function migrate(db: Database.Database): void {
   addColumnIfMissing(db, 'coaching_program_state', 'last_evaluated_at', 'TEXT');
   addColumnIfMissing(db, 'coaching_program_state', 'specialization_target_id', 'TEXT');
   addColumnIfMissing(db, 'coaching_program_state', 'specialization_goal_id', 'TEXT REFERENCES goals(id) ON DELETE SET NULL');
+  // Leg training mode (2026-10-18): 'hypertrophy' (default) or 'athletic'.
+  addColumnIfMissing(db, 'training_profiles', 'leg_training', "TEXT NOT NULL DEFAULT 'hypertrophy'");
 
   // Coaching Depth Batch 4 (Exercise Variety & Preference): exercise_preferences
   // is a brand-new table (created above via CREATE TABLE IF NOT EXISTS),

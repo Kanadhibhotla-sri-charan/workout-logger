@@ -7,6 +7,7 @@
 
 import type { BlueprintId, GoalType, Weekday } from '../../contracts/types.js';
 import type { TargetType } from '../../engine/goalResolver.js';
+import type { SessionPurpose } from '../../engine/config.js';
 import type { RecoveryConstraintResult } from '../../engine/recoveryEngine.js';
 import type { CoachingFoundationContext } from '../../coaching/foundationContext.js';
 import type { TrainingExperienceLevel } from '../../engine/intensityTechniques.js';
@@ -212,6 +213,10 @@ export interface AIProgrammerMuscleGuidance {
   /** True when this target's body area is paused for injury: it is then
    * ineligible for every session. Absent otherwise. */
   pausedForInjury?: true;
+  /** True when leg training is 'athletic' (2026-10-18) and this is a leg
+   * muscle: it gets no muscle-growth volume in any session (legs are
+   * trained on the Athletic day with drills instead). Absent otherwise. */
+  trainedAthletically?: true;
   /** During a deload only (2026-10-11): this target's under-prescription
    * tolerance (deloadAdequacyTolerance), replacing the default 50% so the
    * deload is not applied twice. Absent outside a deload. */
@@ -295,7 +300,7 @@ export interface AIProgrammerSessionIdentityContext {
    * wrote — never recomputed independently here). null on a
    * badminton/rest/unselected day, or when no program row exists yet
    * for this week. */
-  purpose: 'push' | 'pull' | 'legs' | 'upper' | null;
+  purpose: SessionPurpose | null;
   /** SESSION_PURPOSE_TARGETS[purpose] plus the universal targets
    * (abs/neck) — the Blueprint-defined physique_target ids this
    * session's identity expects meaningful direct coverage of. Empty
@@ -369,7 +374,7 @@ export interface AICrossWeekNextWeekDayContext {
   /** The PPL+Upper purpose this date already has (if next week's own
    * program already exists) or would rotate to (if generated today) —
    * null on a non-gym day. */
-  sessionPurpose: 'push' | 'pull' | 'legs' | 'upper' | null;
+  sessionPurpose: SessionPurpose | null;
 }
 
 /** This week's own already-persisted per-target allocation outcome
