@@ -19,7 +19,8 @@ import { findActiveGymSessionConflict, logSessionConflict } from '../../engine/s
 import { WEEKDAYS } from '../../contracts/types.js';
 import { programmingWeekStart, weekdayOfDate } from '../../engine/workoutBuilder.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
-import { buildAthleticContext, revalidateAthleticProposal } from '../../athletic/athleticSession.js';
+import { athleticPaused, buildAthleticContext, revalidateAthleticProposal } from '../../athletic/athleticSession.js';
+import { isDrillId } from '../../blueprint/athletic.js';
 import {
   AICommitIntentMismatchError,
   AIProposalCommitFailedError,
@@ -428,7 +429,10 @@ export function commitAIProposalToPlannedSession(
       // set (see ExercisePerformance's doc comment in contracts/types.ts).
       // Each set row's ONLY prescribed fact is which set number it is —
       // that's why there are exactly `exercise.sets` set rows.
-      proposal.exercises.forEach((exercise, index) => {
+      // The athletic add-on goes after the session's own exercises; it is
+      // left out while the Legs injury pause is on.
+      const addOn = !athletic && record.proposal.athleticAddOn && !athleticPaused(db) ? record.proposal.athleticAddOn.exercises.filter((e) => isDrillId(e.exerciseId)) : [];
+      [...proposal.exercises, ...addOn].forEach((exercise, index) => {
         sessionsRepo.addExercisePerformance(session.session_id, {
           exercise_id: exercise.exerciseId,
           order: index,

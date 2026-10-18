@@ -376,7 +376,7 @@ export function bodyMeasurements(db: Database.Database): MeasurementSeries[] {
   const series = new Map<string, MeasurementSeries>();
   for (const m of new MeasurementsRepo(db).list()) {
     const key = `${m.metric_name.toLowerCase()}|${m.unit}`;
-    const s = series.get(key) ?? series.set(key, { metric: m.metric_name, unit: m.unit, better: measurementDirection(m.metric_name), goals: [], readings: [], change: null, verdict: 'one reading' }).get(key)!;
+    const s = series.get(key) ?? series.set(key, { metric: m.metric_name, unit: m.unit, better: measurementDirection(m.metric_name, m.unit), goals: [], readings: [], change: null, verdict: 'one reading' }).get(key)!;
     s.readings.push({ id: m.id, date: m.date, value: m.value, notes: m.notes });
     const goal = m.goal_id ? goals.get(m.goal_id) : undefined;
     if (goal && !s.goals.includes(goal)) s.goals.push(goal);

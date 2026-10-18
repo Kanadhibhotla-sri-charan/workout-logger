@@ -149,7 +149,7 @@ function classifyMeasurementTrend(measurements: readonly Measurement[]): Aesthet
     if (list.length < 2) continue;
     // 2026-10-12: progress has a direction per metric (a smaller waist is
     // progress; bodyweight is not judged). See measurementMetrics.ts.
-    const direction = measurementDirection(list[0]!.metric_name);
+    const direction = measurementDirection(list[0]!.metric_name, list[0]!.unit);
     if (direction === 'neutral') continue;
     const sorted = [...list].sort((a, b) => a.date.localeCompare(b.date));
     const [first, last] = [sorted[0]!.value, sorted[sorted.length - 1]!.value];

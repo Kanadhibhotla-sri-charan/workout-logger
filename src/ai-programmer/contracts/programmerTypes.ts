@@ -37,7 +37,7 @@ export interface AIWorkoutExerciseProposal {
   source: 'blueprint';
   /** Athletic sessions only: what repsMin/repsMax count, and the block. */
   repUnit?: 'reps' | 'seconds';
-  block?: 'warmup' | 'quality' | 'conditioning' | 'cooldown';
+  block?: 'warmup' | 'quality' | 'strength' | 'conditioning' | 'cooldown' | 'addon';
 }
 
 /** The complete AI output for `mode: "generate_session"`. A proposal
@@ -54,6 +54,11 @@ export interface AIWorkoutSessionProposal {
    * src/athletic/). Absent = the normal physique session. */
   sessionKind?: 'athletic';
   exercises: AIWorkoutExerciseProposal[];
+  /** Push / Pull / Upper with leg training 'athletic' (2026-10-18): 5-10
+   * minutes of athletic drills appended after the session, chosen by
+   * src/athletic/athleticAddOn.ts for recovery. Not part of the AI output
+   * or its validation; written after the main exercises at commit. */
+  athleticAddOn?: { kind: 'mobility' | 'active'; minutes: number; reason: string; exercises: AIWorkoutExerciseProposal[] };
   programmingRationale: string[];
   goalAlignment: string[];
   recoveryConsiderations: string[];

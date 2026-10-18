@@ -965,3 +965,47 @@ Tests: `tests/athletic/athleticDay.test.ts` (16); Insights section list
 updated. Full suite 2300: 0 new failures vs baseline. Headless check on a
 copy of the production DB: Program (setting, Thursday Athletic +
 injury_pause), Logger (drill note, seconds, no RIR), Insights section.
+
+### 20.1 Leg strength, daily athletic add-ons, build-up, timed tests (2026-10-18)
+Owner, after an objective review of section 20: muscle/strength work is
+essential for badminton legs; do not restrict leg strength variations to
+a few (any relevant variation, since leg strength is prioritized with
+athletic ability); add real athletic work (5-10 min) to Push/Pull/Upper
+days, careful with recovery so endurance work is never done every day
+without recovering.
+
+- Athletic day gains a **strength** block (2-3 lifts) between quality and
+  conditioning: blocks warmup 1-2, quality 1-3, strength 2-3, conditioning
+  1-2, cooldown 1-2; at most 10 exercises. Eligible lifts
+  (`liftCatalogue`): every non-drill exercise that trains a leg physique
+  target or carries an athletic goal (42 today, e.g. squats, split squats,
+  RDLs, step-ups, Nordics, calf raises, Copenhagen plank, tibialis raise,
+  leg extension). Prescription: Blueprint profile reps (acceptable range
+  allowed), Blueprint typical working RIR (1-3), sets 2-4, rest 60-180 s
+  (app defaults: hypertrophy profiles carry no sets/rest). Lifts credit
+  their leg target and appear in strength progress/plateau advice; the
+  context lists each lift's last 3 sessions.
+- **Build-up phase**: fewer than 3 Athletic days in the last 28 days
+  (first sessions, after an injury pause) -> drills at minimum sets and
+  at most the lower half of the amount range, lifts at most 3 sets and
+  RIR 2+. Enforced by clamping; the commit re-check ignores build-up caps.
+- **Athletic add-on** (`src/athletic/athleticAddOn.ts`) on Push/Pull/Upper
+  when leg training is athletic, deterministic (no extra AI call):
+  'mobility' (1 dynamic + 1 hold) when yesterday or tomorrow is a hard
+  day (badminton, the Athletic day, or a day already holding power/
+  agility/conditioning drills), else 'active' (1 agility/power + 1
+  conditioning). Least recently done drill per kind, low-end numbers,
+  trimmed to 10 minutes. A day with an active add-on is a hard day for
+  its neighbours, so active add-ons are never adjacent. None while the
+  Legs pause is on. Stored as `proposal.athleticAddOn` (outside the AI
+  output and its validators); commit writes it after the session (skipped
+  if the Legs pause is on by then). Program page shows it under the
+  proposal with its reason and minutes.
+- **Measurements**: presets standing broad jump, vertical jump (bigger is
+  better), four-corner footwork time, shuttle run time (smaller is
+  better); a typed name with "time"/"sprint" or a unit in seconds/minutes
+  is judged smaller-is-better.
+- Coach rule 5d updated for leg lifts and add-ons.
+
+Tests: athleticDay.test.ts now 22; bodyMeasurements direction test.
+Full suite 2307: 0 new failures vs baseline.

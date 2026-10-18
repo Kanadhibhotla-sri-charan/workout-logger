@@ -56,8 +56,18 @@ describe('API', () => {
 
 describe('direction', () => {
   it('presets and typed names', () => {
-    expect(['upper arm (flexed)', 'waist (at navel)', 'bodyweight', 'neck', 'Hips', 'body fat %', 'morning weight'].map(measurementDirection))
+    expect(['upper arm (flexed)', 'waist (at navel)', 'bodyweight', 'neck', 'Hips', 'body fat %', 'morning weight'].map((n) => measurementDirection(n)))
       .toEqual(['higher', 'lower', 'neutral', 'higher', 'lower', 'lower', 'neutral']);
+  });
+
+  it('athletic tests: jump distances bigger, times smaller (by name or by unit)', () => {
+    expect([
+      measurementDirection('standing broad jump'),
+      measurementDirection('shuttle run time'),
+      measurementDirection('10 m sprint'),
+      measurementDirection('agility drill', 's'),
+      measurementDirection('plank hold', 'cm'),
+    ]).toEqual(['higher', 'lower', 'lower', 'lower', 'higher']);
   });
 
   it('summary judges each change its own way; units never mix', () => {

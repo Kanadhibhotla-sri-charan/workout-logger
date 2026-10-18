@@ -1088,7 +1088,7 @@
       return AI_STATUS_LABELS[status] || capitalize(status);
     }
 
-    const ATHLETIC_BLOCK_LABELS = { warmup: 'Warm-up', quality: 'Speed & power', conditioning: 'Conditioning', cooldown: 'Cool-down' };
+    const ATHLETIC_BLOCK_LABELS = { warmup: 'Warm-up', quality: 'Speed & power', strength: 'Leg strength', conditioning: 'Conditioning', cooldown: 'Cool-down', addon: 'Athletic add-on' };
 
     function buildAiExerciseCard(item, pendingReview) {
       const card = createCard();
@@ -1104,7 +1104,8 @@
       header.appendChild(el('div', { class: 'exercise-prescription', text: formatSets(item.sets, item.repsMin, item.repsMax) + unitSuffix }));
       card.appendChild(header);
 
-      const metaParts = item.block ? [ATHLETIC_BLOCK_LABELS[item.block] || capitalize(item.block)] : [formatRirRange(item.rirMin, item.rirMax)];
+      const metaParts = item.block ? [ATHLETIC_BLOCK_LABELS[item.block] || capitalize(item.block)] : [];
+      if (item.rirMin !== null && item.rirMin !== undefined) metaParts.push(formatRirRange(item.rirMin, item.rirMax));
       const restText = formatRestSeconds(item.restSeconds);
       if (restText) metaParts.push(restText);
       card.appendChild(el('p', { class: 'faint', text: metaParts.join(' · '), style: 'margin:0.25rem 0 0' }));
@@ -1149,6 +1150,13 @@
 
       const pendingReview = state.status === 'pending' || state.status === 'approved';
       for (const ex of proposal.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+      // Athletic add-on (2026-10-18): 5-10 min of drills after the session.
+      if (proposal.athleticAddOn && proposal.athleticAddOn.exercises.length > 0) {
+        const addOn = proposal.athleticAddOn;
+        wrap.appendChild(el('h3', { text: `Athletic add-on · about ${addOn.minutes} min (${addOn.kind === 'mobility' ? 'mobility' : 'footwork + conditioning'})`, style: 'margin:0.8rem 0 0.2rem' }));
+        wrap.appendChild(el('p', { class: 'faint', text: addOn.reason, style: 'margin:0 0 0.3rem' }));
+        for (const ex of addOn.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+      }
 
       if (proposal.programmingRationale && proposal.programmingRationale.length > 0) {
         const details = el('details', { class: 'exercise-explanation' });

@@ -49,6 +49,7 @@ import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction, usesRot
 import { runProposalPipeline } from './proposalPipeline.js';
 import { ATHLETIC_OUTPUT_SCHEMA, buildAthleticContext, buildAthleticSystemInstruction, checkAthleticOutput, type AthleticContext } from '../../athletic/athleticSession.js';
 import { weekGymDays } from './weekGeneration.js';
+import { planAthleticAddOn } from '../../athletic/athleticAddOn.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { repairWeekReconciliation, repairGenerateWeek } from '../validation/programmerProposalRepair.js';
@@ -493,7 +494,10 @@ export class AIProgrammerService {
     // COMPLETED proposal, not the pre-completion one, is what proceeds
     // through persistence, so a real deterministic top-up is never
     // silently discarded after the fact.
-    const proposal: AIWorkoutSessionProposal = { ...completed.proposal, proposalId: randomUUID() };
+    // Athletic add-on (2026-10-18): appended to Push / Pull / Upper when leg
+    // training is athletic; deterministic, outside the AI output's checks.
+    const addOn = planAthleticAddOn(this.db, context.targetDate, context.programmingBrief.session.purpose);
+    const proposal: AIWorkoutSessionProposal = { ...completed.proposal, proposalId: randomUUID(), ...(addOn ? { athleticAddOn: addOn } : {}) };
 
     // Phase 2 §5: only a proposal that has passed BOTH structural and
     // domain validation is ever persisted — a provider failure or a

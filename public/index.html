@@ -395,7 +395,7 @@
         const preset = presets.find((p) => p.name === metric.value);
         customName.hidden = !!preset;
         if (preset) unit.value = preset.unit;
-        direction.textContent = preset ? DIRECTION_TEXT[preset.better] : 'Waist, hips or body fat: smaller is better. A name with "weight": not judged. Other sizes: bigger is better.';
+        direction.textContent = preset ? DIRECTION_TEXT[preset.better] : 'Waist, hips, body fat, and times (a name with "time", or a unit in seconds/minutes): smaller is better. A name with "weight": not judged. Anything else: bigger is better.';
       };
       metric.addEventListener('change', syncPreset);
       syncPreset();
