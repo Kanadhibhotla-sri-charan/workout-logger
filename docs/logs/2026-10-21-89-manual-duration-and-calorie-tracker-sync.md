@@ -41,3 +41,11 @@ Drop-in installed as
 restart: health ok, `[calorie-sync] off (no CALORIE_SYNC_TOKEN)`; 36
 sessions with a duration marked `legacy`, 3 without one. The sync starts
 once the owner writes `calorie-sync-token.env` and restarts.
+
+## Sync live
+2026-10-20 17:53 UTC: the owner wrote `calorie-sync-token.env` on the VM
+(chmod 600) and restarted. Log: `[calorie-sync] on`, then
+`startup: committed 4806133`. Checked on GitHub: commit `4806133` "Sync
+workout sessions" on `claude/new-session-7bo2dm` holds
+`data/workout_sessions.json` with 14 days (2026-10-20 back to 2026-10-07),
+9 completed sessions, all durations `legacy`.
