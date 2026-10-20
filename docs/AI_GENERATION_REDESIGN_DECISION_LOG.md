@@ -324,9 +324,13 @@ locally (all states) and read-only on production.
 * **Schema added:** `ai_week_generation_runs`, `ai_week_generation_day_failures`,
   `ai_program_proposals.week_run_id` (nullable).
 * **Backups** before each deploy: `deployment-backups/pre-<commit>-<ts>.sqlite`.
-  These are the only backups: the daily backup timer
-  (`ops/systemd/workout-logger-backup.timer`) is not installed on the VM
-  (found 2026-10-20, `docs/logs/2026-10-20-88-...`).
+  Daily backup timer (`ops/systemd/workout-logger-backup.timer`, 00:00
+  UTC, `Persistent=true`) installed 2026-10-20 on the owner's go-ahead
+  (it had never been installed, found in `docs/logs/2026-10-20-88-...`):
+  `/usr/local/bin/backup-workout-logger.sh` writes
+  `~/workout-logger-backups/workout-logger-<ts>.sqlite` (sqlite3 online
+  backup + integrity check), keeps 7 days. Same disk as the DB, so no
+  protection against losing the VM itself. See `docs/logs/2026-10-20-90-...`.
 * **Calorie Tracker sync** (2026-10-21, §21): drop-in `calorie-sync.conf`
   (`ops/systemd/workout-logger-calorie-sync.conf`) loads
   `~/.config/workout-logger/calorie-sync.env` (branch) and
@@ -861,6 +865,9 @@ Changes:
 - Unchanged and now fed: double progression (`progressionEngine`) advances
   only when the top of the range is reached at RIR <= Blueprint's typical
   working max (a set without RIR counts on reps alone); history averages RIR.
+
+Owner, 2026-10-20: logging RIR 0 on most sets is intentional; 0 means
+the set went to failure (real data: mostly 0 or 3 since 2026-10-13).
 
 Tests: `tests/logging/setRir.test.ts`. Full suite 2276: 0 new failures vs the
 245 known baseline (two further date-dependent tests fail on 2026-10-12 with

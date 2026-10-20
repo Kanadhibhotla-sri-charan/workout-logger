@@ -19,7 +19,6 @@ read-only query (`sqlite3 -readonly`) on the production DB; findings:
   `workout-programmer-new-vnic`.
 - **The daily backup timer (`ops/systemd/workout-logger-backup.timer`)
   is not installed on the VM**; the only backups are the pre-deploy ones
-  in `~/workout-logger/deployment-backups/`. Not yet fixed (owner to
-  decide).
+  in `~/workout-logger/deployment-backups/`. Fixed in log 90.
 
 Outcome: log 89 (manual duration and the sync file).
