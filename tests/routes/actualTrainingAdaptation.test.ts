@@ -82,7 +82,7 @@ async function logCompletedQuadsSession(date: string, setCount: number) {
     .expect(201);
   const completed = await request(app)
     .patch(`/api/workouts/${created.body.session_id}`)
-    .send({ status: 'completed' })
+    .send({ status: 'completed', duration_minutes: 60, duration_source: 'user_entered' })
     .expect(200);
   return completed.body;
 }
@@ -108,7 +108,7 @@ async function logGluteIsolationSession(date: string) {
       ],
     })
     .expect(201);
-  await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
+  await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed', duration_minutes: 60, duration_source: 'user_entered' }).expect(200);
 }
 
 /** Coaching Depth Batch 2 wires rectus-abdominis/obliques/gastrocnemius/
@@ -134,7 +134,7 @@ async function logCoachingDepthCompetitorIsolationSession(date: string) {
       })
       .expect(201);
   }
-  await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
+  await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed', duration_minutes: 60, duration_source: 'user_entered' }).expect(200);
 }
 
 beforeEach(() => {
@@ -362,7 +362,7 @@ describe('Step 12 Remediation §7 (P1): strengthened remaining-week adaptation r
         sets: Array.from({ length: 20 }, (_, i) => ({ set_number: i + 1, weight: 20, reps: 10, completed: true })),
       })
       .expect(201);
-    await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
+    await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed', duration_minutes: 60, duration_source: 'user_entered' }).expect(200);
 
     const after = await getWeek();
     const thursdayAfter = after.days.find((d: any) => d.weekday === 'thursday');

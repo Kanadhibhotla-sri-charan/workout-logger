@@ -862,7 +862,7 @@ describe('Single-selected-workout precedence: AI/manual session supersedes an ex
     });
     await getWeek();
 
-    const patchRes = await request(app).patch(`/api/workouts/${ai.session_id}`).send({ status: 'completed' }).expect(200);
+    const patchRes = await request(app).patch(`/api/workouts/${ai.session_id}`).send({ status: 'completed', duration_minutes: 60, duration_source: 'user_entered' }).expect(200);
     expect(patchRes.body.status).toBe('completed');
 
     // The superseded deterministic snapshot is a plain data row (no

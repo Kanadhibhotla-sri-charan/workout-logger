@@ -35,8 +35,6 @@
     // Athletic drills (2026-10-18): Blueprint mode prescription per drill id.
     let drillById = new Map();
     let dirty = false; // unsaved set values entered but not yet saved (spec §62)
-    let startedAt = Date.now();
-    let elapsedTimer = null;
 
     window.addEventListener('beforeunload', (e) => {
       if (dirty) {
@@ -154,8 +152,6 @@
 
       if (session.status !== 'completed') root.appendChild(buildFinishBar());
       else root.appendChild(buildCompletedFooter());
-
-      startElapsedTimer();
     }
 
     // ---------- Header ----------
@@ -170,7 +166,7 @@
       const meta = el('div', { class: 'logger-meta' });
       if (session.goal_context) meta.appendChild(el('span', { text: `Goal priority #${session.goal_context.priority}` }));
       if (generated) meta.appendChild(el('span', { text: `Planned: ${formatDuration(generated.estimatedMinutes)}` }));
-      meta.appendChild(el('span', { id: 'elapsed-meta', text: 'Elapsed: 0 min' }));
+      if (session.duration_minutes != null) meta.appendChild(el('span', { text: `Duration: ${formatDuration(session.duration_minutes)}` }));
       meta.appendChild(createStatusBadge(session.status, formatSessionType(session.status)));
       header.appendChild(meta);
       return header;
@@ -179,17 +175,6 @@
     function weekdayFromDate(dateIso) {
       const [y, m, d] = dateIso.split('-').map(Number);
       return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }).toLowerCase();
-    }
-
-    function startElapsedTimer() {
-      if (elapsedTimer) clearInterval(elapsedTimer);
-      if (session.status === 'completed') return;
-      const base = session.start_time ? 0 : 0; // start_time is a wall-clock time-of-day, not a timestamp we can diff reliably client-side
-      elapsedTimer = setInterval(() => {
-        const el = document.getElementById('elapsed-meta');
-        if (!el) return clearInterval(elapsedTimer);
-        el.textContent = `Elapsed: ${formatDuration((Date.now() - startedAt) / 60000)}`;
-      }, 30000);
     }
 
     // ---------- Exercise section (gym) ----------
@@ -689,7 +674,8 @@
       const section = el('section');
       section.appendChild(el('h2', { text: 'Badminton session' }));
       const details = session.badminton_details || {};
-      const readOnly = session.status === 'completed';
+      // Editable after finishing too (2026-10-21): badminton is often logged
+      // after the fact, and mistakes need fixing.
 
       const intensity = el('select', { id: 'bm-intensity' }, ['low', 'medium', 'high'].map((v) => el('option', { value: v, text: v, ...(details.intensity === v ? { selected: 'selected' } : {}) })));
       const format = el('select', { id: 'bm-format' }, ['singles', 'doubles'].map((v) => el('option', { value: v, text: v, ...(details.format === v ? { selected: 'selected' } : {}) })));
@@ -701,47 +687,71 @@
       if (details.notes) notes.value = details.notes;
 
       for (const [label, input] of [['Intensity', intensity], ['Format', format], ['Games', games], ['Session quality (1-5)', quality], ['Post-session fatigue (1-5)', fatigue], ['Notes', notes]]) {
-        if (readOnly) input.disabled = true;
         section.appendChild(el('label', { text: label }, [input]));
       }
 
-      if (!readOnly) {
-        const statusEl = el('div');
-        const saveBtn = createButton({ label: 'Save badminton details', onClick: async () => {
-          try {
-            await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/badminton-details`, {
-              method: 'PUT',
-              body: {
-                intensity: intensity.value,
-                format: format.value,
-                games_count: games.value ? Number(games.value) : null,
-                session_quality: Number(quality.value),
-                post_session_fatigue: Number(fatigue.value),
-                notes: notes.value || null,
-              },
-            }), 'Saved.');
-          } catch (err) { /* values preserved */ }
-        }});
-        section.appendChild(saveBtn);
-        section.appendChild(statusEl);
-      }
+      const statusEl = el('div');
+      const saveBtn = createButton({ label: 'Save badminton details', onClick: async () => {
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/badminton-details`, {
+            method: 'PUT',
+            body: {
+              intensity: intensity.value,
+              format: format.value,
+              games_count: games.value ? Number(games.value) : null,
+              session_quality: Number(quality.value),
+              post_session_fatigue: Number(fatigue.value),
+              notes: notes.value || null,
+            },
+          }), 'Saved.');
+        } catch (err) { /* values preserved */ }
+      }});
+      section.appendChild(saveBtn);
+      section.appendChild(statusEl);
       return section;
     }
 
     // ---------- Finish / completed ----------
+
+    // Manual duration (2026-10-21): the user types whole minutes. Never
+    // prefilled with a guess (the old page-load clock was wrong ~40% of
+    // the time); required to finish; editable afterwards.
+    const DURATION_MAX_MINUTES = 360;
+
+    function buildDurationInput(id) {
+      return el('input', { id, type: 'number', inputmode: 'numeric', min: '1', max: String(DURATION_MAX_MINUTES), step: '1', placeholder: 'e.g. 65', class: 'duration-input' });
+    }
+
+    /** The typed duration as a whole number of minutes, or an error message. */
+    function readDuration(input) {
+      const raw = input.value.trim();
+      const n = Number(raw);
+      if (raw === '' || !Number.isInteger(n) || n < 1 || n > DURATION_MAX_MINUTES) {
+        return { error: `Enter the duration as whole minutes, 1 to ${DURATION_MAX_MINUTES} (e.g. 65 or 120).` };
+      }
+      return { minutes: n };
+    }
 
     function buildFinishBar() {
       const bar = el('div', { class: 'logger-finish-bar' });
       const completedSets = session.exercises.reduce((sum, p) => sum + p.sets.filter((s) => s.completed).length, 0);
       bar.appendChild(el('p', { class: 'faint', text: `${session.exercises.length} exercise(s) logged, ${completedSets} completed set(s), ${skippedExerciseIds.size} skipped.`, style: 'margin:0 0 0.5rem' }));
       const statusEl = el('div');
+      const durationInput = buildDurationInput('finish-duration');
+      bar.appendChild(el('label', { text: 'Duration (minutes)' }, [durationInput]));
       const finishBtn = createButton({ label: 'Finish workout', variant: 'primary' });
       finishBtn.classList.add('btn-block');
       finishBtn.addEventListener('click', async () => {
+        const duration = readDuration(durationInput);
+        if (duration.error) {
+          showInlineStatus(statusEl, 'error', duration.error);
+          durationInput.focus();
+          return;
+        }
         try {
           await withSaving(finishBtn, statusEl, () => api(`/api/workouts/${sessionId}`, {
             method: 'PATCH',
-            body: { status: 'completed', duration_minutes: Math.max(1, Math.round((Date.now() - startedAt) / 60000)) },
+            body: { status: 'completed', duration_minutes: duration.minutes, duration_source: 'user_entered' },
           }), 'Workout completed');
           await reload();
         } catch (err) { /* preserved */ }
@@ -838,9 +848,39 @@
       };
     }
 
+    /** Duration on a completed session: shown, and editable. A duration
+     * from the old clock is flagged so it can be corrected. */
+    function buildDurationEditor() {
+      const box = el('div', { class: 'duration-editor', style: 'margin:0 0 0.75rem' });
+      const current = session.duration_minutes;
+      const legacy = current != null && session.duration_source !== 'user_entered';
+      const text = current == null
+        ? 'Duration: not entered.'
+        : `Duration: ${current} min${legacy ? ' (recorded by the old timer, often wrong: enter the real duration if you know it)' : ''}`;
+      box.appendChild(el('p', { class: legacy || current == null ? 'faint' : '', text, style: 'margin:0 0 0.25rem' }));
+      const input = buildDurationInput('edit-duration');
+      const statusEl = el('div');
+      const saveBtn = createButton({ label: 'Save duration', onClick: async () => {
+        const duration = readDuration(input);
+        if (duration.error) return showInlineStatus(statusEl, 'error', duration.error);
+        try {
+          await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}`, {
+            method: 'PATCH',
+            body: { duration_minutes: duration.minutes, duration_source: 'user_entered' },
+          }), 'Duration saved');
+          await reload();
+        } catch (err) { /* preserved */ }
+      }});
+      box.appendChild(el('label', { text: current == null ? 'Duration (minutes)' : 'Change duration (minutes)' }, [input]));
+      box.appendChild(saveBtn);
+      box.appendChild(statusEl);
+      return box;
+    }
+
     function buildCompletedFooter() {
       const bar = el('div', { class: 'logger-finish-bar' });
       bar.appendChild(el('p', { text: 'Workout completed', style: 'font-weight:700;margin:0 0 0.5rem' }));
+      bar.appendChild(buildDurationEditor());
       const row = el('div', { class: 'btn-row' });
       let manualCopyBox = null;
       // Copy is for the performed-exercise table (gym sessions) — a

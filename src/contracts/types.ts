@@ -236,12 +236,18 @@ export interface GoalContext {
  * comment for the full precedence rationale. */
 export type WorkoutSessionSourceType = 'ai' | 'deterministic' | 'manual';
 
+/** Where a session's duration_minutes came from: 'user_entered' (typed by
+ * the user) or 'legacy' (the old logger clock, unreliable). Null when there
+ * is no duration. */
+export type DurationSource = 'user_entered' | 'legacy';
+
 export interface WorkoutSession {
   session_id: string;
   date: string;
   start_time: string | null;
   end_time: string | null;
   duration_minutes: number | null;
+  duration_source: DurationSource | null;
   session_type: SessionType;
   program_id: string | null;
   program_session_id: string | null;

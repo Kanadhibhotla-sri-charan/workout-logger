@@ -324,6 +324,14 @@ locally (all states) and read-only on production.
 * **Schema added:** `ai_week_generation_runs`, `ai_week_generation_day_failures`,
   `ai_program_proposals.week_run_id` (nullable).
 * **Backups** before each deploy: `deployment-backups/pre-<commit>-<ts>.sqlite`.
+  These are the only backups: the daily backup timer
+  (`ops/systemd/workout-logger-backup.timer`) is not installed on the VM
+  (found 2026-10-20, `docs/logs/2026-10-20-88-...`).
+* **Calorie Tracker sync** (2026-10-21, §21): drop-in `calorie-sync.conf`
+  (`ops/systemd/workout-logger-calorie-sync.conf`) loads
+  `~/.config/workout-logger/calorie-sync.env` (branch) and
+  `calorie-sync-token.env` (the secret token, chmod 600). Off when the
+  token file is absent. Rollback: delete the token file and restart.
 * **Observation tooling** (outside the repo, read-only, works on DB copies):
   `/home/ubuntu/ai-observe/observe.sh [isoWatermark]`; `observeAsOf.mjs` and
   `planCompare.mjs` for proposals whose date is already locked (pinned clock
@@ -1044,3 +1052,58 @@ added to available equipment; shadow-badminton-intervals and
 four-corner-shadow-footwork set to 'avoided' (permanent, reversible from
 the preferences).
 Tests: athleticDay.test.ts 25. Full suite 2310: 0 new failures.
+
+## 21. Manual workout duration and Calorie Tracker sync (2026-10-21)
+
+Why: Calorie Tracker picks the day's food target from session type and
+duration. A read-only check of production (2026-10-20) found
+duration_minutes wrong on 10 of 26 gym sessions (1, 8, 9, 10, 26, 187 and
+453 min) and on all 7 badminton sessions (1-6 min): the logger timed from
+page load, so a reload, a session logged afterwards, or a page left open
+broke it. Owner approved (relayed from the Calorie Tracker session):
+1. duration typed by the user in whole minutes, and 2. a job that copies
+finished sessions into the Calorie Tracker repo.
+
+Duration (decision: required field, no automatic timing):
+- Automatic timing was not made the fallback because it cannot be fully
+  reliable here: even timed from the session's real start, a forgotten
+  "Finish" (the 453-min case) or a session logged after playing (every
+  badminton entry) gives a confident wrong number. So the field is
+  required and nothing is ever prefilled.
+- Logger: "Duration (minutes)" on the finish bar (empty; Finish refuses a
+  blank or invalid value); on a completed session, the duration is shown
+  with "Change duration (minutes)" + Save. A legacy duration is flagged
+  "recorded by the old timer, often wrong". The page-load "Elapsed" clock
+  is gone. Badminton details stay editable after finishing.
+- API: duration_minutes is null or a whole number 1-360 (DURATION_MAX_MINUTES,
+  6 h: above the longest badminton day). PATCH to completed without a
+  duration -> 400 DURATION_REQUIRED; clearing a completed session's
+  duration -> 400. `duration_source: 'user_entered'` marks a typed value;
+  a duration sent without it (an old cached logger page) is stored
+  'legacy'.
+- Column workout_sessions.duration_source ('user_entered' | 'legacy' |
+  null). On start-up every duration without a source is set 'legacy'
+  (all pre-existing durations).
+
+Sync (src/services/calorieTrackerSync.ts; contract in
+docs/CALORIE_TRACKER_INTEGRATION.md "Pushed file"):
+- data/workout_sessions.json in Kanadhibhotla-sri-charan/food_and_workout_tracker,
+  via the GitHub Contents API (GET sha, PUT; 409/422 -> re-fetch and
+  retry, up to 5 attempts). Commit message "Sync workout sessions", only
+  when `days` changed (generated_at alone never commits).
+- 14 IST dates, today first, `[]` for empty days; completed sessions
+  only: session_id, session_type, duration_minutes, duration_source,
+  badminton {intensity, format, games_count} | null. No exercises, sets,
+  notes, goals, AI data.
+- Triggers: start-up, Finish workout, an edit of a completed session's
+  duration or badminton details, every 15 minutes. One serialized runner
+  (a request during a run queues one more). Failures are logged, never
+  fail the user's request. Off unless CALORIE_SYNC_TOKEN is set
+  (systemd drop-in ops/systemd/workout-logger-calorie-sync.conf; token in
+  a chmod-600 env file on the VM only).
+- The Athletic leg day appears as session_type 'gym'.
+Tests: tests/sync/calorieTrackerSync.test.ts 16; 11 existing route tests
+now send a duration when finishing. Full suite 2326: 0 new failures.
+Headless logger check: blank Finish refused, 65 -> completed
+user_entered, legacy 2 -> edited 120 user_entered, badminton intensity
+edited after finishing.

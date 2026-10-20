@@ -80,3 +80,18 @@ story of how the app got to its current state.
 - [2026-09-23-72-compatible-sessions-fix.md](2026-09-23-72-compatible-sessions-fix.md) — compatibleSessions now prefers the audited week's own day purposes over a stale pre-reconciliation snapshot; fixes deliverable=0 on a blank future week
 - [2026-09-23-73-add-when-capacity-fallback.md](2026-09-23-73-add-when-capacity-fallback.md) — Goal-completion repair can now ADD a missing exercise when the session has spare capacity and nothing is safe to displace
 - [2026-09-23-74-closure-and-run2-boundary.md](2026-09-23-74-closure-and-run2-boundary.md) — Closes the compatibleSessions/add-when-capacity work; records Run 2's shortfall as an intentional safety boundary, not a defect
+- [2026-09-23-75-generate-week-and-three-role-ui.md](2026-09-23-75-generate-week-and-three-role-ui.md) — Whole-week AI generation backend plus a UI that separates single-day generation, week reconciliation and the day view
+- [2026-09-23-76-program-page-fixes-delete-and-discard.md](2026-09-23-76-program-page-fixes-delete-and-discard.md) — Live-reported program page defects and missing controls, fixed one by one
+- [2026-09-24-77-push-generation-failure-fix.md](2026-09-24-77-push-generation-failure-fix.md) — Why Push/Pull/Upper proposals were rejected for under-prescribed targets, and the layered fix
+- [2026-09-28-78-week-batch-generation-and-paid-retry-gate.md](2026-09-28-78-week-batch-generation-and-paid-retry-gate.md) — Error messages, a whole-week generate button, and protection against paying twice for the same failure
+- [2026-09-29-79-planned-generation.md](2026-09-29-79-planned-generation.md) — A deterministic session plan decides the structure; the AI fills it in
+- [2026-10-01-80-explicit-week-generation.md](2026-10-01-80-explicit-week-generation.md) — Reads never generate; a user action creates per-day proposals for the week
+- [2026-10-02-81-decision-log-and-handoff-docs.md](2026-10-02-81-decision-log-and-handoff-docs.md) — Documentation only
+- [2026-10-11-82-wide-pool-injury-pause-day-notes-deload-fixes.md](2026-10-11-82-wide-pool-injury-pause-day-notes-deload-fixes.md) — Exercise variety and owner-requested controls
+- [2026-10-11-83-insights-and-coaching-pages.md](2026-10-11-83-insights-and-coaching-pages.md) — Read-only training insights and an AI coach review
+- [2026-10-11-84-logging-details-and-blueprint-b90c302.md](2026-10-11-84-logging-details-and-blueprint-b90c302.md) — Recording how each exercise was actually done
+- [2026-10-12-85-rir-per-set.md](2026-10-12-85-rir-per-set.md) — Optional RIR box on every set
+- [2026-10-12-86-body-measurements.md](2026-10-12-86-body-measurements.md) — Log, review and delete body measurements
+- [2026-10-18-87-athletic-day.md](2026-10-18-87-athletic-day.md) — Leg hypertrophy replaced by a durability-first Athletic day plus daily add-ons
+- [2026-10-20-88-production-data-review-for-calorie-tracker.md](2026-10-20-88-production-data-review-for-calorie-tracker.md) — Read-only check of real data; no code change
+- [2026-10-21-89-manual-duration-and-calorie-tracker-sync.md](2026-10-21-89-manual-duration-and-calorie-tracker-sync.md) — Duration typed by the user; finished sessions pushed to the Calorie Tracker repo

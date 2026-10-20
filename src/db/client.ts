@@ -112,6 +112,12 @@ function migrate(db: Database.Database): void {
   addColumnIfMissing(db, 'coaching_program_state', 'specialization_goal_id', 'TEXT REFERENCES goals(id) ON DELETE SET NULL');
   // Leg training mode (2026-10-18): 'hypertrophy' (default) or 'athletic'.
   addColumnIfMissing(db, 'training_profiles', 'leg_training', "TEXT NOT NULL DEFAULT 'hypertrophy'");
+  // Manual duration (2026-10-21): where duration_minutes came from —
+  // 'user_entered' (typed by the user) or 'legacy' (the old logger clock,
+  // which timed from page load and is unreliable). Every duration written
+  // without the user_entered marker is legacy.
+  addColumnIfMissing(db, 'workout_sessions', 'duration_source', 'TEXT');
+  db.prepare("UPDATE workout_sessions SET duration_source = 'legacy' WHERE duration_minutes IS NOT NULL AND duration_source IS NULL").run();
 
   // Coaching Depth Batch 4 (Exercise Variety & Preference): exercise_preferences
   // is a brand-new table (created above via CREATE TABLE IF NOT EXISTS),

@@ -54,6 +54,56 @@ A broader `getWorkoutSessions(date)` (same shape, any status) also exists
 for workout-logger's own UI/history — Calorie Tracker should not call
 this one; only `getCompletedWorkouts` is the intended contract.
 
+## Pushed file: `data/workout_sessions.json` (2026-10-21)
+
+The route above needs Calorie Tracker to reach workout-logger, which it
+cannot (Cloud Run and Claude cloud sessions; the VM has no auth or TLS).
+So workout-logger pushes instead: `src/services/calorieTrackerSync.ts`
+writes one file into the Calorie Tracker repo
+(`Kanadhibhotla-sri-charan/food_and_workout_tracker`, branch from
+`CALORIE_SYNC_BRANCH`) through the GitHub Contents API. Still one
+direction: workout-logger writes only this file and never reads anything
+else from that repo; Calorie Tracker only reads it.
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-21T19:05:00+05:30",
+  "days": {
+    "2026-10-21": [
+      { "session_id": "wsession_...", "session_type": "gym",
+        "duration_minutes": 64, "duration_source": "user_entered", "badminton": null },
+      { "session_id": "wsession_...", "session_type": "badminton",
+        "duration_minutes": 120, "duration_source": "user_entered",
+        "badminton": { "intensity": "medium", "format": "doubles", "games_count": 6 } }
+    ],
+    "2026-10-20": []
+  }
+}
+```
+
+- `days`: the last 14 dates in the user's timezone (IST), today first;
+  every date present, `[]` = nothing completed that day (so "no workout"
+  differs from "not synced yet"). Completed sessions only.
+- `duration_source`: `user_entered` (typed in the logger), `legacy`
+  (the old page-load clock, unreliable: Calorie Tracker ignores it), or
+  `null` when there is no duration. There is no `measured` value: there
+  is no automatic timing (see the decision log, section 21).
+- `session_type`: `gym` or `badminton`. The Athletic leg day is a `gym`
+  session.
+- `badminton`: `{intensity, format, games_count}` (each may be null) on a
+  badminton session, else `null`.
+- No exercises, sets, notes, goals or AI data.
+
+Commits use the message `Sync workout sessions`, only when `days` changed
+(on 409/422 the sha is re-fetched and the write retried; the Calorie
+Tracker app commits food logs to the same repo). Runs after "Finish
+workout", after an edit to a completed session's duration or badminton
+details, at start-up, and every 15 minutes. Off unless
+`CALORIE_SYNC_TOKEN` is set (a fine-grained token for that one repo,
+Contents read/write, kept in an env file on the VM; see
+`ops/systemd/workout-logger-calorie-sync.conf`).
+
 ## Output responsibility
 
 **Calorie Tracker decides how to transform this activity data into an

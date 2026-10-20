@@ -25,6 +25,7 @@ function session(overrides: Partial<WorkoutSession> & { status: WorkoutSessionSt
     start_time: null,
     end_time: null,
     duration_minutes: null,
+    duration_source: null,
     session_type: 'gym',
     program_id: null,
     program_session_id: null,

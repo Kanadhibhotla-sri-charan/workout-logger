@@ -2,6 +2,7 @@ import { modePrescriptionFor } from '../blueprint/programmingProfiles.js';
 import type Database from 'better-sqlite3';
 import { resolveExercise } from '../engine/exerciseUniverse.js';
 import type {
+  DurationSource,
   ExercisePerformance,
   ExerciseRole,
   GoalContext,
@@ -32,6 +33,7 @@ interface WorkoutSessionRow {
   start_time: string | null;
   end_time: string | null;
   duration_minutes: number | null;
+  duration_source: DurationSource | null;
   session_type: string;
   program_id: string | null;
   program_session_id: string | null;
@@ -62,6 +64,7 @@ function rowToSession(row: WorkoutSessionRow): WorkoutSession {
     start_time: row.start_time,
     end_time: row.end_time,
     duration_minutes: row.duration_minutes,
+    duration_source: row.duration_source ?? null,
     session_type: row.session_type,
     program_id: row.program_id,
     program_session_id: row.program_session_id,
@@ -79,6 +82,8 @@ export interface CreateWorkoutSessionInput {
   start_time?: string | null;
   end_time?: string | null;
   duration_minutes?: number | null;
+  /** See UpdateWorkoutSessionInput.duration_source. */
+  duration_source?: DurationSource | null;
   session_type: SessionType;
   program_id?: string | null;
   program_session_id?: string | null;
@@ -131,6 +136,9 @@ export interface AddExercisePerformanceInput {
 export interface UpdateWorkoutSessionInput {
   end_time?: string | null;
   duration_minutes?: number | null;
+  /** Only 'user_entered' is meaningful: a duration sent without it is
+   * stored as 'legacy' (e.g. an old cached logger page's clock). */
+  duration_source?: DurationSource | null;
   status?: WorkoutSessionStatus;
   notes?: string | null;
 }
@@ -157,6 +165,7 @@ export class WorkoutSessionsRepo {
       start_time: input.start_time ?? null,
       end_time: input.end_time ?? null,
       duration_minutes: input.duration_minutes ?? null,
+      duration_source: input.duration_minutes == null ? null : input.duration_source === 'user_entered' ? 'user_entered' : 'legacy',
       session_type: input.session_type,
       program_id: input.program_id ?? null,
       program_session_id: input.program_session_id ?? null,
@@ -171,11 +180,11 @@ export class WorkoutSessionsRepo {
     this.db
       .prepare(
         `INSERT INTO workout_sessions
-           (session_id, date, start_time, end_time, duration_minutes, session_type,
+           (session_id, date, start_time, end_time, duration_minutes, duration_source, session_type,
             program_id, program_session_id, goal_type, goal_id, goal_priority, program_phase,
             status, notes, created_at, source_type, supersedes_program_session_id)
          VALUES
-           (@session_id, @date, @start_time, @end_time, @duration_minutes, @session_type,
+           (@session_id, @date, @start_time, @end_time, @duration_minutes, @duration_source, @session_type,
             @program_id, @program_session_id, @goal_type, @goal_id, @goal_priority, @program_phase,
             @status, @notes, @created_at, @source_type, @supersedes_program_session_id)`
       )
@@ -185,6 +194,7 @@ export class WorkoutSessionsRepo {
         start_time: session.start_time,
         end_time: session.end_time,
         duration_minutes: session.duration_minutes,
+        duration_source: session.duration_source,
         session_type: session.session_type,
         program_id: session.program_id,
         program_session_id: session.program_session_id,
@@ -221,13 +231,21 @@ export class WorkoutSessionsRepo {
     this.db
       .prepare(
         `UPDATE workout_sessions
-         SET end_time = @end_time, duration_minutes = @duration_minutes, status = @status, notes = @notes
+         SET end_time = @end_time, duration_minutes = @duration_minutes, duration_source = @duration_source, status = @status, notes = @notes
          WHERE session_id = @session_id`
       )
       .run({
         session_id: id,
         end_time: input.end_time !== undefined ? input.end_time : existing.end_time,
         duration_minutes: input.duration_minutes !== undefined ? input.duration_minutes : existing.duration_minutes,
+        duration_source:
+          input.duration_minutes === undefined
+            ? existing.duration_source
+            : input.duration_minutes === null
+              ? null
+              : input.duration_source === 'user_entered'
+                ? 'user_entered'
+                : 'legacy',
         status: input.status ?? existing.status,
         notes: input.notes !== undefined ? input.notes : existing.notes,
       });

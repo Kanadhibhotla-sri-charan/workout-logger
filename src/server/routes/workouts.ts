@@ -14,6 +14,7 @@ import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { reconcileAfterActualTraining } from '../../engine/weekProgramReconciliation.js';
 import { computeFreshWeek, defaultBudgetMinutes } from './programming.js';
 import { findActiveGymSessionConflict, logSessionConflict } from '../../engine/selectedSessionResolver.js';
+import { requestCalorieSync } from '../../services/calorieTrackerSync.js';
 
 export const workoutsRouter = Router();
 
@@ -29,6 +30,24 @@ function invalidSetRir(sets: unknown[]): string | undefined {
     return rir !== undefined && rir !== null && !(Number.isInteger(rir) && (rir as number) >= 0 && (rir as number) <= 10);
   });
   return bad === -1 ? undefined : `sets[${bad}].rir must be a whole number from 0 to 10, or null`;
+}
+
+/** Manual duration (2026-10-21): the user types whole minutes; this is the
+ * sane maximum (6 h, above the longest badminton day). */
+export const DURATION_MAX_MINUTES = 360;
+
+/** `duration_minutes` / `duration_source` on a session create or update:
+ * absent, null, or a whole number 1-DURATION_MAX_MINUTES; the source, when
+ * sent, must be 'user_entered'. Returns an error message, or undefined. */
+function invalidDuration(body: Record<string, unknown>): string | undefined {
+  const d = body.duration_minutes;
+  if (d !== undefined && d !== null && !(Number.isInteger(d) && (d as number) >= 1 && (d as number) <= DURATION_MAX_MINUTES)) {
+    return `duration_minutes must be a whole number of minutes from 1 to ${DURATION_MAX_MINUTES}`;
+  }
+  if (body.duration_source !== undefined && body.duration_source !== null && body.duration_source !== 'user_entered') {
+    return "duration_source, if given, must be 'user_entered'";
+  }
+  return undefined;
 }
 
 function parseLogOptions(body: Record<string, unknown> | undefined): { options: LogOptions; error?: string } {
@@ -94,11 +113,13 @@ workoutsRouter.get('/today', (req, res) => {
 const SESSION_SOURCE_TYPES = ['ai', 'deterministic', 'manual'] as const;
 
 workoutsRouter.post('/', (req, res) => {
-  const { date, start_time, end_time, duration_minutes, session_type, program_id, program_session_id, goal_context, status, notes, source_type } =
+  const { date, start_time, end_time, duration_minutes, duration_source, session_type, program_id, program_session_id, goal_context, status, notes, source_type } =
     req.body ?? {};
   if (typeof date !== 'string' || typeof session_type !== 'string') {
     return res.status(400).json({ error: 'date and session_type are required' });
   }
+  const durationError = invalidDuration(req.body ?? {});
+  if (durationError) return res.status(400).json({ error: durationError });
   // Final AI-Deterministic Precedence and Scheduling Fixes §1: optional
   // — omitted defaults to 'deterministic' at the repo layer (this
   // endpoint's own pre-existing, only-ever-deterministic behavior). A
@@ -148,6 +169,7 @@ workoutsRouter.post('/', (req, res) => {
     start_time,
     end_time,
     duration_minutes,
+    duration_source,
     session_type,
     program_id,
     program_session_id,
@@ -185,9 +207,24 @@ workoutsRouter.get('/:id', (req, res) => {
 workoutsRouter.patch('/:id', (req, res) => {
   const database = db(req);
   const repo = new WorkoutSessionsRepo(database);
-  const wasCompletedBefore = repo.getSession(req.params.id)?.status === 'completed';
-  const updated = repo.updateSession(req.params.id, req.body ?? {});
+  const body = req.body ?? {};
+  const durationError = invalidDuration(body);
+  if (durationError) return res.status(400).json({ error: durationError });
+  const before = repo.getSession(req.params.id);
+  if (!before) return res.status(404).json({ error: 'workout session not found' });
+  const wasCompletedBefore = before.status === 'completed';
+  // Finishing a session needs its duration (typed by the user; there is no
+  // automatic timing). Clearing it on a completed session is refused too.
+  const becomesCompleted = (body.status ?? before.status) === 'completed';
+  const durationAfter = body.duration_minutes !== undefined ? body.duration_minutes : before.duration_minutes;
+  if (becomesCompleted && durationAfter === null && (body.status === 'completed' || body.duration_minutes === null)) {
+    return res.status(400).json({ error: 'Enter the workout duration in minutes to finish the session.', code: 'DURATION_REQUIRED' });
+  }
+  const updated = repo.updateSession(req.params.id, body);
   if (!updated) return res.status(404).json({ error: 'workout session not found' });
+  if (updated.status === 'completed' && (!wasCompletedBefore || body.duration_minutes !== undefined)) {
+    requestCalorieSync(wasCompletedBefore ? 'duration edited' : 'workout finished');
+  }
   // Programming Redesign (Step 12) §7/§8: the session becoming
   // completed IS the real "actual training" event the remaining-week
   // adaptation pass reacts to — never re-triggered on every other
@@ -216,6 +253,7 @@ workoutsRouter.put('/:id/badminton-details', (req, res) => {
       post_session_fatigue,
       notes,
     });
+    if (new WorkoutSessionsRepo(db(req)).getSession(req.params.id)?.status === 'completed') requestCalorieSync('badminton details edited');
     res.json(details);
   } catch (err) {
     if (err instanceof UnknownWorkoutSessionError) {

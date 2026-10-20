@@ -179,7 +179,7 @@ describe('Endpoint/integration: /today, /week, logger, completion agree via the 
     const mondayCompleted = sessionsRepo.createSession({ date: monday.date, session_type: 'gym', status: 'completed', duration_minutes: 50 });
     const thursdayAi = sessionsRepo.createSession({ date: thursday.date, session_type: 'gym', status: 'planned', source_type: 'ai' });
 
-    await request(app).patch(`/api/workouts/${thursdayAi.session_id}`).send({ status: 'completed' }).expect(200);
+    await request(app).patch(`/api/workouts/${thursdayAi.session_id}`).send({ status: 'completed', duration_minutes: 60, duration_source: 'user_entered' }).expect(200);
 
     const mondayStillCompleted = sessionsRepo.getSession(mondayCompleted.session_id)!;
     expect(mondayStillCompleted.status).toBe('completed');
