@@ -1164,3 +1164,8 @@ Tests: `tests/ai-programmer/weeklyLedger.test.ts` (12). Full suite: same
 failures as before (246-247, all pre-existing and date-dependent).
 Design: `docs/WEEKLY_VOLUME_PLANNING_DESIGN.md`. Next: one week of shadow,
 then the planner rework (statuses drive slots; reference scoping fixed).
+
+### 22.1 Volume shown to the owner (2026-10-25, 987f0b2)
+`GET /api/insights/volume` exposes the ledger read-only (work through
+today counted); the Today page shows it as a Training volume card. Part of
+the dark UI change (change log 92). Generation still unchanged.
