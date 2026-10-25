@@ -111,7 +111,7 @@ export function buildWorkoutSessionsFile(db: Database.Database, now: Date = new 
          FROM workout_sessions w
          LEFT JOIN badminton_session_details d ON d.workout_session_id = w.session_id
         WHERE w.status = 'completed' AND w.date >= ? AND w.date <= ?
-        ORDER BY w.date, w.created_at, w.session_id`
+        ORDER BY w.date, w.created_at, w.rowid`
     )
     .all(first, today) as SessionRow[];
 

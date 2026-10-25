@@ -15,6 +15,12 @@
     <div id="today-container"></div>
 
     <section>
+      <h2>Training volume</h2>
+      <p class="muted">Sets toward each muscle's number. Goal muscles count per week; the rest over a 14-day cycle that restarts once it is reached. Indirect work counts a third.</p>
+      <div id="volume-container"></div>
+    </section>
+
+    <section>
       <h2>Log something else</h2>
       <p class="muted">For an activity outside today's generated plan (e.g. an unplanned badminton session).</p>
       <form id="other-session-form">
@@ -241,7 +247,67 @@
       }
     });
 
+    // ---------- Training volume (weekly volume ledger) ----------
+
+    async function loadVolume() {
+      const container = document.getElementById('volume-container');
+      showLoading(container, 'Loading training volume…');
+      try {
+        renderVolume(container, await api('/api/insights/volume'));
+      } catch (err) {
+        showError(container, "We couldn't load training volume.", loadVolume);
+      }
+    }
+
+    const fmtSets = (n) => (Math.round(n * 10) / 10).toString();
+
+    function volumeRow(m) {
+      const pct = m.number > 0 ? Math.min(100, (m.done / m.number) * 100) : 0;
+      const state = m.done >= m.number ? 'is-done' : m.overdue ? 'is-overdue' : m.behind > 0.25 ? 'is-behind' : '';
+      const meta = m.overdue
+        ? `overdue · day ${m.windowDay} of ${m.windowLength}`
+        : m.basis === 'week' ? `this week · day ${m.windowDay} of 7` : `cycle day ${m.windowDay} of ${m.windowLength}`;
+      return el('div', { class: `vol-row ${state}` }, [
+        el('div', { class: 'vol-head' }, [
+          el('span', { class: 'vol-name', text: m.name }),
+          el('span', { class: 'vol-num' }, [el('strong', { text: fmtSets(m.done) }), el('span', { text: ` / ${m.number}` })]),
+        ]),
+        el('div', { class: 'vol-track' }, [el('div', { class: 'vol-fill', style: `width:${pct}%` })]),
+        el('div', { class: 'vol-meta', text: meta }),
+      ]);
+    }
+
+    function renderVolume(container, data) {
+      container.innerHTML = '';
+      const goals = data.muscles.filter((m) => m.isGoal);
+      const others = data.muscles.filter((m) => !m.isGoal).sort((a, b) => b.behind - a.behind);
+      if (goals.length > 0) {
+        const done = goals.reduce((s, m) => s + Math.min(m.done, m.number), 0);
+        const total = goals.reduce((s, m) => s + m.number, 0);
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const card = el('div', { class: 'card vol-card' });
+        card.appendChild(el('div', { class: 'vol-card-head' }, [
+          el('div', {}, [el('div', { class: 'vol-kicker', text: 'Goal muscles' }), el('div', { class: 'vol-title', text: 'This week' })]),
+          el('div', { class: 'vol-ring', style: `--p:${pct}`, 'aria-label': `${pct}% of this week's goal volume` }, [el('span', { text: `${pct}%` })]),
+        ]));
+        for (const m of goals) card.appendChild(volumeRow(m));
+        container.appendChild(card);
+      }
+      if (others.length > 0) {
+        const card = el('div', { class: 'card vol-card' });
+        card.appendChild(el('div', { class: 'vol-card-head' }, [
+          el('div', {}, [el('div', { class: 'vol-kicker', text: 'Other muscles' }), el('div', { class: 'vol-title', text: '14-day cycles' })]),
+        ]));
+        const grid = el('div', { class: 'vol-grid' });
+        for (const m of others) grid.appendChild(volumeRow(m));
+        card.appendChild(grid);
+        container.appendChild(card);
+      }
+      if (goals.length === 0 && others.length === 0) showEmpty(container, 'No muscle volume to show yet.');
+    }
+
     load();
+    loadVolume();
   </script>
 </body>
 </html>

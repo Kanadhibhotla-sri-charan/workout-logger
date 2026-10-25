@@ -28,6 +28,11 @@ import { calculateExerciseExposure } from '../../engine/exposureEngine.js';
 import { isTargetCompatibleWithPurpose } from '../../engine/sessionPurpose.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { athleticPaused } from '../../athletic/athleticSession.js';
+import { assembleWeeklyPlanInput } from '../../engine/workoutBuilder.js';
+import { InjuryPausesRepo } from '../../repositories/injuryPausesRepo.js';
+import { LegTrainingRepo } from '../../repositories/legTrainingRepo.js';
+import { TrainingProfileRepo } from '../../repositories/trainingProfileRepo.js';
+import { UsersRepo } from '../../repositories/usersRepo.js';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { getPackageForTarget } from '../../blueprint/developmentPackages.js';
 import { getSubTargetExerciseIds } from '../../blueprint/subTargetExerciseScope.js';
@@ -66,6 +71,9 @@ export interface LedgerInput {
   dailyExposure: ReadonlyMap<string, ReadonlyMap<string, number>>;
   /** Gym days after targetDate (any horizon; filtered per window). */
   futureDays: readonly LedgerFutureDay[];
+  /** Count work logged ON targetDate as done (the overview, read after
+   * training); planning counts only earlier days. */
+  countTargetDate?: boolean;
 }
 
 export interface LedgerEntry {
@@ -122,6 +130,7 @@ export function currentCycle(daily: LedgerInput['dailyExposure'], targetId: stri
 
 export function computeLedger(input: LedgerInput): WeeklyLedger {
   const weekStart = programmingWeekStart(input.targetDate);
+  const countUntil = input.countTargetDate ? addDays(input.targetDate, 1) : input.targetDate;
   const entries: LedgerEntry[] = [];
   for (const t of input.targets) {
     if (t.reference == null || t.reference <= 0) continue;
@@ -130,9 +139,9 @@ export function computeLedger(input: LedgerInput): WeeklyLedger {
     let done: number;
     if (t.isGoal) {
       windowStart = weekStart;
-      done = sumExposure(input.dailyExposure, t.targetId, weekStart, input.targetDate);
+      done = sumExposure(input.dailyExposure, t.targetId, weekStart, countUntil);
     } else {
-      const cycle = currentCycle(input.dailyExposure, t.targetId, t.reference, input.anchor, input.targetDate);
+      const cycle = currentCycle(input.dailyExposure, t.targetId, t.reference, input.anchor, countUntil);
       windowStart = cycle.start > input.targetDate ? input.targetDate : cycle.start;
       done = cycle.done;
     }
@@ -305,6 +314,32 @@ export function buildWeeklyLedger(db: Database.Database, context: AIProgrammerCo
     dailyExposure: readDailyExposure(db, from, targetDate),
     futureDays: readFutureDays(db, targetDate, LEDGER_CYCLE_DAYS),
   });
+}
+
+/** Volume overview for the UI (reads only): every physique target's
+ * progress toward its weekly (goal) or cycle (non-goal) number, counting
+ * everything logged through `today`. Status is not day-specific here
+ * (every non-paused target counts as eligible). */
+export function volumeOverview(db: Database.Database, today: string, anchor: string): WeeklyLedger & { goals: string[]; paused: string[] } {
+  const weekStart = programmingWeekStart(today);
+  const user = new UsersRepo(db).getOrCreateDefault();
+  const budget = new TrainingProfileRepo(db).get(user.id)?.default_session_duration_minutes ?? 60;
+  const physique = assembleWeeklyPlanInput(db, weekStart, budget, today).targets.filter((t) => t.target_type === 'physique_target');
+  const paused = new Set([...new InjuryPausesRepo(db).pausedTargetIds(), ...new LegTrainingRepo(db).athleticLegTargetIds()]);
+  const targets: LedgerTargetInput[] = physique.map((t) => {
+    const ref = ledgerReference(t.target_id, t.is_specialization);
+    return { targetId: t.target_id, isGoal: t.is_specialization, reference: ref?.weekly ?? null, perSessionCap: ref?.perSession ?? null, eligibleToday: true, paused: paused.has(t.target_id) };
+  });
+  const from = anchor < weekStart ? anchor : weekStart;
+  const ledger = computeLedger({
+    targetDate: today,
+    anchor,
+    targets,
+    dailyExposure: readDailyExposure(db, from, addDays(today, 1)),
+    futureDays: readFutureDays(db, today, LEDGER_CYCLE_DAYS),
+    countTargetDate: true,
+  });
+  return { ...ledger, goals: targets.filter((t) => t.isGoal).map((t) => t.targetId), paused: [...paused] };
 }
 
 /** One-line log summary (bounded). */

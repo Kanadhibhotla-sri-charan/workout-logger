@@ -142,3 +142,29 @@ describe('ledgerReference (per-muscle package numbers)', () => {
     expect(ledgerReference('front-delt', false)).toBeNull();
   });
 });
+
+describe('GET /api/insights/volume', () => {
+  it('reports goal muscles per week and the rest per cycle, without paused legs', async () => {
+    const { default: request } = await import('supertest');
+    const { createApp } = await import('../../src/server/app.js');
+    const { UsersRepo } = await import('../../src/repositories/usersRepo.js');
+    const { TrainingProfileRepo } = await import('../../src/repositories/trainingProfileRepo.js');
+    const { GoalsRepo } = await import('../../src/repositories/goalsRepo.js');
+    const { InjuryPausesRepo } = await import('../../src/repositories/injuryPausesRepo.js');
+    const db = openDb(':memory:');
+    const user = new UsersRepo(db).getOrCreateDefault();
+    new TrainingProfileRepo(db).upsert(user.id, {
+      timezone: 'Asia/Kolkata', week_start_day: 'monday', training_days: ['monday', 'tuesday', 'thursday', 'friday'] as any,
+      default_session_duration_minutes: 60, minimum_session_duration_minutes: 30, maximum_session_duration_minutes: 90,
+      available_equipment: ['barbell', 'dumbbell', 'cable', 'machine', 'bench'], other_activity_schedule: [],
+    });
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'triceps-back-depth', priority: 1 });
+    new InjuryPausesRepo(db).pause('legs', '2026-10-01', null);
+    const body = (await request(createApp(db)).get('/api/insights/volume').expect(200)).body;
+    const triceps = body.muscles.find((m: any) => m.targetId === 'triceps');
+    expect(triceps).toMatchObject({ isGoal: true, basis: 'week', number: 24, windowLength: 7 });
+    expect(body.muscles.find((m: any) => m.targetId === 'side-delt')).toMatchObject({ isGoal: false, basis: 'cycle', number: 10, windowLength: 14 });
+    expect(body.muscles.some((m: any) => m.targetId === 'quads')).toBe(false);
+    expect(body.muscles.some((m: any) => m.targetId === 'front-delt')).toBe(false);
+  });
+});
