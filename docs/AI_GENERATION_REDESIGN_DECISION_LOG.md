@@ -1114,3 +1114,53 @@ now send a duration when finishing. Full suite 2326: 0 new failures.
 Headless logger check: blank Finish refused, 65 -> completed
 user_entered, legacy 2 -> edited 120 user_entered, badminton intensity
 edited after finishing.
+
+## 22. Weekly volume ledger, shadow mode (2026-10-25)
+Context: production review of 10-04..10-25 (owner: "the model is trying to
+cover every possible muscle on each given day ... think like a trainer").
+Findings:
+- The deterministic session planner picks every eligible muscle and fills
+  to the 10-exercise cap (10-19 and 10-20 used all 10). It never asks
+  whether a later session this week could take a muscle; the AI only
+  fills exercises, and adequacy completion adds back planned muscles.
+- Abs are accessory (last), capped at 2 exercises, and obliques win the
+  alphabetical tie: rectus abdominis was deferred in every logged plan.
+- Goal muscles got about a third of their reference (triceps about 7-10
+  of 24, brachialis 5 of 8 in the 10-19 week).
+- getDevelopmentReference credits every member of the shoulders, back,
+  forearms and core packages with the WHOLE package (side, rear and front
+  delt 14/wk each; lats, back, traps 16; each abs target 32). Chest,
+  triceps and biceps are scoped correctly. Fixing it in the engine breaks
+  77 tests: the live planner's floors are built on those numbers. Left
+  for the planner rework; reverted.
+
+Owner decisions:
+- Growth decides the numbers, not frequency. Direct and indirect work both
+  count. Spread across the week is free; abs not every day.
+- D1 (a) Efficient numbers for non-goals; D2 goal muscles on every
+  suitable day; D3 aim 60 min, never over 90.
+- Non-goal numbers are due over a 14-day cycle per muscle; the next cycle
+  starts as soon as the number is reached. An unfinished cycle keeps
+  counting past day 14 and is offered first.
+
+Built (shadow only; generation unchanged):
+- `src/ai-programmer/planning/weeklyLedger.ts`: statuses must / can_wait /
+  overdue / met / not_today per muscle; logged as
+  `[ai-programmer] weekly ledger shadow` next to every session plan when
+  `AI_WEEKLY_LEDGER_MODE=shadow` (drop-in
+  `ops/systemd/workout-logger-weekly-ledger.conf`, anchor 2026-10-19).
+- The ledger uses its own per-muscle package numbers (`ledgerReference`):
+  side delt 10, rear delt 4, lats 6, back 6, traps 4, forearms 6 each,
+  obliques 8, rectus abdominis 24 (core profile frequency 4/wk), front
+  delt none (Blueprint leaves it to pressing). Goals unchanged: triceps 24,
+  long head 8, brachialis 8.
+- Future days use the purpose the user actually trained on that weekday in
+  the last 21 days (committed proposals), else the rotation.
+Dry run on real data for Mon 10-26 Push: must = triceps 12, long head 4,
+rectus abdominis 5; can wait = upper/mid/lower pec, side delt, obliques.
+Tue 10-27 Pull: must = brachialis 4, rectus 6, forearms 2+2; can wait =
+lats, back, biceps, rear delt, traps, obliques.
+Tests: `tests/ai-programmer/weeklyLedger.test.ts` (12). Full suite: same
+failures as before (246-247, all pre-existing and date-dependent).
+Design: `docs/WEEKLY_VOLUME_PLANNING_DESIGN.md`. Next: one week of shadow,
+then the planner rework (statuses drive slots; reference scoping fixed).

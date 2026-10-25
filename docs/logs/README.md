@@ -96,3 +96,4 @@ story of how the app got to its current state.
 - [2026-10-20-88-production-data-review-for-calorie-tracker.md](2026-10-20-88-production-data-review-for-calorie-tracker.md) — Read-only check of real data; no code change
 - [2026-10-21-89-manual-duration-and-calorie-tracker-sync.md](2026-10-21-89-manual-duration-and-calorie-tracker-sync.md) — Duration typed by the user; finished sessions pushed to the Calorie Tracker repo
 - [2026-10-20-90-daily-backup-and-rir-confirmation.md](2026-10-20-90-daily-backup-and-rir-confirmation.md) — Daily DB backup timer installed on the VM; RIR 0 = failure confirmed
+- [2026-10-25-91-weekly-volume-ledger-shadow.md](2026-10-25-91-weekly-volume-ledger-shadow.md) — Weekly/cycle volume tally per muscle, logged in shadow mode
