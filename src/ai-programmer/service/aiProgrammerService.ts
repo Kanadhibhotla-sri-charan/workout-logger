@@ -39,12 +39,13 @@ import {
   AIGenerateWeekOutputDomainInvalidError,
   AIGenerateWeekOutputSchemaInvalidError,
 } from '../errors.js';
-import { isAiProgrammerEnabled, isPlannedGenerationEnabled, loadVelonaConfig } from '../provider/config.js';
+import { aiWeeklyLedgerAnchor, aiWeeklyLedgerMode, isAiProgrammerEnabled, isPlannedGenerationEnabled, loadVelonaConfig } from '../provider/config.js';
 import { isLikelyTruncatedOutput, VelonaProvider } from '../provider/velonaProvider.js';
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
 import { clearGenerationFailure, findGenerationFailure, isGatedGenerationFailure, recordGenerationFailure } from './generationFailureMemory.js';
 import { buildGenerationRejectionDiagnostic, logGenerationRejection } from './generationDiagnostics.js';
 import { planSession, summarizeSessionPlanForLog, type SessionPlan } from '../planning/sessionPlanner.js';
+import { buildWeeklyLedger, summarizeLedgerForLog } from '../planning/weeklyLedger.js';
 import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction, usesRotationShortlist } from '../planning/plannedContext.js';
 import { runProposalPipeline } from './proposalPipeline.js';
 import { ATHLETIC_OUTPUT_SCHEMA, buildAthleticContext, buildAthleticSystemInstruction, checkAthleticOutput, type AthleticContext } from '../../athletic/athleticSession.js';
@@ -318,6 +319,7 @@ export class AIProgrammerService {
     if (plan) {
       console.log('[ai-programmer] shadow session plan', JSON.stringify({ ...summarizeSessionPlanForLog(plan), appliedToGeneration: appliedPlan !== null }));
     }
+    this.logWeeklyLedgerShadow(context);
 
     // Same-context retry gate: the last paid attempt for this exact
     // targetDate + contextHash failed an AI-output quality check and
@@ -404,6 +406,18 @@ export class AIProgrammerService {
       requestId: providerResponse.requestId,
       diagnostics,
     };
+  }
+
+  /** Weekly volume ledger, shadow mode only: logged next to the session
+   * plan, never used by generation. A failure is logged and ignored. */
+  private logWeeklyLedgerShadow(context: AIProgrammerContext): void {
+    if (aiWeeklyLedgerMode() !== 'shadow') return;
+    try {
+      const ledger = buildWeeklyLedger(this.db, context, aiWeeklyLedgerAnchor());
+      console.log('[ai-programmer] weekly ledger shadow', JSON.stringify(summarizeLedgerForLog(ledger, context.programmingBrief.session.purpose)));
+    } catch (err) {
+      console.warn('[ai-programmer] weekly ledger shadow failed', JSON.stringify({ targetDate: context.targetDate, error: err instanceof Error ? `${err.name}: ${err.message}` : 'unknown' }));
+    }
   }
 
   /** The deterministic session plan for this context, or null if the

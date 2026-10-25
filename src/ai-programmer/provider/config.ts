@@ -39,6 +39,19 @@ export function aiExercisePoolMode(): 'package' | 'wide' {
   return process.env.AI_EXERCISE_POOL_MODE === 'wide' ? 'wide' : 'package';
 }
 
+/** Weekly volume ledger (2026-10-25, docs/WEEKLY_VOLUME_PLANNING_DESIGN.md).
+ * 'off' (default): not computed. 'shadow': computed at every session
+ * generation and logged next to the session plan; generation unchanged. */
+export function aiWeeklyLedgerMode(): 'off' | 'shadow' {
+  return process.env.AI_WEEKLY_LEDGER_MODE === 'shadow' ? 'shadow' : 'off';
+}
+
+/** First day non-goal cycles are counted from (YYYY-MM-DD). */
+export function aiWeeklyLedgerAnchor(): string {
+  const v = process.env.AI_WEEKLY_LEDGER_ANCHOR;
+  return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '2026-10-19';
+}
+
 export interface VelonaConfig {
   apiKey: string;
   baseUrl: string;

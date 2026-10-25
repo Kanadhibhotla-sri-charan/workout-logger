@@ -179,12 +179,12 @@ describe('GitHub write', () => {
     });
     const out = await pushWorkoutSessionsFile(sample({ '2026-10-21': [] }), CONFIG, fake as any);
     expect(out).toEqual({ status: 'committed', commitSha: 'abc1234def' });
-    expect(calls[0].url).toBe('https://api.github.com/repos/owner/repo/contents/data/workout_sessions.json?ref=live');
-    const put = JSON.parse(String(calls[1].init!.body));
+    expect(calls[0]!.url).toBe('https://api.github.com/repos/owner/repo/contents/data/workout_sessions.json?ref=live');
+    const put = JSON.parse(String(calls[1]!.init!.body));
     expect(put).toMatchObject({ message: SYNC_COMMIT_MESSAGE, branch: 'live' });
     expect(put.sha).toBeUndefined();
     expect(JSON.parse(Buffer.from(put.content, 'base64').toString())).toEqual(sample({ '2026-10-21': [] }));
-    expect((calls[1].init!.headers as Record<string, string>).Authorization).toBe('Bearer tok_secret');
+    expect((calls[1]!.init!.headers as Record<string, string>).Authorization).toBe('Bearer tok_secret');
   });
 
   it('does not commit when only generated_at would change', async () => {
@@ -212,7 +212,7 @@ describe('GitHub write', () => {
     await expect(pushWorkoutSessionsFile(sample({}), CONFIG, conflict as any)).rejects.toThrow(/HTTP 409/);
     expect(conflict).toHaveBeenCalledTimes(10);
     const unauthorized = vi.fn(async () => json(401, { message: 'Bad credentials' }));
-    const err = await pushWorkoutSessionsFile(sample({}), CONFIG, unauthorized as any).catch((e) => e as Error);
+    const err = (await pushWorkoutSessionsFile(sample({}), CONFIG, unauthorized as any).catch((e) => e)) as Error;
     expect(err.message).toMatch(/HTTP 401/);
     expect(err.message).not.toContain('tok_secret');
   });
