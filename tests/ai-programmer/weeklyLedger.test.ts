@@ -3,7 +3,7 @@
 // that restarts as soon as its number is reached.
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db/client.js';
-import { computeLedger, currentCycle, readDailyExposure, type LedgerInput, type LedgerTargetInput } from '../../src/ai-programmer/planning/weeklyLedger.js';
+import { computeLedger, currentCycle, ledgerReference, readDailyExposure, type LedgerInput, type LedgerTargetInput } from '../../src/ai-programmer/planning/weeklyLedger.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 
 const target = (over: Partial<LedgerTargetInput> & { targetId: string }): LedgerTargetInput => ({
@@ -124,5 +124,21 @@ describe('readDailyExposure', () => {
     expect([...daily.keys()]).toEqual(['2026-10-26']);
     expect(daily.get('2026-10-26')!.get('triceps')).toBe(2);
     expect([...daily.get('2026-10-26')!.values()].some((v) => Math.abs(v - 0.66) < 1e-9)).toBe(true);
+  });
+});
+
+describe('ledgerReference (per-muscle package numbers)', () => {
+  it('credits each muscle only with the package exercises that train it', () => {
+    expect(ledgerReference('side-delt', false)).toEqual({ weekly: 10, perSession: 5 });
+    expect(ledgerReference('rear-delt', false)).toEqual({ weekly: 4, perSession: 2 });
+    expect(ledgerReference('lat-width', false)).toEqual({ weekly: 6, perSession: 3 });
+    expect(ledgerReference('obliques', false)).toEqual({ weekly: 8, perSession: 2 });
+    expect(ledgerReference('rectus-abdominis', false)).toEqual({ weekly: 24, perSession: 6 });
+  });
+
+  it('keeps the existing sub-target scope (goal muscles unchanged) and gives front delts no number', () => {
+    expect(ledgerReference('triceps', true)).toEqual({ weekly: 24, perSession: 12 });
+    expect(ledgerReference('brachialis-arm-thickness', true)).toEqual({ weekly: 8, perSession: 4 });
+    expect(ledgerReference('front-delt', false)).toBeNull();
   });
 });

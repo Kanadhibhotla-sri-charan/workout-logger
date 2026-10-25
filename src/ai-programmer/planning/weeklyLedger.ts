@@ -28,6 +28,10 @@ import { calculateExerciseExposure } from '../../engine/exposureEngine.js';
 import { isTargetCompatibleWithPurpose } from '../../engine/sessionPurpose.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { athleticPaused } from '../../athletic/athleticSession.js';
+import { BlueprintAdapter } from '../../blueprint/adapter.js';
+import { getPackageForTarget } from '../../blueprint/developmentPackages.js';
+import { getSubTargetExerciseIds } from '../../blueprint/subTargetExerciseScope.js';
+import { getPreferredFrequencyReference } from '../../coaching/profiles/muscleProfileService.js';
 import type { AIProgrammerContext } from '../context/programmerContextTypes.js';
 import { weekGymDays } from '../service/weekGeneration.js';
 
@@ -262,6 +266,24 @@ export function readFutureDays(db: Database.Database, targetDate: string, horizo
   return out;
 }
 
+/** The ledger's own per-muscle number: the package exercises that train
+ * this muscle (the sub-target scope where one exists, else the exercise's
+ * own Blueprint physique_targets) x the package frequency. The engine's
+ * getDevelopmentReference credits every member of the shoulders, back,
+ * forearms and core packages with the whole package (found 2026-10-25);
+ * the live planner is built on those numbers, so the ledger computes its
+ * own until the planner moves onto it. null = the package gives this
+ * muscle no exercise (front-delt: left to pressing work). */
+export function ledgerReference(targetId: string, isGoal: boolean): { weekly: number; perSession: number } | null {
+  const pkg = getPackageForTarget(targetId, isGoal ? 'complete' : 'efficient');
+  if (!pkg) return null;
+  const scoped = getSubTargetExerciseIds(pkg.id, targetId);
+  const trains = (exerciseId: string) => (scoped ? scoped.includes(exerciseId) : (BlueprintAdapter.getExercise(exerciseId)?.physique_targets ?? []).includes(targetId));
+  const perSession = pkg.exercises.filter((e) => trains(e.exercise_id)).reduce((sum, e) => sum + e.sets, 0);
+  if (perSession <= 0) return null;
+  return { weekly: perSession * (getPreferredFrequencyReference(targetId) ?? pkg.frequency.sessions_per_week), perSession };
+}
+
 /** The ledger for a built generation context (reads only). */
 export function buildWeeklyLedger(db: Database.Database, context: AIProgrammerContext, anchor: string): WeeklyLedger {
   const targetDate = context.targetDate;
@@ -271,8 +293,8 @@ export function buildWeeklyLedger(db: Database.Database, context: AIProgrammerCo
     .map((m) => ({
       targetId: m.targetId,
       isGoal: m.isGoalOriented,
-      reference: m.weeklyDevelopmentReference,
-      perSessionCap: m.directSetsPerExposureCap,
+      reference: ledgerReference(m.targetId, m.isGoalOriented)?.weekly ?? null,
+      perSessionCap: ledgerReference(m.targetId, m.isGoalOriented)?.perSession ?? null,
       eligibleToday: m.eligibleForThisSession,
       paused: m.pausedForInjury === true || m.trainedAthletically === true,
     }));
