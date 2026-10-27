@@ -50,6 +50,7 @@ export const BLOCK_OF_MODE: Record<TrainingMode, AthleticBlock> = {
   'movement-strength': 'quality',
   conditioning: 'conditioning',
   'mobility-hold': 'cooldown',
+  'soft-tissue': 'cooldown',
 };
 
 /** Exercises per block [min, max]; every block is required. */
@@ -210,6 +211,9 @@ export function drillCatalogue(lastDone: ReadonlyMap<string, string> = new Map()
       ...(filter.preferred.has(e.id) ? { preferred: true as const } : {}),
       lastDone: lastDone.get(e.id) ?? null,
     }))
+    // Blueprint 2026-10-27 added upper-body / full-body mobility drills and
+    // soft-tissue work; the Athletic day keeps to drills for its own goals.
+    .filter((d) => d.goals.length > 0)
     .sort((a, b) => ATHLETIC_BLOCKS.indexOf(a.block) - ATHLETIC_BLOCKS.indexOf(b.block) || a.exerciseId.localeCompare(b.exerciseId));
 }
 

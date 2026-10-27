@@ -1,9 +1,564 @@
 {
+  "schemaVersion": 2,
+  "volumeGroups": [
+    {
+      "id": "chest",
+      "name": "Chest",
+      "parent_region": "chest",
+      "definition": "The whole pectoralis major, planned as one muscle and biased toward the upper, mid or lower chest through its children's shares."
+    },
+    {
+      "id": "calves",
+      "name": "Calves",
+      "parent_region": "calves",
+      "definition": "The gastrocnemius and soleus, planned as one muscle and biased through their shares."
+    }
+  ],
+  "volumeTargets": [
+    {
+      "target_id": "chest",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 10,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Main-muscle defaults (see header). Upper / mid / lower chest share this number; the bias comes from their shares."
+    },
+    {
+      "target_id": "calves",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 8,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 24,
+      "indirect_only": false,
+      "rationale": "Efficient sits at the bottom of global-principles' starting range (8-12) because badminton footwork adds a large amount of calf loading outside the gym. Gastrocnemius and soleus share this number."
+    },
+    {
+      "target_id": "upper-pec",
+      "volume_from_parent": "chest"
+    },
+    {
+      "target_id": "mid-pec",
+      "volume_from_parent": "chest"
+    },
+    {
+      "target_id": "lower-pec",
+      "volume_from_parent": "chest"
+    },
+    {
+      "target_id": "front-delt",
+      "weekly_sets": {
+        "minimum": 2,
+        "efficient": 6,
+        "priority": 12
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": true,
+      "rationale": "Every chest or shoulder press credits the front delt (0.5 for chest presses, 1.0 for overhead presses), so about 12 weekly pressing sets already reach \"efficient\". Below the global ranges for that reason."
+    },
+    {
+      "target_id": "side-delt",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 10,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Main-muscle defaults. Pressing gives the side delt only minor credit (0.25 from overhead presses), so it needs direct lateral-raise work."
+    },
+    {
+      "target_id": "rear-delt",
+      "weekly_sets": {
+        "minimum": 2,
+        "efficient": 8,
+        "priority": 14
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Rows credit the rear delt a little (0.25 per set), so slightly less direct work is needed than for the side delt. Efficient sits at the bottom of the global starting range (8-12)."
+    },
+    {
+      "target_id": "lat-width",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 10,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Main-muscle defaults. Rows add 0.5 per set on top of vertical pulls."
+    },
+    {
+      "target_id": "back-thickness",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 10,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Main-muscle defaults. Vertical pulls add 0.5 per set on top of rows."
+    },
+    {
+      "target_id": "upper-traps",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 6,
+        "priority": 12
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": true,
+      "rationale": "Deadlifts, rack pulls, carries and upright rows already credit the upper traps, so direct shrugs are only needed when they are a goal. Below the global ranges for that reason."
+    },
+    {
+      "target_id": "biceps",
+      "weekly_sets": {
+        "minimum": 2,
+        "efficient": 8,
+        "priority": 14
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Pull-ups, pulldowns and rows credit the biceps (0.25-0.5 per set), so a typical back week already covers part of it. Efficient sits at the bottom of the global starting range (8-12)."
+    },
+    {
+      "target_id": "brachialis-arm-thickness",
+      "weekly_sets": {
+        "minimum": 2,
+        "efficient": 6,
+        "priority": 14
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Every curl (0.5) and every pull (0.25) credits the brachialis, so efficient sits below the global starting range. Priority (14) is reached mainly with hammer and reverse curls."
+    },
+    {
+      "target_id": "triceps",
+      "weekly_sets": {
+        "minimum": 2,
+        "efficient": 8,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Every press credits the triceps (0.5 per set), so a normal pressing week covers much of \"efficient\". The long head shares this number through its min_share (a third of triceps work overhead or stretched)."
+    },
+    {
+      "target_id": "triceps-long-head",
+      "volume_from_parent": "triceps"
+    },
+    {
+      "target_id": "rectus-abdominis",
+      "weekly_sets": {
+        "minimum": 2,
+        "efficient": 6,
+        "priority": 10
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 24,
+      "indirect_only": false,
+      "rationale": "A small muscle group that also works during heavy compound lifts; 6-10 weekly sets is a common practical range. Below the global ranges for that reason."
+    },
+    {
+      "target_id": "obliques",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 6,
+        "priority": 10
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 24,
+      "indirect_only": false,
+      "rationale": "Covers rotation, anti-rotation and anti-lateral flexion. Same reasoning as the rectus abdominis. Carries and badminton's rotation add further work outside these sets."
+    },
+    {
+      "goal_id": "core-anti-extension",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 6,
+        "priority": 10
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 24,
+      "indirect_only": false,
+      "rationale": "Planks and ab-wheel rollouts. Heavy squats and deadlifts also train the trunk to resist extension, so a few direct sets a week are a common practical amount."
+    },
+    {
+      "target_id": "gastrocnemius",
+      "volume_from_parent": "calves"
+    },
+    {
+      "target_id": "soleus",
+      "volume_from_parent": "calves"
+    },
+    {
+      "target_id": "gluteus-maximus",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 10,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Main-muscle defaults. Squats, lunges and leg presses credit 0.5 per set, hinges up to 1.0."
+    },
+    {
+      "target_id": "gluteus-medius-minimus",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 6,
+        "priority": 12
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Single-leg work and side planks credit it a little; badminton's lateral movement also loads it. Below the global ranges for that reason."
+    },
+    {
+      "target_id": "adductors",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 4,
+        "priority": 10
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": true,
+      "rationale": "Squats (0.5) and lunges (0.25) credit the adductors, so a normal leg week usually covers \"efficient\". The Copenhagen plank is still useful for groin resilience in badminton."
+    },
+    {
+      "target_id": "quads",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 10,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Main-muscle defaults."
+    },
+    {
+      "target_id": "hamstrings",
+      "weekly_sets": {
+        "minimum": 4,
+        "efficient": 10,
+        "priority": 16
+      },
+      "per_session_max": 8,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 48,
+      "indirect_only": false,
+      "rationale": "Main-muscle defaults. Squats give the hamstrings no credit; hinges and leg curls carry it."
+    },
+    {
+      "target_id": "forearm-flexors",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 4,
+        "priority": 10
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 24,
+      "indirect_only": true,
+      "rationale": "Gripping in deadlifts, rows, carries and racket play loads the forearm flexors, so direct wrist curls are only needed when they are a goal."
+    },
+    {
+      "target_id": "forearm-extensors",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 4,
+        "priority": 10
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 24,
+      "indirect_only": false,
+      "rationale": "Hammer and Zottman curls credit the extensors (0.5), so a few direct sets of reverse curls or reverse wrist curls cover \"efficient\"."
+    },
+    {
+      "target_id": "neck-thickness",
+      "weekly_sets": {
+        "minimum": 0,
+        "efficient": 4,
+        "priority": 10
+      },
+      "per_session_max": 6,
+      "sessions_per_week": [
+        2,
+        3
+      ],
+      "min_hours_between": 24,
+      "indirect_only": false,
+      "rationale": "A small, optional target; a few direct sets a week are a common practical starting point."
+    }
+  ],
+  "mobilityTargets": [
+    {
+      "goal_id": "upper-body-mobility",
+      "weekly_minutes": 10,
+      "sessions_per_week": [
+        3,
+        5
+      ]
+    },
+    {
+      "goal_id": "lower-body-mobility",
+      "weekly_minutes": 10,
+      "sessions_per_week": [
+        3,
+        5
+      ]
+    },
+    {
+      "goal_id": "wrist-forearm-mobility",
+      "weekly_minutes": 5,
+      "sessions_per_week": [
+        3,
+        5
+      ]
+    },
+    {
+      "goal_id": "full-body-mobility",
+      "weekly_minutes": 10,
+      "sessions_per_week": [
+        3,
+        5
+      ]
+    }
+  ],
+  "exerciseFamilies": [
+    {
+      "id": "decline-press",
+      "name": "Decline press",
+      "members": [
+        "decline-barbell-bench-press",
+        "decline-dumbbell-press"
+      ]
+    },
+    {
+      "id": "incline-press",
+      "name": "Incline press",
+      "members": [
+        "incline-barbell-press",
+        "incline-dumbbell-press",
+        "smith-machine-incline-press",
+        "incline-machine-press",
+        "incline-cable-press"
+      ]
+    },
+    {
+      "id": "flat-press",
+      "name": "Flat press",
+      "members": [
+        "flat-barbell-bench-press",
+        "flat-dumbbell-press",
+        "smith-machine-bench-press",
+        "machine-chest-press",
+        "cable-chest-press"
+      ]
+    },
+    {
+      "id": "chest-fly",
+      "name": "Chest fly",
+      "members": [
+        "flat-dumbbell-fly",
+        "machine-fly-pec-deck"
+      ]
+    },
+    {
+      "id": "shoulder-press",
+      "name": "Shoulder press",
+      "members": [
+        "overhead-press",
+        "smith-machine-shoulder-press",
+        "seated-machine-shoulder-press",
+        "cable-shoulder-press"
+      ]
+    },
+    {
+      "id": "lateral-raise",
+      "name": "Lateral raise",
+      "members": [
+        "dumbbell-lateral-raise",
+        "cable-lateral-raise",
+        "machine-lateral-raise"
+      ]
+    },
+    {
+      "id": "rear-delt-fly",
+      "name": "Rear-delt fly",
+      "members": [
+        "rear-delt-fly",
+        "machine-reverse-fly",
+        "cable-rear-delt-builder"
+      ]
+    },
+    {
+      "id": "biceps-curl",
+      "name": "Biceps curl",
+      "members": [
+        "dumbbell-curl",
+        "barbell-ez-bar-curl",
+        "cable-curl"
+      ]
+    },
+    {
+      "id": "preacher-curl",
+      "name": "Preacher curl",
+      "members": [
+        "preacher-curl",
+        "preacher-curl-machine"
+      ]
+    },
+    {
+      "id": "drag-curl",
+      "name": "Drag curl",
+      "members": [
+        "drag-curl",
+        "cable-drag-curl"
+      ]
+    },
+    {
+      "id": "hammer-curl",
+      "name": "Hammer curl",
+      "members": [
+        "hammer-curl",
+        "cable-hammer-curl-rope"
+      ]
+    },
+    {
+      "id": "reverse-curl",
+      "name": "Reverse curl",
+      "members": [
+        "reverse-curl",
+        "cable-reverse-curl"
+      ]
+    },
+    {
+      "id": "squat",
+      "name": "Back squat",
+      "members": [
+        "back-squat",
+        "smith-machine-squat"
+      ]
+    },
+    {
+      "id": "romanian-deadlift",
+      "name": "Romanian deadlift",
+      "members": [
+        "romanian-deadlift",
+        "smith-machine-romanian-deadlift"
+      ]
+    }
+  ],
   "physiqueTargets": [
     {
       "id": "upper-pec",
       "name": "Upper Pec",
       "parent_region": "chest",
+      "parent": "chest",
+      "volume_share": 0.4,
+      "min_share": 0.3,
       "definition": "The clavicular (upper) portion of the pectoralis major — the part of the chest closest to the collarbone.",
       "physique_outcome": "Visually, this reads as the \"upper chest shelf\" filling in: fullness just below the collarbone that closes the gap between shoulder and chest, producing a squared-off upper-chest line in a t-shirt or from the front, rather than the chest appearing to start lower down."
     },
@@ -11,6 +566,9 @@
       "id": "mid-pec",
       "name": "Mid Chest",
       "parent_region": "chest",
+      "parent": "chest",
+      "volume_share": 0.4,
+      "min_share": 0.2,
       "definition": "The sternocostal (mid) portion of the pectoralis major — the largest portion of the muscle, and the part loaded by default in a flat-angle press.",
       "physique_outcome": "Visually, this is the main slab of chest mass and depth seen from the front — the bulk of what makes the chest look \"full\" and thick in a flat-on view, distinct from the upper-chest shelf or the lower/outer sweep near the armpit."
     },
@@ -18,6 +576,8 @@
       "id": "lower-pec",
       "name": "Lower Pec",
       "parent_region": "chest",
+      "parent": "chest",
+      "volume_share": 0.2,
       "definition": "The lower/costal portion of the pectoralis major, most commonly biased via a decline angle or a forward-leaning dip.",
       "physique_outcome": "Visually, this shows up as definition along the lower border of the chest and the transition line into the ribs — most visible from the side or in a lower/decline-angle view, distinct from the upper-chest shelf."
     },
@@ -88,6 +648,9 @@
       "id": "triceps-long-head",
       "name": "Triceps — Long-Head Emphasis",
       "parent_region": "arms",
+      "parent": "triceps",
+      "volume_share": 0.4,
+      "min_share": 0.33,
       "definition": "The long head of the triceps specifically, which crosses the shoulder joint and is more directly loaded when the arm is trained in an overhead position, not just extended at the side.",
       "physique_outcome": "Visually, the long head makes up the largest share of triceps mass, running along the inner/rear portion of the upper arm — the part most responsible for the \"horseshoe\" shape some lifters emphasize, and the part most easily under-trained by exercises that never take the shoulder into an overhead position."
     },
@@ -109,6 +672,9 @@
       "id": "gastrocnemius",
       "name": "Gastrocnemius",
       "parent_region": "calves",
+      "parent": "calves",
+      "volume_share": 0.6,
+      "min_share": 0.4,
       "definition": "The two-headed calf muscle that contributes when the knee is straight, trained through standing-position ankle plantarflexion.",
       "physique_outcome": "Visually, this is the diamond-shaped bulge and overall width of the calf, most visible from behind or the side when the muscle is flexed with the foot pointed — the raise most people mean when they picture a bigger calf."
     },
@@ -116,6 +682,9 @@
       "id": "soleus",
       "name": "Soleus",
       "parent_region": "calves",
+      "parent": "calves",
+      "volume_share": 0.4,
+      "min_share": 0.25,
       "definition": "The calf muscle beneath the gastrocnemius that stays active even with the knee bent, trained through seated-position ankle plantarflexion.",
       "physique_outcome": "Visually, this fills out the lower half of the calf's profile, closer to the ankle, rather than the upper bulge the gastrocnemius builds — often the part that stays thin even once the upper calf has already grown."
     },
@@ -214,7 +783,46 @@
     "progression": {
       "model": "double-progression",
       "explanation": "A simple, practical progression model. Pick a target rep range (for example 8-12). Start with a load that allows completing the low end of that range at the target RIR. Over subsequent sessions, add reps at the same load until the top of the range is reached at the target RIR. Once that happens, increase the load slightly, and the rep count typically drops back toward the bottom of the range — then repeat.",
-      "scope_note": "This is the only progression model Phase 4 introduces. Advanced periodization, deload prediction, and recovery prediction are explicitly out of scope (see the Phase 4 architecture spec §29)."
+      "scope_note": "This is the only progression model Phase 4 introduces. Advanced periodization and recovery prediction remain out of scope (see the Phase 4 architecture spec §29). A simple deload rule was added for the Workout Logger in 2026-10 (see `deload` below)."
+    },
+    "load_progression": {
+      "unit": "kg",
+      "steps": {
+        "total": 2.5,
+        "per_hand": 2,
+        "stack": "1_plate",
+        "band": "next_band",
+        "bodyweight": "reps_then_2.5",
+        "manual": "none"
+      }
+    },
+    "session_rules": {
+      "exercise_order": [
+        "big compounds",
+        "goal muscles",
+        "isolations",
+        "core and forearms"
+      ],
+      "order_note": "Goal muscles may move earlier when they are that session's priority.",
+      "hard_sets_per_session": {
+        "sixty_minutes": [
+          16,
+          22
+        ],
+        "note": "Total hard sets that typically fit a 60-minute session with rest. Sessions should stay under 90 minutes; exercise time costs are in each exercise's `time` block."
+      },
+      "overlap_rule": "A target that received a full (1.0 credit) hard set in a compound counts as trained that day. Don't add an isolation for it the same day unless it is a goal target. Per-target weekly numbers and per-session ceilings are in volume-targets.yaml."
+    },
+    "deload": {
+      "every_weeks": [
+        5,
+        7
+      ],
+      "also_when": "Performance drops across several sessions despite normal sleep and food.",
+      "sets_multiplier": 0.6,
+      "rir_change": 2,
+      "same_exercises": true,
+      "length_days": 7
     },
     "wording_rules": {
       "prefer": [
@@ -235,7 +843,152 @@
     }
   },
   "repRanges": {
-    "overrides": []
+    "overrides": [
+      {
+        "exercise_id": "thoracic-open-book",
+        "primary_range": [
+          8,
+          10
+        ],
+        "acceptable_range": [
+          6,
+          12
+        ],
+        "reason": "8 to 10 controlled reps per side, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "thread-the-needle",
+        "primary_range": [
+          8,
+          10
+        ],
+        "acceptable_range": [
+          6,
+          12
+        ],
+        "reason": "8 to 10 controlled reps per side, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "bench-thoracic-extension-prayer",
+        "primary_range": [
+          30,
+          45
+        ],
+        "acceptable_range": [
+          20,
+          60
+        ],
+        "reason": "Holds of 30 to 45 seconds, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "doorway-pec-stretch",
+        "primary_range": [
+          30,
+          45
+        ],
+        "acceptable_range": [
+          20,
+          60
+        ],
+        "reason": "Holds of 30 to 45 seconds per side, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "kneeling-lat-stretch",
+        "primary_range": [
+          30,
+          45
+        ],
+        "acceptable_range": [
+          20,
+          60
+        ],
+        "reason": "Holds of 30 to 45 seconds per side, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "cross-body-shoulder-stretch",
+        "primary_range": [
+          30,
+          30
+        ],
+        "acceptable_range": [
+          20,
+          45
+        ],
+        "reason": "Holds of about 30 seconds per side, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "band-shoulder-pass-through",
+        "primary_range": [
+          10,
+          15
+        ],
+        "acceptable_range": [
+          8,
+          20
+        ],
+        "reason": "10 to 15 smooth reps, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "wrist-flexor-extensor-stretch",
+        "primary_range": [
+          30,
+          30
+        ],
+        "acceptable_range": [
+          20,
+          45
+        ],
+        "reason": "About 30 seconds for each direction, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "wall-calf-stretch",
+        "primary_range": [
+          30,
+          45
+        ],
+        "acceptable_range": [
+          20,
+          60
+        ],
+        "reason": "Holds of 30 to 45 seconds for each knee position, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "adductor-rock-back",
+        "primary_range": [
+          8,
+          10
+        ],
+        "acceptable_range": [
+          6,
+          12
+        ],
+        "reason": "8 to 10 controlled reps per side, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "worlds-greatest-stretch",
+        "primary_range": [
+          5,
+          5
+        ],
+        "acceptable_range": [
+          3,
+          6
+        ],
+        "reason": "About 5 slow reps per side, per the owner-approved flexibility plan."
+      },
+      {
+        "exercise_id": "leg-swings",
+        "primary_range": [
+          10,
+          15
+        ],
+        "acceptable_range": [
+          8,
+          20
+        ],
+        "reason": "10 to 15 swings per side in each direction, per the owner-approved flexibility plan."
+      }
+    ]
   },
   "programmingProfiles": {
     "profiles": [
@@ -477,7 +1230,8 @@
         ],
         "effort": "A clear but comfortable stretch, breathing slowly; never push into pain.",
         "rep_range_reason": "Holds of half a minute or more give time to relax into the position.",
-        "guidance_note": "Frequency matters more than intensity; short regular sessions work better than occasional hard stretching."
+        "guidance_note": "Frequency matters more than intensity; short regular sessions work better than occasional hard stretching.",
+        "best_timing": "After training or on rest days, when the body is warm. For lasting range, aim for about 5 minutes or more of stretching per area each week, spread over most days: a 2018 review of 23 studies found that weekly stretching time and frequency mattered more than time per session."
       },
       {
         "id": "mobility-dynamic",
@@ -507,7 +1261,8 @@
         ],
         "effort": "Smooth, controlled reps through the range you own, easing slightly deeper over the sets; no bouncing.",
         "rep_range_reason": "Enough reps to explore the range without turning the drill into a strength set.",
-        "guidance_note": "Works well as a warm-up before court sessions or lower-body training."
+        "guidance_note": "Works well as a warm-up before court sessions or lower-body training.",
+        "best_timing": "Before training or court sessions, as part of the warm-up."
       },
       {
         "id": "conditioning",
@@ -538,6 +1293,37 @@
         "effort": "Hard but repeatable, roughly 7 to 8 out of 10, finishing every round at a similar pace.",
         "rep_range_reason": "Intervals of 20 to 60 seconds with short rests mirror the stop-start demand of rallies while staying repeatable.",
         "guidance_note": "Progress by adding rounds or shortening rest, one change at a time."
+      },
+      {
+        "id": "soft-tissue",
+        "training_mode": "soft-tissue",
+        "name": "Soft-tissue rolling",
+        "summary": "Foam rolling and similar self-massage, used to ease muscle tightness around training.",
+        "unit": "seconds",
+        "primary_range": [
+          30,
+          60
+        ],
+        "acceptable_range": [
+          20,
+          120
+        ],
+        "sets": [
+          1,
+          2
+        ],
+        "rest_seconds": [
+          0,
+          15
+        ],
+        "frequency_per_week": [
+          2,
+          7
+        ],
+        "effort": "Moderate, tolerable pressure while breathing normally; ease off on sharp or tingling pain and never roll directly over a joint or bone.",
+        "rep_range_reason": "About half a minute to a minute per area is a common practical starting point, not a measured dose.",
+        "guidance_note": "Any effect on range of motion or soreness is thought to be small and short-lived, so rolling supports stretching and strength work rather than replacing them.",
+        "best_timing": "Briefly as part of a warm-up, or for longer after training and on rest days."
       }
     ],
     "classification": {
@@ -576,6 +1362,12 @@
           "profile_id": "conditioning",
           "match": {
             "training_mode": "conditioning"
+          }
+        },
+        {
+          "profile_id": "soft-tissue",
+          "match": {
+            "training_mode": "soft-tissue"
           }
         },
         {
@@ -697,6 +1489,20 @@
       "region": "chest",
       "viewpoint": "side",
       "visual_description": "The chest lacks depth or projection when viewed from the side — it doesn't stand out from the torso the way a fuller chest does, even if it looks reasonably full from straight on.",
+      "volume_levels": [
+        {
+          "target_id": "chest",
+          "level": "priority"
+        },
+        {
+          "target_id": "upper-pec",
+          "level": "bias"
+        },
+        {
+          "target_id": "lower-pec",
+          "level": "bias"
+        }
+      ],
       "primary_targets": [
         "upper-pec"
       ],
@@ -724,6 +1530,16 @@
       "region": "arms",
       "viewpoint": "back",
       "visual_description": "The back of the upper arm looks flat or thin when viewed from behind, rather than showing visible mass and shape — even if the arm looks reasonably full from the front (biceps side).",
+      "volume_levels": [
+        {
+          "target_id": "triceps",
+          "level": "priority"
+        },
+        {
+          "target_id": "triceps-long-head",
+          "level": "bias"
+        }
+      ],
       "primary_targets": [
         "triceps"
       ],
@@ -747,6 +1563,16 @@
       "region": "arms",
       "viewpoint": "side",
       "visual_description": "The upper arm looks narrow when viewed from the side — thin front-to-back — even if it looks reasonably full from the front (biceps view) or back (triceps view) alone.",
+      "volume_levels": [
+        {
+          "target_id": "brachialis-arm-thickness",
+          "level": "priority"
+        },
+        {
+          "target_id": "triceps",
+          "level": "efficient"
+        }
+      ],
       "primary_targets": [
         "brachialis-arm-thickness"
       ],
@@ -770,6 +1596,20 @@
       "region": "chest",
       "viewpoint": "front",
       "visual_description": "The chest looks narrow or thin straight-on, lacking the visible mass across the front that makes a chest look \"full\" in a t-shirt or a relaxed front pose.",
+      "volume_levels": [
+        {
+          "target_id": "chest",
+          "level": "priority"
+        },
+        {
+          "target_id": "mid-pec",
+          "level": "bias"
+        },
+        {
+          "target_id": "upper-pec",
+          "level": "bias"
+        }
+      ],
       "primary_targets": [
         "mid-pec"
       ],
@@ -796,6 +1636,16 @@
       "region": "chest",
       "viewpoint": "front",
       "visual_description": "There's no visible fullness just below the collarbone — the chest appears to start lower down rather than forming a squared- off upper-chest line.",
+      "volume_levels": [
+        {
+          "target_id": "chest",
+          "level": "priority"
+        },
+        {
+          "target_id": "upper-pec",
+          "level": "bias"
+        }
+      ],
       "primary_targets": [
         "upper-pec"
       ],
@@ -815,6 +1665,16 @@
       "region": "chest",
       "viewpoint": "side",
       "visual_description": "There's no clear line where the chest ends and the abs begin — most visible from the side or a lower/decline-angle view.",
+      "volume_levels": [
+        {
+          "target_id": "chest",
+          "level": "priority"
+        },
+        {
+          "target_id": "lower-pec",
+          "level": "bias"
+        }
+      ],
       "primary_targets": [
         "lower-pec"
       ],
@@ -834,6 +1694,12 @@
       "region": "shoulders",
       "viewpoint": "front",
       "visual_description": "The shoulders don't create a visible taper from shoulder to waist, especially noticeable from the front.",
+      "volume_levels": [
+        {
+          "target_id": "side-delt",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "side-delt"
       ],
@@ -853,6 +1719,12 @@
       "region": "shoulders",
       "viewpoint": "back",
       "visual_description": "The shoulders look developed from the front but flat or unfinished from behind or the side, lacking a rounded, three-dimensional shape.",
+      "volume_levels": [
+        {
+          "target_id": "rear-delt",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "rear-delt"
       ],
@@ -872,6 +1744,12 @@
       "region": "back",
       "viewpoint": "back",
       "visual_description": "The back doesn't create the visible V-shape from shoulders down to the waist — most noticeable from behind or in a relaxed-arm front pose.",
+      "volume_levels": [
+        {
+          "target_id": "lat-width",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "lat-width"
       ],
@@ -894,6 +1772,12 @@
       "region": "back",
       "viewpoint": "side",
       "visual_description": "The back looks wide but flat — it doesn't add visible depth from the side, and there's little definition between the shoulder blades from behind.",
+      "volume_levels": [
+        {
+          "target_id": "back-thickness",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "back-thickness"
       ],
@@ -917,6 +1801,12 @@
       "region": "back",
       "viewpoint": "front",
       "visual_description": "The area where the neck meets the shoulders looks thin or undeveloped, rather than sloped and filled-out — visible from the front and behind.",
+      "volume_levels": [
+        {
+          "target_id": "upper-traps",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "upper-traps"
       ],
@@ -944,6 +1834,12 @@
       "region": "arms",
       "viewpoint": "front",
       "visual_description": "The front of the upper arm lacks visible mass and peak height, especially noticeable with the elbow bent (a \"flex\" pose).",
+      "volume_levels": [
+        {
+          "target_id": "biceps",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "biceps"
       ],
@@ -963,6 +1859,12 @@
       "region": "core",
       "viewpoint": "front",
       "visual_description": "No visible six-pack definition down the front of the midline, even with reasonable overall leanness.",
+      "volume_levels": [
+        {
+          "target_id": "rectus-abdominis",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "rectus-abdominis"
       ],
@@ -982,6 +1884,12 @@
       "region": "core",
       "viewpoint": "front",
       "visual_description": "No visible diagonal lines framing the sides of the abdomen — the waist looks smooth rather than defined.",
+      "volume_levels": [
+        {
+          "target_id": "obliques",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "obliques"
       ],
@@ -1001,6 +1909,12 @@
       "region": "glutes",
       "viewpoint": "back",
       "visual_description": "The glutes lack visible roundness from behind — they look flat rather than full, even when the rest of the legs look developed.",
+      "volume_levels": [
+        {
+          "target_id": "gluteus-maximus",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "gluteus-maximus"
       ],
@@ -1020,6 +1934,12 @@
       "region": "glutes",
       "viewpoint": "side",
       "visual_description": "The glutes don't create a visible \"shelf\" projecting from the lower back when viewed from the side, especially in a standing posture.",
+      "volume_levels": [
+        {
+          "target_id": "gluteus-maximus",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "gluteus-maximus"
       ],
@@ -1039,6 +1959,12 @@
       "region": "glutes",
       "viewpoint": "side",
       "visual_description": "There's a visible indentation on the side of the hip (sometimes called a \"hip dip\"), rather than a rounder, fuller side profile.",
+      "volume_levels": [
+        {
+          "target_id": "gluteus-medius-minimus",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "gluteus-medius-minimus"
       ],
@@ -1059,6 +1985,12 @@
       "region": "quads",
       "viewpoint": "front",
       "visual_description": "The front of the thigh lacks visible mass, even when overall leg size looks reasonable from other angles.",
+      "volume_levels": [
+        {
+          "target_id": "quads",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "quads"
       ],
@@ -1081,6 +2013,12 @@
       "region": "quads",
       "viewpoint": "front",
       "visual_description": "The inner thigh looks flat or thin, changing the leg's overall profile from the front, even when the front of the thigh looks developed.",
+      "volume_levels": [
+        {
+          "target_id": "adductors",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "adductors"
       ],
@@ -1100,6 +2038,12 @@
       "region": "quads",
       "viewpoint": "front",
       "visual_description": "The front of the thigh looks like one undifferentiated mass rather than showing visible separation and shape just above the inner knee (sometimes called quad \"sweep\" or \"teardrop\").",
+      "volume_levels": [
+        {
+          "target_id": "quads",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "quads"
       ],
@@ -1127,6 +2071,12 @@
       "region": "hamstrings",
       "viewpoint": "back",
       "visual_description": "The back of the thigh lacks visible thickness, even when the front of the leg (quads) looks developed.",
+      "volume_levels": [
+        {
+          "target_id": "hamstrings",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "hamstrings"
       ],
@@ -1146,6 +2096,16 @@
       "region": "calves",
       "viewpoint": "back",
       "visual_description": "The calf lacks visible width and the diamond-shaped bulge most people picture when they think of a developed calf — most visible from behind or the side.",
+      "volume_levels": [
+        {
+          "target_id": "calves",
+          "level": "priority"
+        },
+        {
+          "target_id": "gastrocnemius",
+          "level": "bias"
+        }
+      ],
       "primary_targets": [
         "gastrocnemius"
       ],
@@ -1173,6 +2133,16 @@
       "region": "calves",
       "viewpoint": "side",
       "visual_description": "The lower portion of the calf, closer to the ankle, looks thin even when the upper calf has some visible development.",
+      "volume_levels": [
+        {
+          "target_id": "calves",
+          "level": "priority"
+        },
+        {
+          "target_id": "soleus",
+          "level": "bias"
+        }
+      ],
       "primary_targets": [
         "soleus"
       ],
@@ -1195,6 +2165,12 @@
       "region": "forearms",
       "viewpoint": "front",
       "visual_description": "The palm-side of the forearm looks thin, most noticeable near the elbow with the palm facing up.",
+      "volume_levels": [
+        {
+          "target_id": "forearm-flexors",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "forearm-flexors"
       ],
@@ -1214,6 +2190,12 @@
       "region": "forearms",
       "viewpoint": "side",
       "visual_description": "The back-of-hand side of the forearm looks thin — the side that's actually visible when the arm hangs relaxed — even when grip strength feels adequate.",
+      "volume_levels": [
+        {
+          "target_id": "forearm-extensors",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "forearm-extensors"
       ],
@@ -1234,6 +2216,12 @@
       "region": "neck",
       "viewpoint": "side",
       "visual_description": "The neck looks narrow rather than thick, most noticeable from the side or behind.",
+      "volume_levels": [
+        {
+          "target_id": "neck-thickness",
+          "level": "priority"
+        }
+      ],
       "primary_targets": [
         "neck-thickness"
       ],
@@ -1333,6 +2321,27 @@
       "parent_region": "hips",
       "definition": "Comfortable range of motion at the hips and legs, trained through held stretches and controlled mobility drills.",
       "why_it_matters": "Deep lunges, low pick-ups and fast direction changes need comfortable hip and leg range."
+    },
+    {
+      "id": "upper-body-mobility",
+      "name": "Upper-Body Mobility",
+      "parent_region": "shoulders",
+      "definition": "Comfortable range of motion at the shoulders and upper back, trained through held stretches and controlled mobility drills.",
+      "why_it_matters": "Overhead clears, smashes and reaching shots need free shoulder and upper-back movement."
+    },
+    {
+      "id": "wrist-forearm-mobility",
+      "name": "Wrist & Forearm Mobility",
+      "parent_region": "forearms",
+      "definition": "Comfortable range of motion at the wrist and forearm, trained through held stretches.",
+      "why_it_matters": "Gripping the racket and snapping the wrist load both sides of the forearm."
+    },
+    {
+      "id": "full-body-mobility",
+      "name": "Full-Body Mobility & Recovery",
+      "parent_region": "full-body",
+      "definition": "Whole-body warm-up drills and recovery work, such as flowing mobility drills, spine mobility and foam rolling.",
+      "why_it_matters": "Quick whole-body warm-ups and recovery routines that cover several areas in one go."
     },
     {
       "id": "full-body-conditioning",

@@ -1,21 +1,29 @@
-// Weekly volume ledger (2026-10-25, docs/WEEKLY_VOLUME_PLANNING_DESIGN.md).
+// Weekly volume ledger (2026-10-25, revised 2026-10-27 for Blueprint
+// schema 2; docs/WEEKLY_VOLUME_PLANNING_DESIGN.md).
 //
-// Owner rules: growth decides the numbers, not frequency. Goal muscles
-// get their Complete-package number every calendar week and are planned
-// on every suitable day. Non-goal muscles get their Efficient-package
-// number over a cycle of up to LEDGER_CYCLE_DAYS days; each muscle runs
-// its own cycle, and the moment its number is reached (direct sets 1.0 +
-// secondary 0.33, the engine's own exposure units) the next cycle starts.
-// A cycle not finished by day 14 keeps counting (the shortfall is not
-// wiped) and is offered first.
+// Owner rules: growth decides the numbers, not frequency. Every muscle
+// counts per calendar week (decision 2026-10-27: the 14-day cycle for
+// non-goal muscles is dropped). The numbers are Blueprint's own
+// (volume-targets.yaml): goal muscles at "priority", the rest at
+// "efficient", counted as credited sets (completed sets x the exercise's
+// target_credit weight). Goal muscles are planned on every suitable day.
+// Blueprint's min_hours_between is not applied (owner decision
+// 2026-10-27: four training days in a row are normal). Goal muscles may
+// go past Blueprint's per_session_max (owner decision 2026-10-27: on a
+// Push/Pull week brachialis gets two sessions, and 2 x 6 < 14).
+//
+// Sub-regions (upper/mid/lower pec, triceps long head) have no number of
+// their own: their parent's number applies, and a child with a min_share
+// gets an entry for that share of the parent's number.
 //
 // For today's session each target gets a status:
 //   must      goal muscle (D2), or more still needed than the later
-//             suitable days before its window ends can hold
+//             suitable days this week can hold
 //   can_wait  still needed, later days can hold it
-//   overdue   non-goal cycle past day 14, still short (offered first)
-//   met       goal muscle with this week's number reached
-//   not_today not compatible with today's purpose, or paused
+//   indirect  non-goal muscle Blueprint leaves to compound work
+//             (indirect_only); counted, never scheduled directly
+//   met       this week's number reached
+//   not_today not compatible with today's session, or paused
 //
 // computeLedger is pure; buildWeeklyLedger reads the logged sessions and
 // the coming schedule. Shadow mode only logs the result.
@@ -24,38 +32,37 @@ import type Database from 'better-sqlite3';
 import { WEEKDAYS, type Weekday } from '../../contracts/types.js';
 import type { SessionPurpose } from '../../engine/config.js';
 import { addDays, daysBetween } from '../../engine/dateMath.js';
-import { calculateExerciseExposure } from '../../engine/exposureEngine.js';
 import { isTargetCompatibleWithPurpose } from '../../engine/sessionPurpose.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
 import { athleticPaused } from '../../athletic/athleticSession.js';
-import { assembleWeeklyPlanInput } from '../../engine/workoutBuilder.js';
+import { GoalsRepo } from '../../repositories/goalsRepo.js';
 import { InjuryPausesRepo } from '../../repositories/injuryPausesRepo.js';
 import { LegTrainingRepo } from '../../repositories/legTrainingRepo.js';
-import { TrainingProfileRepo } from '../../repositories/trainingProfileRepo.js';
-import { UsersRepo } from '../../repositories/usersRepo.js';
-import { BlueprintAdapter } from '../../blueprint/adapter.js';
-import { getPackageForTarget } from '../../blueprint/developmentPackages.js';
-import { getSubTargetExerciseIds } from '../../blueprint/subTargetExerciseScope.js';
-import { getPreferredFrequencyReference } from '../../coaching/profiles/muscleProfileService.js';
+import { getTargetCredit, listVolumeNumbers, outcomeVolumeLevels, volumeChildren } from '../../blueprint/volumeTargets.js';
 import type { AIProgrammerContext } from '../context/programmerContextTypes.js';
 import { weekGymDays } from '../service/weekGeneration.js';
 
-export const LEDGER_SCHEMA_VERSION = 'weekly-ledger.v1' as const;
-export const LEDGER_CYCLE_DAYS = 14;
+export const LEDGER_SCHEMA_VERSION = 'weekly-ledger.v2' as const;
 /** How far back a weekday's most recent real purpose is looked up. */
 export const LEDGER_PURPOSE_LOOKBACK_DAYS = 21;
 
-export type LedgerStatus = 'must' | 'can_wait' | 'overdue' | 'met' | 'not_today';
+export type LedgerStatus = 'must' | 'can_wait' | 'indirect' | 'met' | 'not_today';
 
 export interface LedgerTargetInput {
   targetId: string;
   isGoal: boolean;
-  /** Weekly (goal) or per-cycle (non-goal) set number; null = no package. */
-  reference: number | null;
-  /** Blueprint per-session maximum; null = none authored. */
+  /** Credited sets this week. */
+  reference: number;
+  /** Blueprint per_session_max; null = none authored. */
   perSessionCap: number | null;
+  /** Non-goal muscle left to compound work (Blueprint indirect_only). */
+  indirectOnly: boolean;
+  /** Sub-region entry: the parent whose number this is a share of. */
+  shareOf: string | null;
   eligibleToday: boolean;
   paused: boolean;
+  /** Whether a session of this purpose can train the target (later days). */
+  trainedOn: (purpose: SessionPurpose) => boolean;
 }
 
 export interface LedgerFutureDay {
@@ -65,11 +72,10 @@ export interface LedgerFutureDay {
 
 export interface LedgerInput {
   targetDate: string;
-  anchor: string;
   targets: readonly LedgerTargetInput[];
-  /** Exposure units per date per target id, for dates before targetDate. */
-  dailyExposure: ReadonlyMap<string, ReadonlyMap<string, number>>;
-  /** Gym days after targetDate (any horizon; filtered per window). */
+  /** Credited sets per date per target id. */
+  dailyCredit: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  /** Gym days after targetDate (only this week's are used). */
   futureDays: readonly LedgerFutureDay[];
   /** Count work logged ON targetDate as done (the overview, read after
    * training); planning counts only earlier days. */
@@ -78,20 +84,21 @@ export interface LedgerInput {
 
 export interface LedgerEntry {
   targetId: string;
-  basis: 'week' | 'cycle';
+  isGoal: boolean;
+  shareOf: string | null;
   number: number;
-  windowStart: string;
-  windowEnd: string;
-  /** 1-based day of the window today falls on. */
-  windowDay: number;
+  weekStart: string;
+  weekEnd: string;
+  /** 1-based day of the week today falls on. */
+  weekDay: number;
   done: number;
   remaining: number;
   laterSessions: number;
   laterCapacity: number;
   status: LedgerStatus;
-  /** Sets that must happen today so the window can still be met (must only). */
+  /** Sets that must happen today so the week can still be met (must only). */
   mustSetsToday: number;
-  /** Share of the window elapsed minus share of the number done (higher = further behind). */
+  /** Share of the week elapsed minus share of the number done (higher = further behind). */
   behind: number;
   reason: string;
 }
@@ -99,63 +106,26 @@ export interface LedgerEntry {
 export interface WeeklyLedger {
   schemaVersion: typeof LEDGER_SCHEMA_VERSION;
   targetDate: string;
-  anchor: string;
   entries: LedgerEntry[];
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-function sumExposure(daily: LedgerInput['dailyExposure'], targetId: string, from: string, toExclusive: string): number {
-  let total = 0;
-  for (const [date, byTarget] of daily) if (date >= from && date < toExclusive) total += byTarget.get(targetId) ?? 0;
-  return total;
-}
-
-/** The current cycle of a non-goal target: walk the logged days from the
- * anchor; each time the running total reaches the number, the next cycle
- * starts the following day (any excess does not carry over). */
-export function currentCycle(daily: LedgerInput['dailyExposure'], targetId: string, number: number, anchor: string, targetDate: string): { start: string; done: number } {
-  const dates = [...daily.keys()].filter((d) => d >= anchor && d < targetDate).sort();
-  let start = anchor;
-  let done = 0;
-  for (const date of dates) {
-    done += daily.get(date)!.get(targetId) ?? 0;
-    if (number > 0 && done >= number) {
-      start = addDays(date, 1);
-      done = 0;
-    }
-  }
-  return { start, done };
-}
-
 export function computeLedger(input: LedgerInput): WeeklyLedger {
   const weekStart = programmingWeekStart(input.targetDate);
+  const weekEnd = addDays(weekStart, 6);
+  const weekDay = daysBetween(weekStart, input.targetDate) + 1;
   const countUntil = input.countTargetDate ? addDays(input.targetDate, 1) : input.targetDate;
   const entries: LedgerEntry[] = [];
   for (const t of input.targets) {
-    if (t.reference == null || t.reference <= 0) continue;
-    const basis = t.isGoal ? 'week' : 'cycle';
-    let windowStart: string;
-    let done: number;
-    if (t.isGoal) {
-      windowStart = weekStart;
-      done = sumExposure(input.dailyExposure, t.targetId, weekStart, countUntil);
-    } else {
-      const cycle = currentCycle(input.dailyExposure, t.targetId, t.reference, input.anchor, countUntil);
-      windowStart = cycle.start > input.targetDate ? input.targetDate : cycle.start;
-      done = cycle.done;
-    }
-    const windowEnd = addDays(windowStart, (t.isGoal ? 7 : LEDGER_CYCLE_DAYS) - 1);
-    const windowDay = daysBetween(windowStart, input.targetDate) + 1;
+    if (t.reference <= 0) continue;
+    let done = 0;
+    for (const [date, byTarget] of input.dailyCredit) if (date >= weekStart && date < countUntil) done += byTarget.get(t.targetId) ?? 0;
     const remaining = Math.max(0, t.reference - done);
-    const later = t.paused
-      ? []
-      : input.futureDays.filter((d) => d.date > input.targetDate && d.date <= windowEnd && isTargetCompatibleWithPurpose('physique_target', t.targetId, d.purpose));
+    const later = t.paused ? [] : input.futureDays.filter((d) => d.date > input.targetDate && d.date <= weekEnd && t.trainedOn(d.purpose));
     const perSession = t.perSessionCap ?? t.reference;
     const laterCapacity = later.length * perSession;
-    const windowLength = t.isGoal ? 7 : LEDGER_CYCLE_DAYS;
-    const behind = round2(Math.min(windowDay, windowLength) / windowLength - (t.reference > 0 ? (t.reference - remaining) / t.reference : 1));
-    const overdue = !t.isGoal && input.targetDate > windowEnd && remaining > 0;
+    const behind = round2(weekDay / 7 - (t.reference - remaining) / t.reference);
 
     let status: LedgerStatus;
     let mustSetsToday = 0;
@@ -166,28 +136,29 @@ export function computeLedger(input: LedgerInput): WeeklyLedger {
     } else if (remaining <= 0) {
       status = 'met';
       reason = `this week's ${t.reference} reached`;
-    } else if (overdue) {
-      status = 'overdue';
-      reason = `cycle day ${windowDay} of ${LEDGER_CYCLE_DAYS}, ${round2(remaining)} still needed`;
+    } else if (t.indirectOnly && !t.isGoal) {
+      status = 'indirect';
+      reason = `${round2(remaining)} left; Blueprint leaves it to compound work`;
     } else if (t.isGoal) {
       status = 'must';
-      mustSetsToday = Math.min(perSession, Math.ceil(remaining / (later.length + 1)));
+      mustSetsToday = Math.ceil(remaining / (later.length + 1));
       reason = `goal muscle: ${round2(remaining)} left this week over ${later.length + 1} suitable day(s)`;
     } else if (remaining > laterCapacity) {
       status = 'must';
       mustSetsToday = Math.min(perSession, Math.ceil(remaining - laterCapacity));
-      reason = `${round2(remaining)} needed by ${windowEnd}; later days hold only ${laterCapacity}`;
+      reason = `${round2(remaining)} needed by ${weekEnd}; later days hold only ${laterCapacity}`;
     } else {
       status = 'can_wait';
-      reason = `${round2(remaining)} needed by ${windowEnd}; ${later.length} later suitable day(s) hold ${laterCapacity}`;
+      reason = `${round2(remaining)} needed by ${weekEnd}; ${later.length} later suitable day(s) hold ${laterCapacity}`;
     }
     entries.push({
       targetId: t.targetId,
-      basis,
+      isGoal: t.isGoal,
+      shareOf: t.shareOf,
       number: t.reference,
-      windowStart,
-      windowEnd,
-      windowDay,
+      weekStart,
+      weekEnd,
+      weekDay,
       done: round2(done),
       remaining: round2(remaining),
       laterSessions: later.length,
@@ -198,38 +169,85 @@ export function computeLedger(input: LedgerInput): WeeklyLedger {
       reason,
     });
   }
-  const order: LedgerStatus[] = ['must', 'overdue', 'can_wait', 'met', 'not_today'];
+  const order: LedgerStatus[] = ['must', 'can_wait', 'indirect', 'met', 'not_today'];
   entries.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || b.behind - a.behind || a.targetId.localeCompare(b.targetId));
-  return { schemaVersion: LEDGER_SCHEMA_VERSION, targetDate: input.targetDate, anchor: input.anchor, entries };
+  return { schemaVersion: LEDGER_SCHEMA_VERSION, targetDate: input.targetDate, entries };
+}
+
+// ---------------------------------------------------------- targets
+
+const TRAINING_PURPOSES: readonly SessionPurpose[] = ['push', 'pull', 'legs', 'upper'];
+
+/** The physique targets that stand for a volume id: a group's children
+ * (chest -> pecs), anti-extension core -> rectus (both core accessories),
+ * else the id itself. */
+function representatives(id: string): string[] {
+  if (id === 'core-anti-extension') return ['rectus-abdominis'];
+  const children = volumeChildren(id).map((c) => c.id);
+  return children.length > 0 ? children : [id];
+}
+
+const trainsOn = (ids: readonly string[]) => (purpose: SessionPurpose) => ids.some((id) => isTargetCompatibleWithPurpose('physique_target', id, purpose));
+
+/** Ledger targets from Blueprint's volume numbers: every entry a training
+ * session can train, at "priority" when an active aesthetic goal gives it
+ * that level, else "efficient"; plus a share entry per sub-region with a
+ * min_share. `eligible` says whether a physique target fits today. */
+export function ledgerTargets(goalOutcomeIds: readonly string[], pausedIds: ReadonlySet<string>, eligible: (targetId: string) => boolean): LedgerTargetInput[] {
+  const levels = outcomeVolumeLevels(goalOutcomeIds);
+  const out: LedgerTargetInput[] = [];
+  for (const v of listVolumeNumbers()) {
+    const reps = representatives(v.id);
+    const trainedOn = trainsOn(reps);
+    if (!TRAINING_PURPOSES.some(trainedOn)) continue;
+    const isGoal = levels.get(v.id) === 'priority';
+    const reference = isGoal ? v.weekly.priority : v.weekly.efficient;
+    const shared = { isGoal, perSessionCap: v.perSessionMax, indirectOnly: v.indirectOnly };
+    out.push({ ...shared, targetId: v.id, reference, shareOf: null, eligibleToday: reps.some(eligible), paused: reps.every((id) => pausedIds.has(id)), trainedOn });
+    for (const child of volumeChildren(v.id)) {
+      if (child.minShare == null) continue;
+      out.push({
+        ...shared,
+        targetId: child.id,
+        reference: round2(reference * child.minShare),
+        shareOf: v.id,
+        eligibleToday: eligible(child.id),
+        paused: pausedIds.has(child.id),
+        trainedOn: trainsOn([child.id]),
+      });
+    }
+  }
+  return out;
+}
+
+function activeGoalOutcomeIds(db: Database.Database): string[] {
+  return new GoalsRepo(db).list({ active: true, goal_type: 'aesthetic' }).map((g) => g.blueprint_ref);
+}
+
+function pausedTargetIds(db: Database.Database): Set<string> {
+  return new Set([...new InjuryPausesRepo(db).pausedTargetIds(), ...new LegTrainingRepo(db).athleticLegTargetIds()]);
 }
 
 // ---------------------------------------------------------------- reads
 
-/** Exposure units per date per physique target from completed sessions
- * in [from, toExclusive). Unknown (non-Blueprint) exercises are skipped. */
-export function readDailyExposure(db: Database.Database, from: string, toExclusive: string): Map<string, Map<string, number>> {
+/** Credited sets per date per volume id from completed sessions in
+ * [from, toExclusive): each completed set x the exercise's Blueprint
+ * target_credit. Exercises without credit (unknown, mobility) add nothing. */
+export function readDailyCredit(db: Database.Database, from: string, toExclusive: string): Map<string, Map<string, number>> {
   const rows = db
     .prepare(
-      `SELECT s.date AS date, we.id AS weId, we.exercise_id AS exerciseId,
+      `SELECT s.date AS date, we.exercise_id AS exerciseId,
               (SELECT COUNT(*) FROM workout_sets ws WHERE ws.workout_exercise_id = we.id AND ws.completed = 1) AS done
          FROM workout_sessions s JOIN workout_exercises we ON we.workout_session_id = s.session_id
         WHERE s.status = 'completed' AND s.date >= ? AND s.date < ?`
     )
-    .all(from, toExclusive) as Array<{ date: string; weId: string; exerciseId: string; done: number }>;
+    .all(from, toExclusive) as Array<{ date: string; exerciseId: string; done: number }>;
   const daily = new Map<string, Map<string, number>>();
   for (const r of rows) {
-    if (r.done <= 0) continue;
-    let contributions;
-    try {
-      contributions = calculateExerciseExposure(r.exerciseId, Array.from({ length: r.done }, () => ({ completed: true }))).contributions;
-    } catch {
-      continue;
-    }
+    const credit = getTargetCredit(r.exerciseId);
+    if (r.done <= 0 || !credit) continue;
     const day = daily.get(r.date) ?? new Map<string, number>();
-    for (const c of contributions) {
-      if (c.target_type !== 'physique_target') continue;
-      day.set(c.target_id, (day.get(c.target_id) ?? 0) + c.exposure_units);
-    }
+    for (const [targetId, weight] of Object.entries(credit)) day.set(targetId, (day.get(targetId) ?? 0) + r.done * weight);
     daily.set(r.date, day);
   }
   return daily;
@@ -254,92 +272,49 @@ function recentPurposeByWeekday(db: Database.Database, targetDate: string): Map<
   return out;
 }
 
-/** Gym days after targetDate through targetDate + horizon: the effective
- * schedule (overrides applied) with the purpose the user has lately
- * trained on that weekday, else the rotation's purpose. An Athletic slot
- * while legs are paused, with no recent purpose, is a rest day. */
-export function readFutureDays(db: Database.Database, targetDate: string, horizonDays: number): LedgerFutureDay[] {
+/** Gym days after targetDate through the end of its programming week:
+ * the effective schedule (overrides applied) with the purpose the user
+ * has lately trained on that weekday, else the rotation's purpose. An
+ * Athletic slot while legs are paused, with no recent purpose, is a rest
+ * day. */
+export function readFutureDays(db: Database.Database, targetDate: string): LedgerFutureDay[] {
   const recent = recentPurposeByWeekday(db, targetDate);
   const paused = athleticPaused(db);
-  const end = addDays(targetDate, horizonDays);
   const out: LedgerFutureDay[] = [];
-  for (let week = programmingWeekStart(targetDate); week <= end; week = addDays(week, 7)) {
-    for (const day of weekGymDays(db, week)) {
-      if (day.date <= targetDate || day.date > end) continue;
-      const learned = recent.get(day.weekday);
-      const purpose = learned ?? day.purpose;
-      if (!purpose || (purpose === 'athletic' && paused)) continue;
-      out.push({ date: day.date, purpose });
-    }
+  for (const day of weekGymDays(db, programmingWeekStart(targetDate))) {
+    if (day.date <= targetDate) continue;
+    const purpose = recent.get(day.weekday) ?? day.purpose;
+    if (!purpose || (purpose === 'athletic' && paused)) continue;
+    out.push({ date: day.date, purpose });
   }
   return out;
 }
 
-/** The ledger's own per-muscle number: the package exercises that train
- * this muscle (the sub-target scope where one exists, else the exercise's
- * own Blueprint physique_targets) x the package frequency. The engine's
- * getDevelopmentReference credits every member of the shoulders, back,
- * forearms and core packages with the whole package (found 2026-10-25);
- * the live planner is built on those numbers, so the ledger computes its
- * own until the planner moves onto it. null = the package gives this
- * muscle no exercise (front-delt: left to pressing work). */
-export function ledgerReference(targetId: string, isGoal: boolean): { weekly: number; perSession: number } | null {
-  const pkg = getPackageForTarget(targetId, isGoal ? 'complete' : 'efficient');
-  if (!pkg) return null;
-  const scoped = getSubTargetExerciseIds(pkg.id, targetId);
-  const trains = (exerciseId: string) => (scoped ? scoped.includes(exerciseId) : (BlueprintAdapter.getExercise(exerciseId)?.physique_targets ?? []).includes(targetId));
-  const perSession = pkg.exercises.filter((e) => trains(e.exercise_id)).reduce((sum, e) => sum + e.sets, 0);
-  if (perSession <= 0) return null;
-  return { weekly: perSession * (getPreferredFrequencyReference(targetId) ?? pkg.frequency.sessions_per_week), perSession };
-}
-
 /** The ledger for a built generation context (reads only). */
-export function buildWeeklyLedger(db: Database.Database, context: AIProgrammerContext, anchor: string): WeeklyLedger {
+export function buildWeeklyLedger(db: Database.Database, context: AIProgrammerContext): WeeklyLedger {
   const targetDate = context.targetDate;
-  const from = anchor < programmingWeekStart(targetDate) ? anchor : programmingWeekStart(targetDate);
-  const targets: LedgerTargetInput[] = context.programmingBrief.muscles
-    .filter((m) => m.targetType === 'physique_target')
-    .map((m) => ({
-      targetId: m.targetId,
-      isGoal: m.isGoalOriented,
-      reference: ledgerReference(m.targetId, m.isGoalOriented)?.weekly ?? null,
-      perSessionCap: ledgerReference(m.targetId, m.isGoalOriented)?.perSession ?? null,
-      eligibleToday: m.eligibleForThisSession,
-      paused: m.pausedForInjury === true || m.trainedAthletically === true,
-    }));
+  const eligibleIds = new Set(context.programmingBrief.muscles.filter((m) => m.targetType === 'physique_target' && m.eligibleForThisSession).map((m) => m.targetId));
   return computeLedger({
     targetDate,
-    anchor,
-    targets,
-    dailyExposure: readDailyExposure(db, from, targetDate),
-    futureDays: readFutureDays(db, targetDate, LEDGER_CYCLE_DAYS),
+    targets: ledgerTargets(activeGoalOutcomeIds(db), pausedTargetIds(db), (id) => eligibleIds.has(id)),
+    dailyCredit: readDailyCredit(db, programmingWeekStart(targetDate), targetDate),
+    futureDays: readFutureDays(db, targetDate),
   });
 }
 
-/** Volume overview for the UI (reads only): every physique target's
- * progress toward its weekly (goal) or cycle (non-goal) number, counting
- * everything logged through `today`. Status is not day-specific here
- * (every non-paused target counts as eligible). */
-export function volumeOverview(db: Database.Database, today: string, anchor: string): WeeklyLedger & { goals: string[]; paused: string[] } {
-  const weekStart = programmingWeekStart(today);
-  const user = new UsersRepo(db).getOrCreateDefault();
-  const budget = new TrainingProfileRepo(db).get(user.id)?.default_session_duration_minutes ?? 60;
-  const physique = assembleWeeklyPlanInput(db, weekStart, budget, today).targets.filter((t) => t.target_type === 'physique_target');
-  const paused = new Set([...new InjuryPausesRepo(db).pausedTargetIds(), ...new LegTrainingRepo(db).athleticLegTargetIds()]);
-  const targets: LedgerTargetInput[] = physique.map((t) => {
-    const ref = ledgerReference(t.target_id, t.is_specialization);
-    return { targetId: t.target_id, isGoal: t.is_specialization, reference: ref?.weekly ?? null, perSessionCap: ref?.perSession ?? null, eligibleToday: true, paused: paused.has(t.target_id) };
-  });
-  const from = anchor < weekStart ? anchor : weekStart;
+/** Volume overview for the UI (reads only): every muscle's progress
+ * toward this week's number, counting everything logged through `today`.
+ * Status is not day-specific here (every target counts as eligible). */
+export function volumeOverview(db: Database.Database, today: string): WeeklyLedger & { paused: string[] } {
+  const targets = ledgerTargets(activeGoalOutcomeIds(db), pausedTargetIds(db), () => true);
   const ledger = computeLedger({
     targetDate: today,
-    anchor,
     targets,
-    dailyExposure: readDailyExposure(db, from, addDays(today, 1)),
-    futureDays: readFutureDays(db, today, LEDGER_CYCLE_DAYS),
+    dailyCredit: readDailyCredit(db, programmingWeekStart(today), addDays(today, 1)),
+    futureDays: readFutureDays(db, today),
     countTargetDate: true,
   });
-  return { ...ledger, goals: targets.filter((t) => t.isGoal).map((t) => t.targetId), paused: [...paused] };
+  return { ...ledger, paused: targets.filter((t) => t.paused).map((t) => t.targetId) };
 }
 
 /** One-line log summary (bounded). */
@@ -349,15 +324,13 @@ export function summarizeLedgerForLog(ledger: WeeklyLedger, purpose: SessionPurp
     schemaVersion: ledger.schemaVersion,
     targetDate: ledger.targetDate,
     purpose,
-    anchor: ledger.anchor,
     entries: ledger.entries.map((e) => ({
       id: e.targetId,
       status: e.status,
-      basis: e.basis,
+      ...(e.isGoal ? { goal: true } : {}),
       number: e.number,
       done: e.done,
       remaining: e.remaining,
-      window: `${e.windowStart}..${e.windowEnd}#${e.windowDay}`,
       later: `${e.laterSessions}x=${e.laterCapacity}`,
       ...(e.mustSetsToday > 0 ? { mustToday: e.mustSetsToday } : {}),
       behind: e.behind,

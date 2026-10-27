@@ -1169,3 +1169,30 @@ then the planner rework (statuses drive slots; reference scoping fixed).
 `GET /api/insights/volume` exposes the ledger read-only (work through
 today counted); the Today page shows it as a Training volume card. Part of
 the dark UI change (change log 92). Generation still unchanged.
+
+### 22.2 Blueprint schema 2 numbers; 1-week cycle for every muscle (2026-10-27)
+Blueprint shipped the logger change requests (b1381ad, 44b73ae, 74cf1a1,
+1d23acf; schema_version 2): weekly credited-set numbers per muscle
+(volume-targets.yaml), sub-region shares, target_credit per exercise,
+time per exercise, volume levels per goal, variants, session rules,
+mobility dose. Owner decisions, 2026-10-27:
+- **1-week cycle for every muscle.** The 14-day cycle for non-goal muscles
+  is dropped (Blueprint numbers are per 7 days; a 14-day count would
+  halve them to near "minimum"). Goals at "priority", the rest at
+  "efficient", per calendar week.
+- **No minimum rest between sessions.** Blueprint's min_hours_between
+  (48 h; 24 h for abs/calves/forearms/neck) is not applied: four training
+  days in a row are normal for the owner. Per-session maximums still
+  apply.
+- Worked check before the decision (Push/Pull/Push/Pull, Blueprint
+  credit and time data): every muscle reaches its weekly number in about
+  21-22 sets / about 60 min per session; traps need 2 sets of shrugs while
+  legs are paused (Blueprint expects deadlifts to cover them).
+- **Goal muscles may go past Blueprint's per-session maximum** (owner,
+  2026-10-27). Brachialis (14, max 6) is a pull muscle, so on
+  Push/Pull/Push/Pull it gets 2 sessions = 12 at Blueprint's maximum;
+  triceps (16, max 8) had no slack. Non-goal muscles keep the maximum.
+Step 1 (change log 93): the ledger and the Training volume card read
+Blueprint's numbers and count credited sets; the logger's own numbers
+(ledgerReference) are gone. Generation is still unchanged (shadow).
+

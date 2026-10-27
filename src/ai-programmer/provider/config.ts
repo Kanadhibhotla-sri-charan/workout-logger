@@ -46,12 +46,6 @@ export function aiWeeklyLedgerMode(): 'off' | 'shadow' {
   return process.env.AI_WEEKLY_LEDGER_MODE === 'shadow' ? 'shadow' : 'off';
 }
 
-/** First day non-goal cycles are counted from (YYYY-MM-DD). */
-export function aiWeeklyLedgerAnchor(): string {
-  const v = process.env.AI_WEEKLY_LEDGER_ANCHOR;
-  return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '2026-10-19';
-}
-
 export interface VelonaConfig {
   apiKey: string;
   baseUrl: string;

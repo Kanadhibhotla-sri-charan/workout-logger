@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeTargetPhrase, resolveSecondaryTarget } from '../../src/blueprint/secondaryTargetMapping.js';
+import { isDrill } from '../../src/blueprint/athletic.js';
 import { BlueprintAdapter } from '../../src/blueprint/adapter.js';
 
 describe('normalizeTargetPhrase', () => {
@@ -113,7 +114,9 @@ describe('mapping completeness — no new, undocumented phrase silently falls th
   it('every secondary_targets phrase across the real Blueprint snapshot is either mapped or documented as unmapped', () => {
     const exercises = BlueprintAdapter.getExercises();
     const unknown = new Set<string>();
-    for (const e of exercises) {
+    // Drills credit no physique target (exposureEngine skips their
+    // secondary_targets), so their phrases need no mapping decision.
+    for (const e of exercises.filter((x) => !isDrill(x))) {
       for (const phrase of normalizeAll(e.secondary_targets)) {
         if (!KNOWN_PHRASES.has(phrase)) unknown.add(phrase);
       }

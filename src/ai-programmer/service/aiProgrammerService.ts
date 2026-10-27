@@ -39,7 +39,7 @@ import {
   AIGenerateWeekOutputDomainInvalidError,
   AIGenerateWeekOutputSchemaInvalidError,
 } from '../errors.js';
-import { aiWeeklyLedgerAnchor, aiWeeklyLedgerMode, isAiProgrammerEnabled, isPlannedGenerationEnabled, loadVelonaConfig } from '../provider/config.js';
+import { aiWeeklyLedgerMode, isAiProgrammerEnabled, isPlannedGenerationEnabled, loadVelonaConfig } from '../provider/config.js';
 import { isLikelyTruncatedOutput, VelonaProvider } from '../provider/velonaProvider.js';
 import { buildTokenDiagnostics, logTokenDiagnostics, type TokenDiagnostics } from './tokenDiagnostics.js';
 import { clearGenerationFailure, findGenerationFailure, isGatedGenerationFailure, recordGenerationFailure } from './generationFailureMemory.js';
@@ -413,7 +413,7 @@ export class AIProgrammerService {
   private logWeeklyLedgerShadow(context: AIProgrammerContext): void {
     if (aiWeeklyLedgerMode() !== 'shadow') return;
     try {
-      const ledger = buildWeeklyLedger(this.db, context, aiWeeklyLedgerAnchor());
+      const ledger = buildWeeklyLedger(this.db, context);
       console.log('[ai-programmer] weekly ledger shadow', JSON.stringify(summarizeLedgerForLog(ledger, context.programmingBrief.session.purpose)));
     } catch (err) {
       console.warn('[ai-programmer] weekly ledger shadow failed', JSON.stringify({ targetDate: context.targetDate, error: err instanceof Error ? `${err.name}: ${err.message}` : 'unknown' }));

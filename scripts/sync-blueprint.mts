@@ -72,7 +72,17 @@ function loadExercises(repoPath: string): Record<string, unknown>[] {
 function loadProgramming(repoPath: string) {
   const dir = join(repoPath, 'data', 'programming');
   const loadYaml = (filename: string) => yaml.load(readFileSync(join(dir, filename), 'utf8')) as any;
+  // Schema 2 (Blueprint 2026-10-27): volume numbers, families and the id
+  // registry's schema_version, mirroring app/scripts/generate-data.mjs.
+  const registryPath = join(repoPath, 'data', 'id-registry.yaml');
+  const schemaVersion = existsSync(registryPath) ? (yaml.load(readFileSync(registryPath, 'utf8')) as any).schema_version : 1;
+  const volume = existsSync(join(dir, 'volume-targets.yaml')) ? loadYaml('volume-targets.yaml') : {};
   return {
+    schemaVersion,
+    volumeGroups: loadYaml('physique-targets.yaml').volume_groups ?? [],
+    volumeTargets: volume.volume_targets ?? [],
+    mobilityTargets: volume.mobility_targets ?? [],
+    exerciseFamilies: existsSync(join(dir, 'exercise-families.yaml')) ? loadYaml('exercise-families.yaml').families : [],
     physiqueTargets: loadYaml('physique-targets.yaml').targets,
     globalPrinciples: loadYaml('global-principles.yaml'),
     repRanges: loadYaml('rep-ranges.yaml'),

@@ -127,7 +127,7 @@ afterEach(() => {
 
 describe('Blueprint drills', () => {
   it('a drill gets its own mode prescription; normal lifts keep their hypertrophy ranges', () => {
-    expect(allDrills()).toHaveLength(20);
+    expect(allDrills()).toHaveLength(39); // 20 athletic + 19 flexibility (Blueprint 2026-10-26)
     expect(resolvePrimaryRepRange(BlueprintAdapter.getExercise('flat-barbell-bench-press')!)).toEqual([6, 12]);
     expect(modePrescriptionFor('flat-barbell-bench-press')).toBeNull();
     expect(modePrescriptionFor('lateral-shuffle')).toMatchObject({ mode: 'agility', unit: 'seconds', amount: [5, 15], sets: [4, 8], restSeconds: [30, 90] });

@@ -23,6 +23,8 @@ import type {
   BlueprintProgramming,
   BlueprintProgrammingProfiles,
   BlueprintRepRangeOverride,
+  BlueprintVolumeGroup,
+  BlueprintVolumeTarget,
 } from './types.js';
 
 function deepFreeze<T>(value: T): T {
@@ -161,6 +163,16 @@ export const BlueprintAdapter = {
 
   getIntensityTechnique(id: string): BlueprintIntensityTechnique | undefined {
     return intensityTechniquesById.get(id);
+  },
+
+  /** Schema 2 weekly volume numbers per target / group / goal id — see
+   * src/blueprint/volumeTargets.ts. */
+  listVolumeTargets(): readonly BlueprintVolumeTarget[] {
+    return programming.volumeTargets ?? [];
+  },
+
+  listVolumeGroups(): readonly BlueprintVolumeGroup[] {
+    return programming.volumeGroups ?? [];
   },
 };
 

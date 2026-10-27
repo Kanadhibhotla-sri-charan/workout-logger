@@ -130,7 +130,16 @@ Delivered 10-19 week: triceps about 7-10 direct, brachialis 5 (goals at
 roughly a third of their reference). Goals get crowded out by covering
 every muscle at its minimum.
 
-### Owner rule, 2026-10-25: two-week cycle for non-goal muscles
+### Superseded 2026-10-27: every muscle per calendar week
+
+Blueprint schema 2 publishes weekly numbers per muscle (volume-targets.yaml),
+counted as credited sets (completed sets x target_credit). Owner decision:
+goal muscles at "priority", the rest at "efficient", all per calendar week;
+Blueprint's min_hours_between is not applied. Statuses: must / can_wait /
+indirect (Blueprint indirect_only, non-goal) / met / not_today. The
+two-week cycle below is kept for history. Decision log §22.2.
+
+### Owner rule, 2026-10-25 (superseded): two-week cycle for non-goal muscles
 
 - Goal muscles: Complete package number per calendar week (unchanged).
 - Non-goal muscles: the same Efficient number, but it is due over a

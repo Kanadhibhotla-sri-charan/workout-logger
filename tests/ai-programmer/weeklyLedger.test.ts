@@ -1,109 +1,120 @@
-// Weekly volume ledger (docs/WEEKLY_VOLUME_PLANNING_DESIGN.md): goal
-// muscles per calendar week, non-goal muscles per rolling 14-day cycle
-// that restarts as soon as its number is reached.
+// Weekly volume ledger (docs/WEEKLY_VOLUME_PLANNING_DESIGN.md): every
+// muscle per calendar week at Blueprint's own numbers (schema 2), goal
+// muscles at "priority", counted as credited sets.
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db/client.js';
-import { computeLedger, currentCycle, ledgerReference, readDailyExposure, type LedgerInput, type LedgerTargetInput } from '../../src/ai-programmer/planning/weeklyLedger.js';
+import { computeLedger, ledgerTargets, readDailyCredit, type LedgerInput, type LedgerTargetInput } from '../../src/ai-programmer/planning/weeklyLedger.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 
 const target = (over: Partial<LedgerTargetInput> & { targetId: string }): LedgerTargetInput => ({
   isGoal: false,
-  reference: 14,
-  perSessionCap: 7,
+  reference: 10,
+  perSessionCap: 8,
+  indirectOnly: false,
+  shareOf: null,
   eligibleToday: true,
   paused: false,
+  trainedOn: (p) => p === 'push',
   ...over,
 });
 
-const exposure = (days: Record<string, Record<string, number>>) => new Map(Object.entries(days).map(([d, t]) => [d, new Map(Object.entries(t))]));
+const credit = (days: Record<string, Record<string, number>>) => new Map(Object.entries(days).map(([d, t]) => [d, new Map(Object.entries(t))]));
 
-// Mon 2026-10-26 push, Tue pull, Thu push, Fri pull; next week the same.
-const PPPP = ['2026-10-26:push', '2026-10-27:pull', '2026-10-29:push', '2026-10-30:pull', '2026-11-02:push', '2026-11-03:pull', '2026-11-05:push', '2026-11-06:pull'].map((s) => {
+// Mon 2026-10-26 push, Tue pull, Thu push, Fri pull.
+const PPPP = ['2026-10-26:push', '2026-10-27:pull', '2026-10-29:push', '2026-10-30:pull'].map((s) => {
   const [date, purpose] = s.split(':') as [string, 'push' | 'pull'];
   return { date, purpose };
 });
 
-const base = (over: Partial<LedgerInput>): LedgerInput => ({
-  targetDate: '2026-10-26',
-  anchor: '2026-10-26',
-  targets: [],
-  dailyExposure: new Map(),
-  futureDays: PPPP,
-  ...over,
-});
+const base = (over: Partial<LedgerInput>): LedgerInput => ({ targetDate: '2026-10-26', targets: [], dailyCredit: new Map(), futureDays: PPPP, ...over });
 
 const entry = (input: LedgerInput, id: string) => computeLedger(input).entries.find((e) => e.targetId === id)!;
 
-describe('goal muscles (calendar week, every suitable day)', () => {
+describe('goal muscles', () => {
   it('is a must on a suitable day, today getting its share of what is left this week', () => {
-    const e = entry(base({ targets: [target({ targetId: 'triceps', isGoal: true, reference: 24, perSessionCap: 12 })] }), 'triceps');
-    expect(e).toMatchObject({ basis: 'week', status: 'must', remaining: 24, laterSessions: 1, mustSetsToday: 12, windowEnd: '2026-11-01' });
+    const e = entry(base({ targets: [target({ targetId: 'triceps', isGoal: true, reference: 16 })] }), 'triceps');
+    expect(e).toMatchObject({ status: 'must', remaining: 16, laterSessions: 1, mustSetsToday: 8, weekEnd: '2026-11-01' });
   });
 
-  it('is met once this week reaches its number, and counts indirect work', () => {
+  it("may go past Blueprint's per-session maximum to reach the week", () => {
+    const e = entry(base({ targetDate: '2026-10-27', targets: [target({ targetId: 'brachialis-arm-thickness', isGoal: true, reference: 14, perSessionCap: 6, trainedOn: (p) => p === 'pull' })] }), 'brachialis-arm-thickness');
+    expect(e).toMatchObject({ status: 'must', laterSessions: 1, mustSetsToday: 7 });
+  });
+
+  it('is met once this week reaches its number, and counts credited indirect work', () => {
     const e = entry(
-      base({ targetDate: '2026-10-29', targets: [target({ targetId: 'triceps', isGoal: true, reference: 24, perSessionCap: 12 })], dailyExposure: exposure({ '2026-10-26': { triceps: 22 }, '2026-10-27': { triceps: 2.97 } }) }),
+      base({ targetDate: '2026-10-29', targets: [target({ targetId: 'triceps', isGoal: true, reference: 16 })], dailyCredit: credit({ '2026-10-26': { triceps: 14 }, '2026-10-27': { triceps: 2.5 } }) }),
       'triceps'
     );
     expect(e.status).toBe('met');
-    expect(e.done).toBe(24.97);
+    expect(e.done).toBe(16.5);
   });
 
   it('ignores last week', () => {
-    const e = entry(base({ targets: [target({ targetId: 'triceps', isGoal: true, reference: 24, perSessionCap: 12 })], dailyExposure: exposure({ '2026-10-23': { triceps: 30 } }) }), 'triceps');
+    const e = entry(base({ targets: [target({ targetId: 'triceps', isGoal: true, reference: 16 })], dailyCredit: credit({ '2026-10-23': { triceps: 30 } }) }), 'triceps');
     expect(e.done).toBe(0);
   });
 });
 
-describe('non-goal muscles (14-day cycle)', () => {
-  it('can wait while later suitable days in the cycle can hold what is left', () => {
+describe('other muscles (same calendar week)', () => {
+  it('can wait while later suitable days this week can hold what is left', () => {
+    const e = entry(base({ targets: [target({ targetId: 'rear-delt', reference: 8 })] }), 'rear-delt');
+    expect(e).toMatchObject({ status: 'can_wait', laterSessions: 1, laterCapacity: 8 });
+  });
+
+  it('asks today for only what the later days cannot hold', () => {
     const e = entry(base({ targets: [target({ targetId: 'side-delt' })] }), 'side-delt');
-    expect(e).toMatchObject({ basis: 'cycle', status: 'can_wait', windowStart: '2026-10-26', windowEnd: '2026-11-08', laterSessions: 3, laterCapacity: 21 });
+    expect(e).toMatchObject({ status: 'must', remaining: 10, laterCapacity: 8, mustSetsToday: 2 });
   });
 
-  it('becomes a must when the later days in the cycle cannot hold it all', () => {
-    const e = entry(base({ targetDate: '2026-11-02', targets: [target({ targetId: 'side-delt' })], dailyExposure: exposure({ '2026-10-26': { 'side-delt': 2 } }) }), 'side-delt');
-    // 12 left, only Thu 11-05 is a later push day in the cycle (cap 7).
-    expect(e).toMatchObject({ status: 'must', remaining: 12, laterSessions: 1, laterCapacity: 7, mustSetsToday: 5 });
+  it('becomes a must when the later days this week cannot hold it all', () => {
+    const e = entry(base({ targetDate: '2026-10-29', targets: [target({ targetId: 'side-delt' })], dailyCredit: credit({ '2026-10-26': { 'side-delt': 1 } }) }), 'side-delt');
+    // 9 left, no later push day this week (cap 8 today).
+    expect(e).toMatchObject({ status: 'must', remaining: 9, laterSessions: 0, mustSetsToday: 8 });
   });
 
-  it('starts the next cycle the day after the number is reached, even mid-week', () => {
-    const daily = exposure({ '2026-10-26': { 'side-delt': 6 }, '2026-10-29': { 'side-delt': 5 }, '2026-11-02': { 'side-delt': 4 } });
-    expect(currentCycle(daily, 'side-delt', 14, '2026-10-26', '2026-11-03')).toEqual({ start: '2026-11-03', done: 0 });
-    const e = entry(base({ targetDate: '2026-11-05', targets: [target({ targetId: 'side-delt' })], dailyExposure: daily }), 'side-delt');
-    expect(e).toMatchObject({ windowStart: '2026-11-03', windowEnd: '2026-11-16', remaining: 14, windowDay: 3 });
+  it('leaves indirect-only muscles to compound work unless they are goals', () => {
+    const ledger = computeLedger(base({ targets: [target({ targetId: 'front-delt', indirectOnly: true, reference: 6 }), target({ targetId: 'upper-traps', indirectOnly: true, isGoal: true, reference: 12 })] }));
+    expect(Object.fromEntries(ledger.entries.map((e) => [e.targetId, e.status]))).toEqual({ 'front-delt': 'indirect', 'upper-traps': 'must' });
   });
 
-  it('keeps counting past day 14 and is offered first as overdue', () => {
-    const input = base({
-      targetDate: '2026-11-09',
-      targets: [target({ targetId: 'side-delt' }), target({ targetId: 'mid-pec', reference: 10, perSessionCap: 5 })],
-      dailyExposure: exposure({ '2026-10-26': { 'side-delt': 3, 'mid-pec': 3 } }),
-      futureDays: [],
-    });
-    const ledger = computeLedger(input);
-    expect(ledger.entries.map((e) => [e.targetId, e.status])).toEqual([
-      ['side-delt', 'overdue'],
-      ['mid-pec', 'overdue'],
-    ]);
-    expect(ledger.entries[0]).toMatchObject({ remaining: 11, windowDay: 15 });
-  });
-
-  it('pulls days and pauses: not today', () => {
-    const ledger = computeLedger(
-      base({ targets: [target({ targetId: 'lat-width', eligibleToday: false, reference: 16, perSessionCap: 8 }), target({ targetId: 'quads', paused: true })] })
-    );
+  it('pull muscles on a push day, and paused muscles: not today', () => {
+    const ledger = computeLedger(base({ targets: [target({ targetId: 'lat-width', eligibleToday: false }), target({ targetId: 'quads', paused: true })] }));
     expect(ledger.entries.map((e) => e.status)).toEqual(['not_today', 'not_today']);
-  });
-
-  it('only counts later days whose purpose can train the muscle', () => {
-    const e = entry(base({ targets: [target({ targetId: 'rectus-abdominis', reference: 8, perSessionCap: 4 }), target({ targetId: 'lat-width', reference: 16, perSessionCap: 8, eligibleToday: false })] }), 'rectus-abdominis');
-    expect(e.laterSessions).toBe(7); // abs fit every later gym day in the cycle, push or pull
   });
 });
 
-describe('readDailyExposure', () => {
-  it('counts completed sets of completed sessions, direct 1.0 and secondary 0.33', () => {
+describe('ledgerTargets (Blueprint schema 2 numbers)', () => {
+  const byId = (targets: LedgerTargetInput[]) => Object.fromEntries(targets.map((t) => [t.targetId, t]));
+
+  it('goal outcomes give their priority targets the priority number; the rest get efficient', () => {
+    const t = byId(ledgerTargets(['arm-side-thickness', 'triceps-back-depth'], new Set(), () => true));
+    expect(t['triceps']).toMatchObject({ isGoal: true, reference: 16, perSessionCap: 8 });
+    expect(t['brachialis-arm-thickness']).toMatchObject({ isGoal: true, reference: 14, perSessionCap: 6 });
+    expect(t['side-delt']).toMatchObject({ isGoal: false, reference: 10 });
+    expect(t['chest']).toMatchObject({ isGoal: false, reference: 10 });
+    expect(t['front-delt']).toMatchObject({ indirectOnly: true, reference: 6 });
+    expect(t['core-anti-extension']).toMatchObject({ reference: 6 });
+  });
+
+  it('sub-regions with a min_share get that share of the parent number', () => {
+    const t = byId(ledgerTargets(['triceps-back-depth'], new Set(), () => true));
+    expect(t['triceps-long-head']).toMatchObject({ shareOf: 'triceps', reference: 5.28 });
+    expect(t['upper-pec']).toMatchObject({ shareOf: 'chest', reference: 3 });
+    expect(t['lower-pec']).toBeUndefined();
+  });
+
+  it('a group is paused only when all its children are; neck (no session trains it) is left out', () => {
+    const t = byId(ledgerTargets([], new Set(['gastrocnemius', 'soleus', 'quads']), () => true));
+    expect(t['calves']!.paused).toBe(true);
+    expect(t['quads']!.paused).toBe(true);
+    expect(t['chest']!.paused).toBe(false);
+    expect(t['neck-thickness']).toBeUndefined();
+  });
+});
+
+describe('readDailyCredit', () => {
+  it('counts completed sets of completed sessions x Blueprint target_credit', () => {
     const db = openDb(':memory:');
     const repo = new WorkoutSessionsRepo(db);
     const s = repo.createSession({ date: '2026-10-26', session_type: 'gym', status: 'completed' });
@@ -120,31 +131,14 @@ describe('readDailyExposure', () => {
     const planned = repo.createSession({ date: '2026-10-27', session_type: 'gym', status: 'planned' });
     repo.addExercisePerformance(planned.session_id, { exercise_id: 'cable-pushdown', order: 0, role: 'primary', sets: [{ set_number: 1, completed: true }] });
 
-    const daily = readDailyExposure(db, '2026-10-26', '2026-10-28');
+    const daily = readDailyCredit(db, '2026-10-26', '2026-10-28');
     expect([...daily.keys()]).toEqual(['2026-10-26']);
-    expect(daily.get('2026-10-26')!.get('triceps')).toBe(2);
-    expect([...daily.get('2026-10-26')!.values()].some((v) => Math.abs(v - 0.66) < 1e-9)).toBe(true);
-  });
-});
-
-describe('ledgerReference (per-muscle package numbers)', () => {
-  it('credits each muscle only with the package exercises that train it', () => {
-    expect(ledgerReference('side-delt', false)).toEqual({ weekly: 10, perSession: 5 });
-    expect(ledgerReference('rear-delt', false)).toEqual({ weekly: 4, perSession: 2 });
-    expect(ledgerReference('lat-width', false)).toEqual({ weekly: 6, perSession: 3 });
-    expect(ledgerReference('obliques', false)).toEqual({ weekly: 8, perSession: 2 });
-    expect(ledgerReference('rectus-abdominis', false)).toEqual({ weekly: 24, perSession: 6 });
-  });
-
-  it('keeps the existing sub-target scope (goal muscles unchanged) and gives front delts no number', () => {
-    expect(ledgerReference('triceps', true)).toEqual({ weekly: 24, perSession: 12 });
-    expect(ledgerReference('brachialis-arm-thickness', true)).toEqual({ weekly: 8, perSession: 4 });
-    expect(ledgerReference('front-delt', false)).toBeNull();
+    expect(Object.fromEntries(daily.get('2026-10-26')!)).toEqual({ triceps: 2, chest: 1, 'mid-pec': 1, 'front-delt': 1 });
   });
 });
 
 describe('GET /api/insights/volume', () => {
-  it('reports goal muscles per week and the rest per cycle, without paused legs', async () => {
+  it('reports every muscle against this week, without paused legs', async () => {
     const { default: request } = await import('supertest');
     const { createApp } = await import('../../src/server/app.js');
     const { UsersRepo } = await import('../../src/repositories/usersRepo.js');
@@ -161,10 +155,12 @@ describe('GET /api/insights/volume', () => {
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'triceps-back-depth', priority: 1 });
     new InjuryPausesRepo(db).pause('legs', '2026-10-01', null);
     const body = (await request(createApp(db)).get('/api/insights/volume').expect(200)).body;
-    const triceps = body.muscles.find((m: any) => m.targetId === 'triceps');
-    expect(triceps).toMatchObject({ isGoal: true, basis: 'week', number: 24, windowLength: 7 });
-    expect(body.muscles.find((m: any) => m.targetId === 'side-delt')).toMatchObject({ isGoal: false, basis: 'cycle', number: 10, windowLength: 14 });
-    expect(body.muscles.some((m: any) => m.targetId === 'quads')).toBe(false);
-    expect(body.muscles.some((m: any) => m.targetId === 'front-delt')).toBe(false);
+    const find = (id: string) => body.muscles.find((m: any) => m.targetId === id);
+    expect(find('triceps')).toMatchObject({ isGoal: true, number: 16 });
+    expect(find('triceps-long-head')).toMatchObject({ isGoal: true, shareOf: 'triceps' });
+    expect(find('side-delt')).toMatchObject({ isGoal: false, number: 10 });
+    expect(find('chest')).toMatchObject({ name: 'Chest', number: 10 });
+    expect(find('front-delt')).toMatchObject({ indirect: true });
+    expect(find('quads')).toBeUndefined();
   });
 });

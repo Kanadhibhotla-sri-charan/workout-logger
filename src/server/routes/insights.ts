@@ -11,37 +11,33 @@ import { athleticWork, consistency, deloadHistory, goalCheckIns, strengthProgres
 import { addDays } from '../../engine/dateMath.js';
 import { liveTargetAllocations } from './programming.js';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
-import { LEDGER_CYCLE_DAYS, volumeOverview } from '../../ai-programmer/planning/weeklyLedger.js';
-import { aiWeeklyLedgerAnchor } from '../../ai-programmer/provider/config.js';
+import { volumeOverview } from '../../ai-programmer/planning/weeklyLedger.js';
 
 export const insightsRouter = Router();
 
-/** GET /api/insights/volume (2026-10-25): each muscle's progress toward
- * its weekly (goal) or 14-day cycle (non-goal) number — the weekly
- * volume ledger, read-only (docs/WEEKLY_VOLUME_PLANNING_DESIGN.md). */
+/** GET /api/insights/volume (2026-10-25, weekly for every muscle since
+ * 2026-10-27): each muscle's credited sets toward this week's Blueprint
+ * number — the weekly volume ledger, read-only
+ * (docs/WEEKLY_VOLUME_PLANNING_DESIGN.md). */
 insightsRouter.get('/volume', (req, res) => {
   const database = db(req);
   const today = todayForUser(database);
-  const overview = volumeOverview(database, today, aiWeeklyLedgerAnchor());
-  const name = (id: string) => BlueprintAdapter.getTarget(id)?.name ?? id;
+  const overview = volumeOverview(database, today);
+  const name = (id: string) => BlueprintAdapter.getTarget(id)?.name ?? BlueprintAdapter.listVolumeGroups().find((g) => g.id === id)?.name ?? BlueprintAdapter.getFunctionalGoal(id)?.name ?? id;
   res.json({
     today,
-    goals: overview.goals,
     muscles: overview.entries
       .filter((e) => !overview.paused.includes(e.targetId))
       .map((e) => ({
         targetId: e.targetId,
         name: name(e.targetId),
-        isGoal: e.basis === 'week',
-        basis: e.basis,
+        isGoal: e.isGoal,
+        shareOf: e.shareOf,
+        indirect: e.status === 'indirect',
         number: e.number,
         done: e.done,
         remaining: e.remaining,
-        windowStart: e.windowStart,
-        windowEnd: e.windowEnd,
-        windowDay: e.windowDay,
-        windowLength: e.basis === 'week' ? 7 : LEDGER_CYCLE_DAYS,
-        overdue: e.status === 'overdue',
+        weekDay: e.weekDay,
         behind: e.behind,
       })),
   });

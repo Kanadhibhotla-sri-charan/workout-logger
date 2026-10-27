@@ -13,7 +13,7 @@ export type DemandLevel = 'low' | 'medium' | 'high';
 export type ReviewStatus = 'draft' | 'needs-review' | 'reviewed';
 export type VideoStatus = 'verified' | 'needs-review' | 'broken';
 
-export const TRAINING_MODES = ['power', 'agility', 'movement-strength', 'mobility-hold', 'mobility-dynamic', 'conditioning'] as const;
+export const TRAINING_MODES = ['power', 'agility', 'movement-strength', 'mobility-hold', 'mobility-dynamic', 'conditioning', 'soft-tissue'] as const;
 export type TrainingMode = (typeof TRAINING_MODES)[number];
 
 export interface BlueprintExercise {
@@ -46,6 +46,11 @@ export interface BlueprintExercise {
   skill_demand: DemandLevel;
   setup_time: DemandLevel;
   fatigue_cost: DemandLevel;
+  /** Schema 2: credited sets per hard set, per target / volume group /
+   * goal id (weights in (0, 1]). Absent on non-strength records. */
+  target_credit?: Record<string, number>;
+  /** Schema 2: time cost per exercise (request 2.2). */
+  time?: BlueprintExerciseTime;
   best_used_when: string[];
   less_suitable_when: string[] | null;
   mirror_effect: string;
@@ -73,6 +78,41 @@ export interface BlueprintPhysiqueTarget {
   parent_region: string;
   definition: string;
   physique_outcome: string;
+  /** Schema 2: a sub-region's volume parent (a target or volume group). */
+  parent?: string;
+  volume_share?: number;
+  min_share?: number;
+}
+
+export interface BlueprintExerciseTime {
+  setup_minutes: number;
+  seconds_per_set: number;
+  rest_seconds: [number, number];
+  per_side: boolean;
+  superset_friendly: boolean;
+}
+
+export type BlueprintVolumeLevel = 'minimum' | 'efficient' | 'priority';
+
+/** Schema 2 volume-targets.yaml entry: credited hard sets per 7 days.
+ * A child (sub-region) carries volume_from_parent instead of numbers. */
+export interface BlueprintVolumeTarget {
+  target_id?: string;
+  goal_id?: string;
+  weekly_sets?: Record<BlueprintVolumeLevel, number>;
+  per_session_max?: number;
+  indirect_only?: boolean;
+  sessions_per_week?: [number, number];
+  min_hours_between?: number;
+  volume_from_parent?: string;
+  rationale?: string;
+}
+
+export interface BlueprintVolumeGroup {
+  id: string;
+  name: string;
+  parent_region: string;
+  definition: string;
 }
 
 export interface BlueprintAestheticOutcome {
@@ -81,6 +121,9 @@ export interface BlueprintAestheticOutcome {
   region: string;
   viewpoint: string;
   primary_targets: string[];
+  /** Schema 2: the volume level each target gets for this outcome; a
+   * child's level is given to its parent and the child marked 'bias'. */
+  volume_levels?: Array<{ target_id: string; level: 'priority' | 'efficient' | 'bias' }>;
   /** Optional in the raw Blueprint snapshot data — a real minority of
    * aesthetic outcomes (verified: 22 of ~46 in
    * src/blueprint/snapshot/programming.json) have no supporting_targets
@@ -265,6 +308,10 @@ export interface BlueprintProgramming {
   aestheticOutcomes: BlueprintAestheticOutcome[];
   functionalGoals: BlueprintFunctionalGoal[];
   developmentPackages: BlueprintDevelopmentPackages;
+  /** Schema 2 (Blueprint 2026-10-27); absent in older snapshots. */
+  schemaVersion?: number;
+  volumeGroups?: BlueprintVolumeGroup[];
+  volumeTargets?: BlueprintVolumeTarget[];
 }
 
 export interface BlueprintManifest {
