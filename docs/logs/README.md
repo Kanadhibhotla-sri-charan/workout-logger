@@ -98,3 +98,5 @@ story of how the app got to its current state.
 - [2026-10-20-90-daily-backup-and-rir-confirmation.md](2026-10-20-90-daily-backup-and-rir-confirmation.md) — Daily DB backup timer installed on the VM; RIR 0 = failure confirmed
 - [2026-10-25-91-weekly-volume-ledger-shadow.md](2026-10-25-91-weekly-volume-ledger-shadow.md) — Weekly/cycle volume tally per muscle, logged in shadow mode
 - [2026-10-25-92-dark-ui-and-volume-card.md](2026-10-25-92-dark-ui-and-volume-card.md) — Dark athletic theme; Training volume card on Today
+- [2026-10-27-93-blueprint-schema-2-weekly-numbers.md](2026-10-27-93-blueprint-schema-2-weekly-numbers.md) — Blueprint's own weekly numbers and credit; every muscle per calendar week
+- [2026-10-27-94-telemetry-console-ui.md](2026-10-27-94-telemetry-console-ui.md) — High-tech "telemetry console" theme; segmented volume meters

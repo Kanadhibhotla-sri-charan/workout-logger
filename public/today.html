@@ -16,7 +16,7 @@
 
     <section>
       <h2>Training volume</h2>
-      <p class="muted">Sets toward each muscle's number. Goal muscles count per week; the rest over a 14-day cycle that restarts once it is reached. Indirect work counts a third.</p>
+      <p class="muted">Sets this week toward each muscle's Blueprint number: goal muscles at priority, the rest at efficient. A set counts toward every muscle it trains, at Blueprint's credit for that exercise.</p>
       <div id="volume-container"></div>
     </section>
 
@@ -263,14 +263,14 @@
 
     function volumeRow(m) {
       const pct = m.number > 0 ? Math.min(100, (m.done / m.number) * 100) : 0;
-      const state = m.done >= m.number ? 'is-done' : m.overdue ? 'is-overdue' : m.behind > 0.25 ? 'is-behind' : '';
-      const meta = m.overdue
-        ? `overdue · day ${m.windowDay} of ${m.windowLength}`
-        : m.basis === 'week' ? `this week · day ${m.windowDay} of 7` : `cycle day ${m.windowDay} of ${m.windowLength}`;
+      const state = m.done >= m.number ? 'is-done' : m.behind > 0.25 && !m.indirect ? 'is-behind' : '';
+      const meta = m.shareOf
+        ? `at least this share of ${m.shareOf.replace(/-/g, ' ')}`
+        : m.indirect ? 'covered by compound lifts' : `this week · day ${m.weekDay} of 7`;
       return el('div', { class: `vol-row ${state}` }, [
         el('div', { class: 'vol-head' }, [
           el('span', { class: 'vol-name', text: m.name }),
-          el('span', { class: 'vol-num' }, [el('strong', { text: fmtSets(m.done) }), el('span', { text: ` / ${m.number}` })]),
+          el('span', { class: 'vol-num' }, [el('strong', { text: fmtSets(m.done) }), el('span', { text: ` / ${fmtSets(m.number)}` })]),
         ]),
         el('div', { class: 'vol-track' }, [el('div', { class: 'vol-fill', style: `width:${pct}%` })]),
         el('div', { class: 'vol-meta', text: meta }),
@@ -279,13 +279,19 @@
 
     function renderVolume(container, data) {
       container.innerHTML = '';
-      const goals = data.muscles.filter((m) => m.isGoal);
-      const others = data.muscles.filter((m) => !m.isGoal).sort((a, b) => b.behind - a.behind);
+      // A share row (e.g. long head) sits right under its parent muscle.
+      const goalParents = data.muscles.filter((m) => m.isGoal && !m.shareOf);
+      const goals = goalParents.flatMap((p) => [p, ...data.muscles.filter((m) => m.shareOf === p.targetId)]);
+      const others = data.muscles
+        .filter((m) => !m.isGoal && !m.shareOf)
+        .sort((a, b) => b.behind - a.behind)
+        .flatMap((p) => [p, ...data.muscles.filter((m) => m.shareOf === p.targetId)]);
       if (goals.length > 0) {
-        const done = goals.reduce((s, m) => s + Math.min(m.done, m.number), 0);
-        const total = goals.reduce((s, m) => s + m.number, 0);
+        const whole = goals.filter((m) => !m.shareOf);
+        const done = whole.reduce((s, m) => s + Math.min(m.done, m.number), 0);
+        const total = whole.reduce((s, m) => s + m.number, 0);
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-        const card = el('div', { class: 'card vol-card' });
+        const card = el('div', { class: 'card vol-card is-goal' });
         card.appendChild(el('div', { class: 'vol-card-head' }, [
           el('div', {}, [el('div', { class: 'vol-kicker', text: 'Goal muscles' }), el('div', { class: 'vol-title', text: 'This week' })]),
           el('div', { class: 'vol-ring', style: `--p:${pct}`, 'aria-label': `${pct}% of this week's goal volume` }, [el('span', { text: `${pct}%` })]),
@@ -296,7 +302,7 @@
       if (others.length > 0) {
         const card = el('div', { class: 'card vol-card' });
         card.appendChild(el('div', { class: 'vol-card-head' }, [
-          el('div', {}, [el('div', { class: 'vol-kicker', text: 'Other muscles' }), el('div', { class: 'vol-title', text: '14-day cycles' })]),
+          el('div', {}, [el('div', { class: 'vol-kicker', text: 'Other muscles' }), el('div', { class: 'vol-title', text: 'This week' })]),
         ]));
         const grid = el('div', { class: 'vol-grid' });
         for (const m of others) grid.appendChild(volumeRow(m));
