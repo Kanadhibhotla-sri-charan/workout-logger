@@ -42,3 +42,10 @@ before the sync (date-dependent), none new.
 Session generation and the live planner (still shadow). Steps 2-4 to
 follow: weekly plan drives sessions; minutes instead of exercise count;
 variants, deload, warm-up mobility.
+
+## Deployed
+2026-10-27 with ff85753 (UI, change log 94). Backup
+`deployment-backups/pre-ff85753-20261027T144843Z.sqlite` (integrity ok);
+drop-in updated (anchor removed), health ok, calorie sync on. Live this
+week after Mon/Tue: triceps 10.5/16, long head 3.5/5.3, brachialis
+4.5/14; abs 0/6 x 3; chest 7.75/10.
