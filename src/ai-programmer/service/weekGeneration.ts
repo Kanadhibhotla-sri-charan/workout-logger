@@ -34,6 +34,7 @@ import { WorkoutSessionsRepo } from '../../repositories/workoutSessionsRepo.js';
 import { LegTrainingRepo } from '../../repositories/legTrainingRepo.js';
 import { athleticPaused, buildAthleticContext } from '../../athletic/athleticSession.js';
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
+import { withWeeklyLedger } from '../planning/ledgerBrief.js';
 import type { ProjectedSession } from '../context/projectedExposure.js';
 import {
   AIProgrammerError,
@@ -301,11 +302,14 @@ async function executeRun(db: Database.Database, service: AIProgrammerService, r
         continue;
       }
       const projected = projectedSessionsBefore(db, run.weekStart, day.date);
-      const context = buildProgrammerContext(db, {
-        targetDate: day.date,
-        requestedSessionPurpose: (day.purpose as SessionPurpose | null) ?? undefined,
-        projectedSessions: projected,
-      });
+      const context = withWeeklyLedger(
+        db,
+        buildProgrammerContext(db, {
+          targetDate: day.date,
+          requestedSessionPurpose: (day.purpose as SessionPurpose | null) ?? undefined,
+          projectedSessions: projected,
+        })
+      );
       day.contextHash = context.contextHash;
 
       const previous = repo.dayFailure(day.date, context.contextHash);

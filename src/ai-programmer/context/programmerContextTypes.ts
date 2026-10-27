@@ -197,6 +197,10 @@ export interface AIProgrammerMuscleGuidance {
    * exercise lists" — the same non-rigidity applies to the derived
    * session number). */
   recommendedSessionSets: { min: number; max: number };
+  /** Weekly ledger status for today (AI_WEEKLY_LEDGER_MODE=on only; see
+   * planning/ledgerBrief.ts): must / can_wait are expected today, done is
+   * not. Absent when the ledger is off or does not know the target. */
+  weeklyStatus?: 'must' | 'can_wait' | 'done';
   /** recoveryEngine.applyRecoveryConstraint's own priority_adjustment
    * for this target, evaluated as of targetDate — reused verbatim,
    * never re-derived. */

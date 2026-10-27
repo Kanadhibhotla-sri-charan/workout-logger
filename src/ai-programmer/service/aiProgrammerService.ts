@@ -46,6 +46,7 @@ import { clearGenerationFailure, findGenerationFailure, isGatedGenerationFailure
 import { buildGenerationRejectionDiagnostic, logGenerationRejection } from './generationDiagnostics.js';
 import { planSession, summarizeSessionPlanForLog, type SessionPlan } from '../planning/sessionPlanner.js';
 import { buildWeeklyLedger, summarizeLedgerForLog } from '../planning/weeklyLedger.js';
+import { withWeeklyLedger } from '../planning/ledgerBrief.js';
 import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction, usesRotationShortlist } from '../planning/plannedContext.js';
 import { runProposalPipeline } from './proposalPipeline.js';
 import { ATHLETIC_OUTPUT_SCHEMA, buildAthleticContext, buildAthleticSystemInstruction, checkAthleticOutput, type AthleticContext } from '../../athletic/athleticSession.js';
@@ -303,10 +304,13 @@ export class AIProgrammerService {
       }
     }
 
-    const context: AIProgrammerContext = buildProgrammerContext(this.db, {
-      targetDate: input.targetDate,
-      requestedSessionPurpose: input.requestedSessionPurpose,
-    });
+    const context: AIProgrammerContext = withWeeklyLedger(
+      this.db,
+      buildProgrammerContext(this.db, {
+        targetDate: input.targetDate,
+        requestedSessionPurpose: input.requestedSessionPurpose,
+      })
+    );
     observed.contextHash = context.contextHash;
     observed.sessionPurpose = context.programmingBrief.session.purpose;
 
@@ -408,10 +412,11 @@ export class AIProgrammerService {
     };
   }
 
-  /** Weekly volume ledger, shadow mode only: logged next to the session
-   * plan, never used by generation. A failure is logged and ignored. */
+  /** Weekly volume ledger, logged next to the session plan (shadow: never
+   * used by generation; on: already applied by withWeeklyLedger). A failure
+   * is logged and ignored. */
   private logWeeklyLedgerShadow(context: AIProgrammerContext): void {
-    if (aiWeeklyLedgerMode() !== 'shadow') return;
+    if (aiWeeklyLedgerMode() === 'off') return;
     try {
       const ledger = buildWeeklyLedger(this.db, context);
       console.log('[ai-programmer] weekly ledger shadow', JSON.stringify(summarizeLedgerForLog(ledger, context.programmingBrief.session.purpose)));

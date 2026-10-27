@@ -41,9 +41,12 @@ export function aiExercisePoolMode(): 'package' | 'wide' {
 
 /** Weekly volume ledger (2026-10-25, docs/WEEKLY_VOLUME_PLANNING_DESIGN.md).
  * 'off' (default): not computed. 'shadow': computed at every session
- * generation and logged next to the session plan; generation unchanged. */
-export function aiWeeklyLedgerMode(): 'off' | 'shadow' {
-  return process.env.AI_WEEKLY_LEDGER_MODE === 'shadow' ? 'shadow' : 'off';
+ * generation and logged next to the session plan; generation unchanged.
+ * 'on' (2026-10-27): the ledger rewrites the brief before planning
+ * (planning/ledgerBrief.ts). */
+export function aiWeeklyLedgerMode(): 'off' | 'shadow' | 'on' {
+  const v = process.env.AI_WEEKLY_LEDGER_MODE;
+  return v === 'shadow' || v === 'on' ? v : 'off';
 }
 
 export interface VelonaConfig {

@@ -154,6 +154,14 @@ export interface PlanSessionOptions {
   nonGoalRotationCursor?: number;
 }
 
+/** Blueprint session_rules: hard sets that fit a session of this length
+ * (lower bound of the 60-minute range, scaled). */
+function sessionSetBudget(minutes: number): number {
+  const rules = (BlueprintAdapter.getGlobalPrinciples() as { session_rules?: { hard_sets_per_session?: { sixty_minutes?: [number, number] } } }).session_rules;
+  const perHour = rules?.hard_sets_per_session?.sixty_minutes?.[0] ?? 16;
+  return Math.round((perHour * minutes) / 60);
+}
+
 const isAbs = (targetId: string) => ABS_PHYSIQUE_TARGETS.includes(targetId);
 const isLeg = (targetId: string) => LEGS_PHYSIQUE_TARGETS.includes(targetId);
 const idOf = (key: string) => key.slice(key.indexOf(':') + 1);
@@ -575,12 +583,37 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
       attempt(w, isAccessory(w) ? 'accessory' : 'identity');
       return false;
     });
-  const identityTargets = allocatable.filter((w) => !isAccessory(w)).sort(byRank);
-  for (const w of identityTargets) {
-    if (w.target.parentRegion && !representedRegions.has(w.target.parentRegion)) attempt(w, 'identity_primary');
-  }
-  for (const w of identityTargets) if (!attempted.has(w)) attempt(w, 'identity');
-  for (const w of allocatable.filter(isAccessory).sort(byRank)) attempt(w, 'accessory');
+  // Weekly ledger on (planning/ledgerBrief.ts): every "must" target (identity,
+  // then accessory) is allocated before any "can wait" one, so the week's
+  // deadlines are never crowded out by muscles a later day can cover; "can
+  // wait" targets then only fill the session up to Blueprint's set count
+  // for its length (session_rules: 16 hard sets per 60 minutes).
+  const ledgerOn = allocatable.some((w) => w.guidance.weeklyStatus !== undefined);
+  const passes = ledgerOn
+    ? [allocatable.filter((w) => w.guidance.weeklyStatus === 'must'), allocatable.filter((w) => w.guidance.weeklyStatus !== 'must')]
+    : [allocatable];
+  const setBudget = ledgerOn ? sessionSetBudget(context.profile.defaultSessionDurationMinutes) : Number.POSITIVE_INFINITY;
+  const plannedSets = () => working.filter((w) => planned.has(w.key)).reduce((s, w) => s + w.guidance.recommendedSessionSets.min, 0);
+  const attemptWithinBudget = (w: Working, tier: PlanningTier, fill: boolean) => {
+    if (fill && plannedSets() >= setBudget) {
+      attempted.add(w);
+      w.plan.tier = tier;
+      w.plan.rank = order++;
+      w.plan.status = 'deferred';
+      w.plan.reason = `can wait: a later day this week can cover it, and the session already holds about ${plannedSets()} sets`;
+      return;
+    }
+    attempt(w, tier);
+  };
+  passes.forEach((pass, i) => {
+    const fill = ledgerOn && i > 0;
+    const identityTargets = pass.filter((w) => !isAccessory(w)).sort(byRank);
+    for (const w of identityTargets) {
+      if (w.target.parentRegion && !representedRegions.has(w.target.parentRegion)) attemptWithinBudget(w, 'identity_primary', fill);
+    }
+    for (const w of identityTargets) if (!attempted.has(w)) attemptWithinBudget(w, 'identity', fill);
+    for (const w of pass.filter(isAccessory).sort(byRank)) attemptWithinBudget(w, 'accessory', fill);
+  });
 
   // ---- 6. final capacity, candidate lists and per-target reservations ----
   const final = capacityFor(planned);
