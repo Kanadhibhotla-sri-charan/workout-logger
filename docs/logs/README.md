@@ -100,3 +100,4 @@ story of how the app got to its current state.
 - [2026-10-25-92-dark-ui-and-volume-card.md](2026-10-25-92-dark-ui-and-volume-card.md) — Dark athletic theme; Training volume card on Today
 - [2026-10-27-93-blueprint-schema-2-weekly-numbers.md](2026-10-27-93-blueprint-schema-2-weekly-numbers.md) — Blueprint's own weekly numbers and credit; every muscle per calendar week
 - [2026-10-27-94-telemetry-console-ui.md](2026-10-27-94-telemetry-console-ui.md) — High-tech "telemetry console" theme; segmented volume meters
+- [2026-10-27-95-weekly-ledger-on.md](2026-10-27-95-weekly-ledger-on.md) — The weekly tally now decides what each session trains

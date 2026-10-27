@@ -1196,3 +1196,28 @@ Step 1 (change log 93): the ledger and the Training volume card read
 Blueprint's numbers and count credited sets; the logger's own numbers
 (ledgerReference) are gone. Generation is still unchanged (shadow).
 
+### 22.3 Weekly ledger drives the session (2026-10-27)
+Owner: "if the old way is clearly falling short, why don't change now?" —
+no shadow week; switched on the same day (AI_WEEKLY_LEDGER_MODE=on, rollback:
+shadow). planning/ledgerBrief.ts rewrites the brief before planning:
+- must: expected, minimum = ledger sets for today, validator floor 80%
+  (not 50%); goals may exceed the per-session maximum.
+- can wait: planned after every must, only while the session holds under
+  22 sets per 60 min (Blueprint session_rules top), even share of the rest.
+- done (met / compound-covered): dropped from today's expected list; a met
+  goal is not required today.
+- Volume groups (chest): one region carries the group's ask (its own must
+  first, else largest volume_share); others done unless their own share is
+  due.
+- Planner: goals blocked only by side credit get those targets planned
+  first; must before can-wait; a goal ask the plan cannot hold is lowered
+  set by set (applyWeeklyLedgerPlannable). Any ledger error falls back to
+  the unchanged context.
+Dry run on a copy of production (Thu 10-29 Push): old = triceps, long head,
+three pec regions, side delt, obliques (7 slots); new = triceps 6, long
+head, chest as one exercise, side delt 6, abs (7 slots), front delts
+dropped (covered). Fri Pull: brachialis with biceps/forearms, back, lats,
+rear delt; abs still blocked by the 10-exercise cap (step 3).
+Known limits: week runs count only completed sessions (not pending
+proposals); core anti-extension has no physique target to plan.
+

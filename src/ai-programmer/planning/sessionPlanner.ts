@@ -155,10 +155,10 @@ export interface PlanSessionOptions {
 }
 
 /** Blueprint session_rules: hard sets that fit a session of this length
- * (lower bound of the 60-minute range, scaled). */
+ * (upper bound of the 60-minute range, scaled). */
 function sessionSetBudget(minutes: number): number {
   const rules = (BlueprintAdapter.getGlobalPrinciples() as { session_rules?: { hard_sets_per_session?: { sixty_minutes?: [number, number] } } }).session_rules;
-  const perHour = rules?.hard_sets_per_session?.sixty_minutes?.[0] ?? 16;
+  const perHour = rules?.hard_sets_per_session?.sixty_minutes?.[1] ?? 22;
   return Math.round((perHour * minutes) / 60);
 }
 
@@ -516,7 +516,7 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
   const attempted = new Set<Working>();
   let order = 0;
 
-  function attempt(w: Working, tier: PlanningTier): boolean {
+  function attempt(w: Working, tier: PlanningTier, retryGoalLater = false): boolean {
     attempted.add(w);
     w.plan.tier = tier;
     w.plan.rank = order++;
@@ -526,6 +526,11 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
     if (!feasibility.isFeasible) {
       const genuinelyInfeasible = !feasibilityWith(w, w.baseCandidates).isFeasible;
       w.plan.feasible = false;
+      if (retryGoalLater && !genuinelyInfeasible) {
+        w.plan.status = 'deferred';
+        w.plan.reason = 'its exercises also credit targets not planned yet; tried again after them';
+        return false;
+      }
       if (genuinelyInfeasible || w.guidance.isGoalOriented) {
         w.plan.status = 'infeasible';
         w.plan.reason = genuinelyInfeasible
@@ -572,7 +577,18 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
   }
 
   const goals = plannable.filter((w) => w.guidance.isGoalOriented).sort(byRank);
-  for (const w of goals) attempt(w, 'goal');
+  const ledgerGoals = goals.some((w) => w.guidance.weeklyStatus !== undefined);
+  // Weekly ledger on: a goal whose exercises also credit other targets
+  // today (hammer curls -> biceps, forearms) gets those targets planned
+  // first, then is tried again, instead of being refused.
+  for (const w of goals.filter((g) => !attempt(g, 'goal', ledgerGoals) && g.plan.status === 'deferred')) {
+    const blockers = new Set(splitCandidates(w, new Set([...planned, w.key])).excluded.flatMap((e) => e.uncoveredSideTargets));
+    for (const key of [...blockers].sort()) {
+      const b = workingByKey.get(key);
+      if (b && b.plannable && !attempted.has(b) && !b.guidance.isGoalOriented) attempt(b, isAccessory(b) ? 'accessory' : 'identity');
+    }
+    attempt(w, 'goal');
+  }
 
   // Genuinely infeasible targets never enter capacity allocation.
   const allocatable = plannable
@@ -587,7 +603,8 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
   // then accessory) is allocated before any "can wait" one, so the week's
   // deadlines are never crowded out by muscles a later day can cover; "can
   // wait" targets then only fill the session up to Blueprint's set count
-  // for its length (session_rules: 16 hard sets per 60 minutes).
+  // for its length (session_rules: 16-22 hard sets per 60 minutes; the top
+  // of the range, since musts alone often reach the bottom).
   const ledgerOn = allocatable.some((w) => w.guidance.weeklyStatus !== undefined);
   const passes = ledgerOn
     ? [allocatable.filter((w) => w.guidance.weeklyStatus === 'must'), allocatable.filter((w) => w.guidance.weeklyStatus !== 'must')]
