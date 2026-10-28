@@ -124,26 +124,36 @@ export function planFlexibilityBlock(db: Database.Database, date: string, purpos
     .sort((a, b) => b.remainingMinutes - a.remainingMinutes || a.goalId.localeCompare(b.goalId));
   if (behind.length === 0) return null;
 
-  const catalogue = drillCatalogue(lastDoneDrills(db, date), athleticFilterFor(db, date), isFlexibilityGoal);
+  // During the Legs pause no drill that works lower-body range (e.g. a lunge-position stretch).
+  const legsPaused = week.goals.some((g) => g.goalId === LOWER_BODY_GOAL && g.paused);
+  const catalogue = drillCatalogue(lastDoneDrills(db, date), athleticFilterFor(db, date), isFlexibilityGoal).filter((d) => !(legsPaused && d.goals.includes(LOWER_BODY_GOAL)));
   const covered = new Map<string, number>();
   const picks: Array<{ drill: AthleticDrillContext; sets: number }> = [];
-  for (const goal of behind) {
-    const need = goal.todaySeconds - (covered.get(goal.goalId) ?? 0);
-    if (need <= 0) continue;
-    const drill = catalogue
-      .filter((d) => d.goals.includes(goal.goalId) && drillSetSeconds(d.exerciseId) > 0 && !picks.some((p) => p.drill.exerciseId === d.exerciseId))
-      .sort((a, b) => (a.lastDone ?? '').localeCompare(b.lastDone ?? '') || a.exerciseId.localeCompare(b.exerciseId))[0];
-    if (!drill) continue;
-    const perSet = drillSetSeconds(drill.exerciseId);
-    const sets = Math.min(drill.sets.max, Math.max(drill.sets.min, Math.ceil(need / perSet)));
-    picks.push({ drill, sets });
-    for (const g of drill.goals) covered.set(g, (covered.get(g) ?? 0) + sets * perSet);
+  const secondsOf = (p: { drill: AthleticDrillContext; sets: number }) => p.sets * (drillSetSeconds(p.drill.exerciseId) + restOf(p.drill.exerciseId));
+  const total = () => picks.reduce((sum, p) => sum + secondsOf(p), 0);
+  // First pass: one drill for every goal behind. Later passes: another drill
+  // for a goal still short of today's share, while it fits the time box.
+  for (let pass = 0, added = true; added; pass++) {
+    added = false;
+    for (const goal of behind) {
+      const need = goal.todaySeconds - (covered.get(goal.goalId) ?? 0);
+      if (need <= 0) continue;
+      const drill = catalogue
+        .filter((d) => d.goals.includes(goal.goalId) && drillSetSeconds(d.exerciseId) > 0 && !picks.some((p) => p.drill.exerciseId === d.exerciseId))
+        .sort((a, b) => (a.lastDone ?? '').localeCompare(b.lastDone ?? '') || a.exerciseId.localeCompare(b.exerciseId))[0];
+      if (!drill) continue;
+      const perSet = drillSetSeconds(drill.exerciseId);
+      const pick = { drill, sets: Math.min(drill.sets.max, Math.max(drill.sets.min, Math.ceil(need / perSet))) };
+      if (pass > 0 && total() + secondsOf({ ...pick, sets: 1 }) > FLEXIBILITY_BLOCK_MAX_SECONDS) continue;
+      if (pass > 0) while (pick.sets > 1 && total() + secondsOf(pick) > FLEXIBILITY_BLOCK_MAX_SECONDS) pick.sets -= 1;
+      picks.push(pick);
+      added = true;
+      for (const g of drill.goals) covered.set(g, (covered.get(g) ?? 0) + pick.sets * perSet);
+    }
   }
   if (picks.length === 0) return null;
 
   // Fit the time box: take sets off the longest item while over it (never below 1).
-  const secondsOf = (p: { drill: AthleticDrillContext; sets: number }) => p.sets * (drillSetSeconds(p.drill.exerciseId) + restOf(p.drill.exerciseId));
-  const total = () => picks.reduce((sum, p) => sum + secondsOf(p), 0);
   while (total() > FLEXIBILITY_BLOCK_MAX_SECONDS) {
     const longest = [...picks].filter((p) => p.sets > 1).sort((a, b) => secondsOf(b) - secondsOf(a))[0];
     if (!longest) break;
