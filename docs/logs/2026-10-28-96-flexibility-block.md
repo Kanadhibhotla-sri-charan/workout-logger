@@ -25,3 +25,6 @@ the planner or the model. Decision log §22.4.
 4 new tests and 4 updated add-on tests in `tests/athletic/athleticDay.test.ts`
 (29 pass). Full suite: same 233 pre-existing failures, none new. Dry run on
 a copy of production for Thu 10-29 Push / Fri 10-30 Pull (copy deleted).
+
+## Deployed
+2026-10-28 16:48 UTC (22:18 IST). Backup `deployment-backups/pre-4b10ed1-20261028T164747Z.sqlite`. Health ok; AI_PLANNED_GENERATION_ENABLED=true, AI_WEEKLY_LEDGER_MODE=on. `/api/insights/volume` returns the flexibility minutes (lower body hidden while legs are paused). Dry-run checkout on the VM removed.
