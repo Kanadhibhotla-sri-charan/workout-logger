@@ -47,7 +47,7 @@ export interface FlexibilityGoalWeek {
 export interface FlexibilityWeek {
   weekStart: string;
   goals: FlexibilityGoalWeek[];
-  /** Gym days from today (or the week's start) to Sunday that get the block. */
+  /** Gym days from today (or the week's start) to Sunday, not yet trained. */
   sessionsLeft: number;
 }
 
@@ -103,7 +103,11 @@ export function flexibilityWeek(db: Database.Database, date: string, beforeDate:
   const from = today < weekStart ? weekStart : today < date ? today : date;
   // A day before `date` that already has its completed session is used up.
   const trained = (day: string) => day < date && sessions.listSessionsByDate(day).some((x) => x.status === 'completed');
-  const sessionsLeft = weekGymDays(db, weekStart).filter((d) => d.date >= from && d.purpose !== null && BLOCK_PURPOSES.includes(d.purpose) && !trained(d.date)).length;
+  // Every gym day counts: the calendar's purpose for a day is not always
+  // what is trained there (with the Legs pause on, the Athletic slot is
+  // trained as Push or Pull on request); a real Athletic day's own mobility
+  // drills count toward the week too.
+  const sessionsLeft = weekGymDays(db, weekStart).filter((d) => d.date >= from && !trained(d.date)).length;
   return { weekStart, goals, sessionsLeft };
 }
 

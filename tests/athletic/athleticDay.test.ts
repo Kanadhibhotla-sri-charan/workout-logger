@@ -416,7 +416,7 @@ describe('flexibility block (Blueprint weekly mobility minutes, 2026-10-28)', ()
     expect(drillSetSeconds('doorway-pec-stretch')).toBe(80);
     const week = flexibilityWeek(db, '2026-10-20');
     expect(week.goals.find((g) => g.goalId === 'upper-body-mobility')).toMatchObject({ weeklyMinutes: 10, doneMinutes: 10.7, remainingMinutes: 0 });
-    expect(week.sessionsLeft).toBe(2); // Tue and Fri: Monday is done, Thursday is the Athletic day
+    expect(week.sessionsLeft).toBe(3); // Tue, Thu, Fri: Monday is done
     const block = planFlexibilityBlock(db, '2026-10-20', 'pull')!;
     expect([...block.warmup, ...block.cooldown].some((e) => goalsOf(e.exerciseId).every((g) => g === 'upper-body-mobility'))).toBe(false);
   });
