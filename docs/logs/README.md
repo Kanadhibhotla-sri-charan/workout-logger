@@ -101,3 +101,4 @@ story of how the app got to its current state.
 - [2026-10-27-93-blueprint-schema-2-weekly-numbers.md](2026-10-27-93-blueprint-schema-2-weekly-numbers.md) — Blueprint's own weekly numbers and credit; every muscle per calendar week
 - [2026-10-27-94-telemetry-console-ui.md](2026-10-27-94-telemetry-console-ui.md) — High-tech "telemetry console" theme; segmented volume meters
 - [2026-10-27-95-weekly-ledger-on.md](2026-10-27-95-weekly-ledger-on.md) — The weekly tally now decides what each session trains
+- [2026-10-28-96-flexibility-block.md](2026-10-28-96-flexibility-block.md) — Blueprint flexibility minutes: a stretching block on every gym day, told to the model

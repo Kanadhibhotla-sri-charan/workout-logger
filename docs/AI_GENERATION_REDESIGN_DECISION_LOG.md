@@ -1221,3 +1221,30 @@ rear delt; abs still blocked by the 10-exercise cap (step 3).
 Known limits: week runs count only completed sessions (not pending
 proposals); core anti-extension has no physique target to plan.
 
+
+### 22.4 Flexibility block (2026-10-28)
+Owner asked whether Blueprint's flexibility plan reached the model; it did
+not (mobility_targets were synced but unread, upper-body / wrist /
+full-body drills were filtered out, the model was told nothing). Owner:
+"yes" to building it, all four goals.
+- src/athletic/flexibility.ts: weekly minutes per mobility goal
+  (upper-body 10, lower-body 10, wrist & forearm 5, full-body 10), per
+  calendar week; credit = completed sets x Blueprint time.seconds_per_set
+  (x2 per side), working time only. Today's share = what is left / gym days
+  left this week (counted from today, trained days excluded, every gym day
+  counts because the calendar purpose is not always what is trained).
+- Every Push / Pull / Upper / Legs session gets a deterministic block
+  (outside the AI output, like the athletic add-on): least recently done
+  drill per goal behind, furthest behind first, more drills while a goal is
+  short and the block fits; 5-12 min with rest. Dynamic drills before the
+  session, holds / foam rolling after it.
+- The model is told: programmingBrief.flexibilityBlock and
+  sessionPlan.flexibilityBlock, rule 10 / planned rule 6a ("the app adds
+  those drills; leave stretches out of your exercises").
+- Legs pause: lower-body mobility and any drill carrying it are left out.
+- The athletic add-on's 'mobility' kind is gone (the block holds it); the
+  'active' add-on is unchanged.
+Dry run on a copy of production, Thu 10-29 Push: cat-cow 3 sets before;
+thoracic extension prayer 3, wrist flexor/extensor stretch 2, child's pose
+side reach 1 after; about 11 min. Lower body paused. This week cannot fully
+reach 35 min (started Thursday); from Mon 11-02 the full week is planned.
