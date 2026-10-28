@@ -27,6 +27,7 @@ import { readWeekGenerationState, startWeekGeneration, weekGymDays } from '../..
 import type { AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../../src/ai-programmer/contracts/providerTypes.js';
 import { ATHLETIC_BLOCKS, BUILD_UP_SESSIONS, buildAthleticContext, checkAthleticOutput, type AthleticContext } from '../../src/athletic/athleticSession.js';
 import { planAthleticAddOn } from '../../src/athletic/athleticAddOn.js';
+import { drillSetSeconds, flexibilityWeek, planFlexibilityBlock, FLEXIBILITY_BLOCK_MAX_SECONDS } from '../../src/athletic/flexibility.js';
 import { addDays } from '../../src/engine/dateMath.js';
 import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
 import { athleticWork, strengthProgress } from '../../src/insights/insightsService.js';
@@ -320,7 +321,7 @@ describe("the owner's gym and aims (2026-10-18)", () => {
     expect(ids(buildAthleticContext(db, THURSDAY))).not.toEqual(expect.arrayContaining(['shadow-badminton-intervals']));
     expect(ids(buildAthleticContext(db, THURSDAY))).not.toContain('four-corner-shadow-footwork');
     for (const date of [MONDAY, '2026-10-20', '2026-10-23']) {
-      expect(planAthleticAddOn(db, date, 'push')!.exercises.map((e) => e.exerciseId)).not.toContain('shadow-badminton-intervals');
+      expect((planAthleticAddOn(db, date, 'push')?.exercises ?? []).map((e) => e.exerciseId)).not.toContain('shadow-badminton-intervals');
     }
   });
 
@@ -335,17 +336,14 @@ describe("the owner's gym and aims (2026-10-18)", () => {
 });
 
 describe('athletic add-on on Push / Pull / Upper days', () => {
-  it('mobility next to a hard day (badminton, the Athletic day), short active work otherwise', () => {
-    // Mon: badminton on Sunday -> mobility. Tue: Mon and Wed are easy -> active. Fri: Thu is the Athletic day -> mobility.
-    const mon = planAthleticAddOn(db, MONDAY, 'push')!;
+  it('none next to a hard day (badminton, the Athletic day; the flexibility block holds the mobility), short active work otherwise', () => {
+    // Mon: badminton on Sunday -> none. Tue: Mon and Wed are easy -> active. Fri: Thu is the Athletic day -> none.
+    expect(planAthleticAddOn(db, MONDAY, 'push')).toBeNull();
     const tue = planAthleticAddOn(db, '2026-10-20', 'pull')!;
-    const fri = planAthleticAddOn(db, '2026-10-23', 'upper')!;
-    expect([mon.kind, tue.kind, fri.kind]).toEqual(['mobility', 'active', 'mobility']);
-    expect(mon.reason).toMatch(/badminton yesterday/);
-    expect(fri.reason).toMatch(/Athletic day yesterday.*badminton tomorrow/);
-    expect(mon.exercises.map((e) => modePrescriptionFor(e.exerciseId)!.mode)).toEqual(['mobility-dynamic', 'mobility-hold']);
+    expect(planAthleticAddOn(db, '2026-10-23', 'upper')).toBeNull();
+    expect(tue.kind).toBe('active');
     expect(tue.exercises.map((e) => modePrescriptionFor(e.exerciseId)!.mode)).toEqual([expect.stringMatching(/agility|power/), 'conditioning']);
-    for (const a of [mon, tue, fri]) {
+    for (const a of [tue]) {
       expect(a.minutes).toBeGreaterThanOrEqual(1);
       expect(a.minutes).toBeLessThanOrEqual(10);
       expect(a.exercises.every((e) => e.block === 'addon' && e.rirMin === null)).toBe(true);
@@ -361,7 +359,7 @@ describe('athletic add-on on Push / Pull / Upper days', () => {
     expect(tue.kind).toBe('active');
     const s = repo.createSession({ date: '2026-10-20', session_type: 'gym', status: 'planned' });
     tue.exercises.forEach((e, i) => repo.addExercisePerformance(s.session_id, { exercise_id: e.exerciseId, order: i, role: 'accessory', sets: [] }));
-    expect(planAthleticAddOn(db, '2026-10-21', 'pull')!).toMatchObject({ kind: 'mobility', reason: expect.stringMatching(/drills yesterday/) });
+    expect(planAthleticAddOn(db, '2026-10-21', 'pull')).toBeNull();
   });
 
   it('none on the Athletic day, with leg training on Size, or during the Legs pause', () => {
@@ -373,7 +371,7 @@ describe('athletic add-on on Push / Pull / Upper days', () => {
     expect(planAthleticAddOn(db, '2026-10-20', 'pull')).toBeNull();
   });
 
-  it('a Push proposal carries the add-on and commit writes it after the session', async () => {
+  it('a Push proposal carries the add-on and commit writes it after the session, inside the flexibility block', async () => {
     process.env.AI_PLANNED_GENERATION_ENABLED = 'true';
     new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'triceps-back-depth', priority: 1 });
     const service = new AIProgrammerService(db, new FakeProvider());
@@ -383,9 +381,57 @@ describe('athletic add-on on Push / Pull / Upper days', () => {
     const { sessionId } = commitAIProposalToPlannedSession(db, proposalId, { intent: 'fill_existing_gym_day' });
     const perfs = new WorkoutSessionsRepo(db).getExercisePerformances(sessionId);
     const addOnIds = proposal.athleticAddOn!.exercises.map((e) => e.exerciseId);
-    expect(perfs.slice(-addOnIds.length).map((p) => p.exercise_id)).toEqual(addOnIds);
-    expect(perfs.slice(0, -addOnIds.length).map((p) => p.exercise_id)).toEqual(proposal.exercises.map((e) => e.exerciseId));
-    expect(perfs.slice(-addOnIds.length).map((p) => p.rep_unit)).toEqual(addOnIds.map((id) => modePrescriptionFor(id)!.unit));
+    const flex = proposal.flexibilityBlock!;
+    const ids = (list: { exerciseId: string }[]) => list.map((e) => e.exerciseId);
+    expect(perfs.map((p) => p.exercise_id)).toEqual([...ids(flex.warmup), ...ids(proposal.exercises), ...addOnIds, ...ids(flex.cooldown)]);
+    const addOnPerfs = perfs.slice(flex.warmup.length + proposal.exercises.length, flex.warmup.length + proposal.exercises.length + addOnIds.length);
+    expect(addOnPerfs.map((p) => p.rep_unit)).toEqual(addOnIds.map((id) => modePrescriptionFor(id)!.unit));
+  });
+});
+
+describe('flexibility block (Blueprint weekly mobility minutes, 2026-10-28)', () => {
+  const goalsOf = (id: string) => BlueprintAdapter.getExercise(id)!.functional_goals ?? [];
+
+  it('every gym day gets a block: dynamic drills before the session, holds after, inside the time box', () => {
+    const block = planFlexibilityBlock(db, MONDAY, 'push')!;
+    expect(block.minutes).toBeGreaterThanOrEqual(5);
+    expect(block.minutes * 60).toBeLessThanOrEqual(FLEXIBILITY_BLOCK_MAX_SECONDS + 30);
+    expect(block.warmup.every((e) => modePrescriptionFor(e.exerciseId)!.mode === 'mobility-dynamic')).toBe(true);
+    expect(block.cooldown.every((e) => ['mobility-hold', 'soft-tissue'].includes(modePrescriptionFor(e.exerciseId)!.mode))).toBe(true);
+    const goals = [...block.warmup, ...block.cooldown].flatMap((e) => goalsOf(e.exerciseId));
+    expect(goals).toEqual(expect.arrayContaining(['upper-body-mobility', 'wrist-forearm-mobility']));
+    expect(block.reason).toMatch(/Upper-Body Mobility 10 of 10 min left/);
+    expect(planFlexibilityBlock(db, THURSDAY, 'athletic')).toBeNull();
+    expect(planFlexibilityBlock(db, MONDAY, null)).toBeNull();
+  });
+
+  it('completed drills count toward the week; a met goal is left out', () => {
+    const repo = new WorkoutSessionsRepo(db);
+    const s = repo.createSession({ date: MONDAY, session_type: 'gym', status: 'completed' });
+    // Doorway pec stretch: 40 s per side -> 80 s a set; 8 sets = 10.7 min of upper-body mobility.
+    repo.addExercisePerformance(s.session_id, {
+      exercise_id: 'doorway-pec-stretch', order: 0, role: 'accessory',
+      sets: Array.from({ length: 8 }, (_, i) => ({ set_number: i + 1, weight: null, reps: 40, completed: true })),
+    });
+    expect(drillSetSeconds('doorway-pec-stretch')).toBe(80);
+    const week = flexibilityWeek(db, '2026-10-20');
+    expect(week.goals.find((g) => g.goalId === 'upper-body-mobility')).toMatchObject({ weeklyMinutes: 10, doneMinutes: 10.7, remainingMinutes: 0 });
+    expect(week.sessionsLeft).toBe(2); // Tue and Fri: Monday is done, Thursday is the Athletic day
+    const block = planFlexibilityBlock(db, '2026-10-20', 'pull')!;
+    expect([...block.warmup, ...block.cooldown].some((e) => goalsOf(e.exerciseId).every((g) => g === 'upper-body-mobility'))).toBe(false);
+  });
+
+  it('lower-body mobility is left out during the Legs pause', () => {
+    new InjuryPausesRepo(db).pause('legs', MONDAY, null);
+    const block = planFlexibilityBlock(db, MONDAY, 'push')!;
+    expect([...block.warmup, ...block.cooldown].flatMap((e) => goalsOf(e.exerciseId))).not.toContain('lower-body-mobility');
+    expect(flexibilityWeek(db, MONDAY).goals.find((g) => g.goalId === 'lower-body-mobility')!.paused).toBe(true);
+  });
+
+  it('the model is told about the block in its brief', () => {
+    const context = buildProgrammerContext(db, { targetDate: '2026-10-20', requestedSessionPurpose: 'pull' });
+    const block = planFlexibilityBlock(db, '2026-10-20', 'pull')!;
+    expect(context.programmingBrief.flexibilityBlock).toEqual({ minutes: block.minutes, reason: block.reason, drills: [...block.warmup, ...block.cooldown].map((e) => e.exerciseId) });
   });
 });
 

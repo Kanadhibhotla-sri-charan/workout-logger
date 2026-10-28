@@ -52,6 +52,7 @@ import { runProposalPipeline } from './proposalPipeline.js';
 import { ATHLETIC_OUTPUT_SCHEMA, buildAthleticContext, buildAthleticSystemInstruction, checkAthleticOutput, type AthleticContext } from '../../athletic/athleticSession.js';
 import { weekGymDays } from './weekGeneration.js';
 import { planAthleticAddOn } from '../../athletic/athleticAddOn.js';
+import { planFlexibilityBlock } from '../../athletic/flexibility.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
 import { NonGoalRotationRepo } from '../../repositories/nonGoalRotationRepo.js';
 import { repairWeekReconciliation, repairGenerateWeek } from '../validation/programmerProposalRepair.js';
@@ -97,7 +98,7 @@ export function buildProgrammerSystemInstruction(): string {
     '7. Some targets share one or more exercises with a more specific sub-target that is also present in context.targets — you can recognize this because the exact same exerciseId appears in both targets\' own validExercises lists (e.g., a specific-emphasis variant of a broader muscle). A set you assign to the more specific sub-target is automatically credited by the app toward the broader target\'s own weekly number too — it is never counted as two separate sets, and you must never list the same exercise under both target ids to try to credit it twice. Once the sub-target\'s own number is genuinely covered, work out how much of the broader target\'s own number is still realistically unmet after that shared credit, then use your own coaching judgment — the same judgment rules 5 and 9 already give you, never a mechanical top-up — to decide whether and how to address whatever genuinely remains, using that target\'s own remaining eligible exercises and the full weekly context.',
     "8. What's actually been trained this week (context.targets[].currentWeeklyPrimarySets/exerciseHistory) takes priority over the deterministic engine's own already-computed allocation for this week (context.crossWeek.currentWeekAllocations, when present) — the real, current picture always outranks a plan computed before it.",
     `9. Never train more than ${SESSION_REALISM_CAP.maxTargetsPerSession} muscles or use more than ${SESSION_REALISM_CAP.maxExercisesPerSession} exercises in one session, with abs (obliques/rectus-abdominis) exercises capped at ${ABS_SESSION_EXERCISE_SHARE_MAX} of that total — except on a leg day (context.programmingBrief.session.purpose is "legs"), where the ceiling is ${LEGS_SESSION_MAX_TARGETS} muscles and ${LEGS_SESSION_MAX_EXERCISES} exercises, unless abs (the only muscle group legs pairs with) is also part of the session, in which case the day allows up to ${LEGS_WITH_ABS_SESSION_MAX_EXERCISES} exercises total but leg work itself stays capped at ${LEGS_SESSION_MAX_EXERCISES} — the extra room is for abs, never for more leg exercises. If giving every eligible muscle its own minimum would exceed the applicable ceiling, decide who gets real training today — goal muscles and today's focus first — and leave the rest out entirely. Nothing is lost: unmet volume is picked up automatically at the next real session.`,
-    '10. Every muscle you might train already has a calculated volume: a weekly target, a number of sets for THIS session (a range, not a suggestion — context.programmingBrief.muscles[].recommendedSessionSets), a hard per-muscle set cap (directSetsPerExposureCap), and a total session set budget (approxSessionSetBudget). Follow these as final. If context.coachingFoundation.programState indicates an active deload, the session number already reflects that reduction — never reduce it again because the program is deloading.',
+    '10. Every muscle you might train already has a calculated volume: a weekly target, a number of sets for THIS session (a range, not a suggestion — context.programmingBrief.muscles[].recommendedSessionSets), a hard per-muscle set cap (directSetsPerExposureCap), and a total session set budget (approxSessionSetBudget). Follow these as final. If context.coachingFoundation.programState indicates an active deload, the session number already reflects that reduction — never reduce it again because the program is deloading. context.programmingBrief.flexibilityBlock, when present, is today\'s share of the user\'s weekly flexibility work (Blueprint stretching minutes): the app adds those drills to the session itself, before and after your exercises, and its minutes are already allowed for — never add stretches or mobility drills of your own.',
     '11. You have full freedom over WHICH muscles/exercises to train from the provided list (rule 5). An exercise may receive AT MOST its Blueprint-authored sets (and its directSetsPerExposureCap, when present); fewer sets are allowed when the coaching data supports the reduction. Never exceed either ceiling, and never estimate authored sets from memory.',
     // Fix B (2026-09-24): rule 12(6)'s prior wording ("add a second valid
     // exercise") capped the model's own guidance at exactly one addition,
@@ -515,8 +516,16 @@ export class AIProgrammerService {
     // silently discarded after the fact.
     // Athletic add-on (2026-10-18): appended to Push / Pull / Upper when leg
     // training is athletic; deterministic, outside the AI output's checks.
+    // Flexibility block (2026-10-28): Blueprint's weekly flexibility
+    // minutes, the same block the model was told about in its brief.
     const addOn = planAthleticAddOn(this.db, context.targetDate, context.programmingBrief.session.purpose);
-    const proposal: AIWorkoutSessionProposal = { ...completed.proposal, proposalId: randomUUID(), ...(addOn ? { athleticAddOn: addOn } : {}) };
+    const flexibility = planFlexibilityBlock(this.db, context.targetDate, context.programmingBrief.session.purpose);
+    const proposal: AIWorkoutSessionProposal = {
+      ...completed.proposal,
+      proposalId: randomUUID(),
+      ...(addOn ? { athleticAddOn: addOn } : {}),
+      ...(flexibility ? { flexibilityBlock: flexibility } : {}),
+    };
 
     // Phase 2 §5: only a proposal that has passed BOTH structural and
     // domain validation is ever persisted — a provider failure or a

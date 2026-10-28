@@ -328,6 +328,10 @@ export interface AIProgrammerProgrammingBrief {
   approxSessionSetBudget: number;
   /** True while a deload is active. Absent otherwise. */
   deloadActive?: boolean;
+  /** Flexibility block (2026-10-28): stretches the app itself adds to a
+   * gym session from Blueprint's weekly flexibility minutes
+   * (src/athletic/flexibility.ts). Absent when none is due today. */
+  flexibilityBlock?: { minutes: number; reason: string; drills: string[] };
   /** Push Generation Architectural Fix (2026-09-24): deterministic,
    * plain-language notes about a real, session-wide constraint that
    * makes it mathematically impossible for two or more eligible targets

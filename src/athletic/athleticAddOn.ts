@@ -2,9 +2,10 @@
 // 'athletic', each Push / Pull / Upper session ends with 5-10 minutes of
 // athletic work, chosen with recovery in mind so the user never does
 // endurance or jump work on back-to-back days:
-//   - 'mobility' when yesterday or tomorrow is a hard day (badminton, the
-//     Athletic day, or a day that already has active drills): one dynamic
-//     mobility drill and one mobility hold — easy to recover from;
+//   - none when yesterday or tomorrow is a hard day (badminton, the
+//     Athletic day, or a day that already has active drills); until
+//     2026-10-28 that was a 'mobility' add-on, now part of the flexibility
+//     block (src/athletic/flexibility.ts);
 //   - 'active' otherwise: one footwork / ankle / power drill and one short
 //     whole-body conditioning drill, at the low end of their ranges.
 // A day with an active add-on counts as a hard day for its neighbours, so
@@ -66,7 +67,7 @@ function secondsOf(e: AIWorkoutExerciseProposal, drill: AthleticDrillContext): n
 }
 
 /** Last completed date of each drill in the 28 days before `date`. */
-function lastDoneDrills(db: Database.Database, date: string): Map<string, string> {
+export function lastDoneDrills(db: Database.Database, date: string): Map<string, string> {
   const sessions = new WorkoutSessionsRepo(db);
   const last = new Map<string, string>();
   for (const s of sessions.listSessionsInRange(addDays(date, -28), addDays(date, -1)).filter((x) => x.status === 'completed').sort((a, b) => a.date.localeCompare(b.date))) {
@@ -83,11 +84,11 @@ export function planAthleticAddOn(db: Database.Database, date: string, purpose: 
 
   const before = hardDayReason(db, addDays(date, -1));
   const after = hardDayReason(db, addDays(date, 1));
-  const kind: AddOnKind = before || after ? 'mobility' : 'active';
-  const reason =
-    kind === 'mobility'
-      ? `Mobility only: ${before ? `${before} yesterday` : ''}${before && after ? ' and ' : ''}${after ? `${after} tomorrow` : ''}, so the legs recover.`
-      : 'Short ankle/landing resilience and conditioning: no hard leg day yesterday or tomorrow.';
+  // Next to a hard leg day the flexibility block (src/athletic/flexibility.ts)
+  // already holds the mobility work (2026-10-28), so there is no add-on.
+  if (before || after) return null;
+  const kind: AddOnKind = 'active';
+  const reason = 'Short ankle/landing resilience and conditioning: no hard leg day yesterday or tomorrow.';
 
   // Only drills the user can do in their gym and has not set to avoid.
   const catalogue = drillCatalogue(lastDoneDrills(db, date), athleticFilterFor(db, date));
@@ -96,10 +97,7 @@ export function planAthleticAddOn(db: Database.Database, date: string, purpose: 
       .filter((d) => modes.includes(d.mode) && (!goals || d.goals.some((g) => goals.includes(g))))
       .sort((a, b) => (a.lastDone ?? '').localeCompare(b.lastDone ?? '') || a.exerciseId.localeCompare(b.exerciseId))[0];
   // Active: resilience (ankle / landing control), not footwork skill (owner, 2026-10-18).
-  const picks = (kind === 'mobility'
-    ? [leastRecent(['mobility-dynamic']), leastRecent(['mobility-hold'])]
-    : [leastRecent(['power', 'agility'], ['ankle-resilience', 'landing-control']), leastRecent(['conditioning'])]
-  ).filter(
+  const picks = [leastRecent(['power', 'agility'], ['ankle-resilience', 'landing-control']), leastRecent(['conditioning'])].filter(
     (d): d is AthleticDrillContext => d !== undefined
   );
 

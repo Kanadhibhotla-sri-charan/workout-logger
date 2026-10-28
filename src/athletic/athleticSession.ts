@@ -187,8 +187,13 @@ export function athleticFilterFor(db: Database.Database, date: string): Athletic
 const isAthleticGoal = (g: string) => (ATHLETIC_GOAL_IDS as readonly string[]).includes(g);
 
 /** Every drill the user can do (equipment, not avoided) with its Blueprint
- * mode prescription. */
-export function drillCatalogue(lastDone: ReadonlyMap<string, string> = new Map(), filter: AthleticEquipmentFilter = NO_FILTER): AthleticDrillContext[] {
+ * mode prescription, keeping the drills that carry a goal `goalOf` accepts
+ * (the athletic goals by default; the flexibility block passes its own). */
+export function drillCatalogue(
+  lastDone: ReadonlyMap<string, string> = new Map(),
+  filter: AthleticEquipmentFilter = NO_FILTER,
+  goalOf: (goalId: string) => boolean = isAthleticGoal
+): AthleticDrillContext[] {
   return allDrills()
     .filter((e) => !filter.avoided.has(e.id))
     .map((e) => ({ e, rx: modePrescriptionFor(e.id), setup: drillSetup(e, filter.available) }))
@@ -198,7 +203,7 @@ export function drillCatalogue(lastDone: ReadonlyMap<string, string> = new Map()
       name: e.name,
       mode: rx.mode,
       block: BLOCK_OF_MODE[rx.mode],
-      goals: (e.functional_goals ?? []).filter(isAthleticGoal),
+      goals: (e.functional_goals ?? []).filter(goalOf),
       unit: rx.unit,
       perSide: rx.perSide,
       amount: { min: rx.amount[0], max: rx.amount[1] },
@@ -212,7 +217,8 @@ export function drillCatalogue(lastDone: ReadonlyMap<string, string> = new Map()
       lastDone: lastDone.get(e.id) ?? null,
     }))
     // Blueprint 2026-10-27 added upper-body / full-body mobility drills and
-    // soft-tissue work; the Athletic day keeps to drills for its own goals.
+    // soft-tissue work; the Athletic day keeps to drills for its own goals
+    // (they go in the flexibility block, src/athletic/flexibility.ts).
     .filter((d) => d.goals.length > 0)
     .sort((a, b) => ATHLETIC_BLOCKS.indexOf(a.block) - ATHLETIC_BLOCKS.indexOf(b.block) || a.exerciseId.localeCompare(b.exerciseId));
 }

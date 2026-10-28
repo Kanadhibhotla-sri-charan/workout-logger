@@ -84,6 +84,8 @@ export interface AIProgrammerPlannedContext {
     exerciseGroups: PlannedExerciseGroupForAI[];
     notInThisSession: { deferred: string[]; infeasible: string[] };
     notes: string[];
+    /** Stretches the app adds to this session itself (src/athletic/flexibility.ts). */
+    flexibilityBlock?: { minutes: number; reason: string; drills: string[] };
   };
   coachingFoundation: {
     programState: AIProgrammerContext['coachingFoundation']['programState'];
@@ -199,6 +201,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
       },
       // Ownership is expressed by the candidate lists themselves, not by extra wording.
       notes: plan.notes.filter((n) => !n.startsWith('refusal') && !n.startsWith('ownership')),
+      ...(context.programmingBrief.flexibilityBlock ? { flexibilityBlock: context.programmingBrief.flexibilityBlock } : {}),
     },
     coachingFoundation: {
       programState: context.coachingFoundation.programState,
@@ -231,6 +234,7 @@ export function buildPlannedProgrammerSystemInstruction(rotationShortlist = fals
     '4. An exercise appears once in the session. A candidate\'s alsoCredits names other targets it also counts toward: list it once, under one target, and count its sets toward each.',
     '5. Each exercise gets at most its maxSets; copy its repsMin, repsMax, rirMin and rirMax exactly.',
     '6. Each target\'s total sets reach its minimumSets, should fall within recommendedSets, and never exceed maximumSets. If context.coachingFoundation.programState shows a deload, these numbers already include it.',
+    '6a. sessionPlan.flexibilityBlock, when present, is the flexibility work for today (a share of the weekly Blueprint stretching minutes). The application adds those drills itself, before and after your exercises, and the session already allows for their minutes. Leave stretches and mobility drills out of your exercises.',
     '',
     'Your coaching decisions (real judgment; cite the specific data behind each in programmingRationale):',
     rotationShortlist

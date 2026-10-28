@@ -309,7 +309,29 @@
         card.appendChild(grid);
         container.appendChild(card);
       }
-      if (goals.length === 0 && others.length === 0) showEmpty(container, 'No muscle volume to show yet.');
+      // Flexibility (2026-10-28): Blueprint's weekly stretching minutes.
+      const flex = data.flexibility || [];
+      if (flex.length > 0) {
+        const card = el('div', { class: 'card vol-card' });
+        card.appendChild(el('div', { class: 'vol-card-head' }, [
+          el('div', {}, [el('div', { class: 'vol-kicker', text: 'Flexibility' }), el('div', { class: 'vol-title', text: 'Minutes this week' })]),
+        ]));
+        const grid = el('div', { class: 'vol-grid' });
+        for (const g of flex) {
+          const pct = g.weeklyMinutes > 0 ? Math.min(100, (g.doneMinutes / g.weeklyMinutes) * 100) : 0;
+          grid.appendChild(el('div', { class: `vol-row ${g.doneMinutes >= g.weeklyMinutes ? 'is-done' : ''}` }, [
+            el('div', { class: 'vol-head' }, [
+              el('span', { class: 'vol-name', text: g.name }),
+              el('span', { class: 'vol-num' }, [el('strong', { text: fmtSets(g.doneMinutes) }), el('span', { text: ` / ${g.weeklyMinutes} min` })]),
+            ]),
+            el('div', { class: 'vol-track' }, [el('div', { class: 'vol-fill', style: `width:${pct}%` })]),
+            el('div', { class: 'vol-meta', text: 'stretches added to each gym session' }),
+          ]));
+        }
+        card.appendChild(grid);
+        container.appendChild(card);
+      }
+      if (goals.length === 0 && others.length === 0 && flex.length === 0) showEmpty(container, 'No muscle volume to show yet.');
     }
 
     load();

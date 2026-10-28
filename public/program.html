@@ -1149,6 +1149,15 @@
       }
 
       const pendingReview = state.status === 'pending' || state.status === 'approved';
+      // Flexibility block (2026-10-28): Blueprint's weekly stretching
+      // minutes, warm-up drills before the session and holds after it.
+      const flex = proposal.flexibilityBlock;
+      if (flex) {
+        wrap.appendChild(el('h3', { text: `Flexibility · about ${flex.minutes} min`, style: 'margin:0.8rem 0 0.2rem' }));
+        wrap.appendChild(el('p', { class: 'faint', text: flex.reason, style: 'margin:0 0 0.3rem' }));
+        for (const ex of flex.warmup) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+        if (flex.warmup.length > 0) wrap.appendChild(el('h3', { text: 'Session', style: 'margin:0.8rem 0 0.2rem' }));
+      }
       for (const ex of proposal.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
       // Athletic add-on (2026-10-18): 5-10 min of drills after the session.
       if (proposal.athleticAddOn && proposal.athleticAddOn.exercises.length > 0) {
@@ -1156,6 +1165,10 @@
         wrap.appendChild(el('h3', { text: `Athletic add-on · about ${addOn.minutes} min (${addOn.kind === 'mobility' ? 'mobility' : 'footwork + conditioning'})`, style: 'margin:0.8rem 0 0.2rem' }));
         wrap.appendChild(el('p', { class: 'faint', text: addOn.reason, style: 'margin:0 0 0.3rem' }));
         for (const ex of addOn.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+      }
+      if (flex && flex.cooldown.length > 0) {
+        wrap.appendChild(el('h3', { text: 'Flexibility cool-down', style: 'margin:0.8rem 0 0.2rem' }));
+        for (const ex of flex.cooldown) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
       }
 
       if (proposal.programmingRationale && proposal.programmingRationale.length > 0) {

@@ -108,6 +108,13 @@ export interface BlueprintVolumeTarget {
   rationale?: string;
 }
 
+/** Schema 2 mobility target: weekly minutes for a mobility goal. */
+export interface BlueprintMobilityTarget {
+  goal_id: string;
+  weekly_minutes: number;
+  sessions_per_week: [number, number];
+}
+
 export interface BlueprintVolumeGroup {
   id: string;
   name: string;
@@ -312,6 +319,7 @@ export interface BlueprintProgramming {
   schemaVersion?: number;
   volumeGroups?: BlueprintVolumeGroup[];
   volumeTargets?: BlueprintVolumeTarget[];
+  mobilityTargets?: BlueprintMobilityTarget[];
 }
 
 export interface BlueprintManifest {

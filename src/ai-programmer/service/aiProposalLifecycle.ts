@@ -432,7 +432,12 @@ export function commitAIProposalToPlannedSession(
       // The athletic add-on goes after the session's own exercises; it is
       // left out while the Legs injury pause is on.
       const addOn = !athletic && record.proposal.athleticAddOn && !athleticPaused(db) ? record.proposal.athleticAddOn.exercises.filter((e) => isDrillId(e.exerciseId)) : [];
-      [...proposal.exercises, ...addOn].forEach((exercise, index) => {
+      // The flexibility block wraps the session: warm-up drills first,
+      // cool-down drills last.
+      const flexibility = athletic ? undefined : record.proposal.flexibilityBlock;
+      const flexWarmup = (flexibility?.warmup ?? []).filter((e) => isDrillId(e.exerciseId));
+      const flexCooldown = (flexibility?.cooldown ?? []).filter((e) => isDrillId(e.exerciseId));
+      [...flexWarmup, ...proposal.exercises, ...addOn, ...flexCooldown].forEach((exercise, index) => {
         sessionsRepo.addExercisePerformance(session.session_id, {
           exercise_id: exercise.exerciseId,
           order: index,

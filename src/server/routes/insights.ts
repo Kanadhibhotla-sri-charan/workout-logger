@@ -12,6 +12,7 @@ import { addDays } from '../../engine/dateMath.js';
 import { liveTargetAllocations } from './programming.js';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { volumeOverview } from '../../ai-programmer/planning/weeklyLedger.js';
+import { flexibilityWeek } from '../../athletic/flexibility.js';
 
 export const insightsRouter = Router();
 
@@ -40,6 +41,8 @@ insightsRouter.get('/volume', (req, res) => {
         weekDay: e.weekDay,
         behind: e.behind,
       })),
+    // Flexibility (2026-10-28): Blueprint's weekly mobility minutes, today included.
+    flexibility: flexibilityWeek(database, today, addDays(today, 1)).goals.filter((g) => !g.paused),
   });
 });
 

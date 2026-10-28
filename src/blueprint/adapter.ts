@@ -23,6 +23,7 @@ import type {
   BlueprintProgramming,
   BlueprintProgrammingProfiles,
   BlueprintRepRangeOverride,
+  BlueprintMobilityTarget,
   BlueprintVolumeGroup,
   BlueprintVolumeTarget,
 } from './types.js';
@@ -173,6 +174,11 @@ export const BlueprintAdapter = {
 
   listVolumeGroups(): readonly BlueprintVolumeGroup[] {
     return programming.volumeGroups ?? [];
+  },
+
+  /** Schema 2 weekly minutes per mobility goal — see src/athletic/flexibility.ts. */
+  listMobilityTargets(): readonly BlueprintMobilityTarget[] {
+    return programming.mobilityTargets ?? [];
   },
 };
 
