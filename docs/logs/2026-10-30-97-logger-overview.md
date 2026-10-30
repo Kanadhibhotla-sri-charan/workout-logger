@@ -29,3 +29,6 @@ saved row collapsed; another exercise's unsaved 30 kg kept; scroll
 unchanged). Full suite: 246 failures, all date-dependent (233 before, plus
 13 whose fixed target date 2026-10-28 is now in the past); none from this
 change (HTML/CSS only).
+
+## Deployed
+2026-10-30 03:45 UTC (09:15 IST). Backup `deployment-backups/pre-a1c181e-20261030T034500Z.sqlite`. Health ok; the new logger page is served.
