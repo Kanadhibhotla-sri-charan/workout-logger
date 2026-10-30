@@ -585,6 +585,112 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
 .logger-header .logger-title { font-family: var(--font-display); font-weight: 700; font-size: 1.65rem; margin-top: 0.15rem; line-height: 1.1; }
 .logger-header .logger-meta { display: flex; gap: var(--space-4); margin-top: 0.3rem; font-size: 0.82rem; color: var(--text-muted); }
 
+/* Progress strip in the pinned logger header (2026-10-30): counts, a
+   meter and one chip per exercise that jumps to it. */
+.logger-header.has-strip { position: static; margin-bottom: 0; border-bottom: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.progress-strip {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 15;
+  background: rgba(7, 11, 20, 0.92);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-4) var(--space-2);
+  margin: 0 calc(var(--space-4) * -1) var(--space-3);
+}
+.strip-counts { display: flex; gap: var(--space-4); font-size: 0.82rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.strip-counts strong { color: var(--text); font-family: var(--font-display); font-size: 1rem; }
+.strip-track { height: 4px; background: var(--surface-muted); margin: 0.35rem 0 0.45rem; overflow: hidden; }
+.strip-fill { height: 100%; background: var(--success); box-shadow: 0 0 10px rgba(46, 230, 166, 0.5); transition: width 0.4s var(--ease); }
+.strip-chips {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(var(--space-4) * -1);
+  padding: 0 var(--space-4) 0.1rem;
+  scroll-padding-inline: var(--space-4);
+}
+.strip-chips::-webkit-scrollbar { display: none; }
+.strip-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 9.5rem;
+  min-height: 2.25rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: 600 0.78rem var(--font-body);
+  cursor: pointer;
+}
+.strip-chip .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip-chip .chip-icon { font-weight: 700; }
+.strip-chip.is-pending .chip-icon { display: none; }
+.strip-chip.is-done { border-color: rgba(46, 230, 166, 0.45); background: var(--success-bg); color: var(--text-muted); }
+.strip-chip.is-done .chip-icon { color: var(--success); }
+.strip-chip.is-editing { border-color: var(--warning); background: var(--warning-bg); }
+.strip-chip.is-editing .chip-icon { color: var(--warning); }
+.strip-chip.is-skipped { color: var(--text-faint); text-decoration: line-through; }
+
+/* Exercise rows: one line until tapped open. */
+.ex-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: var(--space-4) 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--text-muted);
+}
+.ex-section-count { font: 500 0.78rem var(--font-body); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.exercise-card.ex-collapsible { padding: var(--space-2) var(--space-3); margin-bottom: var(--space-2); }
+.exercise-card.ex-collapsible.is-open { padding-bottom: var(--space-4); }
+.ex-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ex-status {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.ex-done .ex-status { border-color: var(--success); background: var(--success-bg); color: var(--success); }
+.ex-editing .ex-status { border-color: var(--warning); color: var(--warning); }
+.ex-skipped .ex-status { color: var(--text-faint); }
+.ex-sum-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ex-sum-name { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-done .ex-sum-name { color: var(--text-muted); }
+.ex-sum-detail { font-size: 0.8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ex-chevron { flex-shrink: 0; width: 0.55rem; height: 0.55rem; border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted); transform: rotate(45deg); margin: 0 0.3rem 0.25rem; transition: transform 0.2s var(--ease); }
+.is-open > .ex-summary .ex-chevron { transform: rotate(-135deg); margin-bottom: -0.2rem; }
+.ex-collapsible:not(.is-open) > .ex-body { display: none; }
+.ex-collapsible.is-open > .ex-body { margin-top: var(--space-2); }
+.exercise-card.ex-done { border-left-color: var(--success); }
+.exercise-card.ex-done::before { box-shadow: none; }
+.exercise-card.ex-editing { border-left-color: var(--warning); }
+
+.logger-finish-bar.is-static { position: static; }
 .logger-finish-bar {
   position: sticky;
   bottom: 0;

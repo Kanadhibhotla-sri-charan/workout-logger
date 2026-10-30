@@ -35,6 +35,14 @@
     // Athletic drills (2026-10-18): Blueprint mode prescription per drill id.
     let drillById = new Map();
     let dirty = false; // unsaved set values entered but not yet saved (spec §62)
+    // Overview (2026-10-30, owner: too much scrolling in the gym; the
+    // listed order is not the order exercises are done in): every exercise
+    // is a one-line row, opened by a tap; a pinned progress strip jumps to
+    // any of them. Open rows and unsaved set entries survive re-renders.
+    const openKeys = new Set();
+    const drafts = new Map(); // card key -> set-editor state ({ sets, unit, noRir, dirty })
+    let lastSavedExerciseId = null;
+    const anyDraftDirty = () => [...drafts.values()].some((d) => d.dirty);
 
     window.addEventListener('beforeunload', (e) => {
       if (dirty) {
@@ -136,13 +144,21 @@
 
     function render() {
       const root = document.getElementById('logger-root');
+      const scrollY = window.scrollY;
       root.innerHTML = '';
-      root.appendChild(buildHeader());
+      const header = buildHeader();
+      root.appendChild(header);
 
       if (session.session_type === 'badminton') {
         root.appendChild(buildBadmintonSection());
       } else {
-        root.appendChild(buildExerciseSection());
+        const overview = [];
+        root.appendChild(buildExerciseSection(overview));
+        // Only the strip stays pinned; the title scrolls away.
+        if (overview.length > 0) {
+          header.classList.add('has-strip');
+          header.after(buildProgressStrip(overview));
+        }
         if (session.status !== 'completed') root.appendChild(buildAddExerciseSection());
         // Badminton already has its own per-session notes field within
         // its own details form — this general session note is added
@@ -150,8 +166,134 @@
         root.appendChild(buildSessionNoteSection());
       }
 
-      if (session.status !== 'completed') root.appendChild(buildFinishBar());
+      if (session.status !== 'completed') {
+        const finish = buildFinishBar();
+        // With one-line rows the end of the list is close: no pinned bar
+        // taking a quarter of the phone screen.
+        if (root.querySelector('.progress-strip')) finish.classList.add('is-static');
+        root.appendChild(finish);
+      }
       else root.appendChild(buildCompletedFooter());
+
+      // Rebuilding the page must not move you: stay where you were, and
+      // keep a just-saved exercise's row in view.
+      window.scrollTo(0, scrollY);
+      if (lastSavedExerciseId) {
+        const saved = root.querySelector(`[data-exercise-id="${CSS.escape(lastSavedExerciseId)}"]`);
+        lastSavedExerciseId = null;
+        if (saved) scrollToCard(saved, true);
+      }
+    }
+
+    // ---------- Overview: one-line rows, progress strip ----------
+
+    const STATUS_ICON = { done: '✓', editing: '●', pending: '', skipped: '–' };
+
+    /** Leading drills are the warm-up and drills after the last lift come
+     * after the session (flexibility cool-down, athletic add-on); a session
+     * without both drills and lifts is one list. */
+    function sectionsOf(exerciseIds) {
+      const lifts = exerciseIds.map((id) => !drillById.has(id));
+      const first = lifts.indexOf(true);
+      const last = lifts.lastIndexOf(true);
+      if (first === -1 || lifts.every(Boolean)) return exerciseIds.map(() => 'main');
+      return exerciseIds.map((_, i) => (i < first ? 'warmup' : i > last ? 'after' : 'main'));
+    }
+    const SECTION_LABELS = { warmup: 'Warm-up', main: 'Main session', after: 'After the session' };
+
+    function shortSetText(sets, unit) {
+      const done = sets.filter((s) => s.completed);
+      if (done.length === 0) return 'Nothing logged';
+      const last = done[done.length - 1];
+      const amount = last.reps != null ? `${last.reps}${unit === 'seconds' ? ' s' : unit === 'reps' ? '' : ` ${unit}`}` : '—';
+      return `${done.length} set${done.length === 1 ? '' : 's'} · ${last.weight ? `${last.weight} kg × ` : ''}${amount}`;
+    }
+
+    /** Wraps a full exercise card into a row that opens on tap. */
+    function makeCollapsible(card, item) {
+      card.dataset.key = item.key;
+      card.dataset.exerciseId = item.exerciseId;
+      card.classList.add('ex-collapsible', `ex-${item.status}`);
+      const body = el('div', { class: 'ex-body', id: `ex-body-${item.key}` });
+      while (card.firstChild) body.appendChild(card.firstChild);
+      // The name moves to the row; the rest of the header stays in the body.
+      const nameInBody = body.querySelector('.exercise-header .exercise-name') || body.querySelector(':scope > .exercise-name');
+      if (nameInBody) nameInBody.remove();
+      const summary = el('button', { type: 'button', class: 'ex-summary', 'aria-controls': body.id, 'aria-expanded': 'false' }, [
+        el('span', { class: 'ex-status', 'aria-hidden': 'true', text: STATUS_ICON[item.status] }),
+        el('span', { class: 'ex-sum-text' }, [
+          el('span', { class: 'ex-sum-name', text: item.name }),
+          el('span', { class: 'ex-sum-detail', text: item.detail }),
+        ]),
+        el('span', { class: 'ex-chevron', 'aria-hidden': 'true' }),
+      ]);
+      summary.addEventListener('click', () => setCardOpen(card, !card.classList.contains('is-open')));
+      card.prepend(summary);
+      card.appendChild(body);
+      setCardOpen(card, openKeys.has(item.key));
+      return card;
+    }
+
+    function setCardOpen(card, open) {
+      card.classList.toggle('is-open', open);
+      card.querySelector('.ex-summary').setAttribute('aria-expanded', String(open));
+      if (open) openKeys.add(card.dataset.key);
+      else openKeys.delete(card.dataset.key);
+    }
+
+    /** Scrolls a card to just under the pinned headers (only when out of view, if `ifNeeded`). */
+    function scrollToCard(card, ifNeeded) {
+      const pinned = (document.getElementById('app-header')?.offsetHeight || 0) + (document.querySelector('.progress-strip')?.offsetHeight || 0);
+      const top = card.getBoundingClientRect().top;
+      if (ifNeeded && top >= pinned && top < window.innerHeight - 120) return;
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollTo({ top: top + window.scrollY - pinned - 8, behavior: reduce ? 'auto' : 'smooth' });
+    }
+
+    /** A card's unsaved entries: mark its row and chip without re-rendering. */
+    function markEditing(key) {
+      const card = document.querySelector(`.ex-collapsible[data-key="${CSS.escape(key)}"]`);
+      if (card && !card.classList.contains('ex-editing')) {
+        card.classList.remove('ex-pending', 'ex-done');
+        card.classList.add('ex-editing');
+        card.querySelector('.ex-status').textContent = STATUS_ICON.editing;
+      }
+      const chip = document.querySelector(`.strip-chip[data-key="${CSS.escape(key)}"]`);
+      if (chip) {
+        chip.className = 'strip-chip is-editing';
+        chip.querySelector('.chip-icon').textContent = STATUS_ICON.editing;
+      }
+    }
+
+    function buildProgressStrip(items) {
+      const counted = items.filter((i) => i.status !== 'skipped');
+      const done = counted.filter((i) => i.status === 'done').length;
+      const setsDone = counted.reduce((sum, i) => sum + i.setsDone, 0);
+      const setsPlanned = counted.reduce((sum, i) => sum + Math.max(i.setsPlanned, i.setsDone), 0);
+      const skipped = items.length - counted.length;
+      const strip = el('div', { class: 'progress-strip' });
+      strip.appendChild(el('div', { class: 'strip-counts' }, [
+        el('span', {}, [el('strong', { text: String(done) }), document.createTextNode(` / ${counted.length} exercises`)]),
+        el('span', {}, [el('strong', { text: String(setsDone) }), document.createTextNode(` / ${setsPlanned} sets`)]),
+        ...(skipped ? [el('span', { text: `${skipped} skipped` })] : []),
+      ]));
+      strip.appendChild(el('div', { class: 'strip-track', 'aria-hidden': 'true' }, [el('div', { class: 'strip-fill', style: `width:${counted.length ? (done / counted.length) * 100 : 0}%` })]));
+      const chips = el('div', { class: 'strip-chips', 'aria-label': 'Jump to an exercise' });
+      for (const i of items) {
+        const chip = el('button', { type: 'button', class: `strip-chip is-${i.status}`, 'data-key': i.key, title: i.name, 'aria-label': `${i.name}: ${i.status}` }, [
+          el('span', { class: 'chip-icon', 'aria-hidden': 'true', text: STATUS_ICON[i.status] }),
+          el('span', { class: 'chip-name', text: i.name }),
+        ]);
+        chip.addEventListener('click', () => {
+          const card = document.querySelector(`.ex-collapsible[data-key="${CSS.escape(i.key)}"]`);
+          if (!card) return;
+          setCardOpen(card, true);
+          scrollToCard(card, false);
+        });
+        chips.appendChild(chip);
+      }
+      strip.appendChild(chips);
+      return strip;
     }
 
     // ---------- Header ----------
@@ -179,7 +321,7 @@
 
     // ---------- Exercise section (gym) ----------
 
-    function buildExerciseSection() {
+    function buildExerciseSection(overview) {
       const section = el('section');
       section.appendChild(el('h2', { text: 'Exercises' }));
 
@@ -191,19 +333,64 @@
         section.appendChild(el('div', { class: 'state-block' }, [el('p', { text: 'No exercises yet.' })]));
       }
 
-      for (const perf of session.exercises) {
-        section.appendChild(buildLoggedExerciseCard(perf));
-      }
+      const entries = [
+        ...session.exercises.map((perf) => ({ kind: 'logged', perf, exerciseId: perf.exercise_id })),
+        ...generatedItems.map((g) => ({ kind: 'generated', g, exerciseId: effectiveExerciseId(g) })),
+      ];
+      const sections = sectionsOf(entries.map((e) => e.exerciseId));
+      const grouped = sections.some((x) => x !== 'main');
+      const sectionCounts = new Map();
+      let currentSection = null;
 
-      for (const g of generatedItems) {
-        if (skippedExerciseIds.has(g.exercise_id)) {
-          section.appendChild(buildSkippedCard(g));
-        } else {
-          section.appendChild(buildPreloadedExerciseCard(g));
+      entries.forEach((entry, index) => {
+        const item = overviewItem(entry);
+        overview.push(item);
+        const name = sections[index];
+        if (grouped && name !== currentSection) {
+          currentSection = name;
+          const heading = el('h3', { class: 'ex-section-title' }, [el('span', { text: SECTION_LABELS[name] }), el('span', { class: 'ex-section-count' })]);
+          heading.dataset.section = name;
+          section.appendChild(heading);
         }
+        const counts = sectionCounts.get(name) || { done: 0, total: 0 };
+        if (item.status !== 'skipped') counts.total += 1;
+        if (item.status === 'done') counts.done += 1;
+        sectionCounts.set(name, counts);
+        const card = entry.kind === 'logged'
+          ? buildLoggedExerciseCard(entry.perf)
+          : skippedExerciseIds.has(entry.g.exercise_id) ? buildSkippedCard(entry.g) : buildPreloadedExerciseCard(entry.g);
+        section.appendChild(makeCollapsible(card, item));
+      });
+      for (const heading of section.querySelectorAll('.ex-section-title')) {
+        const c = sectionCounts.get(heading.dataset.section);
+        heading.querySelector('.ex-section-count').textContent = `${c.done} / ${c.total} done`;
       }
 
       return section;
+    }
+
+    /** One exercise's row: key, name, status, one-line detail, set counts. */
+    function overviewItem(entry) {
+      if (entry.kind === 'logged') {
+        const perf = entry.perf;
+        const generatedMatch = generated ? generated.exercises.find((g) => effectiveExerciseId(g) === perf.exercise_id) : null;
+        const key = `p${perf.id}`;
+        const hasLoggedData = perf.sets.some((s) => s.completed || s.weight !== null || s.reps !== null);
+        const planned = generatedMatch || (perf.target_sets != null ? perf : null);
+        const unit = repUnitOf(perf);
+        const setsDone = perf.sets.filter((s) => s.completed).length;
+        const status = session.status === 'completed' || hasLoggedData ? 'done' : drafts.get(key)?.dirty ? 'editing' : 'pending';
+        const detail = status === 'done'
+          ? shortSetText(perf.sets, unit)
+          : planned ? formatSets(planned.target_sets, planned.target_reps_min, planned.target_reps_max) + (unit !== 'reps' ? ` ${unit}` : '') : `${perf.sets.length} sets`;
+        return { key, exerciseId: perf.exercise_id, name: exerciseDisplayName(perf, generatedMatch), status, detail, setsDone, setsPlanned: planned ? planned.target_sets : perf.sets.length };
+      }
+      const g = entry.g;
+      const key = `g${g.exercise_id}`;
+      const sub = substitutions.get(g.exercise_id);
+      const skipped = skippedExerciseIds.has(g.exercise_id);
+      const status = skipped ? 'skipped' : drafts.get(key)?.dirty ? 'editing' : 'pending';
+      return { key, exerciseId: entry.exerciseId, name: sub ? sub.name : g.exercise_name, status, detail: skipped ? 'Skipped' : formatSets(g.target_sets, g.target_reps_min, g.target_reps_max), setsDone: 0, setsPlanned: g.target_sets };
     }
 
     function effectiveExerciseId(generatedItem) {
@@ -227,7 +414,8 @@
       card.classList.add('exercise-card');
       const header = el('div', { class: 'exercise-header' });
       header.appendChild(el('div', { class: 'exercise-name', text: exerciseDisplayName(perf, generatedMatch) }));
-      if (!generatedMatch) header.appendChild(el('span', { class: 'badge badge-warning', text: 'Unplanned exercise' }));
+      // An AI-committed exercise carries its own plan (target_sets), so it is not unplanned.
+      if (!generatedMatch && perf.target_sets == null) header.appendChild(el('span', { class: 'badge badge-warning', text: 'Unplanned exercise' }));
       card.appendChild(header);
       // Updated in place (a full render would drop unsaved set entries).
       let onUnitChanged = () => {};
@@ -243,11 +431,13 @@
       const plannedSource = generatedMatch || (perf.target_sets != null ? perf : null);
       if (plannedSource) {
         const completed = perf.sets.filter((s) => s.completed).length;
-        const skipped = perf.sets.length - completed;
+        const started = session.status === 'completed' || perf.sets.some((s) => s.completed || s.weight !== null || s.reps !== null);
+        // Sets not done yet are not "skipped" until something is logged.
+        const skipped = started ? perf.sets.length - completed : 0;
         const pva = el('div', { class: 'planned-vs-actual' });
         const plannedUnit = repUnitOf(perf) !== 'reps' ? ` ${repUnitOf(perf)}` : '';
         pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Planned' }), document.createTextNode(formatSets(plannedSource.target_sets, plannedSource.target_reps_min, plannedSource.target_reps_max) + plannedUnit + (drill && drill.perSide ? ' per side' : ''))]));
-        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(`${completed} completed${skipped ? `, ${skipped} skipped` : ''}`)]));
+        pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(started ? `${completed} completed${skipped ? `, ${skipped} skipped` : ''}` : 'Not started')]));
         card.appendChild(pva);
         if (generatedMatch && generatedMatch.previous_performance) {
           card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'}${generatedMatch.previous_performance.rep_unit ? ` ${generatedMatch.previous_performance.rep_unit}` : ''} (${formatDate(generatedMatch.previous_performance.date)})` }));
@@ -288,16 +478,19 @@
         return card;
       }
 
-      const state = { sets: perf.sets.map((s) => ({ ...s })), unit: repUnitOf(perf), noRir: !!drill };
+      const key = `p${perf.id}`;
+      const state = drafts.get(key) || { sets: perf.sets.map((s) => ({ ...s })), unit: repUnitOf(perf), noRir: !!drill, dirty: false };
+      drafts.set(key, state);
+      const onDirty = () => { state.dirty = true; dirty = true; markEditing(key); };
       const setsContainer = el('div');
-      renderSetEditor(setsContainer, state, () => { dirty = true; });
-      onUnitChanged = () => { state.unit = repUnitOf(perf); renderSetEditor(setsContainer, state, () => { dirty = true; }); };
+      renderSetEditor(setsContainer, state, onDirty);
+      onUnitChanged = () => { state.unit = repUnitOf(perf); renderSetEditor(setsContainer, state, onDirty); };
       card.appendChild(setsContainer);
 
       const addSetBtn = createButton({ label: '+ Add set', variant: 'secondary', onClick: () => {
         state.sets.push({ set_number: state.sets.length + 1, weight: null, reps: null, completed: false });
-        renderSetEditor(setsContainer, state, () => { dirty = true; });
-        dirty = true;
+        renderSetEditor(setsContainer, state, onDirty);
+        onDirty();
       }});
       card.appendChild(addSetBtn);
 
@@ -309,7 +502,10 @@
             method: 'PATCH',
             body: { sets: state.sets },
           }), 'Exercise saved.');
-          dirty = false;
+          drafts.delete(key);
+          openKeys.delete(key);
+          dirty = anyDraftDirty();
+          lastSavedExerciseId = perf.exercise_id;
           await reload();
         } catch (err) { /* values preserved — card stays as-is (spec §61) */ }
       }});
@@ -325,6 +521,9 @@
         if (!window.confirm(`Skip ${exerciseDisplayName(perf, generatedMatch)}? This removes it from today's session.`)) return;
         try {
           await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/exercises/${perf.id}`, { method: 'DELETE' }), 'Skipped.');
+          drafts.delete(key);
+          openKeys.delete(key);
+          dirty = anyDraftDirty();
           await reload();
         } catch (err) { /* left as-is on failure */ }
       }}));
@@ -447,15 +646,18 @@
       explain.appendChild(el('p', { text: g.friendly_reasoning || g.reasoning, style: 'margin:0.4rem 0 0' }));
       card.appendChild(explain);
 
-      const state = { sets: buildInitialSets(g.target_sets) };
+      const key = `g${g.exercise_id}`;
+      const state = drafts.get(key) || { sets: buildInitialSets(g.target_sets), dirty: false };
+      drafts.set(key, state);
+      const onDirty = () => { state.dirty = true; dirty = true; markEditing(key); };
       const setsContainer = el('div');
-      renderSetEditor(setsContainer, state, () => { dirty = true; });
+      renderSetEditor(setsContainer, state, onDirty);
       card.appendChild(setsContainer);
 
       const addSetBtn = createButton({ label: '+ Add set', variant: 'secondary', onClick: () => {
         state.sets.push({ set_number: state.sets.length + 1, weight: null, reps: null, completed: false });
-        renderSetEditor(setsContainer, state, () => { dirty = true; });
-        dirty = true;
+        renderSetEditor(setsContainer, state, onDirty);
+        onDirty();
       }});
       card.appendChild(addSetBtn);
 
@@ -467,7 +669,10 @@
             method: 'POST',
             body: { exercise_id: sub ? sub.id : g.exercise_id, order: session.exercises.length + 1, role: 'primary', sets: state.sets },
           }), 'Exercise saved.');
-          dirty = false;
+          drafts.delete(key);
+          openKeys.delete(key);
+          dirty = anyDraftDirty();
+          lastSavedExerciseId = sub ? sub.id : g.exercise_id;
           await reload();
         } catch (err) { /* values preserved — card stays as-is (spec §61) */ }
       }});
