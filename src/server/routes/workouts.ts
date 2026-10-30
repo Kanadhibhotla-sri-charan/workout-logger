@@ -15,6 +15,7 @@ import { reconcileAfterActualTraining } from '../../engine/weekProgramReconcilia
 import { computeFreshWeek, defaultBudgetMinutes } from './programming.js';
 import { findActiveGymSessionConflict, logSessionConflict } from '../../engine/selectedSessionResolver.js';
 import { requestCalorieSync } from '../../services/calorieTrackerSync.js';
+import { loadHintsForSession } from '../../engine/loadHint.js';
 
 export const workoutsRouter = Router();
 
@@ -201,7 +202,14 @@ workoutsRouter.get('/:id', (req, res) => {
   if (!session) return res.status(404).json({ error: 'workout session not found' });
   const badminton_details =
     session.session_type === 'badminton' ? new BadmintonSessionDetailsRepo(db(req)).get(session.session_id) ?? null : null;
-  res.json({ ...session, exercises: repo.getExercisePerformances(session.session_id), badminton_details });
+  const exercises = repo.getExercisePerformances(session.session_id);
+  res.json({
+    ...session,
+    exercises,
+    badminton_details,
+    // Hints are for a session still being trained; a finished one stays as logged.
+    load_hints: session.status === 'completed' ? {} : loadHintsForSession(db(req), exercises, session.date),
+  });
 });
 
 workoutsRouter.patch('/:id', (req, res) => {

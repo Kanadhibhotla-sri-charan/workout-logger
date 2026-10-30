@@ -209,6 +209,15 @@
       return `${done.length} set${done.length === 1 ? '' : 's'} · ${last.weight ? `${last.weight} kg × ` : ''}${amount}`;
     }
 
+    // Load hint (2026-10-30): last time's heaviest set and what to try
+    // today, from GET /api/workouts/:id (src/engine/loadHint.ts).
+    const loadHintOf = (perf) => (session.status !== 'completed' && !drillById.has(perf.exercise_id) && session.load_hints ? session.load_hints[perf.id] || null : null);
+    function loadHintShort(perf) {
+      const h = loadHintOf(perf);
+      if (!h) return '';
+      return h.kind === 'heavier' ? ` · ↑ ${h.weight} kg` : ` · ${h.weight} kg × ${h.reps}`;
+    }
+
     /** Wraps a full exercise card into a row that opens on tap. */
     function makeCollapsible(card, item) {
       card.dataset.key = item.key;
@@ -382,7 +391,7 @@
         const status = session.status === 'completed' || hasLoggedData ? 'done' : drafts.get(key)?.dirty ? 'editing' : 'pending';
         const detail = status === 'done'
           ? shortSetText(perf.sets, unit)
-          : planned ? formatSets(planned.target_sets, planned.target_reps_min, planned.target_reps_max) + (unit !== 'reps' ? ` ${unit}` : '') : `${perf.sets.length} sets`;
+          : (planned ? formatSets(planned.target_sets, planned.target_reps_min, planned.target_reps_max) + (unit !== 'reps' ? ` ${unit}` : '') : `${perf.sets.length} sets`) + loadHintShort(perf);
         return { key, exerciseId: perf.exercise_id, name: exerciseDisplayName(perf, generatedMatch), status, detail, setsDone, setsPlanned: planned ? planned.target_sets : perf.sets.length };
       }
       const g = entry.g;
@@ -439,10 +448,12 @@
         pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Planned' }), document.createTextNode(formatSets(plannedSource.target_sets, plannedSource.target_reps_min, plannedSource.target_reps_max) + plannedUnit + (drill && drill.perSide ? ' per side' : ''))]));
         pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(started ? `${completed} completed${skipped ? `, ${skipped} skipped` : ''}` : 'Not started')]));
         card.appendChild(pva);
-        if (generatedMatch && generatedMatch.previous_performance) {
+        if (generatedMatch && generatedMatch.previous_performance && !loadHintOf(perf)) {
           card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'}${generatedMatch.previous_performance.rep_unit ? ` ${generatedMatch.previous_performance.rep_unit}` : ''} (${formatDate(generatedMatch.previous_performance.date)})` }));
         }
       }
+      const hint = loadHintOf(perf);
+      if (hint) card.appendChild(el('p', { class: `load-hint load-hint-${hint.kind}`, text: `${hint.text} (${formatDate(hint.lastDate)})` }));
 
       // Fix: freeze into the static read-only table once the session is
       // completed, OR once this exercise actually has real logged data —

@@ -103,3 +103,4 @@ story of how the app got to its current state.
 - [2026-10-27-95-weekly-ledger-on.md](2026-10-27-95-weekly-ledger-on.md) — The weekly tally now decides what each session trains
 - [2026-10-28-96-flexibility-block.md](2026-10-28-96-flexibility-block.md) — Blueprint flexibility minutes: a stretching block on every gym day, told to the model
 - [2026-10-30-97-logger-overview.md](2026-10-30-97-logger-overview.md) — Logger: one-line rows, pinned progress strip with jump chips, sections
+- [2026-10-30-98-direct-goal-sets-and-load-hints.md](2026-10-30-98-direct-goal-sets-and-load-hints.md) — Goal muscles count direct sets only; load hints for every exercise in the logger

@@ -1248,3 +1248,27 @@ Dry run on a copy of production, Thu 10-29 Push: cat-cow 3 sets before;
 thoracic extension prayer 3, wrist flexor/extensor stretch 2, child's pose
 side reach 1 after; about 11 min. Lower body paused. This week cannot fully
 reach 35 min (started Thursday); from Mon 11-02 the full week is planned.
+
+### 22.5 Goal muscles count direct sets; load hints (2026-10-30)
+Owner felt triceps were lagging while the tally read 17 / 16 (met). About
+6 of the 17 were half credits from chest / shoulder pressing; direct
+triceps work was 11 sets, the same as the two weeks before. Owner chose
+A + D from the options given (D "for all muscles instead of only goal
+ones").
+- A: a goal muscle counts a set only when the exercise gives its volume
+  group full credit (target_credit 1; a sub-region looks at its parent).
+  Skull crusher, dips (triceps), overhead extension, close-grip bench
+  count for triceps; incline / overhead / chest press do not. Non-goal
+  muscles keep Blueprint's partial credit. Same rule for planning and the
+  Today volume card. This differs from Blueprint's target_credit rule, so
+  it is noted for the Blueprint dev. Within a session the validators
+  already credited only exercises assigned to the target, so they agree.
+- D: every weighted exercise in an unfinished session gets a load hint
+  from the last completed session of the same exercise, equipment,
+  attachment and unit, read at the heaviest weight used (ramp sets
+  ignored): top of today's range -> about +2.5 kg (dumbbells +2 kg, next
+  pair); within it -> same weight, +1 rep; below it -> stay. Shows how many
+  sessions in a row the weight has not changed (3+). Display only; the
+  model's plan is unchanged.
+Owner also: the Legs pause is lifted, but leg rehab is done in separate
+sessions; the planned leg work is skipped and what was done goes in notes.

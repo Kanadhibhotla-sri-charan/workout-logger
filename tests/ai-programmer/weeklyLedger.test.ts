@@ -135,6 +135,22 @@ describe('readDailyCredit', () => {
     expect([...daily.keys()]).toEqual(['2026-10-26']);
     expect(Object.fromEntries(daily.get('2026-10-26')!)).toEqual({ triceps: 2, chest: 1, 'mid-pec': 1, 'front-delt': 1 });
   });
+
+  it('goal muscles count direct exercises only; a sub-region looks at its parent', () => {
+    const db = openDb(':memory:');
+    const repo = new WorkoutSessionsRepo(db);
+    const s = repo.createSession({ date: '2026-10-26', session_type: 'gym', status: 'completed' });
+    const add = (exercise_id: string, order: number) => repo.addExercisePerformance(s.session_id, { exercise_id, order, role: 'primary', sets: [{ set_number: 1, completed: true }, { set_number: 2, completed: true }] });
+    add('incline-barbell-press', 0);
+    add('lying-triceps-extension-skull-crusher', 1);
+    add('dumbbell-pullover-lat-biased', 2);
+    const day = Object.fromEntries(readDailyCredit(db, '2026-10-26', '2026-10-27', new Set(['triceps', 'triceps-long-head'])).get('2026-10-26')!);
+    // Press and pullover give triceps nothing; the skull crusher gives triceps 2 and its long head 1.
+    expect(day['triceps']).toBe(2);
+    expect(day['triceps-long-head']).toBe(1);
+    // Non-goal muscles keep partial credit.
+    expect(day['front-delt']).toBeGreaterThan(0);
+  });
 });
 
 describe('GET /api/insights/volume', () => {

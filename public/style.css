@@ -852,3 +852,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: var(--space-4) 0
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
   .spinner { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
 }
+
+/* Load hint (2026-10-30): last time's heaviest set and today's nudge. */
+.load-hint { margin: 0.35rem 0 0; padding: 0.4rem 0.6rem; border-radius: 8px; font-size: 0.82rem; color: var(--text-muted); background: var(--accent-bg); border-left: 3px solid var(--accent); }
+.load-hint-heavier { color: var(--text); background: var(--success-bg); border-left-color: var(--success); }

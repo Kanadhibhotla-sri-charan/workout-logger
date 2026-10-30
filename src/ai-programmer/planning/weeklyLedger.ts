@@ -7,6 +7,11 @@
 // (volume-targets.yaml): goal muscles at "priority", the rest at
 // "efficient", counted as credited sets (completed sets x the exercise's
 // target_credit weight). Goal muscles are planned on every suitable day.
+// Goal muscles count direct work only (owner decision 2026-10-30, after
+// triceps read "met" at 17/16 with ~6 of it from pressing): a set counts
+// toward a goal muscle only when the exercise gives that muscle's volume
+// group full credit (1), e.g. skull crushers and dips for triceps, not
+// bench or overhead press. Non-goal muscles keep Blueprint's partial credit.
 // Blueprint's min_hours_between is not applied (owner decision
 // 2026-10-27: four training days in a row are normal). Goal muscles may
 // go past Blueprint's per_session_max (owner decision 2026-10-27: on a
@@ -38,7 +43,7 @@ import { athleticPaused } from '../../athletic/athleticSession.js';
 import { GoalsRepo } from '../../repositories/goalsRepo.js';
 import { InjuryPausesRepo } from '../../repositories/injuryPausesRepo.js';
 import { LegTrainingRepo } from '../../repositories/legTrainingRepo.js';
-import { getTargetCredit, listVolumeNumbers, outcomeVolumeLevels, volumeChildren } from '../../blueprint/volumeTargets.js';
+import { getTargetCredit, listVolumeNumbers, outcomeVolumeLevels, volumeChildren, volumeParentOf } from '../../blueprint/volumeTargets.js';
 import type { AIProgrammerContext } from '../context/programmerContextTypes.js';
 import { weekGymDays } from '../service/weekGeneration.js';
 
@@ -230,10 +235,17 @@ function pausedTargetIds(db: Database.Database): Set<string> {
 
 // ---------------------------------------------------------------- reads
 
+/** Whether an exercise trains a target directly: full credit (1) for the
+ * target's volume group (a sub-region looks at its parent). */
+export function isDirectCredit(credit: Readonly<Record<string, number>>, targetId: string): boolean {
+  return (credit[volumeParentOf(targetId)] ?? credit[targetId] ?? 0) >= 1;
+}
+
 /** Credited sets per date per volume id from completed sessions in
  * [from, toExclusive): each completed set x the exercise's Blueprint
- * target_credit. Exercises without credit (unknown, mobility) add nothing. */
-export function readDailyCredit(db: Database.Database, from: string, toExclusive: string): Map<string, Map<string, number>> {
+ * target_credit. Exercises without credit (unknown, mobility) add nothing.
+ * Ids in `directOnly` (goal muscles) count only direct exercises. */
+export function readDailyCredit(db: Database.Database, from: string, toExclusive: string, directOnly: ReadonlySet<string> = new Set()): Map<string, Map<string, number>> {
   const rows = db
     .prepare(
       `SELECT s.date AS date, we.exercise_id AS exerciseId,
@@ -247,7 +259,10 @@ export function readDailyCredit(db: Database.Database, from: string, toExclusive
     const credit = getTargetCredit(r.exerciseId);
     if (r.done <= 0 || !credit) continue;
     const day = daily.get(r.date) ?? new Map<string, number>();
-    for (const [targetId, weight] of Object.entries(credit)) day.set(targetId, (day.get(targetId) ?? 0) + r.done * weight);
+    for (const [targetId, weight] of Object.entries(credit)) {
+      if (directOnly.has(targetId) && !isDirectCredit(credit, targetId)) continue;
+      day.set(targetId, (day.get(targetId) ?? 0) + r.done * weight);
+    }
     daily.set(r.date, day);
   }
   return daily;
@@ -290,14 +305,17 @@ export function readFutureDays(db: Database.Database, targetDate: string): Ledge
   return out;
 }
 
+const goalIds = (targets: readonly LedgerTargetInput[]) => new Set(targets.filter((t) => t.isGoal).map((t) => t.targetId));
+
 /** The ledger for a built generation context (reads only). */
 export function buildWeeklyLedger(db: Database.Database, context: AIProgrammerContext): WeeklyLedger {
   const targetDate = context.targetDate;
   const eligibleIds = new Set(context.programmingBrief.muscles.filter((m) => m.targetType === 'physique_target' && m.eligibleForThisSession).map((m) => m.targetId));
+  const targets = ledgerTargets(activeGoalOutcomeIds(db), pausedTargetIds(db), (id) => eligibleIds.has(id));
   return computeLedger({
     targetDate,
-    targets: ledgerTargets(activeGoalOutcomeIds(db), pausedTargetIds(db), (id) => eligibleIds.has(id)),
-    dailyCredit: readDailyCredit(db, programmingWeekStart(targetDate), targetDate),
+    targets,
+    dailyCredit: readDailyCredit(db, programmingWeekStart(targetDate), targetDate, goalIds(targets)),
     futureDays: readFutureDays(db, targetDate),
   });
 }
@@ -310,7 +328,7 @@ export function volumeOverview(db: Database.Database, today: string): WeeklyLedg
   const ledger = computeLedger({
     targetDate: today,
     targets,
-    dailyCredit: readDailyCredit(db, programmingWeekStart(today), addDays(today, 1)),
+    dailyCredit: readDailyCredit(db, programmingWeekStart(today), addDays(today, 1), goalIds(targets)),
     futureDays: readFutureDays(db, today),
     countTargetDate: true,
   });
