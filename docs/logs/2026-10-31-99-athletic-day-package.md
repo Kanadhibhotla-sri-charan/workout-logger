@@ -50,3 +50,7 @@ is on there is no Athletic day, no add-on, no lower-body mobility.
   rotation, skipped part waits, light day, plan read from logs, commit
   re-check uses the stored plan; old tests moved to plan-shaped answers).
 - Full suite: 247 failures before and after, the same date-dependent set.
+
+## Deployed
+2026-10-31 21:15 IST, 4f28ef6 (backup pre-4f28ef6-20261031T154527Z.sqlite).
+Health ok; Legs pause still on; Program page serves the package view.
