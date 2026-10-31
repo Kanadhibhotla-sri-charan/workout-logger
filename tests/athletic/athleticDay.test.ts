@@ -25,8 +25,9 @@ import { AIProgrammerService } from '../../src/ai-programmer/service/aiProgramme
 import { approveProposal, commitAIProposalToPlannedSession } from '../../src/ai-programmer/service/aiProposalLifecycle.js';
 import { readWeekGenerationState, startWeekGeneration, weekGymDays } from '../../src/ai-programmer/service/weekGeneration.js';
 import type { AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../../src/ai-programmer/contracts/providerTypes.js';
-import { ATHLETIC_BLOCKS, BUILD_UP_SESSIONS, buildAthleticContext, checkAthleticOutput, type AthleticContext } from '../../src/athletic/athleticSession.js';
+import { ATHLETIC_BLOCKS, BUILD_UP_SESSIONS, buildAthleticContext, checkAthleticOutput, planAthleticDay, type AthleticContext } from '../../src/athletic/athleticSession.js';
 import { planAthleticAddOn } from '../../src/athletic/athleticAddOn.js';
+import { chooseAthleticComponents, componentsDone } from '../../src/athletic/athleticPlan.js';
 import { drillSetSeconds, flexibilityWeek, planFlexibilityBlock, FLEXIBILITY_BLOCK_MAX_SECONDS } from '../../src/athletic/flexibility.js';
 import { addDays } from '../../src/engine/dateMath.js';
 import { GoalsRepo } from '../../src/repositories/goalsRepo.js';
@@ -37,13 +38,19 @@ const MONDAY = '2026-10-19';
 const THURSDAY = '2026-10-22';
 let db: Database.Database;
 
-/** Picks exercises per block at the low end of each range. `tweak` lets a test bend the answer. */
+/** Picks exercises for the blocks today's plan lists, at the low end of
+ * each range. `tweak` lets a test bend the answer. */
+const WANTED: Record<string, number> = { warmup: 2, quality: 2, conditioning: 1, cooldown: 2 };
+function blockCount(context: AthleticContext, block: string): number {
+  const b = context.session.blocks.find((x) => x.block === block);
+  return b ? Math.min(b.exercises.max, Math.max(b.exercises.min, WANTED[block] ?? 2)) : 0;
+}
 function athleticAnswer(context: AthleticContext, tweak: (exercises: any[]) => any[] = (x) => x) {
-  const pick = (block: string, n: number) => context.drills.filter((d) => d.block === block).slice(0, n);
-  const drills = [...pick('warmup', 2), ...pick('quality', 2), ...pick('conditioning', 1), ...pick('cooldown', 1)].map((d) => ({
+  const pick = (block: string) => context.drills.filter((d) => d.block === block).slice(0, blockCount(context, block));
+  const drills = [...pick('warmup'), ...pick('quality'), ...pick('conditioning'), ...pick('cooldown')].map((d) => ({
     exerciseId: d.exerciseId, targetId: d.goals[0], sets: d.sets.min, amountMin: d.amount.min, amountMax: d.amount.max, restSeconds: d.restSeconds.min, rationale: d.mode,
   }));
-  const lifts = ['bulgarian-split-squat-knee-dominant', 'romanian-deadlift'].map((id) => {
+  const lifts = ['bulgarian-split-squat-knee-dominant', 'romanian-deadlift'].slice(0, blockCount(context, 'strength')).map((id) => {
     const l = context.strengthLifts.find((x) => x.exerciseId === id)!;
     return { exerciseId: id, targetId: l.legTargets[0], sets: 3, repsMin: l.reps.min, repsMax: l.reps.max, rirMin: l.rir.min, rirMax: l.rir.max, restSeconds: 120, rationale: 'strength' };
   });
@@ -80,7 +87,10 @@ function plannedOutput(ctx: any): any {
   return { schemaVersion: 'ai-workout-session-proposal.v1', proposalId: 'p', mode: 'generate_session', targetDate: ctx.targetDate, weekday: ctx.targetWeekday, sessionFocus: [sp.purpose], exercises, programmingRationale: ['fake'], goalAlignment: [], recoveryConsiderations: [], warnings: [] };
 }
 
-const BLOCK_ORDER = ['warmup', 'warmup', 'quality', 'quality', 'strength', 'strength', 'conditioning', 'cooldown'];
+/** The block order an athleticAnswer for `context` ends up in. */
+const blockOrder = (context: AthleticContext) => context.session.blocks.flatMap((b) => Array(blockCount(context, b.block)).fill(b.block));
+/** With no past Athletic day: strength + the first two in the owner's order. */
+const FIRST_PLAN = ['strength', 'resilience', 'flexibility'];
 
 /** Completed Athletic days in the past, so the build-up phase is over. */
 function pastAthleticDays(n: number) {
@@ -97,7 +107,7 @@ class FakeProvider implements AIProgrammerProvider {
   async generate(req: AIProgrammerProviderRequest): Promise<AIProgrammerProviderResponse> {
     this.requests.push(req);
     const ctx = req.context as any;
-    const body = ctx.schemaVersion === 'athletic-session-context.v3' ? athleticAnswer(ctx, this.tweak) : ctx.sessionPlan ? plannedOutput(ctx) : { nonsense: true };
+    const body = ctx.schemaVersion === 'athletic-session-context.v4' ? athleticAnswer(ctx, this.tweak) : ctx.sessionPlan ? plannedOutput(ctx) : { nonsense: true };
     return { provider: 'fake', model: 'fake-model', requestId: req.requestId, rawText: JSON.stringify(body) };
   }
 }
@@ -182,7 +192,10 @@ describe('generating an Athletic day', () => {
     expect(provider.requests[0]!.systemInstruction).toMatch(/strength and conditioning coach.*not badminton skill or footwork/);
     const p = result.proposal;
     expect(p.sessionKind).toBe('athletic');
-    expect(p.exercises.map((e) => e.block)).toEqual(BLOCK_ORDER);
+    const context = buildAthleticContext(db, THURSDAY);
+    expect(p.athleticPlan).toMatchObject({ components: FIRST_PLAN, light: false });
+    expect(p.exercises.map((e) => e.block)).toEqual(blockOrder(context));
+    expect(p.exercises.map((e) => e.block)).toEqual(['warmup', 'quality', 'quality', 'strength', 'strength', 'cooldown', 'cooldown']);
     for (const e of p.exercises.filter((x) => x.block !== 'strength')) {
       const rx = modePrescriptionFor(e.exerciseId)!;
       expect(e).toMatchObject({ targetType: 'functional_goal', rirMin: null, rirMax: null, repUnit: rx.unit });
@@ -232,7 +245,7 @@ describe('generating an Athletic day', () => {
     pastAthleticDays(BUILD_UP_SESSIONS);
     const reversed = new FakeProvider((xs) => [...xs].reverse().map((x) => ({ ...x, sets: 50, amountMax: 999, restSeconds: 1 })));
     const p = (await new AIProgrammerService(db, reversed).generateSession({ targetDate: THURSDAY })).proposal;
-    expect(p.exercises.map((e) => e.block)).toEqual(BLOCK_ORDER);
+    expect(p.exercises.map((e) => e.block)).toEqual(blockOrder(buildAthleticContext(db, THURSDAY)));
     for (const e of p.exercises.filter((x) => x.block !== 'strength')) {
       const rx = modePrescriptionFor(e.exerciseId)!;
       expect(e.sets).toBe(rx.sets[1]);
@@ -242,9 +255,13 @@ describe('generating an Athletic day', () => {
     expect(p.exercises.filter((x) => x.block === 'strength').map((e) => [e.sets, e.restSeconds])).toEqual([[4, 60], [4, 60]]);
     expect(p.warnings.join(' ')).toMatch(/reordered/);
 
-    const context = buildAthleticContext(db, '2026-10-23');
-    const noConditioning = athleticAnswer(context, (xs) => xs.filter((x) => context.drills.find((d) => d.exerciseId === x.exerciseId)?.block !== 'conditioning'));
-    expect(checkAthleticOutput(noConditioning, context)).toMatchObject({ ok: false, stage: 'domain' });
+    const context = buildAthleticContext(db, THURSDAY);
+    const blockOf = (x: any) => context.drills.find((d) => d.exerciseId === x.exerciseId)?.block;
+    const noFlexibility = athleticAnswer(context, (xs) => xs.filter((x) => blockOf(x) !== 'cooldown'));
+    expect(checkAthleticOutput(noFlexibility, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/cooldown: 0 exercise\(s\); needs 2-3/)] });
+    const conditioning = context.drills.find((d) => d.block === 'conditioning')!;
+    const unplanned = athleticAnswer(context, (xs) => [...xs, { exerciseId: conditioning.exerciseId, targetId: conditioning.goals[0], sets: conditioning.sets.min, amountMin: conditioning.amount.min, amountMax: conditioning.amount.max, restSeconds: conditioning.restSeconds.min }]);
+    expect(checkAthleticOutput(unplanned, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/conditioning: 1 exercise\(s\); not part of today's plan/)] });
     const benchSnuckIn = athleticAnswer(context, (xs) => [...xs, { ...xs[4], exerciseId: 'flat-barbell-bench-press' }]);
     expect(checkAthleticOutput(benchSnuckIn, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/not an athletic drill or leg strength lift/)] });
     const noStrength = athleticAnswer(context, (xs) => xs.filter((x) => x.rirMin === undefined));
@@ -480,5 +497,63 @@ describe('logging and Insights', () => {
       const inline = read(page).match(/<script>([\s\S]*?)<\/script>/)![1]!;
       expect(() => new Function(`${read('app.js')}\n${inline}`), page).not.toThrow();
     }
+  });
+});
+
+describe('Athletic day as one package (2026-10-31)', () => {
+  it('a day covers only what was logged: one warm-up drill is not mobility, one hold is not flexibility', () => {
+    const done = (ids: string[]) => [...componentsDone(ids.map((exercise_id) => ({ exercise_id, sets: [{ completed: true }] })))].sort();
+    const dynamic = allDrills().filter((d) => d.training_mode === 'mobility-dynamic').map((d) => d.id);
+    const holds = allDrills().filter((d) => d.training_mode === 'mobility-hold').map((d) => d.id);
+    expect(done(['romanian-deadlift', 'pogo-hops', 'jump-rope', dynamic[0]!, holds[0]!])).toEqual(['endurance', 'resilience', 'strength']);
+    expect(done([dynamic[0]!, dynamic[1]!, holds[0]!, holds[1]!])).toEqual(['flexibility', 'mobility']);
+    expect(componentsDone([{ exercise_id: 'romanian-deadlift', sets: [{ completed: false }] }]).size).toBe(0);
+  });
+
+  it('strength every day plus the two waiting longest; consecutive days rotate', () => {
+    const none = { yesterday: false, tomorrow: false };
+    expect(chooseAthleticComponents([], none).components).toEqual(['strength', 'resilience', 'flexibility']);
+    const week1 = [{ date: '2026-10-22', components: ['strength', 'resilience', 'flexibility'] as any }];
+    expect(chooseAthleticComponents(week1, none).components).toEqual(['strength', 'endurance', 'mobility']);
+    const week2 = [...week1, { date: '2026-10-29', components: ['strength', 'endurance', 'mobility'] as any }];
+    expect(chooseAthleticComponents(week2, none).components).toEqual(['strength', 'resilience', 'flexibility']);
+    // A planned part that was skipped waits its turn: only strength + resilience were logged.
+    const skipped = [{ date: '2026-10-22', components: ['strength', 'resilience'] as any }];
+    expect(chooseAthleticComponents(skipped, none).components).toEqual(['strength', 'endurance', 'flexibility']);
+  });
+
+  it('badminton next to it makes a light day: no jumps or endurance, easy strength', () => {
+    const plan = chooseAthleticComponents([], { yesterday: false, tomorrow: true });
+    expect(plan).toMatchObject({ light: true, components: ['strength', 'mobility', 'flexibility'] });
+    expect(plan.reasons.join(' ')).toMatch(/badminton tomorrow/);
+    const friday = buildAthleticContext(db, '2026-10-23'); // Saturday is badminton
+    expect(friday.session.plan.light).toBe(true);
+    expect(friday.session.blocks.map((b) => b.block)).toEqual(['warmup', 'strength', 'cooldown']);
+    expect(friday.strengthLifts.every((l) => l.rir.min >= 2 && l.sets.max <= 3)).toBe(true);
+    expect(buildAthleticContext(db, THURSDAY).session.plan.light).toBe(false);
+  });
+
+  it("the next Athletic day reads what the last one logged", async () => {
+    const service = new AIProgrammerService(db, new FakeProvider());
+    const { proposalId } = await service.generateSession({ targetDate: THURSDAY });
+    approveProposal(db, proposalId);
+    const { sessionId } = commitAIProposalToPlannedSession(db, proposalId, { intent: 'fill_existing_gym_day' });
+    db.prepare(`UPDATE workout_sets SET completed = 1, reps = 8 WHERE workout_exercise_id IN (SELECT id FROM workout_exercises WHERE workout_session_id = ?)`).run(sessionId);
+    db.prepare(`UPDATE workout_sessions SET status = 'completed' WHERE session_id = ?`).run(sessionId);
+    const plan = planAthleticDay(db, '2026-10-29');
+    expect(plan.lastDone).toMatchObject({ strength: THURSDAY, resilience: THURSDAY, flexibility: THURSDAY, endurance: null, mobility: null });
+    expect(plan.components).toEqual(['strength', 'endurance', 'mobility']);
+  });
+
+  it('the commit re-check uses the plan stored with the proposal', async () => {
+    const service = new AIProgrammerService(db, new FakeProvider());
+    const { proposalId } = await service.generateSession({ targetDate: THURSDAY });
+    approveProposal(db, proposalId);
+    // Badminton added for Friday after generation: today's fresh plan would be light, the stored one is not.
+    const user = new UsersRepo(db).getOrCreateDefault();
+    const profile = new TrainingProfileRepo(db).get(user.id)!;
+    new TrainingProfileRepo(db).upsert(user.id, { ...profile, other_activity_schedule: [...profile.other_activity_schedule, { day: 'friday', activity_type: 'badminton', notes: null }] } as any);
+    expect(planAthleticDay(db, THURSDAY).light).toBe(true);
+    expect(() => commitAIProposalToPlannedSession(db, proposalId, { intent: 'fill_existing_gym_day' })).not.toThrow();
   });
 });

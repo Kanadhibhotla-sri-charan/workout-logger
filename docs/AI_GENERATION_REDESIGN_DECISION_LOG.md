@@ -1272,3 +1272,31 @@ ones").
   model's plan is unchanged.
 Owner also: the Legs pause is lifted, but leg rehab is done in separate
 sessions; the planned leg work is skipped and what was done goes in notes.
+
+### 22.6 Athletic day is one package; Legs pause back on (2026-10-31)
+Owner: the Athletic day was meant as one package (strength, mobility,
+endurance, flexibility), not a choice against leg size, and not every part
+on every day; the choice should follow recovery and badminton nearby, and
+consecutive Athletic days must rotate ("I can't be doing the recovery,
+mobility on the 2 consecutive athletic days without touching flexibility
+and strength"). Answers: leg size matters only where it makes the legs
+injury resistant and quick to recover; one Athletic day a week, add-ons
+(no strength) on other days; Legs pause back on while rehab is separate.
+- src/athletic/athleticPlan.ts picks today's components before the model
+  runs: strength every Athletic day (the only leg strength of the week),
+  plus the two waiting longest since an Athletic day last did them (ties:
+  resilience, flexibility, endurance, mobility). "Done" = logged on past
+  Athletic days (committed Athletic proposals, completed sets); a warm-up
+  drill or one closing hold alone does not count.
+- Badminton yesterday or tomorrow: light day (no resilience or endurance;
+  lifts RIR 2+, at most 3 sets).
+- Blocks follow the plan: warm-up 1 drill (2-3 when mobility is picked),
+  resilience / strength / endurance blocks only when picked, flexibility
+  2-3 holds when picked (else at most 1). The check rejects a block that
+  is not in the plan. The proposal stores athleticPlan; the commit re-check
+  uses it (badminton added later does not void the proposal).
+- Program page: the Size / Athletic toggle is gone (the API keeps both
+  modes); the proposal shows "Today's package" and the reasons.
+- Legs injury pause turned on in production at the owner's request
+  (backup pre-legs-pause-20261031T151208Z.sqlite); no Athletic day is
+  generated until it is lifted.

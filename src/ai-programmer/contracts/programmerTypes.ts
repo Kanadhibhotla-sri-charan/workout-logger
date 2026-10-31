@@ -53,6 +53,9 @@ export interface AIWorkoutSessionProposal {
   /** 'athletic' (2026-10-18): an Athletic-day proposal (drills only,
    * src/athletic/). Absent = the normal physique session. */
   sessionKind?: 'athletic';
+  /** Athletic day (2026-10-31): the package components picked for it by
+   * src/athletic/athleticPlan.ts, and why. */
+  athleticPlan?: { components: Array<'strength' | 'resilience' | 'endurance' | 'mobility' | 'flexibility'>; light: boolean; reasons: string[] };
   exercises: AIWorkoutExerciseProposal[];
   /** Push / Pull / Upper with leg training 'athletic' (2026-10-18): 5-10
    * minutes of athletic drills appended after the session, chosen by

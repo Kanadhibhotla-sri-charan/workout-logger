@@ -22,7 +22,7 @@
 
     <section>
       <h2>Leg training</h2>
-      <p class="faint">How legs are trained. Athletic: no leg size work on any day; the Legs day becomes an Athletic day of badminton drills and whole-body conditioning. Push, Pull and Upper do not change.</p>
+      <p class="faint">One Athletic day a week holds the legs' whole package: strength, resilience (landing, ankles, low jumps), endurance, mobility and flexibility. Each Athletic day picks strength plus the two parts waiting longest; next to badminton it is a light day (easy strength, mobility, flexibility). Leg size counts only where it makes the legs harder to injure and quicker to recover. Add-ons on other days carry light athletic work, never strength.</p>
       <div id="leg-training"></div>
     </section>
 
@@ -1088,7 +1088,8 @@
       return AI_STATUS_LABELS[status] || capitalize(status);
     }
 
-    const ATHLETIC_BLOCK_LABELS = { warmup: 'Warm-up', quality: 'Speed & power', strength: 'Leg strength', conditioning: 'Conditioning', cooldown: 'Cool-down', addon: 'Athletic add-on' };
+    const ATHLETIC_BLOCK_LABELS = { warmup: 'Warm-up / mobility', quality: 'Resilience', strength: 'Leg strength', conditioning: 'Endurance', cooldown: 'Flexibility', addon: 'Athletic add-on' };
+    const ATHLETIC_COMPONENT_LABELS = { strength: 'Strength', resilience: 'Resilience', endurance: 'Endurance', mobility: 'Mobility', flexibility: 'Flexibility' };
 
     function buildAiExerciseCard(item, pendingReview) {
       const card = createCard();
@@ -1149,6 +1150,12 @@
       }
 
       const pendingReview = state.status === 'pending' || state.status === 'approved';
+      // Athletic day (2026-10-31): the parts of the package picked for it, and why.
+      const plan = proposal.athleticPlan;
+      if (plan) {
+        wrap.appendChild(el('h3', { text: `Today's package: ${plan.components.map((c) => ATHLETIC_COMPONENT_LABELS[c] || c).join(' + ')}${plan.light ? ' (light day)' : ''}`, style: 'margin:0.8rem 0 0.2rem' }));
+        for (const r of plan.reasons) wrap.appendChild(el('p', { class: 'faint', text: r, style: 'margin:0' }));
+      }
       // Flexibility block (2026-10-28): Blueprint's weekly stretching
       // minutes, warm-up drills before the session and holds after it.
       const flex = proposal.flexibilityBlock;
@@ -2070,37 +2077,16 @@
       container.appendChild(grid);
     }
 
-    /** Leg training (2026-10-18): Size or Athletic; a change saves at once. */
+    /** Leg training (2026-10-18; 2026-10-31 owner: the Athletic day is one
+     * package, not a choice against leg size, so there is no Size option
+     * any more). Shows the setting; the API still accepts both modes. */
     let legTrainingMode = 'hypertrophy';
     async function loadLegTraining() {
       const container = document.getElementById('leg-training');
       try {
         legTrainingMode = (await api('/api/programming/leg-training')).mode;
         container.innerHTML = '';
-        const statusEl = el('div');
-        const row = el('div', { class: 'btn-row' });
-        const options = [
-          { value: 'athletic', text: 'Athletic (badminton fitness, mobility, conditioning)' },
-          { value: 'hypertrophy', text: 'Size (a Legs day like the other muscles)' },
-        ];
-        for (const opt of options) {
-          const radio = el('input', { type: 'radio', name: 'leg-training', value: opt.value, ...(legTrainingMode === opt.value ? { checked: 'checked' } : {}) });
-          radio.addEventListener('change', async () => {
-            if (!radio.checked) return;
-            const previous = legTrainingMode;
-            try {
-              legTrainingMode = (await api('/api/programming/leg-training', { method: 'PUT', body: { mode: opt.value } })).mode;
-              showInlineStatus(statusEl, 'success', 'Saved. Days not yet generated follow the new setting.');
-              loadWeek();
-            } catch (err) {
-              legTrainingMode = previous;
-              container.querySelector(`input[value="${previous}"]`).checked = true;
-              showInlineStatus(statusEl, 'error', err.message || 'Could not save.');
-            }
-          });
-          row.appendChild(el('label', { style: 'display:inline-flex;align-items:center;gap:0.35rem;margin-right:0.9rem' }, [radio, document.createTextNode(opt.text)]));
-        }
-        container.append(row, statusEl);
+        container.appendChild(el('p', { text: legTrainingMode === 'athletic' ? 'Legs: Athletic day (one package).' : 'Legs: a Legs day for size (set before 2026-10-31).' }));
       } catch (err) {
         showError(container, "We couldn't load the leg training setting.", loadLegTraining);
       }
