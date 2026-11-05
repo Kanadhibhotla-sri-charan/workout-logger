@@ -31,4 +31,5 @@ The contextHash is unchanged, so that attempt meets the retry gate once.
 
 ## Deploy
 
-Not deployed yet.
+Deployed 2026-11-05 09:28 IST (aa4bcc0). Backup
+pre-aa4bcc0-20261105T035812Z.sqlite, integrity ok. Health ok, service active.
