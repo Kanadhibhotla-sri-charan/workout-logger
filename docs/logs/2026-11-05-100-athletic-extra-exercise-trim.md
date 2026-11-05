@@ -33,3 +33,12 @@ The contextHash is unchanged, so that attempt meets the retry gate once.
 
 Deployed 2026-11-05 09:28 IST (aa4bcc0). Backup
 pre-aa4bcc0-20261105T035812Z.sqlite, integrity ok. Health ok, service active.
+
+## Data fix, same day
+
+Owner did the wall calf stretch on 2026-11-05 but its set was not ticked,
+and a finished session is read-only in the logger. At the owner's request
+that one set was marked completed directly in the production DB. Backup
+pre-calf-stretch-tick-20261105T055515Z.sqlite, integrity ok, 1 row changed.
+That day now counts as strength + flexibility; the next plan reads
+strength + resilience + endurance.
