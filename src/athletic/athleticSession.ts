@@ -408,7 +408,7 @@ export function buildAthleticSystemInstruction(): string {
     "You are the user's strength and conditioning coach. Build one Athletic session for context.targetDate. Read context.athlete first: the aim is a durable, flexible body and legs that do not tire, so the user can play badminton without injury. It is not badminton skill or footwork training. Leg size matters only where it makes the legs harder to injure or quicker to recover.",
     '',
     "1. Use only exercises from context.drills and context.strengthLifts, each at most once. They already fit the user's gym and equipment; follow a drill's setupNote when it has one. Favour exercises marked preferred.",
-    '2. The Athletic day is one package (strength, resilience, endurance, mobility, flexibility); context.session.plan.components are the parts picked for today, with the reasons in context.session.plan.reasons (rotation over Athletic days, badminton nearby). Build the session from context.session.blocks only, in their order. Each block gets between its minimum and maximum number of exercises; at most context.session.maxExercises in total. A drill belongs to the block in its own "block" field; every strength lift belongs to the strength block. A block not listed gets no exercises.',
+    '2. The Athletic day is one package (strength, resilience, endurance, mobility, flexibility); context.session.plan.components are the parts picked for today, with the reasons in context.session.plan.reasons (rotation over Athletic days, badminton nearby). Build the session from context.session.blocks only, in their order. Each block gets between its minimum and maximum number of exercises (exercises.min to exercises.max; when both are 1, exactly one, even for the warm-up); at most context.session.maxExercises in total. A drill belongs to the block in its own "block" field; every strength lift belongs to the strength block. A block not listed gets no exercises.',
     '3. Strength block: choose lifts that make the legs strong and hard to injure (single-leg work, a hip hinge, calves/Achilles, adductors/groin, knees), rotating through context.strengthLifts over the weeks rather than repeating the same few. For fatigue resistance, at least one lift uses the upper part of its allowedReps (for example walking lunges or split squats for higher reps). Give sets, repsMin, repsMax, rirMin and rirMax inside the lift\'s own ranges (sets, allowedReps, rir) and restSeconds inside its restSeconds range. Progress from the lift\'s "recent" entries when they went well.',
     "4. Conditioning block (when listed): whole-body endurance from the conditioning drills in context.drills, varied across sessions; favour longer work intervals that build leg endurance.",
     '5. Drills: sets, amountMin, amountMax and restSeconds inside the drill\'s own ranges (sets, allowedAmount, restSeconds). amount counts the drill\'s "unit" (reps or seconds), per side when perSide is true. Drill effort follows its "effort" text: fast, sharp and well landed, never to failure. Drills have no RIR.',
@@ -513,9 +513,13 @@ export function drillEntry(
 /** Checks the model's answer against the context and turns it into a
  * stored proposal. Numbers outside an exercise's ranges (the build-up
  * ranges when context.session.buildUp) are clamped into them and the
- * order is fixed to the block order (both noted in `repairs`); an unknown
- * or repeated exercise, a block with too few or too many exercises, or
- * too many in total fail. `ignoreBuildUp` is for the commit-time re-check. */
+ * order is fixed to the block order, and exercises past a block's maximum
+ * (or in a block not in today's plan) are dropped, the model's first ones
+ * kept (2026-11-05: the first real Athletic day failed twice on one extra
+ * warm-up drill, a paid call each; the plan decides the shape, so the extra
+ * is not worth a rejection). All noted in `repairs`. An unknown or repeated
+ * exercise, a block with too few exercises, or too many in total fail.
+ * `ignoreBuildUp` is for the commit-time re-check. */
 export function checkAthleticOutput(raw: unknown, context: AthleticContext, options: { ignoreBuildUp?: boolean } = {}): AthleticCheck {
   const r = raw as { exercises?: unknown; sessionFocus?: unknown; warnings?: unknown } | null;
   if (!r || typeof r !== 'object' || !Array.isArray(r.exercises)) return { ok: false, stage: 'schema', errors: ['exercises (array) is required'] };
@@ -582,17 +586,26 @@ export function checkAthleticOutput(raw: unknown, context: AthleticContext, opti
     });
   });
 
-  if (entries.length > ATHLETIC_MAX_EXERCISES) errors.push(`${entries.length} exercises; at most ${ATHLETIC_MAX_EXERCISES}`);
   const sizes = new Map(context.session.blocks.map((b) => [b.block, b.exercises]));
+  const inBlock = new Map<AthleticBlock, number>();
+  const kept = entries.filter((x) => {
+    const n = (inBlock.get(x.block) ?? 0) + 1;
+    inBlock.set(x.block, n);
+    const max = sizes.get(x.block)?.max ?? 0;
+    if (n <= max) return true;
+    repairs.push(`${x.ex.exerciseId}: dropped, ${max === 0 ? `${x.block} is not part of today's plan` : `${x.block} holds at most ${max}`}`);
+    return false;
+  });
+  if (kept.length > ATHLETIC_MAX_EXERCISES) errors.push(`${kept.length} exercises; at most ${ATHLETIC_MAX_EXERCISES}`);
   for (const block of ATHLETIC_BLOCKS) {
-    const n = entries.filter((x) => x.block === block).length;
-    const { min, max } = sizes.get(block) ?? { min: 0, max: 0 };
-    if (n < min || n > max) errors.push(max === 0 ? `${block}: ${n} exercise(s); not part of today's plan (${context.session.plan.components.join(', ')})` : `${block}: ${n} exercise(s); needs ${min}-${max}`);
+    const n = kept.filter((x) => x.block === block).length;
+    const min = sizes.get(block)?.min ?? 0;
+    if (n < min) errors.push(`${block}: ${n} exercise(s); needs at least ${min}`);
   }
   if (errors.length > 0) return { ok: false, stage: 'domain', errors };
 
-  const ordered = [...entries].sort((a, b) => ATHLETIC_BLOCKS.indexOf(a.block) - ATHLETIC_BLOCKS.indexOf(b.block) || a.index - b.index);
-  if (ordered.some((x, i) => x !== entries[i])) repairs.push('reordered to warm-up, quality, strength, conditioning, cool-down');
+  const ordered = [...kept].sort((a, b) => ATHLETIC_BLOCKS.indexOf(a.block) - ATHLETIC_BLOCKS.indexOf(b.block) || a.index - b.index);
+  if (ordered.some((x, i) => x !== kept[i])) repairs.push('reordered to warm-up, quality, strength, conditioning, cool-down');
 
   const strings = (v: unknown, max: number) => (Array.isArray(v) ? v.map((x) => shortText(x)).filter(Boolean).slice(0, max) : []);
   return {

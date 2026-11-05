@@ -1300,3 +1300,11 @@ injury resistant and quick to recover; one Athletic day a week, add-ons
 - Legs injury pause turned on in production at the owner's request
   (backup pre-legs-pause-20261031T151208Z.sqlite); no Athletic day is
   generated until it is lifted.
+
+### 22.7 Athletic: drop extras, do not reject (2026-11-05)
+
+- First real Athletic generation failed twice on `warmup: 2 exercise(s);
+  needs 1-1` (two paid calls). Exercises past a block's maximum, or in a
+  block not in the plan, are now dropped and noted in repairs. Too few
+  still fails. The commit re-check still treats any repair as an error.
+  Log 100.

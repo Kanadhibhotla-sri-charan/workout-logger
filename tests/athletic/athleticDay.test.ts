@@ -258,10 +258,20 @@ describe('generating an Athletic day', () => {
     const context = buildAthleticContext(db, THURSDAY);
     const blockOf = (x: any) => context.drills.find((d) => d.exerciseId === x.exerciseId)?.block;
     const noFlexibility = athleticAnswer(context, (xs) => xs.filter((x) => blockOf(x) !== 'cooldown'));
-    expect(checkAthleticOutput(noFlexibility, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/cooldown: 0 exercise\(s\); needs 2-3/)] });
+    expect(checkAthleticOutput(noFlexibility, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/cooldown: 0 exercise\(s\); needs at least 2/)] });
     const conditioning = context.drills.find((d) => d.block === 'conditioning')!;
     const unplanned = athleticAnswer(context, (xs) => [...xs, { exerciseId: conditioning.exerciseId, targetId: conditioning.goals[0], sets: conditioning.sets.min, amountMin: conditioning.amount.min, amountMax: conditioning.amount.max, restSeconds: conditioning.restSeconds.min }]);
-    expect(checkAthleticOutput(unplanned, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/conditioning: 1 exercise\(s\); not part of today's plan/)] });
+    const dropped = checkAthleticOutput(unplanned, context);
+    expect(dropped.ok && dropped.proposal.exercises.some((e) => e.exerciseId === conditioning.exerciseId)).toBe(false);
+    expect(dropped).toMatchObject({ ok: true, repairs: expect.arrayContaining([expect.stringMatching(/conditioning is not part of today's plan/)]) });
+    // 2026-11-05: an extra warm-up drill past the plan's one is dropped, the
+    // model's first one kept, and the session still builds.
+    const [firstWarmup, secondWarmup] = context.drills.filter((d) => d.block === 'warmup') as [AthleticContext['drills'][number], AthleticContext['drills'][number]];
+    const asAnswer = (d: typeof firstWarmup) => ({ exerciseId: d.exerciseId, targetId: d.goals[0], sets: d.sets.min, amountMin: d.amount.min, amountMax: d.amount.max, restSeconds: d.restSeconds.min });
+    const twoWarmups = athleticAnswer(context, (xs) => [asAnswer(firstWarmup), asAnswer(secondWarmup), ...xs.filter((x) => blockOf(x) !== 'warmup')]);
+    const trimmed = checkAthleticOutput(twoWarmups, context);
+    expect(trimmed).toMatchObject({ ok: true, repairs: expect.arrayContaining([expect.stringMatching(/warmup holds at most 1/)]) });
+    expect(trimmed.ok && trimmed.proposal.exercises.filter((e) => e.block === 'warmup').map((e) => e.exerciseId)).toEqual([firstWarmup.exerciseId]);
     const benchSnuckIn = athleticAnswer(context, (xs) => [...xs, { ...xs[4], exerciseId: 'flat-barbell-bench-press' }]);
     expect(checkAthleticOutput(benchSnuckIn, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/not an athletic drill or leg strength lift/)] });
     const noStrength = athleticAnswer(context, (xs) => xs.filter((x) => x.rirMin === undefined));

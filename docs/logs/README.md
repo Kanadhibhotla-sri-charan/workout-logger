@@ -105,3 +105,4 @@ story of how the app got to its current state.
 - [2026-10-30-97-logger-overview.md](2026-10-30-97-logger-overview.md) — Logger: one-line rows, pinned progress strip with jump chips, sections
 - [2026-10-30-98-direct-goal-sets-and-load-hints.md](2026-10-30-98-direct-goal-sets-and-load-hints.md) — Goal muscles count direct sets only; load hints for every exercise in the logger
 - [2026-10-31-99-athletic-day-package.md](2026-10-31-99-athletic-day-package.md) — Athletic day is one package: strength + the two parts waiting longest, light next to badminton; Size toggle removed; Legs pause on
+- [2026-11-05-100-athletic-extra-exercise-trim.md](2026-11-05-100-athletic-extra-exercise-trim.md) — Athletic day: an extra drill is dropped instead of failing generation
