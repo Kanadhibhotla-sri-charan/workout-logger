@@ -1308,3 +1308,10 @@ injury resistant and quick to recover; one Athletic day a week, add-ons
   block not in the plan, are now dropped and noted in repairs. Too few
   still fails. The commit re-check still treats any repair as an error.
   Log 100.
+
+### 22.8 No warm-up block (2026-11-05)
+
+- Owner: a warm-up should cover every muscle worked that day or not exist;
+  they chose removal. Warming up is their own choice. Applied to all days:
+  the Athletic mobility block and the gym days' dynamic drills now come
+  after the main work, so weekly mobility minutes are kept. Log 101.

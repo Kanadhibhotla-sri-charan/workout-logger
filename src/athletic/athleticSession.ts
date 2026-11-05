@@ -19,7 +19,12 @@
 // mobility, flexibility) and each session holds only the components
 // src/athletic/athleticPlan.ts picks for it (strength + the two waiting
 // longest; a light day next to badminton). Blocks of components not picked
-// stay empty (one warm-up drill and at most one closing hold aside).
+// stay empty (at most one closing hold aside).
+// 2026-11-05 (owner): no warm-up block. One ankle drill before calf raises,
+// split squats and lunges "is neither here nor there"; warming up is the
+// owner's own choice. The dynamic drills are the mobility component only,
+// done after the main work. Their block keeps the id 'warmup' because
+// drills and stored proposals carry it; it is shown as "Mobility".
 
 import type Database from 'better-sqlite3';
 import type { Weekday } from '../contracts/types.js';
@@ -46,7 +51,7 @@ import { AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION } from '../ai-programmer/con
 
 // ------------------------------------------------------------ session shape
 
-export const ATHLETIC_BLOCKS = ['warmup', 'quality', 'strength', 'conditioning', 'cooldown'] as const;
+export const ATHLETIC_BLOCKS = ['quality', 'strength', 'conditioning', 'warmup', 'cooldown'] as const;
 export type AthleticBlock = (typeof ATHLETIC_BLOCKS)[number];
 
 export const BLOCK_OF_MODE: Record<TrainingMode, AthleticBlock> = {
@@ -60,12 +65,12 @@ export const BLOCK_OF_MODE: Record<TrainingMode, AthleticBlock> = {
 };
 
 /** Exercises per block [min, max] for the components picked today: a
- * picked component's block is required, the others stay empty except one
- * warm-up drill (always) and an optional closing hold. */
+ * picked component's block is required, the others stay empty except an
+ * optional closing hold. */
 export function blockSizesFor(components: readonly AthleticComponent[]): Record<AthleticBlock, [number, number]> {
   const has = (c: AthleticComponent) => components.includes(c);
   return {
-    warmup: has('mobility') ? [2, 3] : [1, 1],
+    warmup: has('mobility') ? [2, 3] : [0, 0],
     quality: has('resilience') ? [1, 3] : [0, 0],
     strength: has('strength') ? [2, 3] : [0, 0],
     conditioning: has('endurance') ? [1, 2] : [0, 0],
@@ -83,7 +88,7 @@ export const LIFT_SETS: [number, number] = [2, 4];
 export const LIFT_REST_SECONDS: [number, number] = [60, 180];
 
 const BLOCK_PURPOSE: Record<AthleticBlock, string> = {
-  warmup: 'Dynamic mobility to open hips and ankles (a full mobility block when mobility is picked today).',
+  warmup: 'Mobility work for hips and ankles, after the main work. This is not a warm-up.',
   quality: 'Resilience: landing control, ankle and knee tolerance, low-volume jumps done well. Quality, not skill.',
   strength: 'Leg strength and fatigue resistance: the base that protects knees, ankles and tendons and lets the legs last a match.',
   conditioning: 'Whole-body endurance intervals for longer rallies and sessions.',
@@ -408,7 +413,7 @@ export function buildAthleticSystemInstruction(): string {
     "You are the user's strength and conditioning coach. Build one Athletic session for context.targetDate. Read context.athlete first: the aim is a durable, flexible body and legs that do not tire, so the user can play badminton without injury. It is not badminton skill or footwork training. Leg size matters only where it makes the legs harder to injure or quicker to recover.",
     '',
     "1. Use only exercises from context.drills and context.strengthLifts, each at most once. They already fit the user's gym and equipment; follow a drill's setupNote when it has one. Favour exercises marked preferred.",
-    '2. The Athletic day is one package (strength, resilience, endurance, mobility, flexibility); context.session.plan.components are the parts picked for today, with the reasons in context.session.plan.reasons (rotation over Athletic days, badminton nearby). Build the session from context.session.blocks only, in their order. Each block gets between its minimum and maximum number of exercises (exercises.min to exercises.max; when both are 1, exactly one, even for the warm-up); at most context.session.maxExercises in total. A drill belongs to the block in its own "block" field; every strength lift belongs to the strength block. A block not listed gets no exercises.',
+    '2. The Athletic day is one package (strength, resilience, endurance, mobility, flexibility); context.session.plan.components are the parts picked for today, with the reasons in context.session.plan.reasons (rotation over Athletic days, badminton nearby). Build the session from context.session.blocks only, in their order. Each block gets between its minimum and maximum number of exercises (exercises.min to exercises.max; when both are 1, exactly one); at most context.session.maxExercises in total. A drill belongs to the block in its own "block" field; every strength lift belongs to the strength block. A block not listed gets no exercises. There is no warm-up: the user warms up on their own, so drills whose block is not listed today are not available.',
     '3. Strength block: choose lifts that make the legs strong and hard to injure (single-leg work, a hip hinge, calves/Achilles, adductors/groin, knees), rotating through context.strengthLifts over the weeks rather than repeating the same few. For fatigue resistance, at least one lift uses the upper part of its allowedReps (for example walking lunges or split squats for higher reps). Give sets, repsMin, repsMax, rirMin and rirMax inside the lift\'s own ranges (sets, allowedReps, rir) and restSeconds inside its restSeconds range. Progress from the lift\'s "recent" entries when they went well.',
     "4. Conditioning block (when listed): whole-body endurance from the conditioning drills in context.drills, varied across sessions; favour longer work intervals that build leg endurance.",
     '5. Drills: sets, amountMin, amountMax and restSeconds inside the drill\'s own ranges (sets, allowedAmount, restSeconds). amount counts the drill\'s "unit" (reps or seconds), per side when perSide is true. Drill effort follows its "effort" text: fast, sharp and well landed, never to failure. Drills have no RIR.',
@@ -516,7 +521,7 @@ export function drillEntry(
  * order is fixed to the block order, and exercises past a block's maximum
  * (or in a block not in today's plan) are dropped, the model's first ones
  * kept (2026-11-05: the first real Athletic day failed twice on one extra
- * warm-up drill, a paid call each; the plan decides the shape, so the extra
+ * drill, a paid call each; the plan decides the shape, so the extra
  * is not worth a rejection). All noted in `repairs`. An unknown or repeated
  * exercise, a block with too few exercises, or too many in total fail.
  * `ignoreBuildUp` is for the commit-time re-check. */
@@ -605,7 +610,7 @@ export function checkAthleticOutput(raw: unknown, context: AthleticContext, opti
   if (errors.length > 0) return { ok: false, stage: 'domain', errors };
 
   const ordered = [...kept].sort((a, b) => ATHLETIC_BLOCKS.indexOf(a.block) - ATHLETIC_BLOCKS.indexOf(b.block) || a.index - b.index);
-  if (ordered.some((x, i) => x !== kept[i])) repairs.push('reordered to warm-up, quality, strength, conditioning, cool-down');
+  if (ordered.some((x, i) => x !== kept[i])) repairs.push('reordered to resilience, strength, endurance, mobility, flexibility');
 
   const strings = (v: unknown, max: number) => (Array.isArray(v) ? v.map((x) => shortText(x)).filter(Boolean).slice(0, max) : []);
   return {

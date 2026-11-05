@@ -189,8 +189,8 @@
 
     const STATUS_ICON = { done: '✓', editing: '●', pending: '', skipped: '–' };
 
-    /** Leading drills are the warm-up and drills after the last lift come
-     * after the session (flexibility cool-down, athletic add-on); a session
+    /** Leading drills come before the lifts and drills after the last lift
+     * come after the session (flexibility cool-down, athletic add-on); a session
      * without both drills and lifts is one list. */
     function sectionsOf(exerciseIds) {
       const lifts = exerciseIds.map((id) => !drillById.has(id));
@@ -199,7 +199,7 @@
       if (first === -1 || lifts.every(Boolean)) return exerciseIds.map(() => 'main');
       return exerciseIds.map((_, i) => (i < first ? 'warmup' : i > last ? 'after' : 'main'));
     }
-    const SECTION_LABELS = { warmup: 'Warm-up', main: 'Main session', after: 'After the session' };
+    const SECTION_LABELS = { warmup: 'Before the lifts', main: 'Main session', after: 'After the session' };
 
     function shortSetText(sets, unit) {
       const done = sets.filter((s) => s.completed);

@@ -1088,7 +1088,7 @@
       return AI_STATUS_LABELS[status] || capitalize(status);
     }
 
-    const ATHLETIC_BLOCK_LABELS = { warmup: 'Warm-up / mobility', quality: 'Resilience', strength: 'Leg strength', conditioning: 'Endurance', cooldown: 'Flexibility', addon: 'Athletic add-on' };
+    const ATHLETIC_BLOCK_LABELS = { warmup: 'Mobility', quality: 'Resilience', strength: 'Leg strength', conditioning: 'Endurance', cooldown: 'Flexibility', addon: 'Athletic add-on' };
     const ATHLETIC_COMPONENT_LABELS = { strength: 'Strength', resilience: 'Resilience', endurance: 'Endurance', mobility: 'Mobility', flexibility: 'Flexibility' };
 
     function buildAiExerciseCard(item, pendingReview) {
@@ -1157,9 +1157,10 @@
         for (const r of plan.reasons) wrap.appendChild(el('p', { class: 'faint', text: r, style: 'margin:0' }));
       }
       // Flexibility block (2026-10-28): Blueprint's weekly stretching
-      // minutes, warm-up drills before the session and holds after it.
+      // minutes, after the session. Only proposals from before 2026-11-05
+      // have warm-up drills.
       const flex = proposal.flexibilityBlock;
-      if (flex) {
+      if (flex && flex.warmup.length > 0) {
         wrap.appendChild(el('h3', { text: `Flexibility · about ${flex.minutes} min`, style: 'margin:0.8rem 0 0.2rem' }));
         wrap.appendChild(el('p', { class: 'faint', text: flex.reason, style: 'margin:0 0 0.3rem' }));
         for (const ex of flex.warmup) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
@@ -1174,7 +1175,8 @@
         for (const ex of addOn.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
       }
       if (flex && flex.cooldown.length > 0) {
-        wrap.appendChild(el('h3', { text: 'Flexibility cool-down', style: 'margin:0.8rem 0 0.2rem' }));
+        wrap.appendChild(el('h3', { text: flex.warmup.length > 0 ? 'Flexibility cool-down' : `Flexibility · about ${flex.minutes} min`, style: 'margin:0.8rem 0 0.2rem' }));
+        if (flex.warmup.length === 0) wrap.appendChild(el('p', { class: 'faint', text: flex.reason, style: 'margin:0 0 0.3rem' }));
         for (const ex of flex.cooldown) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
       }
 

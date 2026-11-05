@@ -13,9 +13,9 @@
 //   strength     strength block (leg lifts)
 //   resilience   quality block (landing, ankle, low jumps)
 //   endurance    conditioning block
-//   mobility     warm-up block grown into a mobility block (2-3 drills)
+//   mobility     mobility block (2-3 dynamic drills), after the main work
 //   flexibility  cool-down block of holds (2-3)
-// Every session still opens with one warm-up drill.
+// There is no warm-up block (owner, 2026-11-05): warming up is the owner's choice.
 //
 // Today's components are chosen by the app, before the model runs, so the
 // rotation is guaranteed:
@@ -70,7 +70,7 @@ const RESILIENCE_MODES: readonly TrainingMode[] = ['power', 'agility', 'movement
 const FLEXIBILITY_MODES: readonly TrainingMode[] = ['mobility-hold', 'soft-tissue'];
 
 /** Components a logged session covered (completed sets only). One
- * warm-up drill is not mobility work, and one closing hold is not
+ * mobility drill is not mobility work, and one closing hold is not
  * flexibility work: those need two drills each. */
 export function componentsDone(performances: ReadonlyArray<{ exercise_id: string; sets: ReadonlyArray<{ completed: boolean }> }>): Set<AthleticComponent> {
   const done = new Set<AthleticComponent>();

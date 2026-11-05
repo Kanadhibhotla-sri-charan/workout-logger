@@ -10,9 +10,10 @@
 // Every Push / Pull / Upper / Legs session gets a deterministic block, outside
 // the AI output (the model is told about it and leaves it to the app): for
 // each goal still behind, furthest behind first, its least recently done
-// drill not already picked, with enough sets for today's share. Dynamic
-// drills go before the session (warm-up), holds and foam rolling after it
-// (cool-down). The block stays between FLEXIBILITY_BLOCK_MIN_SECONDS and
+// drill not already picked, with enough sets for today's share. All of it
+// goes after the session, dynamic drills first, then holds and foam rolling
+// (owner, 2026-11-05: no warm-up block; warming up is the owner's choice).
+// The block stays between FLEXIBILITY_BLOCK_MIN_SECONDS and
 // FLEXIBILITY_BLOCK_MAX_SECONDS, rest included. While the Legs injury pause
 // is on, lower-body mobility is left out.
 
@@ -30,7 +31,7 @@ import { athleticFilterFor, athleticPaused, drillCatalogue, drillEntry, type Ath
 
 export const FLEXIBILITY_BLOCK_MIN_SECONDS = 5 * 60;
 export const FLEXIBILITY_BLOCK_MAX_SECONDS = 12 * 60;
-/** Gym days that get the block (the Athletic day has its own warm-up and cool-down). */
+/** Gym days that get the block (the Athletic day has its own mobility and flexibility). */
 const BLOCK_PURPOSES: readonly SessionPurpose[] = ['push', 'pull', 'upper', 'legs'];
 const LOWER_BODY_GOAL = 'lower-body-mobility';
 
@@ -54,7 +55,7 @@ export interface FlexibilityWeek {
 export interface FlexibilityBlock {
   minutes: number;
   reason: string;
-  /** Warm-up drills (before the session) and cool-down drills (after it). */
+  /** Always empty since 2026-11-05 (no warm-up block); kept for stored proposals. */
   warmup: AIWorkoutExerciseProposal[];
   cooldown: AIWorkoutExerciseProposal[];
 }
@@ -180,13 +181,13 @@ export function planFlexibilityBlock(db: Database.Database, date: string, purpos
       repairs
     );
     // The time box may take a drill below its usual minimum sets (never below 1).
-    return { ...entry, sets };
+    return { ...entry, sets, block: 'cooldown' as const, dynamic: drill.block === 'warmup' };
   });
   const names = behind.filter((g) => picks.some((p) => p.drill.goals.includes(g.goalId))).map((g) => `${g.name} ${g.remainingMinutes} of ${g.weeklyMinutes} min left`);
   return {
     minutes: Math.max(1, Math.round(total() / 60)),
     reason: `This week: ${names.join('; ')}.`,
-    warmup: exercises.filter((e) => e.block === 'warmup'),
-    cooldown: exercises.filter((e) => e.block !== 'warmup'),
+    warmup: [],
+    cooldown: [...exercises.filter((e) => e.dynamic), ...exercises.filter((e) => !e.dynamic)].map(({ dynamic: _dynamic, ...e }) => e),
   };
 }

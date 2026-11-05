@@ -195,7 +195,7 @@ describe('generating an Athletic day', () => {
     const context = buildAthleticContext(db, THURSDAY);
     expect(p.athleticPlan).toMatchObject({ components: FIRST_PLAN, light: false });
     expect(p.exercises.map((e) => e.block)).toEqual(blockOrder(context));
-    expect(p.exercises.map((e) => e.block)).toEqual(['warmup', 'quality', 'quality', 'strength', 'strength', 'cooldown', 'cooldown']);
+    expect(p.exercises.map((e) => e.block)).toEqual(['quality', 'quality', 'strength', 'strength', 'cooldown', 'cooldown']);
     for (const e of p.exercises.filter((x) => x.block !== 'strength')) {
       const rx = modePrescriptionFor(e.exerciseId)!;
       expect(e).toMatchObject({ targetType: 'functional_goal', rirMin: null, rirMax: null, repUnit: rx.unit });
@@ -264,14 +264,19 @@ describe('generating an Athletic day', () => {
     const dropped = checkAthleticOutput(unplanned, context);
     expect(dropped.ok && dropped.proposal.exercises.some((e) => e.exerciseId === conditioning.exerciseId)).toBe(false);
     expect(dropped).toMatchObject({ ok: true, repairs: expect.arrayContaining([expect.stringMatching(/conditioning is not part of today's plan/)]) });
-    // 2026-11-05: an extra warm-up drill past the plan's one is dropped, the
-    // model's first one kept, and the session still builds.
-    const [firstWarmup, secondWarmup] = context.drills.filter((d) => d.block === 'warmup') as [AthleticContext['drills'][number], AthleticContext['drills'][number]];
-    const asAnswer = (d: typeof firstWarmup) => ({ exerciseId: d.exerciseId, targetId: d.goals[0], sets: d.sets.min, amountMin: d.amount.min, amountMax: d.amount.max, restSeconds: d.restSeconds.min });
-    const twoWarmups = athleticAnswer(context, (xs) => [asAnswer(firstWarmup), asAnswer(secondWarmup), ...xs.filter((x) => blockOf(x) !== 'warmup')]);
-    const trimmed = checkAthleticOutput(twoWarmups, context);
-    expect(trimmed).toMatchObject({ ok: true, repairs: expect.arrayContaining([expect.stringMatching(/warmup holds at most 1/)]) });
-    expect(trimmed.ok && trimmed.proposal.exercises.filter((e) => e.block === 'warmup').map((e) => e.exerciseId)).toEqual([firstWarmup.exerciseId]);
+    // 2026-11-05: no warm-up block. A warm-up drill the model adds anyway is
+    // dropped and the session still builds.
+    const warmupDrill = context.drills.find((d) => d.block === 'warmup')!;
+    const withWarmup = athleticAnswer(context, (xs) => [{ exerciseId: warmupDrill.exerciseId, targetId: warmupDrill.goals[0], sets: warmupDrill.sets.min, amountMin: warmupDrill.amount.min, amountMax: warmupDrill.amount.max, restSeconds: warmupDrill.restSeconds.min }, ...xs]);
+    const trimmed = checkAthleticOutput(withWarmup, context);
+    expect(trimmed).toMatchObject({ ok: true, repairs: expect.arrayContaining([expect.stringMatching(/warmup is not part of today's plan/)]) });
+    expect(trimmed.ok && trimmed.proposal.exercises.some((e) => e.block === 'warmup')).toBe(false);
+    // Too many in a listed block: the first ones stay.
+    const holds = context.drills.filter((d) => d.block === 'cooldown').slice(0, 4);
+    const tooManyHolds = athleticAnswer(context, (xs) => [...xs.filter((x) => blockOf(x) !== 'cooldown'), ...holds.map((d) => ({ exerciseId: d.exerciseId, targetId: d.goals[0], sets: d.sets.min, amountMin: d.amount.min, amountMax: d.amount.max, restSeconds: d.restSeconds.min }))]);
+    const trimmedHolds = checkAthleticOutput(tooManyHolds, context);
+    expect(trimmedHolds).toMatchObject({ ok: true, repairs: expect.arrayContaining([expect.stringMatching(/cooldown holds at most 3/)]) });
+    expect(trimmedHolds.ok && trimmedHolds.proposal.exercises.filter((e) => e.block === 'cooldown').map((e) => e.exerciseId)).toEqual(holds.slice(0, 3).map((d) => d.exerciseId));
     const benchSnuckIn = athleticAnswer(context, (xs) => [...xs, { ...xs[4], exerciseId: 'flat-barbell-bench-press' }]);
     expect(checkAthleticOutput(benchSnuckIn, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/not an athletic drill or leg strength lift/)] });
     const noStrength = athleticAnswer(context, (xs) => xs.filter((x) => x.rirMin === undefined));
@@ -419,12 +424,14 @@ describe('athletic add-on on Push / Pull / Upper days', () => {
 describe('flexibility block (Blueprint weekly mobility minutes, 2026-10-28)', () => {
   const goalsOf = (id: string) => BlueprintAdapter.getExercise(id)!.functional_goals ?? [];
 
-  it('every gym day gets a block: dynamic drills before the session, holds after, inside the time box', () => {
+  it('every gym day gets a block after the session, dynamic drills then holds, no warm-up, inside the time box', () => {
     const block = planFlexibilityBlock(db, MONDAY, 'push')!;
     expect(block.minutes).toBeGreaterThanOrEqual(5);
     expect(block.minutes * 60).toBeLessThanOrEqual(FLEXIBILITY_BLOCK_MAX_SECONDS + 30);
-    expect(block.warmup.every((e) => modePrescriptionFor(e.exerciseId)!.mode === 'mobility-dynamic')).toBe(true);
-    expect(block.cooldown.every((e) => ['mobility-hold', 'soft-tissue'].includes(modePrescriptionFor(e.exerciseId)!.mode))).toBe(true);
+    expect(block.warmup).toEqual([]);
+    expect(block.cooldown.every((e) => e.block === 'cooldown')).toBe(true);
+    const modes = block.cooldown.map((e) => modePrescriptionFor(e.exerciseId)!.mode);
+    expect(modes.slice(modes.filter((m) => m === 'mobility-dynamic').length).every((m) => m !== 'mobility-dynamic')).toBe(true);
     const goals = [...block.warmup, ...block.cooldown].flatMap((e) => goalsOf(e.exerciseId));
     expect(goals).toEqual(expect.arrayContaining(['upper-body-mobility', 'wrist-forearm-mobility']));
     expect(block.reason).toMatch(/Upper-Body Mobility 10 of 10 min left/);
@@ -498,7 +505,7 @@ describe('logging and Insights', () => {
     const html = readFileSync(new URL('../../public/logger.html', import.meta.url), 'utf8');
     expect(html).toMatch(/noRir: !!drill/);
     expect(html).toMatch(/if \(state\.noRir\) row\.append\(weight, reps, done, remove\)/);
-    expect(ATHLETIC_BLOCKS).toEqual(['warmup', 'quality', 'strength', 'conditioning', 'cooldown']);
+    expect(ATHLETIC_BLOCKS).toEqual(['quality', 'strength', 'conditioning', 'warmup', 'cooldown']);
   });
 
   it('pages load with app.js (no clashing top-level names)', () => {
@@ -511,7 +518,7 @@ describe('logging and Insights', () => {
 });
 
 describe('Athletic day as one package (2026-10-31)', () => {
-  it('a day covers only what was logged: one warm-up drill is not mobility, one hold is not flexibility', () => {
+  it('a day covers only what was logged: one mobility drill is not mobility, one hold is not flexibility', () => {
     const done = (ids: string[]) => [...componentsDone(ids.map((exercise_id) => ({ exercise_id, sets: [{ completed: true }] })))].sort();
     const dynamic = allDrills().filter((d) => d.training_mode === 'mobility-dynamic').map((d) => d.id);
     const holds = allDrills().filter((d) => d.training_mode === 'mobility-hold').map((d) => d.id);
@@ -538,7 +545,7 @@ describe('Athletic day as one package (2026-10-31)', () => {
     expect(plan.reasons.join(' ')).toMatch(/badminton tomorrow/);
     const friday = buildAthleticContext(db, '2026-10-23'); // Saturday is badminton
     expect(friday.session.plan.light).toBe(true);
-    expect(friday.session.blocks.map((b) => b.block)).toEqual(['warmup', 'strength', 'cooldown']);
+    expect(friday.session.blocks.map((b) => b.block)).toEqual(['strength', 'warmup', 'cooldown']);
     expect(friday.strengthLifts.every((l) => l.rir.min >= 2 && l.sets.max <= 3)).toBe(true);
     expect(buildAthleticContext(db, THURSDAY).session.plan.light).toBe(false);
   });
