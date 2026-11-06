@@ -1315,3 +1315,10 @@ injury resistant and quick to recover; one Athletic day a week, add-ons
   they chose removal. Warming up is their own choice. Applied to all days:
   the Athletic mobility block and the gym days' dynamic drills now come
   after the main work, so weekly mobility minutes are kept. Log 101.
+
+### 22.9 Minimum exercises per target (2026-11-06)
+
+- The model missed brachialis (2 of 4) and long head (2 of 3) twice while
+  keeping each group's exercise count. Each planned target now carries the
+  planner's reserved exercise count as minimumExercises. The model still
+  chooses the exercises. Log 102.

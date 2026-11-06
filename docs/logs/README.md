@@ -107,3 +107,4 @@ story of how the app got to its current state.
 - [2026-10-31-99-athletic-day-package.md](2026-10-31-99-athletic-day-package.md) — Athletic day is one package: strength + the two parts waiting longest, light next to badminton; Size toggle removed; Legs pause on
 - [2026-11-05-100-athletic-extra-exercise-trim.md](2026-11-05-100-athletic-extra-exercise-trim.md) — Athletic day: an extra drill is dropped instead of failing generation
 - [2026-11-05-101-no-warm-up-block.md](2026-11-05-101-no-warm-up-block.md) — No warm-up block on any day: mobility and flexibility drills go after the main work
+- [2026-11-06-102-minimum-exercises-per-target.md](2026-11-06-102-minimum-exercises-per-target.md) — Upper day failed twice on brachialis and long head sets; the plan now tells the model how many exercises each target needs

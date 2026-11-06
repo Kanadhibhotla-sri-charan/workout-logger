@@ -113,6 +113,12 @@ describe('planned AI context', () => {
       for (const t of ai.sessionPlan.targets) {
         const p = plan.targets.find((x) => x.targetId === t.targetId)!;
         expect([t.minimumSets, t.maximumSets]).toEqual([p.plannedMinimumSets, p.legalMaximumSets]);
+        // 2026-11-06: the exercise count the planner reserved, and it can reach
+        // minimumSets: the largest minimumExercises crediting ceilings add up.
+        expect(t.minimumExercises).toBe(p.reservedExerciseSlots);
+        const crediting = ai.sessionPlan.targets.flatMap((o) => o.candidates.filter((c) => o.targetId === t.targetId || c.alsoCredits.includes(t.targetId)).map((c) => c.maxSets));
+        const best = [...crediting].sort((a, b) => b - a).slice(0, t.minimumExercises).reduce((s, x) => s + x, 0);
+        expect(best).toBeGreaterThanOrEqual(t.minimumSets);
       }
     }
   });
