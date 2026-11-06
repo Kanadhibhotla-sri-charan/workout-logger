@@ -37,4 +37,5 @@ generation is the real test.
 
 ## Deploy
 
-Not deployed yet.
+Deployed 2026-11-06 09:00 IST (1b90a86, with 8ec9f4d). Backup
+pre-1b90a86-20261106T033001Z.sqlite, integrity ok. Health ok, service active.

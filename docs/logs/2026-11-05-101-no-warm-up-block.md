@@ -32,4 +32,5 @@ Typecheck clean. No real provider call.
 
 ## Deploy
 
-Not deployed yet.
+Deployed 2026-11-06 09:00 IST with 1b90a86 (log 102). Backup
+pre-1b90a86-20261106T033001Z.sqlite.
