@@ -22,7 +22,7 @@
 
     <section>
       <h2>Past days</h2>
-      <p class="faint">Fix what a day last week or earlier this week was: rest or badminton when nothing was logged, gym or gym + badminton when a workout was. This changes only that day; no plan is touched.</p>
+      <p class="faint">Fix what a day last week or earlier this week was. A day with a gym workout logged is Gym or Gym + badminton; a day without one is Rest or Badminton (Badminton only, when badminton is logged). This changes only that day; no plan is touched.</p>
       <div id="past-days"></div>
     </section>
 
@@ -2161,7 +2161,8 @@
               }
             });
             row.appendChild(select);
-            if (day.workout === 'completed') row.appendChild(el('span', { class: 'faint', text: 'workout logged' }));
+            const logged = [day.workout === 'completed' ? 'gym workout' : null, day.badmintonLogged ? 'badminton' : null].filter(Boolean).join(' + ');
+            if (logged) row.appendChild(el('span', { class: 'faint', text: `${logged} logged` }));
           }
           row.appendChild(statusEl);
           container.appendChild(row);

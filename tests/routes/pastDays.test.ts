@@ -69,7 +69,7 @@ describe('past-day activity', () => {
     setupProfile();
     const monday = addDays(programmingWeekStart(todayForUser(db)), -7);
     new WorkoutSessionsRepo(db).createSession({ date: monday, session_type: 'gym', status: 'completed', duration_minutes: 50 } as any);
-    expect((await put(monday, 'unselected').expect(400)).body.error).toMatch(/gym\|both.*a workout is logged/);
+    expect((await put(monday, 'unselected').expect(400)).body.error).toMatch(/gym\|both.*a gym workout logged/);
     expect((await put(monday, 'both').expect(200)).body).toMatchObject({ activity: 'both', allowed: ['gym', 'both'] });
   });
 
@@ -78,6 +78,21 @@ describe('past-day activity', () => {
     const tuesday = addDays(programmingWeekStart(todayForUser(db)), -6);
     expect((await put(tuesday, 'gym').expect(400)).body.error).toMatch(/unselected\|badminton/);
     await put(tuesday, 'badminton').expect(200);
+  });
+
+  it('badminton is logged as a session but is not a gym workout (Saturday 7 Nov)', async () => {
+    setupProfile();
+    const saturday = addDays(programmingWeekStart(todayForUser(db)), -2);
+    const sessions = new WorkoutSessionsRepo(db);
+    sessions.createSession({ date: saturday, session_type: 'badminton', status: 'completed', duration_minutes: 100 } as any);
+    const res = await request(app).get('/api/programming/past-days').expect(200);
+    expect(res.body.days.find((d: { date: string }) => d.date === saturday)).toMatchObject({ workout: null, badmintonLogged: true, allowed: ['badminton'] });
+    expect((await put(saturday, 'unselected').expect(400)).body.error).toMatch(/badminton logged/);
+    await put(saturday, 'badminton').expect(200);
+    // Gym on the same day too: Both only.
+    sessions.createSession({ date: saturday, session_type: 'gym', status: 'completed', duration_minutes: 50 } as any);
+    expect((await put(saturday, 'gym').expect(400)).body.error).toMatch(/a gym workout and badminton logged/);
+    expect((await put(saturday, 'both').expect(200)).body).toMatchObject({ activity: 'both', allowed: ['both'] });
   });
 
   it('a planned workout blocks the change', async () => {

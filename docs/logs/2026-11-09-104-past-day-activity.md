@@ -31,3 +31,16 @@ current week).
 - Full suite: 234 failures, identical with and without this change. They
   are date rot: fixtures dated e.g. 2026-09-13 are now "in the past" for
   buildProgrammerContext. Not fixed here.
+
+## Fix, same day: badminton sessions are not gym workouts
+Owner, on Saturday 7 Nov showing "workout logged": "nO WORKOUT only badminton on 7th".
+Badminton is logged as its own session (session_type 'badminton'; 7 Nov:
+100 min), and the first version counted any completed session as a gym
+workout. Now only 'gym' sessions are workouts, and a logged badminton
+session is reported as `badmintonLogged`:
+- gym workout logged: Gym or Gym + badminton (Gym + badminton only, if
+  badminton is logged too)
+- badminton logged, no gym workout: Badminton
+- nothing logged: Rest or Badminton
+7 Nov was already Badminton, so no data change was needed. Test added
+(7 pass).

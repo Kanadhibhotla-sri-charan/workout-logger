@@ -7,10 +7,15 @@
 // A past day's activity is a record of what happened, so the change
 // writes only that day's week override. It never runs the planner and
 // never touches sessions, plans or other days. What a day can become
-// depends on what was logged there:
-//   completed workout          Gym, or Both (gym + badminton)
-//   nothing logged             Rest, or Badminton
-//   planned or in progress     nothing: finish, log or delete it first
+// depends on what was logged there. Badminton is logged as a session of
+// its own (session_type 'badminton'); only 'gym' sessions are workouts.
+//   gym workout logged             Gym, or Both (gym + badminton)
+//   gym workout + badminton        Both
+//   badminton logged, no workout   Badminton
+//   nothing logged                 Rest, or Badminton
+//   gym workout planned or in progress: nothing; finish, log or delete it first
+// (2026-11-09: the first version counted any session as a gym workout, so
+// Saturday 7 Nov, badminton only, offered just Gym / Gym + badminton.)
 
 import { Router } from 'express';
 import type Database from 'better-sqlite3';
@@ -34,8 +39,10 @@ export interface PastDay {
   date: string;
   weekday: Weekday;
   activity: DailyActivity;
-  /** The day's workout, if any: completed, planned or in_progress. */
+  /** The day's gym workout, if any: completed, planned or in_progress. */
   workout: 'completed' | 'planned' | 'in_progress' | null;
+  /** A completed badminton session is logged on this day. */
+  badmintonLogged: boolean;
   /** Activities this day can be changed to (its current one included). */
   allowed: DailyActivity[];
   /** Why `allowed` is empty, when it is. */
@@ -58,7 +65,9 @@ export function readPastDay(database: Database.Database, profile: TrainingProfil
   const overrides = new WeekActivityOverridesRepo(database).get(profile.id, weekStart);
   const effective = applyWeekOverrides(profile.training_days, profile.other_activity_schedule, overrides);
   const activity = deriveDailyActivity(weekday, effective.trainingDays, effective.otherActivitySchedule);
-  const sessions = new WorkoutSessionsRepo(database).listSessionsByDate(date);
+  const all = new WorkoutSessionsRepo(database).listSessionsByDate(date);
+  const sessions = all.filter((s) => s.session_type === 'gym');
+  const badmintonLogged = all.some((s) => s.session_type === 'badminton' && s.status === 'completed');
   const workout = sessions.some((s) => s.status === 'in_progress')
     ? 'in_progress'
     : sessions.some((s) => s.status === 'completed')
@@ -66,14 +75,15 @@ export function readPastDay(database: Database.Database, profile: TrainingProfil
       : sessions.some((s) => s.status === 'planned')
         ? 'planned'
         : null;
-  const allowed: DailyActivity[] = workout === 'completed' ? ['gym', 'both'] : workout === null ? ['unselected', 'badminton'] : [];
+  const allowed: DailyActivity[] =
+    workout === 'completed' ? (badmintonLogged ? ['both'] : ['gym', 'both']) : workout === null ? (badmintonLogged ? ['badminton'] : ['unselected', 'badminton']) : [];
   const blockedReason =
     workout === 'in_progress'
       ? 'A workout on this day is still in progress. Finish it first.'
       : workout === 'planned'
         ? 'This day still has a planned workout. Log it or delete it first.'
         : null;
-  return { date, weekday, activity, workout, allowed, blockedReason };
+  return { date, weekday, activity, workout, badmintonLogged, allowed, blockedReason };
 }
 
 function profileOf(database: Database.Database): TrainingProfile | undefined {
@@ -106,7 +116,8 @@ pastDaysRouter.put('/past-days/:date/activity', (req, res) => {
   const day = readPastDay(database, profile, date);
   if (day.blockedReason) return res.status(409).json({ error: day.blockedReason });
   if (!day.allowed.includes(activity)) {
-    const reason = day.workout === 'completed' ? 'a workout is logged on this day' : 'no workout is logged on this day';
+    const logged = [day.workout === 'completed' ? 'a gym workout' : null, day.badmintonLogged ? 'badminton' : null].filter(Boolean).join(' and ');
+    const reason = logged ? `${logged} logged on this day` : 'nothing logged on this day';
     return res.status(400).json({ error: `activity must be one of ${day.allowed.join('|')} (${reason})` });
   }
   new WeekActivityOverridesRepo(database).setOverride(profile.id, programmingWeekStart(date), day.weekday, activity);
