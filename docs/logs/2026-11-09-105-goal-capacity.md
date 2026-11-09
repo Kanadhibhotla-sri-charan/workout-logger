@@ -1,6 +1,6 @@
 # 105 · Goal muscles get the exercises and sets their week needs
 
-Date: 2026-11-09 · Status: committed, not deployed
+Date: 2026-11-09 · Status: deployed 2026-11-09 (fc8af95, backup pre-fc8af95-20261109T070049Z.sqlite)
 
 ## Why
 Owner: aesthetics must not be compromised (2026-11-05); goals confirmed as

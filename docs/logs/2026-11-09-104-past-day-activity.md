@@ -1,6 +1,6 @@
 # 104 · Past days can be changed from the app
 
-Date: 2026-11-09 · Status: deployed 2026-11-09 (backup pre-fdb01e3-20261109T035847Z.sqlite)
+Date: 2026-11-09 · Status: deployed 2026-11-09 (backup pre-fdb01e3-20261109T035847Z.sqlite); badminton fix d7d4645 deployed with fc8af95
 
 ## Request
 Owner: "yes build the past-day edit option" (after change log 103: Sunday 8 Nov

@@ -1,6 +1,6 @@
 # 107 · Fixed Athletic day; shoulder care on Push and Upper
 
-Date: 2026-11-09 · Status: committed, not deployed
+Date: 2026-11-09 · Status: deployed 2026-11-09 (fc8af95, backup pre-fc8af95-20261109T070049Z.sqlite)
 
 ## Athletic day
 Owner approved the week layout (Thu: strength + resilience + endurance

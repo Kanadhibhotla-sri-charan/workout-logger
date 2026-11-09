@@ -1,6 +1,6 @@
 # 108 · Assisted switch for pull-ups, chin-ups and dips
 
-Date: 2026-11-09 · Status: committed, not deployed
+Date: 2026-11-09 · Status: deployed 2026-11-09 (fc8af95, backup pre-fc8af95-20261109T070049Z.sqlite)
 
 ## Request
 Owner asked how to log assisted pull-ups, chin-ups and dips; then "add

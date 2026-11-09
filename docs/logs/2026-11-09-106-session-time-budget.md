@@ -1,6 +1,6 @@
 # 106 · Session time budget (step 3: minutes)
 
-Date: 2026-11-09 · Status: committed, not deployed
+Date: 2026-11-09 · Status: deployed 2026-11-09 (fc8af95, backup pre-fc8af95-20261109T070049Z.sqlite)
 
 ## Why
 Logged sessions ran 85-97 min (2 Nov 85, 3 Nov 95, 6 Nov 97, 9 Nov 95)
