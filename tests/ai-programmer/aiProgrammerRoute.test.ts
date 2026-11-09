@@ -4,7 +4,7 @@
 // with a mocked global `fetch` standing in for Velona — no real API
 // key is ever used.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
@@ -16,6 +16,16 @@ import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { buildProgrammerContext } from '../../src/ai-programmer/context/programmerContextBuilder.js';
 import { findGenerationFailure } from '../../src/ai-programmer/service/generationFailureMemory.js';
+
+// Pinned clock (2026-11-09): these fixtures use fixed calendar dates and the
+// context builder refuses past dates, so "today" is the date the tests were
+// written for (they started failing once real time passed it).
+beforeAll(() => {
+  vi.useFakeTimers({ now: new Date('2026-09-13T03:00:00Z'), toFake: ['Date'] });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';

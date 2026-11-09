@@ -3,7 +3,7 @@
 // no real Velona API key is ever used or required. Mirrors
 // aiProgrammerService.test.ts's own generateSession test structure.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
 import { AIProgrammerService } from '../../src/ai-programmer/service/aiProgrammerService.js';
@@ -20,6 +20,16 @@ import type { AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerPro
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { AIWeekReconciliationRepo } from '../../src/repositories/aiWeekReconciliationRepo.js';
+
+// Pinned clock (2026-11-09): these fixtures use fixed calendar dates and the
+// context builder refuses past dates, so "today" is the date the tests were
+// written for (they started failing once real time passed it).
+beforeAll(() => {
+  vi.useFakeTimers({ now: new Date('2026-09-13T03:00:00Z'), toFake: ['Date'] });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';

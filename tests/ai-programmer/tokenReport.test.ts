@@ -6,7 +6,7 @@
 // hand-approximated payload — never calls the network, and represents
 // an unavailable typical-output estimate as `null`, never `0`.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
@@ -21,6 +21,16 @@ import { buildVelonaRequestBody } from '../../src/ai-programmer/provider/velonaP
 import { loadVelonaConfig } from '../../src/ai-programmer/provider/config.js';
 import { estimateTokensFromChars } from '../../src/ai-programmer/service/tokenDiagnostics.js';
 import type { AIProgrammerProviderRequest } from '../../src/ai-programmer/contracts/providerTypes.js';
+
+// Pinned clock (2026-11-09): these fixtures use fixed calendar dates and the
+// context builder refuses past dates, so "today" is the date the tests were
+// written for (they started failing once real time passed it).
+beforeAll(() => {
+  vi.useFakeTimers({ now: new Date('2026-09-13T03:00:00Z'), toFake: ['Date'] });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';
@@ -131,21 +141,23 @@ describe('buildTokenReport — generate_session', () => {
 
   it('reports a defensible output-token planning value under the default config, and separates it from configuredMaxOutputTokens', () => {
     const report = buildTokenReport(db, { mode: 'generate_session', targetDate: SUNDAY });
-    expect(report.tokenEstimate.configuredMaxOutputTokens).toBe(4096); // provider default
-    expect(report.tokenEstimate.estimatedTypicalOutputTokens).toBe(2000); // recommended Generate value, fits under 4096
+    expect(report.tokenEstimate.configuredMaxOutputTokens).toBe(16384); // generate_session floor (provider default 4096 is raised)
+    expect(report.tokenEstimate.estimatedTypicalOutputTokens).toBe(2000); // recommended Generate value, fits under it
     expect(report.tokenEstimate.estimatedTotalTokens).toBe(report.tokenEstimate.estimatedInputTokens + 2000);
     expect(report.tokenEstimate.note).toMatch(/planning value/i);
     expect(report.tokenEstimate.note).toMatch(/actual completion length is only known after a live request/i);
   });
 
-  it('represents an unavailable typical-output estimate as null — never 0 — and estimatedTotalTokens also becomes null, while configuredMaxOutputTokens is still reported', () => {
-    process.env.VELONA_MAX_TOKENS = '1000'; // below the 2000 recommended for generate_session
+  it('a VELONA_MAX_TOKENS below the mode floor is raised to it, so the typical estimate stays available (never 0, never null)', () => {
+    // Since the per-mode output floors (velonaProvider.ts: generate_session
+    // 16384, reconcile_week 6144) a low VELONA_MAX_TOKENS is raised to the
+    // floor, so the planning value always fits and is never null.
+    process.env.VELONA_MAX_TOKENS = '1000';
     const report = buildTokenReport(db, { mode: 'generate_session', targetDate: SUNDAY });
-    expect(report.tokenEstimate.configuredMaxOutputTokens).toBe(1000);
-    expect(report.tokenEstimate.estimatedTypicalOutputTokens).toBeNull();
-    expect(report.tokenEstimate.estimatedTypicalOutputTokens).not.toBe(0);
-    expect(report.tokenEstimate.estimatedTotalTokens).toBeNull();
-    expect(report.tokenEstimate.note).toMatch(/exceeds the configured max_tokens/);
+    expect(report.tokenEstimate.configuredMaxOutputTokens).toBe(16384);
+    expect(report.tokenEstimate.estimatedTypicalOutputTokens).toBe(2000);
+    expect(report.tokenEstimate.estimatedTotalTokens).toBe(report.tokenEstimate.estimatedInputTokens + 2000);
+    expect(report.tokenEstimate.note).toMatch(/planning value/i);
   });
 });
 
@@ -187,12 +199,14 @@ describe('buildTokenReport — reconcile_week', () => {
     expect(report.tokenEstimate.estimatedTotalTokens).toBe(report.tokenEstimate.estimatedInputTokens + 3000);
   });
 
-  it('represents an unavailable typical-output estimate as null for reconcile_week too', () => {
-    process.env.VELONA_MAX_TOKENS = '2500'; // below the 3000 recommended for reconcile_week
+  it('reconcile_week: a low VELONA_MAX_TOKENS is raised to its floor too', () => {
+    // Since the per-mode output floors (velonaProvider.ts: generate_session
+    // 16384, reconcile_week 6144) a low VELONA_MAX_TOKENS is raised to the
+    // floor, so the planning value always fits and is never null.
+    process.env.VELONA_MAX_TOKENS = '2500';
     const report = buildTokenReport(db, { mode: 'reconcile_week', targetDate: SUNDAY });
-    expect(report.tokenEstimate.estimatedTypicalOutputTokens).toBeNull();
-    expect(report.tokenEstimate.estimatedTotalTokens).toBeNull();
-    expect(report.tokenEstimate.configuredMaxOutputTokens).toBe(2500);
+    expect(report.tokenEstimate.estimatedTypicalOutputTokens).toBe(3000);
+    expect(report.tokenEstimate.configuredMaxOutputTokens).toBe(6144);
   });
 });
 
@@ -259,18 +273,15 @@ describe('buildTokenReport — cost projection', () => {
     expect(report.costProjection.maximumTotalCost).toBeNull();
   });
 
-  it('the maximum projection stays computable even when the typical estimate is unavailable (a ceiling, not an expected cost)', () => {
-    process.env.VELONA_MAX_TOKENS = '1000'; // forces estimatedTypicalOutputTokens: null for generate_session
+  it('the maximum projection is priced at the effective (floored) max_tokens, a ceiling above the typical cost', () => {
+    process.env.VELONA_MAX_TOKENS = '1000';
     const report = buildTokenReport(db, {
       mode: 'generate_session',
       targetDate: SUNDAY,
       pricing: { source: 'unit-test', models: { 'test-model': { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 } } },
     });
-    expect(report.tokenEstimate.estimatedTypicalOutputTokens).toBeNull();
-    expect(report.costProjection.typicalOutputCost).toBeNull();
-    expect(report.costProjection.typicalTotalCost).toBeNull();
-    expect(report.costProjection.maximumOutputCost).not.toBeNull();
-    expect(report.costProjection.maximumTotalCost).not.toBeNull();
+    expect(report.costProjection.maximumOutputCost).toBeCloseTo((16384 / 1_000_000) * 15, 10);
+    expect(report.costProjection.maximumTotalCost!).toBeGreaterThan(report.costProjection.typicalTotalCost!);
   });
 
   it('computes only the input side when only an input price is configured', () => {

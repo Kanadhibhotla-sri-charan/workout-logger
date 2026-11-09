@@ -55,7 +55,7 @@
 // and 17 (the actual canonical reconciliation caller, not a mock of
 // buildTrainingState).
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
@@ -68,6 +68,16 @@ import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { WeeklyProgramRepo } from '../../src/repositories/weeklyProgramRepo.js';
 import { todayForUser } from '../../src/lib/userTimezone.js';
+
+// Pinned clock (2026-11-09): these fixtures use fixed calendar dates and the
+// context builder refuses past dates, so "today" is the date the tests were
+// written for (they started failing once real time passed it).
+beforeAll(() => {
+  vi.useFakeTimers({ now: new Date('2026-09-13T03:00:00Z'), toFake: ['Date'] });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 
@@ -357,7 +367,8 @@ describe('Same-Week History & Day-Specific Recovery Fix — Test Group D (§14, 
       .post(`/api/workouts/${created.body.session_id}/exercises`)
       .send({ exercise_id: 'lat-pulldown-wide-pronated', order: 1, role: 'primary', sets: [{ set_number: 1, weight: 50, reps: 10, completed: true }] })
       .expect(201);
-    await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed' }).expect(200);
+    // A finished session needs its duration (required since 2026-10-20).
+    await request(app).patch(`/api/workouts/${created.body.session_id}`).send({ status: 'completed', duration_minutes: 60 }).expect(200);
 
     // The real training state, rebuilt as of today, must see this
     // just-completed Tuesday session (the exact canonical-reconciliation

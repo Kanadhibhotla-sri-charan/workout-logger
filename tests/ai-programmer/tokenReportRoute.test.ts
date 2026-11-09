@@ -4,13 +4,23 @@
 // anonymously in production), clean validation errors for a missing
 // date or an invalid mode, and that fetch/Velona is never invoked.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/client.js';
 import { createApp } from '../../src/server/app.js';
 import { TrainingProfileRepo } from '../../src/repositories/trainingProfileRepo.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
+
+// Pinned clock (2026-11-09): these fixtures use fixed calendar dates and the
+// context builder refuses past dates, so "today" is the date the tests were
+// written for (they started failing once real time passed it).
+beforeAll(() => {
+  vi.useFakeTimers({ now: new Date('2026-09-13T03:00:00Z'), toFake: ['Date'] });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const FULL_EQUIPMENT = ['barbell', 'bench', 'rack', 'cable', 'machine', 'dumbbell', 'ez-bar', 'pull-up bar', 'smith machine', 'block or plate'];
 const SUNDAY = '2026-09-13';
@@ -161,12 +171,12 @@ describe('GET /api/ai-programmer/token-report — success (never calls Velona)',
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('reports null typical estimates as null, never 0, over HTTP too', async () => {
+  it('a low VELONA_MAX_TOKENS is raised to the mode floor over HTTP too (the typical estimate stays available)', async () => {
     process.env.VELONA_MAX_TOKENS = '1000';
     const res = await request(app).get('/api/ai-programmer/token-report').query({ mode: 'generate_session', date: SUNDAY });
     expect(res.status).toBe(200);
-    expect(res.body.report.tokenEstimate.estimatedTypicalOutputTokens).toBeNull();
-    expect(res.body.report.tokenEstimate.estimatedTotalTokens).toBeNull();
+    expect(res.body.report.tokenEstimate.configuredMaxOutputTokens).toBe(16384);
+    expect(res.body.report.tokenEstimate.estimatedTypicalOutputTokens).toBe(2000);
     delete process.env.VELONA_MAX_TOKENS;
   });
 
