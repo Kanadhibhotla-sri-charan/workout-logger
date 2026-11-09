@@ -109,3 +109,4 @@ story of how the app got to its current state.
 - [2026-11-05-101-no-warm-up-block.md](2026-11-05-101-no-warm-up-block.md) — No warm-up block on any day: mobility and flexibility drills go after the main work
 - [2026-11-06-102-minimum-exercises-per-target.md](2026-11-06-102-minimum-exercises-per-target.md) — Upper day failed twice on brachialis and long head sets; the plan now tells the model how many exercises each target needs
 - [2026-11-09-103-rest-day-8-nov-data-fix.md](2026-11-09-103-rest-day-8-nov-data-fix.md) — Sunday 8 Nov set to rest in prod (the app only edits the current week)
+- [2026-11-09-104-past-day-activity.md](2026-11-09-104-past-day-activity.md) — Past days (last Monday to yesterday) can be set to rest/badminton or gym/both from the Weekly program page

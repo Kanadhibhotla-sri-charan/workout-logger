@@ -21,6 +21,12 @@
     </section>
 
     <section>
+      <h2>Past days</h2>
+      <p class="faint">Fix what a day last week or earlier this week was: rest or badminton when nothing was logged, gym or gym + badminton when a workout was. This changes only that day; no plan is touched.</p>
+      <div id="past-days"></div>
+    </section>
+
+    <section>
       <h2>Leg training</h2>
       <p class="faint">One Athletic day a week holds the legs' whole package: strength, resilience (landing, ankles, low jumps), endurance, mobility and flexibility. Each Athletic day picks strength plus the two parts waiting longest; next to badminton it is a light day (easy strength, mobility, flexibility). Leg size counts only where it makes the legs harder to injure and quicker to recover. Add-ons on other days carry light athletic work, never strength.</p>
       <div id="leg-training"></div>
@@ -2125,7 +2131,48 @@
       }
     }
 
+    /** Past days (2026-11-09): last Monday to yesterday, one row each. */
+    const PAST_DAY_LABELS = { gym: 'Gym', both: 'Gym + badminton', badminton: 'Badminton', unselected: 'Rest' };
+    async function loadPastDays() {
+      const container = document.getElementById('past-days');
+      try {
+        const { days } = await api('/api/programming/past-days');
+        container.innerHTML = '';
+        for (const day of days) {
+          const row = el('div', { style: 'display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin:0 0 0.45rem' });
+          row.appendChild(el('span', { text: formatDate(day.date, { weekday: 'short', day: 'numeric', month: 'short' }), style: 'min-width:7.5rem' }));
+          const statusEl = el('span');
+          if (day.allowed.length === 0) {
+            row.append(el('span', { text: PAST_DAY_LABELS[day.activity] || day.activity }), el('span', { class: 'faint', text: day.blockedReason }));
+          } else {
+            const options = day.allowed.includes(day.activity) ? day.allowed : [day.activity, ...day.allowed];
+            const select = el('select', { 'aria-label': `Activity on ${day.date}` }, options.map((a) => el('option', { value: a, text: PAST_DAY_LABELS[a] || a, ...(a === day.activity ? { selected: 'selected' } : {}), ...(day.allowed.includes(a) ? {} : { disabled: 'disabled' }) })));
+            select.addEventListener('change', async () => {
+              select.disabled = true;
+              try {
+                const saved = await api(`/api/programming/past-days/${day.date}/activity`, { method: 'PUT', body: { activity: select.value } });
+                day.activity = saved.activity;
+                showInlineStatus(statusEl, 'success', 'Saved.');
+              } catch (err) {
+                select.value = day.activity;
+                showInlineStatus(statusEl, 'error', err.message || 'Could not save.');
+              } finally {
+                select.disabled = false;
+              }
+            });
+            row.appendChild(select);
+            if (day.workout === 'completed') row.appendChild(el('span', { class: 'faint', text: 'workout logged' }));
+          }
+          row.appendChild(statusEl);
+          container.appendChild(row);
+        }
+      } catch (err) {
+        showError(container, "We couldn't load past days.", loadPastDays);
+      }
+    }
+
     loadWeek();
+    loadPastDays();
     loadAiNameCatalogs();
     loadLegTraining();
     loadInjuryPauses();

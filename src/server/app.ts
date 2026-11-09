@@ -9,6 +9,7 @@ import { workoutsRouter } from './routes/workouts.js';
 import { exportRouter } from './routes/export.js';
 import { trainingProfileRouter } from './routes/trainingProfile.js';
 import { outsideBlueprintExercisesRouter } from './routes/outsideBlueprintExercises.js';
+import { pastDaysRouter } from './routes/pastDays.js';
 import { programmingRouter } from './routes/programming.js';
 import { aiProgrammerRouter } from './routes/aiProgrammer.js';
 import { insightsRouter } from './routes/insights.js';
@@ -32,6 +33,7 @@ export function createApp(db: Database.Database): Express {
   app.use('/api/training-profile', trainingProfileRouter);
   app.use('/api/outside-blueprint-exercises', outsideBlueprintExercisesRouter);
   app.use('/api/programming', programmingRouter);
+  app.use('/api/programming', pastDaysRouter);
   app.use('/api/ai-programmer', aiProgrammerRouter);
   app.use('/api/insights', insightsRouter);
   app.use('/api/coaching', coachingRouter);
