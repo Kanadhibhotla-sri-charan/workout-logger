@@ -21,6 +21,7 @@
 //     -> the effective (override-applied) Gym/Badminton/Both/Unselected
 //        routine, the same resolution GET /api/programming/week uses
 
+import { planShoulderCare } from '../../athletic/shoulderCare.js';
 import { planFlexibilityBlock } from '../../athletic/flexibility.js';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
@@ -798,11 +799,13 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
       : poolTargets;
 
   const flexibility = planFlexibilityBlock(db, input.targetDate, sessionPurpose);
+  const shoulderCare = planShoulderCare(db, input.targetDate, sessionPurpose);
   const programmingBrief = {
     ...briefFor(targets),
     ...(flexibility
       ? { flexibilityBlock: { minutes: flexibility.minutes, reason: flexibility.reason, drills: [...flexibility.warmup, ...flexibility.cooldown].map((e) => e.exerciseId) } }
       : {}),
+    ...(shoulderCare ? { shoulderCare: { minutes: shoulderCare.minutes, reason: shoulderCare.reason, exercises: shoulderCare.exercises.map((e) => e.exerciseId) } } : {}),
   };
   const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
 

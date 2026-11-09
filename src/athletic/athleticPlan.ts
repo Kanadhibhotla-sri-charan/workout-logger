@@ -17,18 +17,23 @@
 //   flexibility  cool-down block of holds (2-3)
 // There is no warm-up block (owner, 2026-11-05): warming up is the owner's choice.
 //
-// Today's components are chosen by the app, before the model runs, so the
-// rotation is guaranteed:
-//   - strength every Athletic day: it is the only day the legs get
-//     strength work (add-ons hold none);
-//   - plus COMPONENTS_PER_DAY - 1 more, the ones waiting longest since an
-//     Athletic day last did them (never done first; ties in the owner's
-//     order of aims: resilience, flexibility, endurance, mobility);
-//   - badminton yesterday or tomorrow makes it a light day: no
-//     resilience (jumps) or endurance, strength kept easy (RIR 2+, at most
-//     3 sets), the rest from mobility and flexibility.
-// "Done" is read from what was logged on past Athletic days (completed
-// sets), not from what was planned, so a skipped block waits its turn.
+// Today's components are chosen by the app, before the model runs. Since
+// 2026-11-09 the package is fixed (owner OK'd the week layout: "Thu
+// Athletic: strength + resilience + endurance every week, plus 2-3
+// holds"; and left mobility vs resilience to the coach, for staying
+// injury free):
+//   - a normal day: strength, resilience, endurance and flexibility (2-3
+//     holds). Strength is the legs' only strength work of the week;
+//     resilience (landing, ankles, low jumps) has the strongest evidence
+//     for preventing leg injuries, so it comes every week rather than
+//     taking turns with mobility; endurance keeps the legs lasting through
+//     badminton. Mobility is covered by the dynamic drills of the gym days'
+//     flexibility blocks.
+//   - badminton yesterday or tomorrow makes it a light day: no resilience
+//     (jumps) or endurance, strength kept easy (RIR 2+, at most 3 sets),
+//     plus mobility and flexibility.
+// Until 2026-11-09 it was strength plus the two components waiting
+// longest; "last done" (read from logged sets) is still reported.
 
 import type Database from 'better-sqlite3';
 import { trainingModeOf, isDrillId } from '../blueprint/athletic.js';
@@ -39,14 +44,11 @@ import { WorkoutSessionsRepo } from '../repositories/workoutSessionsRepo.js';
 export const ATHLETIC_COMPONENTS = ['strength', 'resilience', 'endurance', 'mobility', 'flexibility'] as const;
 export type AthleticComponent = (typeof ATHLETIC_COMPONENTS)[number];
 
-/** Strength plus two more. */
-export const COMPONENTS_PER_DAY = 3;
+/** The fixed package of a normal and of a light Athletic day. */
+export const NORMAL_DAY: readonly AthleticComponent[] = ['strength', 'resilience', 'endurance', 'flexibility'];
+export const LIGHT_DAY: readonly AthleticComponent[] = ['strength', 'mobility', 'flexibility'];
 /** How far back past Athletic days are read. */
 export const ATHLETIC_PLAN_HISTORY_DAYS = 70;
-/** Owner's order of aims, for ties: injury-free, flexible, legs that last. */
-const TIE_ORDER: readonly AthleticComponent[] = ['resilience', 'flexibility', 'endurance', 'mobility'];
-/** Left out on a light day (badminton yesterday or tomorrow). */
-const HARD_ON_LEGS: readonly AthleticComponent[] = ['resilience', 'endurance'];
 
 export const COMPONENT_LABELS: Record<AthleticComponent, string> = {
   strength: 'Strength',
@@ -126,10 +128,15 @@ export function chooseAthleticComponents(history: ReadonlyArray<{ date: string; 
   const light = badminton.yesterday || badminton.tomorrow;
   const when = badminton.yesterday && badminton.tomorrow ? 'yesterday and tomorrow' : badminton.yesterday ? 'yesterday' : 'tomorrow';
   const reasons: string[] = [light ? `Strength: every Athletic day, kept easy (badminton ${when}).` : 'Strength: every Athletic day (the only day the legs get strength work).'];
-  const candidates = TIE_ORDER.filter((c) => !(light && HARD_ON_LEGS.includes(c)));
-  const waiting = [...candidates].sort((a, b) => (lastDone[a] ?? '').localeCompare(lastDone[b] ?? '') || TIE_ORDER.indexOf(a) - TIE_ORDER.indexOf(b));
-  const extra = waiting.slice(0, COMPONENTS_PER_DAY - 1);
-  for (const c of extra) reasons.push(`${COMPONENT_LABELS[c]}: ${lastDone[c] ? `last done ${lastDone[c]}` : 'not done on an Athletic day yet'}.`);
+  const WHY: Record<AthleticComponent, string> = {
+    strength: '',
+    resilience: 'every week: landing and ankle work does the most to keep the legs injury free',
+    endurance: 'every week: legs that last through badminton',
+    mobility: 'on a light day, in place of jumps and endurance',
+    flexibility: '2-3 holds every Athletic day',
+  };
+  const package_ = light ? LIGHT_DAY : NORMAL_DAY;
+  for (const c of package_.filter((x) => x !== 'strength')) reasons.push(`${COMPONENT_LABELS[c]}: ${WHY[c]} (${lastDone[c] ? `last done ${lastDone[c]}` : 'not done on an Athletic day yet'}).`);
   if (light) reasons.push(`Resilience and endurance left out: badminton ${when}.`);
-  return { components: ATHLETIC_COMPONENTS.filter((c) => c === 'strength' || extra.includes(c)), light, reasons, lastDone };
+  return { components: ATHLETIC_COMPONENTS.filter((c) => package_.includes(c)), light, reasons, lastDone };
 }

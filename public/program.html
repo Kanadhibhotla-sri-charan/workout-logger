@@ -28,7 +28,7 @@
 
     <section>
       <h2>Leg training</h2>
-      <p class="faint">One Athletic day a week holds the legs' whole package: strength, resilience (landing, ankles, low jumps), endurance, mobility and flexibility. Each Athletic day picks strength plus the two parts waiting longest; next to badminton it is a light day (easy strength, mobility, flexibility). Leg size counts only where it makes the legs harder to injure and quicker to recover. Add-ons on other days carry light athletic work, never strength.</p>
+      <p class="faint">One Athletic day a week holds the legs' whole package: strength, resilience (landing, ankles, low jumps), endurance, mobility and flexibility. Every Athletic day does strength, resilience, endurance and 2-3 stretches; mobility comes with the gym days' stretching. Next to badminton it is a light day (easy strength, mobility, flexibility). Leg size counts only where it makes the legs harder to injure and quicker to recover. Add-ons on other days carry light athletic work, never strength.</p>
       <div id="leg-training"></div>
     </section>
 
@@ -1173,6 +1173,12 @@
         if (flex.warmup.length > 0) wrap.appendChild(el('h3', { text: 'Session', style: 'margin:0.8rem 0 0.2rem' }));
       }
       for (const ex of proposal.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+      // Shoulder care (2026-11-09): one easy shoulder-health exercise.
+      if (proposal.shoulderCare && proposal.shoulderCare.exercises.length > 0) {
+        wrap.appendChild(el('h3', { text: `Shoulder care · about ${proposal.shoulderCare.minutes} min`, style: 'margin:0.8rem 0 0.2rem' }));
+        wrap.appendChild(el('p', { class: 'faint', text: proposal.shoulderCare.reason, style: 'margin:0 0 0.3rem' }));
+        for (const ex of proposal.shoulderCare.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
+      }
       // Athletic add-on (2026-10-18): 5-10 min of drills after the session.
       if (proposal.athleticAddOn && proposal.athleticAddOn.exercises.length > 0) {
         const addOn = proposal.athleticAddOn;

@@ -14,7 +14,7 @@
 
 import type Database from 'better-sqlite3';
 import type { ExercisePerformance } from '../contracts/types.js';
-import { progressSeriesKey, type RepUnit } from '../contracts/loggingOptions.js';
+import { ASSISTED_EXERCISE_IDS, formatWeightKg, progressSeriesKey, type RepUnit } from '../contracts/loggingOptions.js';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { PROGRESSION_INCREMENTS } from './config.js';
 
@@ -60,9 +60,11 @@ function pastPerformances(db: Database.Database, exerciseId: string, beforeDate:
   }));
 }
 
-/** The heaviest weight with completed reps, and the best reps at it. */
-function topSet(p: PastPerformance): { weight: number; reps: number } | null {
-  const sets = p.sets.filter((s) => s.completed && s.weight != null && s.weight > 0 && s.reps != null && s.reps > 0);
+/** The heaviest weight with completed reps, and the best reps at it. For
+ * an assisted exercise the weight is minus the assistance (2026-11-09), so
+ * the "heaviest" is the least help, and bodyweight (0) counts too. */
+function topSet(p: PastPerformance, assistable: boolean): { weight: number; reps: number } | null {
+  const sets = p.sets.filter((s) => s.completed && s.weight != null && (assistable ? true : s.weight > 0) && s.reps != null && s.reps > 0);
   if (sets.length === 0) return null;
   const weight = Math.max(...sets.map((s) => s.weight!));
   return { weight, reps: Math.max(...sets.filter((s) => s.weight === weight).map((s) => s.reps!)) };
@@ -74,15 +76,16 @@ function loadStep(perf: ExercisePerformance): number {
   return equipment === 'dumbbell' ? DUMBBELL_STEP_KG : PROGRESSION_INCREMENTS.loadKg;
 }
 
-const fmt = (n: number) => String(Math.round(n * 100) / 100);
 
 export function loadHintFor(db: Database.Database, perf: ExercisePerformance, sessionDate: string): LoadHint | null {
   const unit = (perf.rep_unit ?? 'reps') as RepUnit;
   if (unit !== 'reps') return null;
+  const assistable = ASSISTED_EXERCISE_IDS.includes(perf.exercise_id);
+  const kg = (w: number) => formatWeightKg(w, assistable);
   const key = progressSeriesKey({ exerciseId: perf.exercise_id, equipment: perf.equipment, attachment: perf.attachment, repUnit: unit });
   const series = pastPerformances(db, perf.exercise_id, sessionDate)
     .filter((p) => progressSeriesKey({ exerciseId: perf.exercise_id, equipment: p.equipment, attachment: p.attachment, repUnit: (p.repUnit ?? 'reps') as RepUnit }) === key)
-    .map((p) => ({ date: p.date, top: topSet(p) }))
+    .map((p) => ({ date: p.date, top: topSet(p, assistable) }))
     .filter((p): p is { date: string; top: { weight: number; reps: number } } => p.top !== null)
     .slice(0, MAX_LOOKBACK);
   const last = series[0];
@@ -94,20 +97,21 @@ export function loadHintFor(db: Database.Database, perf: ExercisePerformance, se
 
   const min = perf.target_reps_min;
   const max = perf.target_reps_max;
-  const lastText = `Last time ${fmt(weight)} kg × ${reps}`;
-  const stuck = sameWeightSessions >= 3 ? ` (${sameWeightSessions} sessions at ${fmt(weight)} kg)` : '';
+  const lastText = `Last time ${kg(weight)} × ${reps}`;
+  const stuck = sameWeightSessions >= 3 ? ` (${sameWeightSessions} sessions at ${kg(weight)})` : '';
   if (max != null && reps >= max) {
-    const next = weight + loadStep(perf);
+    // Assisted: less help by one step, never past bodyweight.
+    const next = weight < 0 ? Math.min(0, weight + loadStep(perf)) : weight + loadStep(perf);
     const repGoal = min ?? null;
     return {
       kind: 'heavier', lastDate: last.date, lastWeight: weight, lastReps: reps, weight: next, reps: repGoal, sameWeightSessions,
-      text: `${lastText}, top of ${min ?? max}-${max}${stuck}. Go heavier: about ${fmt(next)} kg${repGoal != null ? ` for ${repGoal}+` : ''}.`,
+      text: `${lastText}, top of ${min ?? max}-${max}${stuck}. ${weight < 0 ? 'Less help' : 'Go heavier'}: about ${kg(next)}${repGoal != null ? ` for ${repGoal}+` : ''}.`,
     };
   }
   if (min != null && reps < min) {
     return {
       kind: 'hold', lastDate: last.date, lastWeight: weight, lastReps: reps, weight, reps: min, sameWeightSessions,
-      text: `${lastText}, below ${min}-${max ?? min}. Stay at ${fmt(weight)} kg and aim for ${min}.`,
+      text: `${lastText}, below ${min}-${max ?? min}. Stay at ${kg(weight)} and aim for ${min}.`,
     };
   }
   return {

@@ -17,6 +17,11 @@
 // minimum share is due. Another sub-region (triceps long head) follows its
 // parent's status. Targets the ledger does not know keep the previous
 // behaviour.
+// A goal muscle whose ask its exercises cannot hold at their usual sets
+// (isolations get 2) may take up to GOAL_EXERCISE_MAX_SETS on each
+// exercise that works it directly (2026-11-09: brachialis has three such
+// exercises, 2 x 3 = 6 < the 7 a Pull day needs, so it ran 5-8 of 14 a
+// week). Only then: a goal its exercises already hold keeps 2 per exercise.
 
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
@@ -27,9 +32,16 @@ import { hashContext } from '../context/programmerContextDiagnostics.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context/programmerContextTypes.js';
 import { adequacyToleranceFor } from '../validation/programmerAdequacyValidator.js';
 import { planSession } from './sessionPlanner.js';
+import { planSessionTime } from './sessionTime.js';
+import { planAthleticAddOn } from '../../athletic/athleticAddOn.js';
+import { planFlexibilityBlock } from '../../athletic/flexibility.js';
 import { buildWeeklyLedger, type LedgerEntry, type WeeklyLedger } from './weeklyLedger.js';
 
 export type WeeklyStatus = 'must' | 'can_wait' | 'done';
+
+/** Most sets one direct exercise of a goal muscle may take when the usual
+ * sets cannot hold the goal's ask. */
+export const GOAL_EXERCISE_MAX_SETS = 3;
 
 /** A must target may fall at most 20% short of today's sets. */
 export const MUST_ADEQUACY_TOLERANCE = 0.8;
@@ -56,6 +68,8 @@ function askOf(entry: LedgerEntry | undefined): number | null {
 export function applyWeeklyLedger(context: AIProgrammerContext, ledger: WeeklyLedger, reductions: ReadonlyMap<string, number> = new Map()): AIProgrammerContext {
   const byId = new Map(ledger.entries.map((e) => [e.targetId, e]));
   const targetsByKey = new Map(context.targets.map((t) => [`${t.targetType}:${t.targetId}`, t]));
+  /** Targets whose direct exercises were allowed GOAL_EXERCISE_MAX_SETS. */
+  const raised = new Map<string, AIProgrammerContext['targets'][number]>();
   const statusById = new Map<string, WeeklyStatus>();
   const eligible = new Set(context.programmingBrief.muscles.filter((m) => m.eligibleForThisSession).map((m) => m.targetId));
   const groupIds = new Set(BlueprintAdapter.listVolumeGroups().map((g) => g.id));
@@ -98,9 +112,21 @@ export function applyWeeklyLedger(context: AIProgrammerContext, ledger: WeeklyLe
       if (isGoal) cap = min;
       else min = cap;
     }
-    const target = targetsByKey.get(`${m.targetType}:${m.targetId}`);
+    let target = targetsByKey.get(`${m.targetType}:${m.targetId}`);
     const adequacyTolerance = m.adequacyTolerance ?? (own && ownStatus === 'must' ? MUST_ADEQUACY_TOLERANCE : undefined);
     const feasibilityAt = (n: number) => (target ? computeTargetFeasibility(target, context.targets, n, cap, adequacyToleranceFor({ adequacyTolerance })) : undefined);
+    if (isGoal && target && feasibilityAt(min)?.isFeasible === false) {
+      const more = {
+        ...target,
+        validExercises: target.validExercises.map((v) =>
+          v.role === 'primary' && v.authoredPrescription && v.authoredPrescription.sets < GOAL_EXERCISE_MAX_SETS ? { ...v, authoredPrescription: { ...v.authoredPrescription, sets: GOAL_EXERCISE_MAX_SETS } } : v
+        ),
+      };
+      if (more.validExercises.some((v, i) => v !== target!.validExercises[i])) {
+        target = more;
+        raised.set(`${m.targetType}:${m.targetId}`, more);
+      }
+    }
     // More than this session's credited exercises can deliver (e.g. a goal's
     // whole remaining week on its last day): ask for the most they can,
     // never a number the planner must refuse. The rest shows as behind.
@@ -123,6 +149,7 @@ export function applyWeeklyLedger(context: AIProgrammerContext, ledger: WeeklyLe
   const content = Object.fromEntries(Object.entries(context).filter(([k]) => !(VOLATILE_KEYS as readonly string[]).includes(k))) as Omit<AIProgrammerContext, (typeof VOLATILE_KEYS)[number]>;
   const rewritten = {
     ...content,
+    targets: context.targets.map((t) => raised.get(`${t.targetType}:${t.targetId}`) ?? t),
     programmingBrief: { ...context.programmingBrief, muscles, session: { ...context.programmingBrief.session, expectedCoverageTargetIds } },
   };
   return { ...rewritten, contextId, contextHash: hashContext(rewritten), generatedAt, diagnostics };
@@ -132,8 +159,8 @@ export function applyWeeklyLedger(context: AIProgrammerContext, ledger: WeeklyLe
  * session plan refuses it (its credited exercises cannot deliver that
  * many alongside today's other targets), never below its original
  * minimum. */
-export function applyWeeklyLedgerPlannable(context: AIProgrammerContext, ledger: WeeklyLedger): AIProgrammerContext {
-  const reductions = new Map<string, number>();
+export function applyWeeklyLedgerPlannable(context: AIProgrammerContext, ledger: WeeklyLedger, initialReductions: ReadonlyMap<string, number> = new Map()): AIProgrammerContext {
+  const reductions = new Map<string, number>(initialReductions);
   const minOf = (ctx: AIProgrammerContext, id: string) => ctx.programmingBrief.muscles.find((m) => m.targetId === id)?.recommendedSessionSets.min ?? 0;
   let applied = applyWeeklyLedger(context, ledger, reductions);
   for (;;) {
@@ -153,9 +180,68 @@ export function applyWeeklyLedgerPlannable(context: AIProgrammerContext, ledger:
 export function withWeeklyLedger(db: Database.Database, context: AIProgrammerContext): AIProgrammerContext {
   if (aiWeeklyLedgerMode() !== 'on') return context;
   try {
-    return applyWeeklyLedgerPlannable(context, buildWeeklyLedger(db, context));
+    const ledger = buildWeeklyLedger(db, context);
+    const timed = withSessionTime(db, context, applyWeeklyLedger(context, ledger));
+    return applyWeeklyLedgerPlannable(timed.context, ledger, timed.reductions);
   } catch (err) {
     console.warn('[ai-programmer] weekly ledger not applied', JSON.stringify({ targetDate: context.targetDate, error: err instanceof Error ? `${err.name}: ${err.message}` : 'unknown' }));
     return context;
   }
+}
+
+/** Today's due sets from a ledger-rewritten brief: goal muscles and the
+ * other "must" muscles. A sub-region whose parent is itself in the brief
+ * (triceps long head) is counted through its parent. */
+export function dueSets(context: AIProgrammerContext): { goalSets: number; otherMust: Array<{ targetId: string; sets: number }> } {
+  const muscles = context.programmingBrief.muscles.filter((m) => m.eligibleForThisSession && m.targetType === 'physique_target');
+  const ids = new Set(muscles.map((m) => m.targetId));
+  let goalSets = 0;
+  const otherMust: Array<{ targetId: string; sets: number }> = [];
+  for (const m of muscles) {
+    const parent = volumeParentOf(m.targetId);
+    if (parent !== m.targetId && ids.has(parent)) continue;
+    if (m.weeklyStatus !== 'must') continue;
+    if (m.isGoalOriented) goalSets += m.recommendedSessionSets.min;
+    else otherMust.push({ targetId: m.targetId, sets: m.recommendedSessionSets.min });
+  }
+  return { goalSets, otherMust };
+}
+
+/** The session time budget (planning/sessionTime.ts) for a ledger-rewritten
+ * context: decides the add-on, the flexibility block's length and the sets
+ * "can wait" muscles may take, and returns the context with the budget (and
+ * a shortened flexibility block) in its brief, plus the set reductions for
+ * non-goal "must" muscles when even the maximum length is passed. */
+export function withSessionTime(db: Database.Database, original: AIProgrammerContext, applied: AIProgrammerContext): { context: AIProgrammerContext; reductions: Map<string, number> } {
+  const purpose = original.programmingBrief.session.purpose;
+  const { goalSets, otherMust } = dueSets(applied);
+  const flex = original.programmingBrief.flexibilityBlock;
+  const time = planSessionTime({
+    aimMinutes: original.profile.defaultSessionDurationMinutes,
+    maxMinutes: original.profile.maximumSessionDurationMinutes,
+    goalSets,
+    otherMustSets: otherMust.reduce((sum, m) => sum + m.sets, 0),
+    flexibilityMinutes: flex?.minutes ?? 0,
+    addOnMinutes: planAthleticAddOn(db, original.targetDate, purpose)?.minutes ?? 0,
+    fixedMinutes: original.programmingBrief.shoulderCare?.minutes ?? 0,
+  });
+  let flexibilityBlock = flex;
+  if (flex && time.flexibilityMinutes < flex.minutes) {
+    const shorter = planFlexibilityBlock(db, original.targetDate, purpose, time.flexibilityMinutes * 60);
+    flexibilityBlock = shorter ? { minutes: shorter.minutes, reason: shorter.reason, drills: [...shorter.warmup, ...shorter.cooldown].map((e) => e.exerciseId) } : undefined;
+  }
+  // Past the maximum: one set at a time off the largest non-goal must.
+  const reductions = new Map<string, number>();
+  const left = otherMust.map((m) => ({ ...m }));
+  for (let n = 0; n < time.otherMustSetsToCut; n++) {
+    const largest = left.filter((m) => m.sets > 1).sort((a, b) => b.sets - a.sets || a.targetId.localeCompare(b.targetId))[0];
+    if (!largest) break;
+    largest.sets -= 1;
+    reductions.set(largest.targetId, (reductions.get(largest.targetId) ?? 0) + 1);
+  }
+  const { contextId, generatedAt, diagnostics } = original;
+  const content = Object.fromEntries(Object.entries(original).filter(([k]) => !(VOLATILE_KEYS as readonly string[]).includes(k))) as Omit<AIProgrammerContext, (typeof VOLATILE_KEYS)[number]>;
+  const { flexibilityBlock: _old, ...brief } = original.programmingBrief;
+  const rewritten = { ...content, programmingBrief: { ...brief, ...(flexibilityBlock ? { flexibilityBlock } : {}), sessionTime: time } };
+  return { context: { ...rewritten, contextId, contextHash: hashContext(rewritten), generatedAt, diagnostics }, reductions };
 }

@@ -65,7 +65,8 @@ function buildExposureRecord(session: WorkoutSession, performance: ExercisePerfo
   // weight x reps load for them (loggingOptions.ts).
   const repCounted = countsReps(performance);
   const completedReps = repCounted ? completedSets.filter((s) => s.reps !== null).map((s) => s.reps!) : [];
-  const loadPoints = repCounted ? completedSets.filter((s) => s.weight !== null && s.reps !== null).map((s) => s.weight! * (1 + s.reps! / 30)) : [];
+  // Assisted sets (negative weight, 2026-11-09) have no weight x reps load.
+  const loadPoints = repCounted ? completedSets.filter((s) => s.weight !== null && s.weight >= 0 && s.reps !== null).map((s) => s.weight! * (1 + s.reps! / 30)) : [];
   const rirValues = completedSets.filter((s) => s.rir !== null).map((s) => s.rir!);
 
   const prescribedSets = performance.target_sets ?? undefined;

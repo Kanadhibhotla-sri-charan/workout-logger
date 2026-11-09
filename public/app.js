@@ -132,6 +132,18 @@ const WEEKDAY_DISPLAY = {
 
 /** "2026-08-31" -> "Mon, Aug 31". Pure string/date formatting — the
  * calendar date itself always comes from the backend. */
+/** Machine-assisted exercises (2026-11-09): the assistance is stored as a
+ * negative weight (20 kg of help = -20). Same list as
+ * src/contracts/loggingOptions.ts ASSISTED_EXERCISE_IDS. */
+const ASSISTED_EXERCISE_IDS = new Set(['pull-up-pronated', 'chin-up-supinated', 'dip-chest-biased', 'dip-triceps-biased']);
+
+/** "20 kg assist" for a negative weight, else "12.5 kg". */
+function formatWeightKg(weight) {
+  if (weight === null || weight === undefined) return '—';
+  const n = Math.round(Math.abs(weight) * 100) / 100;
+  return weight < 0 ? `${n} kg assist` : `${n} kg`;
+}
+
 function formatDate(dateIso, opts = {}) {
   if (!dateIso) return '';
   const [y, m, d] = dateIso.split('-').map(Number);

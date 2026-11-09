@@ -35,6 +35,19 @@ describe('loadHintFor', () => {
     expect(loadHintFor(db, log('2026-11-02', 'hammer-curl', [[0, 0, false]], {}, 'planned'), '2026-11-02')).toMatchObject({ kind: 'heavier', weight: 16 });
   });
 
+  it('assisted (negative weight = help, 2026-11-09): the least help is the top set; at the top of the range, less help', () => {
+    const { db, log } = setup();
+    log('2026-10-29', 'chin-up-supinated', [[-25, 15], [-20, 15]]);
+    const perf = log('2026-11-02', 'chin-up-supinated', [[0, 0, false]], {}, 'planned');
+    const hint = loadHintFor(db, perf, '2026-11-02')!;
+    expect(hint).toMatchObject({ kind: 'heavier', lastWeight: -20, weight: -17.5, reps: 10 });
+    expect(hint.text).toBe('Last time 20 kg assist × 15, top of 10-15. Less help: about 17.5 kg assist for 10+.');
+    // Never past bodyweight: from 2.5 kg of help the next step is bodyweight.
+    log('2026-10-31', 'chin-up-supinated', [[-2.5, 15]]);
+    expect(loadHintFor(db, perf, '2026-11-02')).toMatchObject({ weight: 0 });
+    expect(loadHintFor(db, perf, '2026-11-02')!.text).toContain('about bodyweight');
+  });
+
   it('within the range -> same weight, one more rep; below -> hold', () => {
     const { db, log } = setup();
     log('2026-10-29', 'cable-overhead-extension-leaning-forward', [[27, 15], [42.5, 12]]);

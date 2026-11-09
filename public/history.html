@@ -127,7 +127,7 @@
         for (const s of perf.sets) {
           const row = el('tr');
           row.appendChild(el('td', { text: String(s.set_number) }));
-          row.appendChild(el('td', { text: s.weight ?? '—' }));
+          row.appendChild(el('td', { text: s.weight === null || s.weight === undefined ? '—' : s.weight < 0 ? formatWeightKg(s.weight) : s.weight }));
           row.appendChild(el('td', { text: s.reps ?? '—' }));
           row.appendChild(el('td', { text: s.completed ? 'Yes' : 'No' }));
           table.appendChild(row);

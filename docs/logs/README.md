@@ -110,3 +110,8 @@ story of how the app got to its current state.
 - [2026-11-06-102-minimum-exercises-per-target.md](2026-11-06-102-minimum-exercises-per-target.md) — Upper day failed twice on brachialis and long head sets; the plan now tells the model how many exercises each target needs
 - [2026-11-09-103-rest-day-8-nov-data-fix.md](2026-11-09-103-rest-day-8-nov-data-fix.md) — Sunday 8 Nov set to rest in prod (the app only edits the current week)
 - [2026-11-09-104-past-day-activity.md](2026-11-09-104-past-day-activity.md) — Past days (last Monday to yesterday) can be set to rest/badminton or gym/both from the Weekly program page
+- [2026-11-09-105-goal-capacity.md](2026-11-09-105-goal-capacity.md) — Goal muscles: direct exercises first on the shortlist, 3 sets when the week needs it (brachialis 4 -> 6 on Pull)
+- [2026-11-09-106-session-time-budget.md](2026-11-09-106-session-time-budget.md) — Session time budget: add-on, then flexibility, then can-wait muscles give way; goal sets never cut
+- [2026-11-09-107-fixed-athletic-day-and-shoulder-care.md](2026-11-09-107-fixed-athletic-day-and-shoulder-care.md) — Athletic day fixed (strength, resilience, endurance, holds); shoulder care after Push and Upper
+- [2026-11-09-108-assisted-switch.md](2026-11-09-108-assisted-switch.md) — Assisted switch: assistance logged as negative weight, shown as kg assist
+- [2026-11-09-109-test-date-rot.md](2026-11-09-109-test-date-rot.md) — Test suite green: pinned clocks, 11 stale expectations updated

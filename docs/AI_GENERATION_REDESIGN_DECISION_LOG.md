@@ -1322,3 +1322,40 @@ injury resistant and quick to recover; one Athletic day a week, add-ons
   keeping each group's exercise count. Each planned target now carries the
   planner's reserved exercise count as minimumExercises. The model still
   chooses the exercises. Log 102.
+
+### 22.10 Goal capacity, session time, fixed Athletic day, shoulder care (2026-11-09)
+
+Owner, answering the 2026-11-05 questions: triceps and brachialis are the
+aesthetic goals; build order approved (goal-set shortfall, session time,
+fixed Thursday, shoulder resilience); mobility vs resilience left to the
+coach ("which suits body better and helps in achieving my injury free goal").
+
+- Goal shortfall, found: brachialis ran 5, 6, 8 of 14 a week (triceps met
+  17/16 the week of 2 Nov). The ledger asked 7 on a Pull day; the plan
+  gave 4. Two causes: the rotation shortlist (4 per target) went to biceps
+  curls that give brachialis no goal credit and left out the cable rope
+  hammer curl; and isolations are 2 sets each, so two hammer curls held 4.
+  Fix: a goal muscle's shortlist places go to its direct (primary)
+  exercises first; when a goal's ask cannot be held at the usual sets, its
+  direct exercises may take GOAL_EXERCISE_MAX_SETS (3). Only then: triceps,
+  with many exercises, stays at 2 per exercise. The commit re-check now
+  applies the ledger too, so it reads the same ceilings. Real data: Tue 10
+  Nov Pull brachialis 4 -> 6 planned (all three hammer curls). Log 105.
+- Session time (step 3): sessions ran 85-97 min (logged) against the
+  60-min aim. planning/sessionTime.ts counts due sets at 3.5 min (the
+  owner's logs: 2.9-4.7 min per set) plus the flexibility block, the
+  add-on and shoulder care, and gives way in the owner's order: add-on,
+  flexibility down to 5 min, "can wait" muscles, and only past 90 min
+  other muscles' must sets. Goal sets and shoulder care are never cut. The
+  planner's can-wait fill reads the budget. Log 106.
+- Athletic day fixed (coach's call on Q3): strength + resilience +
+  endurance + 2-3 holds every week; the light day next to badminton is
+  unchanged (easy strength, mobility, flexibility). Resilience over
+  mobility: landing, jump and ankle work has the strongest evidence for
+  preventing leg injuries; mobility is covered by the gym days' dynamic
+  drills. Log 107.
+- Shoulder care: one easy exercise (external rotation or push-up plus,
+  least recently done, 2 sets, RIR 2+) after Push and Upper sessions,
+  outside the AI output like the add-on. Log 107.
+- Assisted switch (log 108) and the test suite repair (log 109) shipped
+  in the same deploy.

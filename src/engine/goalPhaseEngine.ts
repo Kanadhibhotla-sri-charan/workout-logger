@@ -356,7 +356,8 @@ export function gatherReviewEvidence(db: Database.Database, goal: Goal, phase: G
         // goal (spec §2 "Important").
         if (roleFor(exercise.exercise_id, target.target_type, target.target_id) !== 'primary') continue;
         if (!countsReps(exercise)) continue; // steps/seconds/metres: no weight x reps load
-        const completedSets = exercise.sets.filter((s) => s.completed && s.weight != null && s.reps != null);
+        // Assisted sets (negative weight, 2026-11-09) have no weight x reps load.
+        const completedSets = exercise.sets.filter((s) => s.completed && s.weight != null && s.weight >= 0 && s.reps != null);
         for (const set of completedSets) {
           loadPoints.push({ date: session.date, load: set.weight! * (1 + set.reps! / 30) });
         }

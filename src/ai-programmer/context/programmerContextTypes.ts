@@ -332,6 +332,12 @@ export interface AIProgrammerProgrammingBrief {
    * gym session from Blueprint's weekly flexibility minutes
    * (src/athletic/flexibility.ts). Absent when none is due today. */
   flexibilityBlock?: { minutes: number; reason: string; drills: string[] };
+  /** Session time budget (planning/sessionTime.ts, weekly ledger on):
+   * what gave way so the session fits its length. */
+  sessionTime?: import('../planning/sessionTime.js').SessionTimePlan;
+  /** Push / Upper (src/athletic/shoulderCare.ts): the shoulder-health
+   * exercise the app adds after the session. */
+  shoulderCare?: { minutes: number; reason: string; exercises: string[] };
   /** Push Generation Architectural Fix (2026-09-24): deterministic,
    * plain-language notes about a real, session-wide constraint that
    * makes it mathematically impossible for two or more eligible targets

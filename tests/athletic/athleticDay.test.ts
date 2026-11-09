@@ -90,7 +90,7 @@ function plannedOutput(ctx: any): any {
 /** The block order an athleticAnswer for `context` ends up in. */
 const blockOrder = (context: AthleticContext) => context.session.blocks.flatMap((b) => Array(blockCount(context, b.block)).fill(b.block));
 /** With no past Athletic day: strength + the first two in the owner's order. */
-const FIRST_PLAN = ['strength', 'resilience', 'flexibility'];
+const FIRST_PLAN = ['strength', 'resilience', 'endurance', 'flexibility'];
 
 /** Completed Athletic days in the past, so the build-up phase is over. */
 function pastAthleticDays(n: number) {
@@ -195,7 +195,7 @@ describe('generating an Athletic day', () => {
     const context = buildAthleticContext(db, THURSDAY);
     expect(p.athleticPlan).toMatchObject({ components: FIRST_PLAN, light: false });
     expect(p.exercises.map((e) => e.block)).toEqual(blockOrder(context));
-    expect(p.exercises.map((e) => e.block)).toEqual(['quality', 'quality', 'strength', 'strength', 'cooldown', 'cooldown']);
+    expect(p.exercises.map((e) => e.block)).toEqual(['quality', 'quality', 'strength', 'strength', 'conditioning', 'cooldown', 'cooldown']);
     for (const e of p.exercises.filter((x) => x.block !== 'strength')) {
       const rx = modePrescriptionFor(e.exerciseId)!;
       expect(e).toMatchObject({ targetType: 'functional_goal', rirMin: null, rirMax: null, repUnit: rx.unit });
@@ -259,11 +259,8 @@ describe('generating an Athletic day', () => {
     const blockOf = (x: any) => context.drills.find((d) => d.exerciseId === x.exerciseId)?.block;
     const noFlexibility = athleticAnswer(context, (xs) => xs.filter((x) => blockOf(x) !== 'cooldown'));
     expect(checkAthleticOutput(noFlexibility, context)).toMatchObject({ ok: false, errors: [expect.stringMatching(/cooldown: 0 exercise\(s\); needs at least 2/)] });
-    const conditioning = context.drills.find((d) => d.block === 'conditioning')!;
-    const unplanned = athleticAnswer(context, (xs) => [...xs, { exerciseId: conditioning.exerciseId, targetId: conditioning.goals[0], sets: conditioning.sets.min, amountMin: conditioning.amount.min, amountMax: conditioning.amount.max, restSeconds: conditioning.restSeconds.min }]);
-    const dropped = checkAthleticOutput(unplanned, context);
-    expect(dropped.ok && dropped.proposal.exercises.some((e) => e.exerciseId === conditioning.exerciseId)).toBe(false);
-    expect(dropped).toMatchObject({ ok: true, repairs: expect.arrayContaining([expect.stringMatching(/conditioning is not part of today's plan/)]) });
+    // A drill in a block not in today's plan is dropped (conditioning is in
+    // the fixed package since 2026-11-09; the warm-up case below covers it).
     // 2026-11-05: no warm-up block. A warm-up drill the model adds anyway is
     // dropped and the session still builds.
     const warmupDrill = context.drills.find((d) => d.block === 'warmup')!;
@@ -415,8 +412,12 @@ describe('athletic add-on on Push / Pull / Upper days', () => {
     const addOnIds = proposal.athleticAddOn!.exercises.map((e) => e.exerciseId);
     const flex = proposal.flexibilityBlock!;
     const ids = (list: { exerciseId: string }[]) => list.map((e) => e.exerciseId);
-    expect(perfs.map((p) => p.exercise_id)).toEqual([...ids(flex.warmup), ...ids(proposal.exercises), ...addOnIds, ...ids(flex.cooldown)]);
-    const addOnPerfs = perfs.slice(flex.warmup.length + proposal.exercises.length, flex.warmup.length + proposal.exercises.length + addOnIds.length);
+    // Shoulder care (2026-11-09) sits between the session and the add-on.
+    const care = ids(proposal.shoulderCare?.exercises ?? []);
+    expect(care).toHaveLength(1);
+    expect(perfs.map((p) => p.exercise_id)).toEqual([...ids(flex.warmup), ...ids(proposal.exercises), ...care, ...addOnIds, ...ids(flex.cooldown)]);
+    const start = flex.warmup.length + proposal.exercises.length + care.length;
+    const addOnPerfs = perfs.slice(start, start + addOnIds.length);
     expect(addOnPerfs.map((p) => p.rep_unit)).toEqual(addOnIds.map((id) => modePrescriptionFor(id)!.unit));
   });
 });
@@ -527,16 +528,16 @@ describe('Athletic day as one package (2026-10-31)', () => {
     expect(componentsDone([{ exercise_id: 'romanian-deadlift', sets: [{ completed: false }] }]).size).toBe(0);
   });
 
-  it('strength every day plus the two waiting longest; consecutive days rotate', () => {
+  it('a normal day is the fixed package: strength, resilience, endurance, flexibility (2026-11-09)', () => {
     const none = { yesterday: false, tomorrow: false };
-    expect(chooseAthleticComponents([], none).components).toEqual(['strength', 'resilience', 'flexibility']);
-    const week1 = [{ date: '2026-10-22', components: ['strength', 'resilience', 'flexibility'] as any }];
-    expect(chooseAthleticComponents(week1, none).components).toEqual(['strength', 'endurance', 'mobility']);
-    const week2 = [...week1, { date: '2026-10-29', components: ['strength', 'endurance', 'mobility'] as any }];
-    expect(chooseAthleticComponents(week2, none).components).toEqual(['strength', 'resilience', 'flexibility']);
-    // A planned part that was skipped waits its turn: only strength + resilience were logged.
-    const skipped = [{ date: '2026-10-22', components: ['strength', 'resilience'] as any }];
-    expect(chooseAthleticComponents(skipped, none).components).toEqual(['strength', 'endurance', 'flexibility']);
+    const fixed = ['strength', 'resilience', 'endurance', 'flexibility'];
+    expect(chooseAthleticComponents([], none).components).toEqual(fixed);
+    const week1 = [{ date: '2026-10-22', components: ['strength', 'resilience', 'endurance', 'flexibility'] as any }];
+    const plan = chooseAthleticComponents(week1, none);
+    expect(plan.components).toEqual(fixed);
+    expect(plan.reasons.join(' ')).toMatch(/Resilience.*injury free.*last done 2026-10-22/);
+    expect(plan.lastDone).toMatchObject({ resilience: '2026-10-22', mobility: null });
+    expect(buildAthleticContext(db, THURSDAY).session.blocks.map((b) => b.block)).toEqual(['quality', 'strength', 'conditioning', 'cooldown']);
   });
 
   it('badminton next to it makes a light day: no jumps or endurance, easy strength', () => {
@@ -558,8 +559,8 @@ describe('Athletic day as one package (2026-10-31)', () => {
     db.prepare(`UPDATE workout_sets SET completed = 1, reps = 8 WHERE workout_exercise_id IN (SELECT id FROM workout_exercises WHERE workout_session_id = ?)`).run(sessionId);
     db.prepare(`UPDATE workout_sessions SET status = 'completed' WHERE session_id = ?`).run(sessionId);
     const plan = planAthleticDay(db, '2026-10-29');
-    expect(plan.lastDone).toMatchObject({ strength: THURSDAY, resilience: THURSDAY, flexibility: THURSDAY, endurance: null, mobility: null });
-    expect(plan.components).toEqual(['strength', 'endurance', 'mobility']);
+    expect(plan.lastDone).toMatchObject({ strength: THURSDAY, resilience: THURSDAY, endurance: THURSDAY, mobility: null });
+    expect(plan.components).toEqual(['strength', 'resilience', 'endurance', 'flexibility']);
   });
 
   it('the commit re-check uses the plan stored with the proposal', async () => {

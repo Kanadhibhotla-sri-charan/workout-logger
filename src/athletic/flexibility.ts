@@ -114,7 +114,7 @@ export function flexibilityWeek(db: Database.Database, date: string, beforeDate:
 
 /** The flexibility block for a gym session on `date`, or null (not a gym
  * purpose, or every goal already met this week). */
-export function planFlexibilityBlock(db: Database.Database, date: string, purpose: SessionPurpose | null): FlexibilityBlock | null {
+export function planFlexibilityBlock(db: Database.Database, date: string, purpose: SessionPurpose | null, maxSeconds: number = FLEXIBILITY_BLOCK_MAX_SECONDS): FlexibilityBlock | null {
   if (purpose === null || !BLOCK_PURPOSES.includes(purpose)) return null;
   const week = flexibilityWeek(db, date);
   // Today counts even when the calendar does not list it as a gym day.
@@ -145,8 +145,8 @@ export function planFlexibilityBlock(db: Database.Database, date: string, purpos
       if (!drill) continue;
       const perSet = drillSetSeconds(drill.exerciseId);
       const pick = { drill, sets: Math.min(drill.sets.max, Math.max(drill.sets.min, Math.ceil(need / perSet))) };
-      if (pass > 0 && total() + secondsOf({ ...pick, sets: 1 }) > FLEXIBILITY_BLOCK_MAX_SECONDS) continue;
-      if (pass > 0) while (pick.sets > 1 && total() + secondsOf(pick) > FLEXIBILITY_BLOCK_MAX_SECONDS) pick.sets -= 1;
+      if (pass > 0 && total() + secondsOf({ ...pick, sets: 1 }) > maxSeconds) continue;
+      if (pass > 0) while (pick.sets > 1 && total() + secondsOf(pick) > maxSeconds) pick.sets -= 1;
       picks.push(pick);
       added = true;
       for (const g of drill.goals) covered.set(g, (covered.get(g) ?? 0) + pick.sets * perSet);
@@ -155,16 +155,19 @@ export function planFlexibilityBlock(db: Database.Database, date: string, purpos
   if (picks.length === 0) return null;
 
   // Fit the time box: take sets off the longest item while over it (never below 1).
-  while (total() > FLEXIBILITY_BLOCK_MAX_SECONDS) {
+  while (total() > maxSeconds) {
     const longest = [...picks].filter((p) => p.sets > 1).sort((a, b) => secondsOf(b) - secondsOf(a))[0];
     if (!longest) break;
     longest.sets -= 1;
   }
+  // A shortened block (session time budget) keeps its first drills only.
+  while (picks.length > 1 && total() > maxSeconds) picks.pop();
   // Short of the minimum: add sets to the furthest-behind picks within their ranges.
-  for (let grown = true; grown && total() < FLEXIBILITY_BLOCK_MIN_SECONDS; ) {
+  const floor = Math.min(FLEXIBILITY_BLOCK_MIN_SECONDS, maxSeconds);
+  for (let grown = true; grown && total() < floor; ) {
     grown = false;
     for (const p of picks) {
-      if (total() >= FLEXIBILITY_BLOCK_MIN_SECONDS) break;
+      if (total() >= floor) break;
       if (p.sets < p.drill.sets.max) {
         p.sets += 1;
         grown = true;

@@ -206,7 +206,7 @@
       if (done.length === 0) return 'Nothing logged';
       const last = done[done.length - 1];
       const amount = last.reps != null ? `${last.reps}${unit === 'seconds' ? ' s' : unit === 'reps' ? '' : ` ${unit}`}` : '—';
-      return `${done.length} set${done.length === 1 ? '' : 's'} · ${last.weight ? `${last.weight} kg × ` : ''}${amount}`;
+      return `${done.length} set${done.length === 1 ? '' : 's'} · ${last.weight ? `${formatWeightKg(last.weight)} × ` : ''}${amount}`;
     }
 
     // Load hint (2026-10-30): last time's heaviest set and what to try
@@ -215,7 +215,7 @@
     function loadHintShort(perf) {
       const h = loadHintOf(perf);
       if (!h) return '';
-      return h.kind === 'heavier' ? ` · ↑ ${h.weight} kg` : ` · ${h.weight} kg × ${h.reps}`;
+      return h.kind === 'heavier' ? ` · ↑ ${formatWeightKg(h.weight)}` : ` · ${formatWeightKg(h.weight)} × ${h.reps}`;
     }
 
     /** Wraps a full exercise card into a row that opens on tap. */
@@ -449,7 +449,7 @@
         pva.appendChild(el('div', {}, [el('span', { class: 'pva-label', text: 'Actual' }), document.createTextNode(started ? `${completed} completed${skipped ? `, ${skipped} skipped` : ''}` : 'Not started')]));
         card.appendChild(pva);
         if (generatedMatch && generatedMatch.previous_performance && !loadHintOf(perf)) {
-          card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'}${generatedMatch.previous_performance.rep_unit ? ` ${generatedMatch.previous_performance.rep_unit}` : ''} (${formatDate(generatedMatch.previous_performance.date)})` }));
+          card.appendChild(el('p', { class: 'faint', text: `Last time: ${generatedMatch.previous_performance.weight != null && generatedMatch.previous_performance.weight < 0 ? formatWeightKg(generatedMatch.previous_performance.weight) : generatedMatch.previous_performance.weight ?? '—'} × ${generatedMatch.previous_performance.reps ?? '—'}${generatedMatch.previous_performance.rep_unit ? ` ${generatedMatch.previous_performance.rep_unit}` : ''} (${formatDate(generatedMatch.previous_performance.date)})` }));
         }
       }
       const hint = loadHintOf(perf);
@@ -479,7 +479,7 @@
         for (const s of perf.sets) {
           const row = el('tr');
           row.appendChild(el('td', { text: String(s.set_number) }));
-          row.appendChild(el('td', { text: s.weight ?? '—' }));
+          row.appendChild(el('td', { text: s.weight === null || s.weight === undefined ? '—' : s.weight < 0 ? formatWeightKg(s.weight) : s.weight }));
           row.appendChild(el('td', { text: s.reps ?? '—' }));
           if (showRir) row.appendChild(el('td', { text: s.rir ?? '—' }));
           row.appendChild(el('td', { text: s.completed ? 'Yes' : 'No' }));
@@ -490,7 +490,7 @@
       }
 
       const key = `p${perf.id}`;
-      const state = drafts.get(key) || { sets: perf.sets.map((s) => ({ ...s })), unit: repUnitOf(perf), noRir: !!drill, dirty: false };
+      const state = drafts.get(key) || { sets: perf.sets.map((s) => ({ ...s })), unit: repUnitOf(perf), noRir: !!drill, dirty: false, ...assistedState(perf.exercise_id, [...perf.sets.map((s) => s.weight), loadHintOf(perf) ? loadHintOf(perf).lastWeight : null]) };
       drafts.set(key, state);
       const onDirty = () => { state.dirty = true; dirty = true; markEditing(key); };
       const setsContainer = el('div');
@@ -647,7 +647,7 @@
       card.appendChild(header);
 
       if (g.previous_performance) {
-        card.appendChild(el('p', { class: 'faint', text: `Last time: ${g.previous_performance.weight ?? '—'} × ${g.previous_performance.reps ?? '—'}${g.previous_performance.rep_unit ? ` ${g.previous_performance.rep_unit}` : ''} (${formatDate(g.previous_performance.date)})` }));
+        card.appendChild(el('p', { class: 'faint', text: `Last time: ${g.previous_performance.weight != null && g.previous_performance.weight < 0 ? formatWeightKg(g.previous_performance.weight) : g.previous_performance.weight ?? '—'} × ${g.previous_performance.reps ?? '—'}${g.previous_performance.rep_unit ? ` ${g.previous_performance.rep_unit}` : ''} (${formatDate(g.previous_performance.date)})` }));
       } else {
         card.appendChild(el('p', { class: 'faint', text: 'No previous performance recorded.' }));
       }
@@ -658,7 +658,7 @@
       card.appendChild(explain);
 
       const key = `g${g.exercise_id}`;
-      const state = drafts.get(key) || { sets: buildInitialSets(g.target_sets), dirty: false };
+      const state = drafts.get(key) || { sets: buildInitialSets(g.target_sets), dirty: false, ...assistedState(sub ? sub.id : g.exercise_id, [g.previous_performance ? g.previous_performance.weight : null]) };
       drafts.set(key, state);
       const onDirty = () => { state.dirty = true; dirty = true; markEditing(key); };
       const setsContainer = el('div');
@@ -708,15 +708,38 @@
       return `Drill · ${drill.sets[0]}–${drill.sets[1]} sets × ${drill.amount[0]}–${drill.amount[1]} ${unit}${drill.perSide ? ' per side' : ''} · rest ${drill.restSeconds[0]}–${drill.restSeconds[1]} s. Effort: ${drill.effort}`;
     }
 
+    /** Assisted switch (2026-11-09) for an assistable exercise: on when
+     * any known weight for it is negative (last time's or this one's). */
+    function assistedState(exerciseId, weights) {
+      if (!ASSISTED_EXERCISE_IDS.has(exerciseId)) return { assistable: false, assisted: false };
+      return { assistable: true, assisted: weights.some((w) => typeof w === 'number' && w < 0) };
+    }
+
     function renderSetEditor(container, state, onDirty) {
       container.innerHTML = '';
+      // Assisted machine: type the number on the machine; it is saved as a
+      // negative weight, so less help reads as progress.
+      if (state.assistable) {
+        const box = el('input', { type: 'checkbox', ...(state.assisted ? { checked: 'checked' } : {}) });
+        box.addEventListener('change', () => {
+          state.assisted = box.checked;
+          for (const s of state.sets) if (typeof s.weight === 'number' && s.weight !== 0) s.weight = state.assisted ? -Math.abs(s.weight) : Math.abs(s.weight);
+          renderSetEditor(container, state, onDirty);
+          onDirty();
+        });
+        container.appendChild(el('label', { class: 'assisted-switch', style: 'display:flex;align-items:center;gap:0.4rem;margin:0 0 0.4rem' }, [box, document.createTextNode('Assisted machine: kg = the help it gives')]));
+      }
       state.sets.forEach((set, i) => {
         // Drills have an effort note instead of RIR (no RIR box).
         const row = el('div', { class: state.noRir ? 'set-row no-rir' : 'set-row' });
         row.appendChild(el('div', { class: 'set-index', text: `#${set.set_number}` }));
-        const weight = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: state.noRir ? 'kg (opt.)' : 'kg', 'aria-label': `Set ${set.set_number} weight` });
-        if (set.weight !== null) weight.value = set.weight;
-        weight.addEventListener('input', () => { set.weight = weight.value === '' ? null : Number(weight.value); onDirty(); });
+        const weight = el('input', { type: 'number', inputmode: 'decimal', step: '0.5', placeholder: state.assisted ? 'assist kg' : state.noRir ? 'kg (opt.)' : 'kg', 'aria-label': `Set ${set.set_number} ${state.assisted ? 'assistance' : 'weight'}` });
+        if (set.weight !== null) weight.value = state.assisted ? Math.abs(set.weight) : set.weight;
+        weight.addEventListener('input', () => {
+          const v = weight.value === '' ? null : Number(weight.value);
+          set.weight = v === null ? null : state.assisted ? -Math.abs(v) : v;
+          onDirty();
+        });
         const unit = state.unit || 'reps';
         const reps = el('input', { type: 'number', inputmode: 'numeric', placeholder: unit, 'aria-label': `Set ${set.set_number} ${unit}` });
         if (set.reps !== null) reps.value = set.reps;
@@ -796,7 +819,17 @@
       section.appendChild(el('label', { text: 'Exercise' }, [pickerContainer]));
 
       api('/api/blueprint/exercises').then((exercises) => {
-        pickerHolder.picker = createBlueprintExercisePicker(exercises, { onChange: updateSaveButtonState });
+        pickerHolder.picker = createBlueprintExercisePicker(exercises, {
+          onChange: () => {
+            updateSaveButtonState();
+            const picked = pickerHolder.picker ? pickerHolder.picker.getSelected() : null;
+            const next = assistedState(picked ? picked.id : '', state.sets.map((s) => s.weight));
+            if (next.assistable !== !!state.assistable) {
+              Object.assign(state, next);
+              renderSetEditor(setsContainer, state, () => { dirty = true; });
+            }
+          },
+        });
         pickerContainer.appendChild(pickerHolder.picker.root);
         updateSaveButtonState();
       }).catch(() => {
@@ -990,7 +1023,7 @@
         const generatedMatch = generated ? generated.exercises.find((g) => g.exercise_id === perf.exercise_id) : null;
         const name = exerciseDisplayName(perf, generatedMatch);
         const unit = perf.rep_unit && perf.rep_unit !== 'reps' ? ` ${perf.rep_unit}` : '';
-        const setsText = perf.sets.map((s) => `${s.weight ?? '—'}×${s.reps ?? '—'}${unit}${s.rir !== null && s.rir !== undefined ? ` @RIR ${s.rir}` : ''}${s.completed ? '' : ' (skipped)'}`).join(', ');
+        const setsText = perf.sets.map((s) => `${s.weight === null || s.weight === undefined ? '—' : s.weight < 0 ? formatWeightKg(s.weight) + ' ' : s.weight}×${s.reps ?? '—'}${unit}${s.rir !== null && s.rir !== undefined ? ` @RIR ${s.rir}` : ''}${s.completed ? '' : ' (skipped)'}`).join(', ');
         const how = [perf.equipment, perf.attachment].filter(Boolean).join(', ');
         lines.push(`${name}${how ? ` (${how})` : ''} — ${perf.sets.length} set(s): ${setsText}`);
       }

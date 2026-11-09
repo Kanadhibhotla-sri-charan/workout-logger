@@ -158,11 +158,18 @@ export function applyExerciseShortlist(targets: readonly AIProgrammerTargetConte
       Number(b.role === 'primary') - Number(a.role === 'primary') ||
       prescribed.indexOf(a) - prescribed.indexOf(b);
     const ranked = [...eligible].sort(order);
-    const shortlist = [...anchors, ...ranked].slice(0, Math.max(EXERCISE_SHORTLIST_CAP, anchors.length));
+    const guidance = input.guidance.find((g) => g.targetType === target.targetType && g.targetId === target.targetId);
+    // A goal muscle's places go to the exercises that work it directly
+    // first, rested or not (2026-11-09: brachialis has three, the hammer
+    // curl family, and goal sets count direct work only; the cap went to
+    // biceps curls that give it no goal credit and left the cable rope
+    // hammer curl out, so the weekly ledger's 7 sets a day could not be
+    // planned). Triceps, with more than the cap, still rotates.
+    const direct = guidance?.isGoalOriented ? [...ranked, ...accessories.filter((v) => !eligible.includes(v)).sort(order)].filter((v) => v.role === 'primary') : [];
+    const shortlist = [...anchors, ...direct, ...ranked.filter((v) => !direct.includes(v))].slice(0, Math.max(EXERCISE_SHORTLIST_CAP, anchors.length));
 
     // Never less feasible than the full pool: widen, in rotation order and then
     // with the rested exercises, until the shortlist reaches what the pool reaches.
-    const guidance = input.guidance.find((g) => g.targetType === target.targetType && g.targetId === target.targetId);
     if (guidance) {
       const feasibleWith = (list: readonly AIProgrammerValidExerciseContext[]) =>
         computeTargetFeasibility(restrictTo(target, withSignal, list), targets, guidance.recommendedSessionSets.min, guidance.directSetsPerExposureCap, adequacyToleranceFor(guidance)).isFeasible;

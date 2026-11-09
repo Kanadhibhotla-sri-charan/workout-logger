@@ -609,7 +609,14 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
   const passes = ledgerOn
     ? [allocatable.filter((w) => w.guidance.weeklyStatus === 'must'), allocatable.filter((w) => w.guidance.weeklyStatus !== 'must')]
     : [allocatable];
-  const setBudget = ledgerOn ? sessionSetBudget(context.profile.defaultSessionDurationMinutes) : Number.POSITIVE_INFINITY;
+  // Session time budget (2026-11-09): when set, it already counts the
+  // flexibility block and the add-on, so "can wait" muscles fill only the
+  // minutes left.
+  const setBudget = !ledgerOn
+    ? Number.POSITIVE_INFINITY
+    : context.programmingBrief.sessionTime
+      ? context.programmingBrief.sessionTime.liftSetBudget
+      : sessionSetBudget(context.profile.defaultSessionDurationMinutes);
   const plannedSets = () => working.filter((w) => planned.has(w.key)).reduce((s, w) => s + w.guidance.recommendedSessionSets.min, 0);
   const attemptWithinBudget = (w: Working, tier: PlanningTier, fill: boolean) => {
     if (fill && plannedSets() >= setBudget) {
@@ -617,7 +624,7 @@ export function planSession(context: AIProgrammerContext, options: PlanSessionOp
       w.plan.tier = tier;
       w.plan.rank = order++;
       w.plan.status = 'deferred';
-      w.plan.reason = `can wait: a later day this week can cover it, and the session already holds about ${plannedSets()} sets`;
+      w.plan.reason = `can wait: a later day this week can cover it, and the session already holds about ${plannedSets()} sets${context.programmingBrief.sessionTime ? ` (about ${context.programmingBrief.sessionTime.aimMinutes} min)` : ''}`;
       return;
     }
     attempt(w, tier);

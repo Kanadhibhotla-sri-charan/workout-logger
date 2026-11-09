@@ -67,6 +67,10 @@ export interface AIWorkoutSessionProposal {
    * main exercises and cool-down drills after them at commit. Not part of
    * the AI output or its validation. */
   flexibilityBlock?: { minutes: number; reason: string; warmup: AIWorkoutExerciseProposal[]; cooldown: AIWorkoutExerciseProposal[] };
+  /** Push / Upper (2026-11-09): one easy shoulder-health exercise chosen by
+   * src/athletic/shoulderCare.ts, written after the main exercises at
+   * commit. Not part of the AI output or its validation. */
+  shoulderCare?: { minutes: number; reason: string; exercises: AIWorkoutExerciseProposal[] };
   programmingRationale: string[];
   goalAlignment: string[];
   recoveryConsiderations: string[];

@@ -5,6 +5,7 @@
 // the LLM/provider — everything here operates on an already-generated,
 // already-persisted proposal (spec §10.5: "never call the LLM/provider").
 
+import { withWeeklyLedger } from '../planning/ledgerBrief.js';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
 import { AIProposalRepo, type AIProposalRecord } from '../../repositories/aiProposalRepo.js';
@@ -323,7 +324,10 @@ export function commitAIProposalToPlannedSession(
     const errors = revalidateAthleticProposal(proposal, buildAthleticContext(db, proposal.targetDate));
     if (errors.length > 0) throw new AIProposalStaleError(proposalId, errors);
   }
-  const context = athletic ? null : buildProgrammerContext(db, { targetDate: proposal.targetDate, applyRotationShortlist: false });
+  // The weekly ledger applies here as at generation (2026-11-09): it can
+  // allow a goal muscle's direct exercises GOAL_EXERCISE_MAX_SETS, and the
+  // re-check must read the same ceilings the proposal was built against.
+  const context = athletic ? null : withWeeklyLedger(db, buildProgrammerContext(db, { targetDate: proposal.targetDate, applyRotationShortlist: false }));
 
   // Full domain revalidation against the FRESH context — this is what
   // catches a changed authored prescription, an exercise that is no
@@ -437,7 +441,9 @@ export function commitAIProposalToPlannedSession(
       const flexibility = athletic ? undefined : record.proposal.flexibilityBlock;
       const flexWarmup = (flexibility?.warmup ?? []).filter((e) => isDrillId(e.exerciseId));
       const flexCooldown = (flexibility?.cooldown ?? []).filter((e) => isDrillId(e.exerciseId));
-      [...flexWarmup, ...proposal.exercises, ...addOn, ...flexCooldown].forEach((exercise, index) => {
+      // Shoulder care (2026-11-09) right after the main exercises.
+      const shoulderCare = athletic ? [] : (record.proposal.shoulderCare?.exercises ?? []);
+      [...flexWarmup, ...proposal.exercises, ...shoulderCare, ...addOn, ...flexCooldown].forEach((exercise, index) => {
         sessionsRepo.addExercisePerformance(session.session_id, {
           exercise_id: exercise.exerciseId,
           order: index,

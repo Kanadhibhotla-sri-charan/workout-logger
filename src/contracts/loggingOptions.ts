@@ -3,6 +3,21 @@
 // set's count field measures. Both are universal: any exercise can carry
 // any attachment and any unit; nothing is restricted by exercise.
 
+/** Machine-assisted bodyweight exercises (2026-11-09, owner: assisted
+ * pull-ups, chin-ups and dips). The assistance is logged as a NEGATIVE
+ * weight (20 kg of help = -20), so a bigger number is still progress:
+ * -20, -15, 0 (bodyweight), then +5 on a dip belt. public/app.js keeps the
+ * same list for the logger's "Assisted" switch. */
+export const ASSISTED_EXERCISE_IDS: readonly string[] = ['pull-up-pronated', 'chin-up-supinated', 'dip-chest-biased', 'dip-triceps-biased'];
+
+/** A weight for people: "20 kg assist", "bodyweight", "12.5 kg". */
+export function formatWeightKg(weight: number, assistable = false): string {
+  const n = Math.round(Math.abs(weight) * 100) / 100;
+  if (weight < 0) return `${n} kg assist`;
+  if (weight === 0 && assistable) return 'bodyweight';
+  return `${n} kg`;
+}
+
 /** What a set's count (`workout_sets.reps`) measures. Null/absent = reps. */
 export const REP_UNITS = ['reps', 'steps', 'seconds', 'metres'] as const;
 export type RepUnit = (typeof REP_UNITS)[number];

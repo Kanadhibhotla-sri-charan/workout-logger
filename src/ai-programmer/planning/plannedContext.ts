@@ -92,6 +92,8 @@ export interface AIProgrammerPlannedContext {
     notes: string[];
     /** Stretches the app adds to this session itself (src/athletic/flexibility.ts). */
     flexibilityBlock?: { minutes: number; reason: string; drills: string[] };
+    /** The shoulder-health exercise the app adds itself (src/athletic/shoulderCare.ts). */
+    shoulderCare?: { minutes: number; reason: string; exercises: string[] };
   };
   coachingFoundation: {
     programState: AIProgrammerContext['coachingFoundation']['programState'];
@@ -209,6 +211,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
       // Ownership is expressed by the candidate lists themselves, not by extra wording.
       notes: plan.notes.filter((n) => !n.startsWith('refusal') && !n.startsWith('ownership')),
       ...(context.programmingBrief.flexibilityBlock ? { flexibilityBlock: context.programmingBrief.flexibilityBlock } : {}),
+      ...(context.programmingBrief.shoulderCare ? { shoulderCare: context.programmingBrief.shoulderCare } : {}),
     },
     coachingFoundation: {
       programState: context.coachingFoundation.programState,
@@ -241,7 +244,7 @@ export function buildPlannedProgrammerSystemInstruction(rotationShortlist = fals
     '4. An exercise appears once in the session. A candidate\'s alsoCredits names other targets it also counts toward: list it once, under one target, and count its sets toward each.',
     '5. Each exercise gets at most its maxSets; copy its repsMin, repsMax, rirMin and rirMax exactly.',
     '6. Each target\'s total sets reach its minimumSets, should fall within recommendedSets, and never exceed maximumSets. No exercise goes above its maxSets, so a target needs at least minimumExercises exercises that count toward it (its own candidates, or another target\'s candidates whose alsoCredits names it). Example: minimumSets 4 with candidates of maxSets 2 needs two of them. If context.coachingFoundation.programState shows a deload, these numbers already include it.',
-    '6a. sessionPlan.flexibilityBlock, when present, is the flexibility work for today (a share of the weekly Blueprint stretching minutes). The application adds those drills itself, after your exercises, and the session already allows for their minutes. Leave stretches and mobility drills out of your exercises.',
+    '6a. sessionPlan.flexibilityBlock, when present, is the flexibility work for today (a share of the weekly Blueprint stretching minutes). The application adds those drills itself, after your exercises, and the session already allows for their minutes. Leave stretches and mobility drills out of your exercises. sessionPlan.shoulderCare, when present, is the same: the app adds that shoulder-health exercise after the session, so leave it out of yours.',
     '',
     'Your coaching decisions (real judgment; cite the specific data behind each in programmingRationale):',
     rotationShortlist
