@@ -1,6 +1,6 @@
 # 110 · Leg add-on ticks; stretches follow the day's muscles
 
-Date: 2026-11-10 · Status: committed
+Date: 2026-11-10 · Status: deployed 2026-11-10 (9b77061, backup pre-9b77061-20261110T035457Z.sqlite); Tue 10 Nov pending proposal 13fe8df4 discarded so the day is generated again with ticks
 
 ## Request
 Owner, after generating Tue 10 Nov (Pull): Monday was light on the legs and
