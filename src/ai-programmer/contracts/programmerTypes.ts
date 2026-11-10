@@ -61,7 +61,7 @@ export interface AIWorkoutSessionProposal {
    * minutes of athletic drills appended after the session, chosen by
    * src/athletic/athleticAddOn.ts for recovery. Not part of the AI output
    * or its validation; written after the main exercises at commit. */
-  athleticAddOn?: { kind: 'mobility' | 'active'; minutes: number; reason: string; exercises: AIWorkoutExerciseProposal[] };
+  athleticAddOn?: { kind: 'mobility' | 'active'; parts?: string[]; minutes: number; reason: string; exercises: AIWorkoutExerciseProposal[] };
   /** Gym sessions (2026-10-28): Blueprint flexibility drills chosen by
    * src/athletic/flexibility.ts; warm-up drills are written before the
    * main exercises and cool-down drills after them at commit. Not part of

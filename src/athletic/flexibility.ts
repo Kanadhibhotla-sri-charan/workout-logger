@@ -13,6 +13,12 @@
 // drill not already picked, with enough sets for today's share. All of it
 // goes after the session, dynamic drills first, then holds and foam rolling
 // (owner, 2026-11-05: no warm-up block; warming up is the owner's choice).
+// Stretches follow the muscles worked today (owner, 2026-11-10: "lat
+// stretches on pull day would be more meaningful than on push day"): only
+// drills whose Blueprint targets match the day's purpose (STRETCH_KEYWORDS)
+// are used, and only the weekly goals those drills carry count today. The
+// lower body's weekly minutes come from Legs and Athletic days and from the
+// leg add-on's flexibility part (src/athletic/athleticAddOn.ts).
 // The block stays between FLEXIBILITY_BLOCK_MIN_SECONDS and
 // FLEXIBILITY_BLOCK_MAX_SECONDS, rest included. While the Legs injury pause
 // is on, lower-body mobility is left out.
@@ -34,6 +40,27 @@ export const FLEXIBILITY_BLOCK_MAX_SECONDS = 12 * 60;
 /** Gym days that get the block (the Athletic day has its own mobility and flexibility). */
 const BLOCK_PURPOSES: readonly SessionPurpose[] = ['push', 'pull', 'upper', 'legs'];
 const LOWER_BODY_GOAL = 'lower-body-mobility';
+
+/** Words in a drill's Blueprint primary / secondary targets that tie it to
+ * the muscles each session purpose works. */
+const PUSH_STRETCH = ['pec', 'chest', 'front deltoid', 'front of the shoulder', 'triceps'];
+const PULL_STRETCH = ['lats', 'rear delt', 'back of the shoulder', 'rear shoulder', 'upper back', 'wrist', 'forearm', 'finger flexors'];
+const LEGS_STRETCH = ['quad', 'hamstring', 'glute', 'hip', 'adductor', 'calves', 'gastrocnemius', 'soleus', 'ankle'];
+export const STRETCH_KEYWORDS: Partial<Record<SessionPurpose, readonly string[]>> = {
+  push: PUSH_STRETCH,
+  pull: PULL_STRETCH,
+  upper: [...PUSH_STRETCH, ...PULL_STRETCH],
+  legs: LEGS_STRETCH,
+};
+
+/** How well a drill fits today's muscles: 2 = a primary target matches,
+ * 1 = only a secondary one, 0 = none. */
+export function stretchFit(exerciseId: string, purpose: SessionPurpose): number {
+  const words = STRETCH_KEYWORDS[purpose] ?? [];
+  const e = BlueprintAdapter.getExercise(exerciseId);
+  const hit = (targets: readonly string[] | null | undefined) => (targets ?? []).some((t) => words.some((w) => t.toLowerCase().includes(w)));
+  return hit(e?.primary_targets) ? 2 : hit(e?.secondary_targets) ? 1 : 0;
+}
 
 export interface FlexibilityGoalWeek {
   goalId: string;
@@ -119,15 +146,21 @@ export function planFlexibilityBlock(db: Database.Database, date: string, purpos
   const week = flexibilityWeek(db, date);
   // Today counts even when the calendar does not list it as a gym day.
   const sessionsLeft = Math.max(1, week.sessionsLeft);
+  // During the Legs pause no drill that works lower-body range (e.g. a lunge-position stretch).
+  const legsPaused = week.goals.some((g) => g.goalId === LOWER_BODY_GOAL && g.paused);
+  // Only stretches for the muscles worked today.
+  const catalogue = drillCatalogue(lastDoneDrills(db, date), athleticFilterFor(db, date), isFlexibilityGoal).filter(
+    (d) => !(legsPaused && d.goals.includes(LOWER_BODY_GOAL)) && d.goals.length > 0 && stretchFit(d.exerciseId, purpose) > 0
+  );
+  // A weekly goal counts today when a drill aimed squarely at today's
+  // muscles carries it (e.g. no upper-body goal on Legs just because the
+  // child's pose also reaches the hips).
+  const todaysGoals = new Set(catalogue.filter((d) => stretchFit(d.exerciseId, purpose) === 2).flatMap((d) => d.goals));
   const behind = week.goals
-    .filter((g) => !g.paused && g.remainingMinutes > 0)
+    .filter((g) => !g.paused && g.remainingMinutes > 0 && todaysGoals.has(g.goalId))
     .map((g) => ({ ...g, todaySeconds: (g.remainingMinutes * 60) / sessionsLeft }))
     .sort((a, b) => b.remainingMinutes - a.remainingMinutes || a.goalId.localeCompare(b.goalId));
   if (behind.length === 0) return null;
-
-  // During the Legs pause no drill that works lower-body range (e.g. a lunge-position stretch).
-  const legsPaused = week.goals.some((g) => g.goalId === LOWER_BODY_GOAL && g.paused);
-  const catalogue = drillCatalogue(lastDoneDrills(db, date), athleticFilterFor(db, date), isFlexibilityGoal).filter((d) => !(legsPaused && d.goals.includes(LOWER_BODY_GOAL)));
   const covered = new Map<string, number>();
   const picks: Array<{ drill: AthleticDrillContext; sets: number }> = [];
   const secondsOf = (p: { drill: AthleticDrillContext; sets: number }) => p.sets * (drillSetSeconds(p.drill.exerciseId) + restOf(p.drill.exerciseId));
@@ -141,7 +174,7 @@ export function planFlexibilityBlock(db: Database.Database, date: string, purpos
       if (need <= 0) continue;
       const drill = catalogue
         .filter((d) => d.goals.includes(goal.goalId) && drillSetSeconds(d.exerciseId) > 0 && !picks.some((p) => p.drill.exerciseId === d.exerciseId))
-        .sort((a, b) => (a.lastDone ?? '').localeCompare(b.lastDone ?? '') || a.exerciseId.localeCompare(b.exerciseId))[0];
+        .sort((a, b) => (a.lastDone ?? '').localeCompare(b.lastDone ?? '') || stretchFit(b.exerciseId, purpose) - stretchFit(a.exerciseId, purpose) || a.exerciseId.localeCompare(b.exerciseId))[0];
       if (!drill) continue;
       const perSet = drillSetSeconds(drill.exerciseId);
       const pick = { drill, sets: Math.min(drill.sets.max, Math.max(drill.sets.min, Math.ceil(need / perSet))) };

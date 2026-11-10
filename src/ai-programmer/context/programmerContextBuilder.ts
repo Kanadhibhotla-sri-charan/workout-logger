@@ -22,6 +22,7 @@
 //        routine, the same resolution GET /api/programming/week uses
 
 import { planShoulderCare } from '../../athletic/shoulderCare.js';
+import { planAthleticAddOn, type AddOnPart } from '../../athletic/athleticAddOn.js';
 import { planFlexibilityBlock } from '../../athletic/flexibility.js';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../../blueprint/adapter.js';
@@ -617,6 +618,9 @@ export interface BuildProgrammerContextInput {
    * explicit user choice for what to generate right now outranks the
    * day's own default rotation slot. */
   requestedSessionPurpose?: SessionPurpose;
+  /** Leg add-on parts the owner ticked before generating (2026-11-10, see
+   * src/athletic/athleticAddOn.ts). Omitted: the day's suggestion. */
+  addOnParts?: readonly AddOnPart[];
   /** Explicit week generation (2026-10-01): earlier days of the same
    * week-generation run, planned but not yet trained, layered onto real
    * history as projected exposure (see projectedExposure.ts). Absent for
@@ -800,12 +804,16 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
 
   const flexibility = planFlexibilityBlock(db, input.targetDate, sessionPurpose);
   const shoulderCare = planShoulderCare(db, input.targetDate, sessionPurpose);
+  const addOn = planAthleticAddOn(db, input.targetDate, sessionPurpose, input.addOnParts);
   const programmingBrief = {
     ...briefFor(targets),
     ...(flexibility
       ? { flexibilityBlock: { minutes: flexibility.minutes, reason: flexibility.reason, drills: [...flexibility.warmup, ...flexibility.cooldown].map((e) => e.exerciseId) } }
       : {}),
     ...(shoulderCare ? { shoulderCare: { minutes: shoulderCare.minutes, reason: shoulderCare.reason, exercises: shoulderCare.exercises.map((e) => e.exerciseId) } } : {}),
+    ...(addOn
+      ? { athleticAddOn: { minutes: addOn.minutes, reason: addOn.reason, parts: addOn.parts, chosen: input.addOnParts !== undefined, exercises: addOn.exercises.map((e) => e.exerciseId) } }
+      : {}),
   };
   const crossWeek = buildCrossWeekContext(db, weekStart, planInput, weeklyProgram);
 

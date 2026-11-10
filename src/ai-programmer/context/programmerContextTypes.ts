@@ -338,6 +338,10 @@ export interface AIProgrammerProgrammingBrief {
   /** Push / Upper (src/athletic/shoulderCare.ts): the shoulder-health
    * exercise the app adds after the session. */
   shoulderCare?: { minutes: number; reason: string; exercises: string[] };
+  /** Push / Pull / Upper with athletic legs (src/athletic/athleticAddOn.ts):
+   * the leg add-on the app adds after the session. `chosen` when the owner
+   * ticked its parts (2026-11-10); a chosen add-on is never dropped for time. */
+  athleticAddOn?: { minutes: number; reason: string; parts: string[]; chosen: boolean; exercises: string[] };
   /** Push Generation Architectural Fix (2026-09-24): deterministic,
    * plain-language notes about a real, session-wide constraint that
    * makes it mathematically impossible for two or more eligible targets

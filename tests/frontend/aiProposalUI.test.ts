@@ -687,6 +687,21 @@ describe('program.html: AI Workout Proposal section wiring', () => {
       expect(buildGenerateRequest(day, 'pull', { type: 'click' }).body).toEqual({ targetDate: '2026-10-01', requestedSessionPurpose: 'pull' });
     });
 
+    it('sends the ticked leg add-on parts, in their order, only when the day offers them (2026-11-10)', () => {
+      const runBody = extractFunction(html, 'runGeneration');
+      const line = runBody.split('\n').find((l) => l.includes('request.body.addOnParts'))!;
+      const send = (addOnChoice: unknown, ticked: string[]) => {
+        const request = { body: { targetDate: '2026-10-01' } as Record<string, unknown> };
+        new Function('request', 'addOnChoice', 'addOnTicked', line)(request, addOnChoice, new Set(ticked));
+        return request.body;
+      };
+      const parts = ['resilience', 'conditioning', 'mobility', 'flexibility'].map((id) => ({ id }));
+      expect(send({ available: true, parts }, ['flexibility', 'resilience'])).toEqual({ targetDate: '2026-10-01', addOnParts: ['resilience', 'flexibility'] });
+      expect(send({ available: true, parts }, [])).toEqual({ targetDate: '2026-10-01', addOnParts: [] });
+      expect(send({ available: false, parts }, ['resilience'])).toEqual({ targetDate: '2026-10-01' });
+      expect(send(null, ['resilience'])).toEqual({ targetDate: '2026-10-01' });
+    });
+
     it('normal Generate never sends the override; only "Try again anyway" does', () => {
       expect(extractFunction(html, 'onGenerate')).toMatch(/return runGeneration\(false\);/);
       expect(extractFunction(html, 'onGenerateAnyway')).toMatch(/return runGeneration\(true\);/);

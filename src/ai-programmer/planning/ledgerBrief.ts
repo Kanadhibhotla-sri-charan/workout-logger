@@ -33,7 +33,6 @@ import type { AIProgrammerContext, AIProgrammerMuscleGuidance } from '../context
 import { adequacyToleranceFor } from '../validation/programmerAdequacyValidator.js';
 import { planSession } from './sessionPlanner.js';
 import { planSessionTime } from './sessionTime.js';
-import { planAthleticAddOn } from '../../athletic/athleticAddOn.js';
 import { planFlexibilityBlock } from '../../athletic/flexibility.js';
 import { buildWeeklyLedger, type LedgerEntry, type WeeklyLedger } from './weeklyLedger.js';
 
@@ -222,7 +221,8 @@ export function withSessionTime(db: Database.Database, original: AIProgrammerCon
     goalSets,
     otherMustSets: otherMust.reduce((sum, m) => sum + m.sets, 0),
     flexibilityMinutes: flex?.minutes ?? 0,
-    addOnMinutes: planAthleticAddOn(db, original.targetDate, purpose)?.minutes ?? 0,
+    addOnMinutes: original.programmingBrief.athleticAddOn?.minutes ?? 0,
+    addOnChosen: original.programmingBrief.athleticAddOn?.chosen === true,
     fixedMinutes: original.programmingBrief.shoulderCare?.minutes ?? 0,
   });
   let flexibilityBlock = flex;

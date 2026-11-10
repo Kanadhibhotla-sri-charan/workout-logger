@@ -2,7 +2,7 @@
 // the profile's default length (60 min) and never pass its maximum (90);
 // durability work must not compromise the aesthetic goals. When a session
 // runs long, things give way in this order (owner, 2026-11-09):
-//   1. the athletic add-on is dropped
+//   1. the athletic add-on is dropped (unless the owner ticked it, 2026-11-10)
 //   2. the flexibility block shrinks, down to FLEXIBILITY_BLOCK_MIN_SECONDS
 //   3. "can wait" muscles get no sets today (a later day covers them)
 //   4. only past the maximum: "must" sets of non-goal muscles are trimmed
@@ -26,6 +26,9 @@ export interface SessionTimeInput {
   otherMustSets: number;
   flexibilityMinutes: number;
   addOnMinutes: number;
+  /** The owner ticked the add-on's parts (2026-11-10): it is kept like
+   * shoulder care, never dropped for time. */
+  addOnChosen?: boolean;
   /** Minutes that are never cut (shoulder care). */
   fixedMinutes?: number;
 }
@@ -56,7 +59,7 @@ export function planSessionTime(input: SessionTimeInput): SessionTimePlan {
   let addOn = input.addOnMinutes;
   let flex = input.flexibilityMinutes;
   const total = () => liftMinutes + addOn + flex;
-  if (addOn > 0 && total() > input.aimMinutes) {
+  if (addOn > 0 && !input.addOnChosen && total() > input.aimMinutes) {
     cuts.push(`athletic add-on dropped (${addOn} min)`);
     addOn = 0;
   }

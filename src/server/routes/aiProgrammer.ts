@@ -31,6 +31,10 @@ import { buildTokenReport } from '../../ai-programmer/service/tokenReport.js';
 import { aiWeekGenerationMode, isAiProgrammerEnabled, loadVelonaConfig } from '../../ai-programmer/provider/config.js';
 import { activeRunClaimingDate, startWeekGeneration } from '../../ai-programmer/service/weekGeneration.js';
 import { AIWeekGenerationInProgressError } from '../../ai-programmer/errors.js';
+import { ADD_ON_PARTS, addOnOptions, isAddOnPart, type AddOnPart } from '../../athletic/athleticAddOn.js';
+import { weekGymDays } from '../../ai-programmer/service/weekGeneration.js';
+import { programmingWeekStart } from '../../engine/workoutBuilder.js';
+import type { SessionPurpose } from '../../engine/config.js';
 
 export const aiProgrammerRouter = Router();
 
@@ -100,8 +104,23 @@ function requireEnabled(): void {
 
 const REQUESTABLE_SESSION_PURPOSES = ['push', 'pull', 'legs', 'upper', 'athletic'] as const;
 
+// GET /api/ai-programmer/add-on-options?targetDate=YYYY-MM-DD[&purpose=push]
+// (2026-11-10): the leg add-on parts the owner can tick before generating,
+// with the ones suggested for the day (src/athletic/athleticAddOn.ts).
+// Without `purpose`, the day's own rotation purpose is used.
+aiProgrammerRouter.get('/add-on-options', (req, res) => {
+  const targetDate = typeof req.query.targetDate === 'string' ? req.query.targetDate : '';
+  if (!isValidCalendarDate(targetDate)) return res.status(400).json({ ok: false, error: 'targetDate must be a real calendar date in YYYY-MM-DD format' });
+  const requested = typeof req.query.purpose === 'string' && req.query.purpose !== '' ? req.query.purpose : null;
+  if (requested !== null && !(REQUESTABLE_SESSION_PURPOSES as readonly string[]).includes(requested)) {
+    return res.status(400).json({ ok: false, error: `purpose must be one of ${REQUESTABLE_SESSION_PURPOSES.join('|')} (or omitted)` });
+  }
+  const purpose = (requested ?? weekGymDays(db(req), programmingWeekStart(targetDate)).find((d) => d.date === targetDate)?.purpose ?? null) as SessionPurpose | null;
+  res.json({ ok: true, targetDate, purpose, ...addOnOptions(db(req), targetDate, purpose) });
+});
+
 aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
-  const { targetDate, timezone, requestedSessionPurpose, confirmRetry } = req.body ?? {};
+  const { targetDate, timezone, requestedSessionPurpose, confirmRetry, addOnParts } = req.body ?? {};
   if (typeof targetDate !== 'string' || targetDate.trim() === '') {
     return res.status(400).json({ ok: false, error: 'targetDate (string, YYYY-MM-DD) is required' });
   }
@@ -136,6 +155,11 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
   if (confirmRetry !== undefined && typeof confirmRetry !== 'boolean') {
     return res.status(400).json({ ok: false, error: 'confirmRetry must be a boolean when present' });
   }
+  // Leg add-on parts ticked before generating (2026-11-10): an array of
+  // ADD_ON_PARTS; [] means no leg add-on today. Omitted: the day's suggestion.
+  if (addOnParts !== undefined && (!Array.isArray(addOnParts) || !addOnParts.every(isAddOnPart))) {
+    return res.status(400).json({ ok: false, error: `addOnParts must be an array of ${ADD_ON_PARTS.join('|')} when present` });
+  }
 
   // Express 4 does not automatically forward a rejected promise from an
   // async handler to the error middleware — every path below must
@@ -149,7 +173,12 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
       if (claiming) throw new AIWeekGenerationInProgressError(targetDate, claiming.id);
     }
     const service = createDefaultAIProgrammerService(db(req));
-    const result = await service.generateSession({ targetDate, requestedSessionPurpose, confirmRetry: confirmRetry === true });
+    const result = await service.generateSession({
+      targetDate,
+      requestedSessionPurpose,
+      confirmRetry: confirmRetry === true,
+      ...(addOnParts !== undefined ? { addOnParts: [...new Set(addOnParts as AddOnPart[])] } : {}),
+    });
     // Phase 2 §5: the response now also carries the persisted proposal's
     // id/status — proposal.proposalId (echoed in `proposal`) and
     // `proposalId` here are always the exact same string (see

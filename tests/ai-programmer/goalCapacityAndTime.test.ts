@@ -135,3 +135,16 @@ describe('shoulder care on Push and Upper days', () => {
     expect(planShoulderCare(db, MONDAY, 'pull')).toBeNull();
   });
 });
+
+describe('a ticked add-on is kept for time (2026-11-10)', () => {
+  it('suggested add-on gives way first; a ticked one stays and flexibility shrinks instead', () => {
+    const base = { aimMinutes: 60, maxMinutes: 90, goalSets: 8, otherMustSets: 6, flexibilityMinutes: 10, addOnMinutes: 8, fixedMinutes: 4 };
+    const suggested = planSessionTime(base);
+    expect(suggested.addOnMinutes).toBe(0);
+    expect(suggested.cuts[0]).toMatch(/add-on dropped/);
+    const ticked = planSessionTime({ ...base, addOnChosen: true });
+    expect(ticked.addOnMinutes).toBe(8);
+    expect(ticked.cuts.join(' ')).not.toMatch(/add-on dropped/);
+    expect(ticked.flexibilityMinutes).toBe(5);
+  });
+});

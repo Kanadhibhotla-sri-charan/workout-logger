@@ -1359,3 +1359,13 @@ coach ("which suits body better and helps in achieving my injury free goal").
   outside the AI output like the add-on. Log 107.
 - Assisted switch (log 108) and the test suite repair (log 109) shipped
   in the same deploy.
+
+### 22.11 Leg add-on ticks; stretches follow the day (2026-11-10)
+
+Owner: back-to-back leg work is contextual, not a hard rule; the owner
+ticks the add-on's parts (resilience, conditioning, mobility, leg
+flexibility) by fatigue, soreness and recovery. Suggested: all, except
+after badminton / the Athletic day / a Legs day or before badminton /
+the Athletic day (none). A ticked add-on is not dropped for time.
+Stretches: only drills for the muscles the day works (lats on Pull, pecs
+on Push). Log 110.

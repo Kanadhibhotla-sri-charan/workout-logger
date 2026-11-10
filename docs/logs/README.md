@@ -115,3 +115,4 @@ story of how the app got to its current state.
 - [2026-11-09-107-fixed-athletic-day-and-shoulder-care.md](2026-11-09-107-fixed-athletic-day-and-shoulder-care.md) — Athletic day fixed (strength, resilience, endurance, holds); shoulder care after Push and Upper
 - [2026-11-09-108-assisted-switch.md](2026-11-09-108-assisted-switch.md) — Assisted switch: assistance logged as negative weight, shown as kg assist
 - [2026-11-09-109-test-date-rot.md](2026-11-09-109-test-date-rot.md) — Test suite green: pinned clocks, 11 stale expectations updated
+- [2026-11-10-110-leg-add-on-ticks-and-matched-stretches.md](2026-11-10-110-leg-add-on-ticks-and-matched-stretches.md) — Leg add-on parts ticked before generating (contextual suggestion); stretches follow the day's muscles

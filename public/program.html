@@ -1182,7 +1182,8 @@
       // Athletic add-on (2026-10-18): 5-10 min of drills after the session.
       if (proposal.athleticAddOn && proposal.athleticAddOn.exercises.length > 0) {
         const addOn = proposal.athleticAddOn;
-        wrap.appendChild(el('h3', { text: `Athletic add-on · about ${addOn.minutes} min (${addOn.kind === 'mobility' ? 'mobility' : 'footwork + conditioning'})`, style: 'margin:0.8rem 0 0.2rem' }));
+        const addOnWhat = addOn.parts && addOn.parts.length > 0 ? addOn.parts.join(', ') : addOn.kind === 'mobility' ? 'mobility' : 'footwork + conditioning';
+        wrap.appendChild(el('h3', { text: `Leg add-on · about ${addOn.minutes} min (${addOnWhat})`, style: 'margin:0.8rem 0 0.2rem' }));
         wrap.appendChild(el('p', { class: 'faint', text: addOn.reason, style: 'margin:0 0 0.3rem' }));
         for (const ex of addOn.exercises) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
       }
@@ -1276,6 +1277,11 @@
       // same "generate this day" action produced an upper day one time
       // and a leg day another, with no way to ask for a specific one.
       let requestedSessionPurpose = null;
+      // Leg add-on ticks (2026-11-10): what the legs have recovered for today.
+      // Filled from GET /add-on-options (its suggestion) and changed by the owner.
+      let addOnChoice = null; // { available, parts: [{ id, label, description, suggested }], suggestionReason }
+      let addOnTicked = new Set();
+      let addOnRequest = 0;
       // Same-context retry gate: true only after the backend refused a
       // generate with AI_GENERATION_PREVIOUSLY_FAILED — the only state in
       // which the explicit "Try again anyway" action is offered.
@@ -1292,9 +1298,10 @@
       const noticeEl = el('div');
       const reviewEl = el('div');
       const purposeEl = el('div');
+      const addOnEl = el('div');
       const actionsEl = el('div');
       const statusEl = el('div');
-      section.append(noticeEl, reviewEl, purposeEl, actionsEl, statusEl);
+      section.append(noticeEl, reviewEl, purposeEl, addOnEl, actionsEl, statusEl);
 
       /** 2026-09-23 lifecycle fix: a proposal only has a genuinely FIXED
        * purpose while it's still live (pending/approved/committed) — see
@@ -1312,6 +1319,7 @@
        * purpose automatically" — the user genuinely re-decides. */
       function renderPurposePicker() {
         purposeEl.innerHTML = '';
+        renderAddOnChoice();
         const isFreshGenerationOpportunity = !state || state.status === 'expired' || state.status === 'rejected';
         if (!isFreshGenerationOpportunity) return;
         const label = el('label', { class: 'faint', style: 'display:block;margin-bottom:0.3rem' }, [document.createTextNode(`What should ${formatWeekday(day.weekday)} focus on?`)]);
@@ -1321,6 +1329,7 @@
         select.value = requestedSessionPurpose || '';
         select.addEventListener('change', () => {
           requestedSessionPurpose = select.value || null;
+          loadAddOnChoice();
           // A different focus is a different request — the override no
           // longer applies to it.
           if (sameContextRetryOffered) {
@@ -1329,6 +1338,53 @@
           }
         });
         purposeEl.append(label, select);
+        if (!addOnChoice) loadAddOnChoice();
+      }
+
+      /** Leg add-on ticks (2026-11-10, owner: "depending on my fatigue,
+       * soreness and recovery I will choose"). Starts at the app's
+       * suggestion for the day: everything when the legs are fresh, nothing
+       * after badminton / the Athletic day or before badminton. */
+      async function loadAddOnChoice() {
+        const mine = ++addOnRequest;
+        const query = `targetDate=${encodeURIComponent(day.date)}${requestedSessionPurpose ? `&purpose=${encodeURIComponent(requestedSessionPurpose)}` : ''}`;
+        try {
+          const options = await aiApi(`/api/ai-programmer/add-on-options?${query}`);
+          if (!isCurrent() || mine !== addOnRequest) return;
+          addOnChoice = options;
+          addOnTicked = new Set(options.parts.filter((p) => p.suggested).map((p) => p.id));
+        } catch {
+          if (!isCurrent() || mine !== addOnRequest) return;
+          addOnChoice = null; // generation then uses the day's suggestion
+        }
+        renderAddOnChoice();
+      }
+
+      function renderAddOnChoice() {
+        addOnEl.innerHTML = '';
+        const isFreshGenerationOpportunity = !state || state.status === 'expired' || state.status === 'rejected';
+        if (!isFreshGenerationOpportunity || !addOnChoice || !addOnChoice.available) return;
+        addOnEl.appendChild(el('label', { class: 'faint', style: 'display:block;margin:0.6rem 0 0.3rem' }, [document.createTextNode('Leg add-on: what have your legs recovered for today?')]));
+        const list = el('div');
+        for (const part of addOnChoice.parts) {
+          const box = el('input', { type: 'checkbox', ...(addOnTicked.has(part.id) ? { checked: 'checked' } : {}) });
+          box.addEventListener('change', () => {
+            if (box.checked) addOnTicked.add(part.id);
+            else addOnTicked.delete(part.id);
+            if (sameContextRetryOffered) {
+              sameContextRetryOffered = false;
+              renderActions();
+            }
+          });
+          list.appendChild(
+            el('label', { style: 'display:flex;align-items:flex-start;gap:0.4rem;margin:0.2rem 0' }, [
+              box,
+              el('span', {}, [el('strong', { text: part.label }), document.createTextNode(` · ${part.description}`)]),
+            ])
+          );
+        }
+        addOnEl.appendChild(list);
+        if (addOnChoice.suggestionReason) addOnEl.appendChild(el('p', { class: 'faint', text: addOnChoice.suggestionReason, style: 'margin:0.2rem 0 0' }));
       }
 
       function isCurrent() {
@@ -1498,6 +1554,9 @@
           // `=== true`, not truthiness: a click event passed through as an
           // argument must never count as the user's confirmation.
           if (confirmRetry === true) request.body.confirmRetry = true;
+          // Leg add-on ticks (2026-11-10): sent whenever the day offers them;
+          // [] means no leg work today.
+          if (addOnChoice && addOnChoice.available) request.body.addOnParts = addOnChoice.parts.map((p) => p.id).filter((id) => addOnTicked.has(id));
           const generated = await aiApi('/api/ai-programmer/generate-session', request);
           const fresh = await aiApi(`/api/ai-programmer/proposals/${generated.proposalId}`);
           if (!isCurrent()) return;

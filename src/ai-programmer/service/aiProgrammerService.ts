@@ -51,7 +51,7 @@ import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction, usesRot
 import { runProposalPipeline } from './proposalPipeline.js';
 import { ATHLETIC_OUTPUT_SCHEMA, buildAthleticContext, buildAthleticSystemInstruction, checkAthleticOutput, type AthleticContext } from '../../athletic/athleticSession.js';
 import { weekGymDays } from './weekGeneration.js';
-import { planAthleticAddOn } from '../../athletic/athleticAddOn.js';
+import { isAddOnPart, planAthleticAddOn, type AddOnPart } from '../../athletic/athleticAddOn.js';
 import { planShoulderCare } from '../../athletic/shoulderCare.js';
 import { planFlexibilityBlock } from '../../athletic/flexibility.js';
 import { UsersRepo } from '../../repositories/usersRepo.js';
@@ -133,6 +133,8 @@ export interface GenerateSessionInput {
   /** "Ask what to generate" fix — see BuildProgrammerContextInput's own
    * doc comment for the full rationale; passed straight through. */
   requestedSessionPurpose?: SessionPurpose;
+  /** Leg add-on parts ticked before generating (src/athletic/athleticAddOn.ts). */
+  addOnParts?: readonly AddOnPart[];
   /** Explicit user override for the same-context retry gate: only `true`
    * lets a request through after the identical context already failed
    * an AI-output quality check. Never set automatically. */
@@ -311,6 +313,7 @@ export class AIProgrammerService {
       buildProgrammerContext(this.db, {
         targetDate: input.targetDate,
         requestedSessionPurpose: input.requestedSessionPurpose,
+        ...(input.addOnParts !== undefined ? { addOnParts: input.addOnParts } : {}),
       })
     );
     observed.contextHash = context.contextHash;
@@ -522,7 +525,13 @@ export class AIProgrammerService {
     // Session time budget (2026-11-09): the add-on and the block's length
     // follow what the budget decided (planning/sessionTime.ts).
     const time = context.programmingBrief.sessionTime;
-    const addOn = time && time.addOnMinutes === 0 ? null : planAthleticAddOn(this.db, context.targetDate, context.programmingBrief.session.purpose);
+    // The add-on follows the brief: the parts it was built from (ticked or
+    // suggested), unless the time budget dropped it.
+    const briefAddOn = context.programmingBrief.athleticAddOn;
+    const addOn =
+      !briefAddOn || (time && time.addOnMinutes === 0)
+        ? null
+        : planAthleticAddOn(this.db, context.targetDate, context.programmingBrief.session.purpose, briefAddOn.parts.filter(isAddOnPart));
     const flexibility = context.programmingBrief.flexibilityBlock
       ? planFlexibilityBlock(this.db, context.targetDate, context.programmingBrief.session.purpose, time ? time.flexibilityMinutes * 60 : undefined)
       : null;
