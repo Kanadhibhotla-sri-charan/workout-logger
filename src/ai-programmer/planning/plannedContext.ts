@@ -105,6 +105,8 @@ export interface AIProgrammerPlannedContext {
   activityNotes: AIProgrammerContext['activityNotes'];
   injuryPauses: AIProgrammerContext['injuryPauses'];
   coachAdvice: AIProgrammerContext['coachAdvice'];
+  /** Planned muscles whose load is falling (programmingBrief.decliningMuscles). */
+  decliningMuscles?: NonNullable<AIProgrammerContext['programmingBrief']['decliningMuscles']>;
   intensityTechniqueCatalogue: AIProgrammerContext['intensityTechniqueCatalogue'];
   outputRequirements: AIProgrammerContext['outputRequirements'];
 }
@@ -181,6 +183,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
   });
 
   const usedTechniques = new Set(targets.flatMap((t) => t.candidates.flatMap((c) => c.plausibleIntensityTechniques)));
+  const declining = (context.programmingBrief.decliningMuscles ?? []).filter((d) => plannedIds.includes(d.targetId));
   return {
     schemaVersion: AI_PROGRAMMER_PLANNED_CONTEXT_SCHEMA_VERSION,
     mode: 'generate_session',
@@ -223,6 +226,7 @@ export function buildPlannedAIContext(context: AIProgrammerContext, plan: Sessio
     activityNotes: context.activityNotes,
     injuryPauses: context.injuryPauses,
     coachAdvice: context.coachAdvice,
+    ...(declining.length > 0 ? { decliningMuscles: declining } : {}),
     intensityTechniqueCatalogue: pick(context.intensityTechniqueCatalogue, [...usedTechniques]),
     outputRequirements: context.outputRequirements,
   };
@@ -253,6 +257,7 @@ export function buildPlannedProgrammerSystemInstruction(rotationShortlist = fals
     '8. Exercise order and pairing — two trained targets with opposite antagonistGroup can be sequenced as a superset when that genuinely helps.',
     '9. Volume within each target\'s legal range — go below recommendedSets only for a concrete, cited reason (e.g. recoveryCaution "reduce", recent heavy exposure, or pain or an injury reported in context.activityNotes), and never below minimumSets. During a deload, aim for recommendedSets: they already contain the deload\'s reduction, so the deload itself is not a reason to go lower.',
     '9a. context.activityNotes are the user\'s own notes about recent days (rehab, a sport, an injury, how a session felt). Read them as recovery evidence: when a note reports pain, injury or unusual fatigue in a body part, favour the candidates that load it most gently and say so in recoveryConsiderations. A note is never logged sets and never changes the plan\'s structure. context.injuryPauses lists body areas the user has paused for injury; the plan already leaves their targets out, so among the remaining candidates prefer those that load a paused area least.',
+    '9b. context.decliningMuscles, when present, lists muscles in today\'s session whose load has fallen over the last three weeks, with each exercise\'s own trend (sessions counted, first and last load). Coach each one on its own. Judge the likely cause from the evidence: one stalled exercise while the others rise, fatigue from recent volume, pain or poor recovery in context.activityNotes, or too little data to act on. Then choose the response that fits that cause: another candidate in place of the stalled exercise, keeping the exercises that are rising, training the muscle earlier in the session while fresh, or sets toward the lower or the upper end of its legal range. Name the muscle, the cause you judged and your response in programmingRationale. Every other muscle keeps its normal volume.',
     '10. Intensity techniques — only ids in an exercise\'s plausibleIntensityTechniques, looked up in context.intensityTechniqueCatalogue; a considered choice (weigh context.trainingExperience), never reflexive.',
     '11. Rationale — programmingRationale, goalAlignment (context.activeGoals in the order given), recoveryConsiderations and warnings, grounded in the data given.',
     '',

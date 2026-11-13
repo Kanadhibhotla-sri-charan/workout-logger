@@ -391,7 +391,11 @@ export const REACTIVE_TRIGGER = {
   /** §8.3/§9.2.3: minimum number of DIFFERENT targets that must each
    * independently show a genuine decline signal — one target's decline
    * (let alone one session's) is never sufficient on its own. */
-  minimumDecliningTargets: 2,
+  // 2026-11-13 (owner): 2 -> 4. A decline in one to three muscles is
+  // coached muscle by muscle in the session (programmingBrief
+  // .decliningMuscles); cutting the whole body's volume is for a decline
+  // that is widespread.
+  minimumDecliningTargets: 4,
   /** §10: minimum real days after a reactive deload ends before
    * evaluation may trigger a new one — set once, at trigger time, as
    * `reactiveDeloadEndDate + cooldownDays`, never recomputed later. */

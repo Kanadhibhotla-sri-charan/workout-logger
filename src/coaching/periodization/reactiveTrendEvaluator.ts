@@ -62,6 +62,8 @@ export function deloadDatesInRange(db: Database.Database, programId: string, sta
  * own trend can count as decline: two points are one good day against
  * one bad day, not a sustained trend. */
 export const MIN_EXERCISE_POINTS_FOR_DECLINE = 3;
+/** Sessions an exercise needs to count as rising or holding. */
+export const MIN_EXERCISE_POINTS_AGAINST_DECLINE = 2;
 
 /** A target's decline signal from its exercises compared each with
  * itself (2026-10-11 fix): averaging load across different exercises read
@@ -101,7 +103,13 @@ export function targetDeclineEvidence(
       last: Math.round(last * 10) / 10,
     };
   });
-  const withTrend = exercises.filter((x) => x.trend !== 'unknown' && x.points >= MIN_EXERCISE_POINTS_FOR_DECLINE);
+  // A decline needs MIN_EXERCISE_POINTS_FOR_DECLINE sessions; an exercise
+  // that is rising or holding over two sessions already counts against it
+  // (2026-11-13: one falling upright row outvoted three rising lateral
+  // raises because they had two sessions each).
+  const withTrend = exercises.filter(
+    (x) => x.trend !== 'unknown' && (x.points >= MIN_EXERCISE_POINTS_FOR_DECLINE || (x.points >= MIN_EXERCISE_POINTS_AGAINST_DECLINE && x.trend !== 'down'))
+  );
   const down = withTrend.filter((x) => x.trend === 'down').length;
   const counted = withTrend.reduce((n, x) => n + x.points, 0);
   return {
@@ -153,6 +161,29 @@ export interface EvaluateReactiveDeloadTriggerInput {
  * session. Deterministic and side-effect-free: this function reads only,
  * it never writes any persisted state (the caller — periodizationService.ts
  * — decides what to do with the result and performs any write). */
+/** One muscle whose load is falling, with each exercise's own trend. */
+export interface DecliningMuscle {
+  targetId: string;
+  exercises: ExerciseTrendEvidence[];
+}
+
+/** The muscles among `targetIds` that are declining over the reactive
+ * lookback window ending at `referenceDate` (deload dates ignored). Read
+ * only. The session's coach (the AI) decides what to do about each one
+ * (2026-11-13, owner: a comprehensive coach has more ways to address a
+ * decline than cutting every muscle's numbers). */
+export function decliningMuscles(db: Database.Database, programId: string, targetIds: readonly string[], referenceDate: string): DecliningMuscle[] {
+  const { start, end } = rollingRangeEnding(referenceDate, REACTIVE_TRIGGER.lookbackDays);
+  const deloadDates = deloadDatesInRange(db, programId, start, end);
+  const out: DecliningMuscle[] = [];
+  for (const targetId of targetIds) {
+    const evidence = targetDeclineEvidence(db, targetId, start, end, deloadDates);
+    if (evidence.dataQuality === 'insufficient' || evidence.trend !== 'down') continue;
+    out.push({ targetId, exercises: evidence.exercises.filter((x) => x.points >= MIN_EXERCISE_POINTS_AGAINST_DECLINE) });
+  }
+  return out;
+}
+
 export function evaluateReactiveDeloadTrigger(db: Database.Database, input: EvaluateReactiveDeloadTriggerInput): ReactiveEvaluationResult {
   const { start: lookbackStart, end: lookbackEnd } = rollingRangeEnding(input.referenceDate, REACTIVE_TRIGGER.lookbackDays);
   const evaluationTimestamp = input.referenceDate;
@@ -226,7 +257,7 @@ export function evaluateReactiveDeloadTrigger(db: Database.Database, input: Eval
       lookbackStart,
       lookbackEnd,
       blockingReasons,
-      recommendedAction: `Monitor — a decline signal was found on ${signals.length} target(s) (${signals.map((s) => s.targetId).join(', ')}), below the ${REACTIVE_TRIGGER.minimumDecliningTargets} required to initiate a reactive deload. No change to programming yet.`,
+      recommendedAction: `Monitor — a decline signal was found on ${signals.length} target(s) (${signals.map((s) => s.targetId).join(', ')}), below the ${REACTIVE_TRIGGER.minimumDecliningTargets} that make a whole-body deload. Each is coached on its own in its sessions; the rest of the programme keeps its volume.`,
       evaluationTimestamp,
     };
   }

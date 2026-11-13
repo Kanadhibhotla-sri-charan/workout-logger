@@ -101,10 +101,12 @@ describe('deload sessions are ignored', () => {
     expect(r.triggered).toBe(false);
   });
 
-  it('a genuine decline on two targets outside deloads still triggers, with per-exercise evidence', () => {
+  it('a genuine decline on four targets outside deloads still triggers, with per-exercise evidence', () => {
     for (const [d, a, b] of [['2026-11-02', 70, 60], ['2026-11-04', 70, 60], ['2026-11-06', 60, 50], ['2026-11-08', 58, 48]] as const) {
       seed(d, 'seated-cable-row', a);
       seed(d, 'lat-pulldown-wide-pronated', b);
+      seed(d, 'standing-calf-raise', a);
+      seed(d, 'wrist-curl', b / 2);
     }
     const r = evaluate('2026-11-09');
     expect(r.triggered).toBe(true);
@@ -124,5 +126,21 @@ describe('equipment (2026-10-11)', () => {
     const e = targetDeclineEvidence(db, 'forearm-flexors', '2026-11-01', '2026-11-20', new Set());
     expect(e.trend).not.toBe('down');
     expect(e.exercises.map((x) => x.equipment).sort()).toEqual(['barbell', 'dumbbell']);
+  });
+});
+
+describe('rising exercises count against a decline (2026-11-13)', () => {
+  it('one falling exercise does not outvote rising ones that have two sessions each (side delt, 10 Nov 2026)', () => {
+    for (const [d, w] of [['2026-11-02', 30], ['2026-11-05', 27], ['2026-11-08', 22]] as const) seed(d, 'upright-row-wide-grip', w);
+    for (const [d, w] of [['2026-11-03', 9], ['2026-11-09', 12]] as const) seed(d, 'cable-lateral-raise', w);
+    for (const [d, w] of [['2026-11-04', 9], ['2026-11-10', 11]] as const) seed(d, 'dumbbell-lateral-raise', w);
+    const e = targetDeclineEvidence(db, 'side-delt', '2026-11-01', '2026-11-20', new Set());
+    expect(e.exercises.find((x) => x.exerciseId === 'upright-row-wide-grip')!.trend).toBe('down');
+    expect(e.trend).toBe('stable');
+  });
+
+  it('a falling exercise with nothing rising beside it is still a decline', () => {
+    for (const [d, w] of [['2026-11-02', 30], ['2026-11-05', 27], ['2026-11-08', 22]] as const) seed(d, 'upright-row-wide-grip', w);
+    expect(targetDeclineEvidence(db, 'side-delt', '2026-11-01', '2026-11-20', new Set()).trend).toBe('down');
   });
 });

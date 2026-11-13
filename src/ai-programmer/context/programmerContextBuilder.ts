@@ -56,6 +56,7 @@ import { adequacyToleranceFor, deloadAdequacyTolerance } from '../validation/pro
 import { computeTargetFeasibility } from './targetFeasibility.js';
 import { applyDeloadSetVolumeReduction, DELOAD_REP_RANGE_BIAS } from '../../coaching/periodization/deloadPolicy.js';
 import { getPeriodizationContext } from '../../coaching/periodization/periodizationService.js';
+import { decliningMuscles } from '../../coaching/periodization/reactiveTrendEvaluator.js';
 import { isTargetCompatibleWithPurpose, type SessionPurpose } from '../../engine/sessionPurpose.js';
 import { todayForUser } from '../../lib/userTimezone.js';
 import { AestheticAssessmentsRepo } from '../../repositories/aestheticAssessmentsRepo.js';
@@ -805,8 +806,16 @@ export function buildProgrammerContext(db: Database.Database, input: BuildProgra
   const flexibility = planFlexibilityBlock(db, input.targetDate, sessionPurpose);
   const shoulderCare = planShoulderCare(db, input.targetDate, sessionPurpose);
   const addOn = planAthleticAddOn(db, input.targetDate, sessionPurpose, input.addOnParts);
+  const brief = briefFor(targets);
+  const declining = decliningMuscles(
+    db,
+    user.id,
+    brief.muscles.filter((m) => m.targetType === 'physique_target' && m.eligibleForThisSession).map((m) => m.targetId),
+    currentDate
+  );
   const programmingBrief = {
-    ...briefFor(targets),
+    ...brief,
+    ...(declining.length > 0 ? { decliningMuscles: declining } : {}),
     ...(flexibility
       ? { flexibilityBlock: { minutes: flexibility.minutes, reason: flexibility.reason, drills: [...flexibility.warmup, ...flexibility.cooldown].map((e) => e.exerciseId) } }
       : {}),

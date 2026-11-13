@@ -26,6 +26,9 @@ import { approveProposal, commitAIProposalToPlannedSession } from '../../src/ai-
 import { readWeekGenerationState, startWeekGeneration, weekGymDays } from '../../src/ai-programmer/service/weekGeneration.js';
 import type { AIProgrammerProvider, AIProgrammerProviderRequest, AIProgrammerProviderResponse } from '../../src/ai-programmer/contracts/providerTypes.js';
 import { ATHLETIC_BLOCKS, BUILD_UP_SESSIONS, buildAthleticContext, checkAthleticOutput, planAthleticDay, type AthleticContext } from '../../src/athletic/athleticSession.js';
+import { planSession } from '../../src/ai-programmer/planning/sessionPlanner.js';
+import { buildPlannedAIContext, buildPlannedProgrammerSystemInstruction } from '../../src/ai-programmer/planning/plannedContext.js';
+import { ATHLETIC_MAX_EXERCISES, blockSizesFor, buildAthleticSystemInstruction } from '../../src/athletic/athleticSession.js';
 import { addOnOptions, planAthleticAddOn, suggestedAddOnParts } from '../../src/athletic/athleticAddOn.js';
 import { chooseAthleticComponents, componentsDone } from '../../src/athletic/athleticPlan.js';
 import { drillSetSeconds, flexibilityWeek, planFlexibilityBlock, stretchFit, FLEXIBILITY_BLOCK_MAX_SECONDS } from '../../src/athletic/flexibility.js';
@@ -421,6 +424,32 @@ describe('athletic add-on on Push / Pull / Upper days', () => {
     const bad = await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: '2026-10-20', addOnParts: ['strength'] }).expect(400);
     expect(bad.body.error).toMatch(/addOnParts/);
     await request(app).post('/api/ai-programmer/generate-session').send({ targetDate: '2026-10-20', addOnParts: 'mobility' }).expect(400);
+  });
+
+  it('a declining muscle reaches the session coach with its evidence; its numbers stay (owner, 2026-11-13)', () => {
+    process.env.AI_PLANNED_GENERATION_ENABLED = 'true';
+    new GoalsRepo(db).create({ goal_type: 'aesthetic', blueprint_ref: 'triceps-back-depth', priority: 1 });
+    const before = buildProgrammerContext(db, { targetDate: '2026-10-20', requestedSessionPurpose: 'push' });
+    expect(before.programmingBrief.decliningMuscles).toBeUndefined();
+    const repo = new WorkoutSessionsRepo(db);
+    for (const [date, weight] of [['2026-10-06', 30], ['2026-10-10', 26], ['2026-10-14', 20]] as const) {
+      const sess = repo.createSession({ date, session_type: 'gym', status: 'completed' });
+      repo.addExercisePerformance(sess.session_id, { exercise_id: 'cable-pushdown', order: 0, role: 'primary', target_sets: 2, sets: [1, 2].map((n) => ({ set_number: n, weight, reps: 12, completed: true, rir: null })) });
+    }
+    const after = buildProgrammerContext(db, { targetDate: '2026-10-20', requestedSessionPurpose: 'push' });
+    const triceps = after.programmingBrief.decliningMuscles!.find((d) => d.targetId === 'triceps')!;
+    expect(triceps.exercises).toEqual([expect.objectContaining({ exerciseId: 'cable-pushdown', trend: 'down', points: 3 })]);
+    expect(after.coachingFoundation.programState.isDeload).toBe(false);
+    const plan = planSession(after);
+    const planned = buildPlannedAIContext(after, plan);
+    expect(planned.decliningMuscles!.map((d) => d.targetId)).toContain('triceps');
+    expect(buildPlannedProgrammerSystemInstruction()).toMatch(/9b\. context\.decliningMuscles/);
+  });
+
+  it("Athletic strength block: 1 to 4 lifts, the number is the coach's call", () => {
+    expect(blockSizesFor(['strength', 'resilience', 'endurance', 'flexibility']).strength).toEqual([1, 4]);
+    expect(ATHLETIC_MAX_EXERCISES).toBe(12);
+    expect(buildAthleticSystemInstruction()).toMatch(/the maximum is a limit, not a number to reach/);
   });
 
   it('the ticked parts reach the proposal and the brief marks them chosen', async () => {

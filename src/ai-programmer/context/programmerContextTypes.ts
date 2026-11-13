@@ -338,6 +338,14 @@ export interface AIProgrammerProgrammingBrief {
   /** Push / Upper (src/athletic/shoulderCare.ts): the shoulder-health
    * exercise the app adds after the session. */
   shoulderCare?: { minutes: number; reason: string; exercises: string[] };
+  /** Muscles of this session whose load is falling over the last three
+   * weeks, each with its exercises' own trends
+   * (reactiveTrendEvaluator.decliningMuscles). The AI coaches each one
+   * individually; their volume numbers are unchanged. Absent when none. */
+  decliningMuscles?: Array<{
+    targetId: string;
+    exercises: Array<{ exerciseId: string; equipment?: string | null; attachment?: string | null; trend: string; points: number; first: number; last: number }>;
+  }>;
   /** Push / Pull / Upper with athletic legs (src/athletic/athleticAddOn.ts):
    * the leg add-on the app adds after the session. `chosen` when the owner
    * ticked its parts (2026-11-10); a chosen add-on is never dropped for time. */

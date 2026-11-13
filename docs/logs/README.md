@@ -117,3 +117,4 @@ story of how the app got to its current state.
 - [2026-11-09-109-test-date-rot.md](2026-11-09-109-test-date-rot.md) — Test suite green: pinned clocks, 11 stale expectations updated
 - [2026-11-10-110-leg-add-on-ticks-and-matched-stretches.md](2026-11-10-110-leg-add-on-ticks-and-matched-stretches.md) — Leg add-on parts ticked before generating (contextual suggestion); stretches follow the day's muscles
 - [2026-11-13-111-completion-swaps-when-session-full.md](2026-11-13-111-completion-swaps-when-session-full.md) — Fri 13 Nov Upper failed (brachialis 6/9, long head 2/3, session full); completion now swaps a spare exercise
+- [2026-11-13-112-decline-coached-per-muscle-athletic-strength.md](2026-11-13-112-decline-coached-per-muscle-athletic-strength.md) — Whole-body deload only for 4+ declining muscles; fewer are coached per muscle by the AI; Athletic strength block 1-4 by judgment

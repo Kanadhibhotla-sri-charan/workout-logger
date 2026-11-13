@@ -7,7 +7,7 @@ import { openDb } from '../../src/db/client.js';
 import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { PeriodizationEventsRepo } from '../../src/coaching/periodization/periodizationEventsRepo.js';
-import { evaluateReactiveDeloadTrigger } from '../../src/coaching/periodization/reactiveTrendEvaluator.js';
+import { evaluateReactiveDeloadTrigger, decliningMuscles } from '../../src/coaching/periodization/reactiveTrendEvaluator.js';
 import { getPeriodizationContext } from '../../src/coaching/periodization/periodizationService.js';
 import { applyDeloadSetVolumeReduction, computeCooldownUntil, computeReactiveDeloadEndDate } from '../../src/coaching/periodization/deloadPolicy.js';
 import { createInitialProgramState } from '../../src/coaching/programState/programStateService.js';
@@ -34,6 +34,15 @@ function seedSession(date: string, exerciseId: string, weight: number, reps: num
     role: 'primary',
     target_sets: 3,
     sets: [1, 2, 3].map((n) => ({ set_number: n, weight, reps, completed: true, rir: null })),
+  });
+}
+
+/** Two more declining muscles (obliques, forearm flexors): with the two a
+ * test seeds itself, four, a widespread decline (2026-11-13). */
+function seedTwoMoreDeclines(dates: readonly [string, string, string, string]) {
+  dates.forEach((d, i) => {
+    seedSession(d, OBLIQUES_EXERCISE, i < 2 ? 40 : 20, 12);
+    seedSession(d, 'wrist-curl', i < 2 ? 30 : 15, 12);
   });
 }
 
@@ -81,8 +90,23 @@ describe('reactiveTrendEvaluator — one declining target is watch, never trigge
   });
 });
 
-describe('reactiveTrendEvaluator — sustained decline across 2+ targets triggers', () => {
-  it('two independently declining targets report level triggered, triggered true (no blocking reasons)', () => {
+describe('reactiveTrendEvaluator — a widespread decline (4+ targets) triggers', () => {
+  it('two or three declining targets are watch: coached per muscle, no whole-body deload (owner, 2026-11-13)', () => {
+    for (const [i, d] of ['2026-11-20', '2026-11-22', '2026-11-24', '2026-11-26'].entries()) {
+      seedSession(d, RECTUS_ABDOMINIS_EXERCISE, i < 2 ? 40 : 20, 12);
+      seedSession(d, GASTROCNEMIUS_EXERCISE, i < 2 ? 60 : 30, 12);
+      seedSession(d, OBLIQUES_EXERCISE, i < 2 ? 40 : 20, 12);
+    }
+    const result = evaluateReactiveDeloadTrigger(db, { programId, referenceDate: '2026-12-10', isInCooldown: false, isAlreadyInReactiveDeload: false });
+    expect(result.signals.length).toBeGreaterThanOrEqual(2);
+    expect(result.signals.length).toBeLessThan(4);
+    expect(result.level).toBe('watch');
+    expect(result.triggered).toBe(false);
+    expect(result.recommendedAction).toMatch(/coached on its own/);
+    expect(decliningMuscles(db, programId, ['rectus-abdominis', 'gastrocnemius', 'biceps'], '2026-12-10').map((m) => m.targetId)).toEqual(['rectus-abdominis', 'gastrocnemius']);
+  });
+
+  it('four independently declining targets report level triggered, triggered true (no blocking reasons)', () => {
     seedSession('2026-11-20', RECTUS_ABDOMINIS_EXERCISE, 40, 12);
     seedSession('2026-11-22', RECTUS_ABDOMINIS_EXERCISE, 40, 12);
     seedSession('2026-11-24', RECTUS_ABDOMINIS_EXERCISE, 20, 12);
@@ -91,12 +115,13 @@ describe('reactiveTrendEvaluator — sustained decline across 2+ targets trigger
     seedSession('2026-11-30', GASTROCNEMIUS_EXERCISE, 60, 12);
     seedSession('2026-12-02', GASTROCNEMIUS_EXERCISE, 30, 12);
     seedSession('2026-12-04', GASTROCNEMIUS_EXERCISE, 30, 12);
+    seedTwoMoreDeclines(['2026-11-28', '2026-11-30', '2026-12-02', '2026-12-04']);
 
     const result = evaluateReactiveDeloadTrigger(db, { programId, referenceDate: '2026-12-10', isInCooldown: false, isAlreadyInReactiveDeload: false });
     expect(result.level).toBe('triggered');
     expect(result.triggered).toBe(true);
     expect(result.blockingReasons).toHaveLength(0);
-    expect(result.signals.length).toBeGreaterThanOrEqual(2);
+    expect(result.signals.length).toBeGreaterThanOrEqual(4);
   });
 
   it('the same evidence is withheld (triggered false) when already in cooldown', () => {
@@ -108,6 +133,7 @@ describe('reactiveTrendEvaluator — sustained decline across 2+ targets trigger
     seedSession('2026-11-30', GASTROCNEMIUS_EXERCISE, 60, 12);
     seedSession('2026-12-02', GASTROCNEMIUS_EXERCISE, 30, 12);
     seedSession('2026-12-04', GASTROCNEMIUS_EXERCISE, 30, 12);
+    seedTwoMoreDeclines(['2026-11-28', '2026-11-30', '2026-12-02', '2026-12-04']);
 
     const result = evaluateReactiveDeloadTrigger(db, { programId, referenceDate: '2026-12-10', isInCooldown: true, isAlreadyInReactiveDeload: false });
     expect(result.level).toBe('triggered');
@@ -174,6 +200,7 @@ describe('periodizationService.getPeriodizationContext — reactive evaluation l
     seedSession('2026-11-14', GASTROCNEMIUS_EXERCISE, 60, 12);
     seedSession('2026-11-16', GASTROCNEMIUS_EXERCISE, 30, 12);
     seedSession('2026-11-18', GASTROCNEMIUS_EXERCISE, 30, 12);
+    seedTwoMoreDeclines(['2026-11-12', '2026-11-14', '2026-11-16', '2026-11-18']);
 
     const ctx = getPeriodizationContext(db, { programId, referenceDate: '2026-11-22', weekBoundary: 'monday', defaultBlockLengthWeeks: 8 });
     expect(ctx.reactiveEvaluation?.triggered).toBe(true);
@@ -197,6 +224,7 @@ describe('periodizationService.getPeriodizationContext — reactive evaluation l
     seedSession('2026-11-14', GASTROCNEMIUS_EXERCISE, 60, 12);
     seedSession('2026-11-16', GASTROCNEMIUS_EXERCISE, 30, 12);
     seedSession('2026-11-18', GASTROCNEMIUS_EXERCISE, 30, 12);
+    seedTwoMoreDeclines(['2026-11-12', '2026-11-14', '2026-11-16', '2026-11-18']);
 
     const triggered = getPeriodizationContext(db, { programId, referenceDate: '2026-11-22', weekBoundary: 'monday', defaultBlockLengthWeeks: 8 });
     expect(triggered.reactiveEvaluation?.triggered).toBe(true);

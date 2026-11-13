@@ -72,12 +72,16 @@ export function blockSizesFor(components: readonly AthleticComponent[]): Record<
   return {
     warmup: has('mobility') ? [2, 3] : [0, 0],
     quality: has('resilience') ? [1, 3] : [0, 0],
-    strength: has('strength') ? [2, 3] : [0, 0],
+    // 2026-11-13 (owner): up to 4 lifts, and how many is the coach's call
+    // for the day, not a number to fill (was 2-3; on 12 Nov the plan had two
+    // light lifts and five loaded ones were done).
+    strength: has('strength') ? [1, 4] : [0, 0],
     conditioning: has('endurance') ? [1, 2] : [0, 0],
     cooldown: has('flexibility') ? [2, 3] : [0, 1],
   };
 }
-export const ATHLETIC_MAX_EXERCISES = 10;
+/** Every block at its maximum: 3 + 4 + 2 + 3. */
+export const ATHLETIC_MAX_EXERCISES = 12;
 /** How far back the context shows athletic work. */
 export const ATHLETIC_HISTORY_DAYS = 28;
 /** Fewer Athletic days than this in the last 28 days = build-up phase. */
@@ -414,7 +418,7 @@ export function buildAthleticSystemInstruction(): string {
     '',
     "1. Use only exercises from context.drills and context.strengthLifts, each at most once. They already fit the user's gym and equipment; follow a drill's setupNote when it has one. Favour exercises marked preferred.",
     '2. The Athletic day is one package (strength, resilience, endurance, mobility, flexibility); context.session.plan.components are the parts picked for today, with the reasons in context.session.plan.reasons (rotation over Athletic days, badminton nearby). Build the session from context.session.blocks only, in their order. Each block gets between its minimum and maximum number of exercises (exercises.min to exercises.max; when both are 1, exactly one); at most context.session.maxExercises in total. A drill belongs to the block in its own "block" field; every strength lift belongs to the strength block. A block not listed gets no exercises. There is no warm-up: the user warms up on their own, so drills whose block is not listed today are not available.',
-    '3. Strength block: choose lifts that make the legs strong and hard to injure (single-leg work, a hip hinge, calves/Achilles, adductors/groin, knees), rotating through context.strengthLifts over the weeks rather than repeating the same few. For fatigue resistance, at least one lift uses the upper part of its allowedReps (for example walking lunges or split squats for higher reps). Give sets, repsMin, repsMax, rirMin and rirMax inside the lift\'s own ranges (sets, allowedReps, rir) and restSeconds inside its restSeconds range. Progress from the lift\'s "recent" entries when they went well.',
+    '3. Strength block: this is the only day of the week the legs get strength work, so make it a real leg strength session. How many lifts (within the block\'s exercises.min to exercises.max) is your coaching judgment for today, and the maximum is a limit, not a number to reach: more lifts and loaded ones (a squat or leg press, a hip hinge or leg curl, calves, abductors/adductors) when the legs are fresh and the week is quiet; fewer or lighter when context.activityNotes report fatigue, soreness or pain, when the days around are hard, or when the other blocks already load the legs heavily. Say in the rationale why you chose that number. Choose lifts that make the legs strong and hard to injure (single-leg work, a hip hinge, calves/Achilles, adductors/groin, knees), rotating through context.strengthLifts over the weeks rather than repeating the same few. For fatigue resistance, at least one lift uses the upper part of its allowedReps (for example walking lunges or split squats for higher reps). Give sets, repsMin, repsMax, rirMin and rirMax inside the lift\'s own ranges (sets, allowedReps, rir) and restSeconds inside its restSeconds range. Progress from the lift\'s "recent" entries when they went well.',
     "4. Conditioning block (when listed): whole-body endurance from the conditioning drills in context.drills, varied across sessions; favour longer work intervals that build leg endurance.",
     '5. Drills: sets, amountMin, amountMax and restSeconds inside the drill\'s own ranges (sets, allowedAmount, restSeconds). amount counts the drill\'s "unit" (reps or seconds), per side when perSide is true. Drill effort follows its "effort" text: fast, sharp and well landed, never to failure. Drills have no RIR.',
     "6. context.goals is in the user's priority order (durability first). Favour the top goals, cover the ones that have waited longest (lastTrained, null = never), and vary choices from context.recentAthleticDays. Power and agility drills are there for tissue resilience at low volume, never for speed or skill.",

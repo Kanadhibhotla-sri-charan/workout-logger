@@ -1377,3 +1377,11 @@ Upper: brachialis 6 of 9, triceps long head 2 of 3). It may now replace one
 exercise with the short target's plan-legal candidate when every other
 target keeps its floor and every session cap holds. The validator is
 unchanged. Log 111.
+
+### 22.13 A decline is coached per muscle; Athletic strength 1-4 (2026-11-13)
+Owner: a coach has more ways to address a decline than cutting every
+muscle's numbers. A whole-body reactive deload now needs 4 declining
+muscles (was 2). Fewer are handed to the AI with per-exercise evidence
+(decliningMuscles, rule 9b) and it decides the response per muscle.
+Athletic strength block: 1-4 lifts, the count is the AI's judgment for
+the day, the maximum is not a number to fill. Log 112.
