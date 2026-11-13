@@ -1369,3 +1369,11 @@ after badminton / the Athletic day / a Legs day or before badminton /
 the Athletic day (none). A ticked add-on is not dropped for time.
 Stretches: only drills for the muscles the day works (lats on Pull, pecs
 on Push). Log 110.
+
+### 22.12 Completion may swap when the session is full (2026-11-13)
+Deterministic completion could only add exercises, so a goal short of its
+floor in a session already at the exercise cap was rejected (Fri 13 Nov
+Upper: brachialis 6 of 9, triceps long head 2 of 3). It may now replace one
+exercise with the short target's plan-legal candidate when every other
+target keeps its floor and every session cap holds. The validator is
+unchanged. Log 111.

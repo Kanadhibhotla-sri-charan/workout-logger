@@ -42,13 +42,14 @@
 //   - Only ever adds a NEW exercise that has a real Blueprint-authored
 //     prescription — never one requiring an invented rep/RIR range.
 
-import { ABS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
+import { ABS_PHYSIQUE_TARGETS, LEGS_PHYSIQUE_TARGETS, sessionRealismCapFor } from '../../engine/config.js';
 import type { SessionPurpose } from '../../engine/sessionPurpose.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../contracts/programmerTypes.js';
 import type { AIProgrammerContext, AIProgrammerMuscleGuidance, AIProgrammerTargetContext, AIProgrammerValidExerciseContext } from '../context/programmerContextTypes.js';
 import { creditedSetsByTarget, creditedTargetKeys, keyOf } from './sharedCredit.js';
 import type { SessionPlan } from '../planning/sessionPlanner.js';
 import { MAX_SETS_WITHOUT_AUTHORED_CAP } from './programmerProposalRepair.js';
+import { UNDER_PRESCRIPTION_TOLERANCE } from './programmerAdequacyValidator.js';
 
 export interface CompletionResult {
   proposal: AIWorkoutSessionProposal;
@@ -188,6 +189,89 @@ function canAddOneMoreExerciseFor(exercises: readonly AIWorkoutExerciseProposal[
   return true;
 }
 
+/** A target's adequacy floor: its feasibility threshold, else its
+ * recommended minimum at its tolerance (the validator's own rule). */
+function floorOf(g: AIProgrammerMuscleGuidance): number {
+  return g.feasibility?.adequacyThreshold ?? g.recommendedSessionSets.min * (g.adequacyTolerance ?? UNDER_PRESCRIPTION_TOLERANCE);
+}
+
+/** Step 3 of completeOneTarget (2026-11-13, Fri 13 Nov Upper failed twice:
+ * the AI filled the 10-exercise session with a plain biceps curl and a
+ * pushdown, leaving brachialis 6 of 9 and the triceps long head 2 of 3,
+ * and completion could not add the third hammer curl or the second
+ * overhead extension). When the session is at its exercise cap, replace
+ * ONE other exercise with `candidate`, only if afterwards:
+ *   - every target in the brief keeps at least min(its sets before, its
+ *     adequacy floor) and stays within its per-exposure cap (or does not
+ *     grow past it), and every target with work keeps some work;
+ *   - the session caps still hold.
+ * The swapped-in exercise takes the larger of the shortfall and the
+ * removed exercise's sets, within its own ceiling. Deterministic: the
+ * removed exercise with the fewest sets goes first, then by exerciseId.
+ * Returns the sets added for `target` (0 when no swap is safe). */
+function trySwapIn(
+  exercises: AIWorkoutExerciseProposal[],
+  target: AIProgrammerTargetContext,
+  guidance: AIProgrammerMuscleGuidance,
+  candidate: { exerciseId: string; ceiling: number; catalogueEntry: AIProgrammerValidExerciseContext },
+  missing: number,
+  purpose: SessionPurpose | null,
+  allGuidance: readonly AIProgrammerMuscleGuidance[],
+  allTargets: readonly AIProgrammerTargetContext[],
+  notes: string[]
+): number {
+  const targetKey = guidanceKey(guidance);
+  const before = creditedSetsByTarget(exercises, allTargets);
+  const authored = candidate.catalogueEntry.authoredPrescription!;
+  const order = exercises
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => !(e.targetType === target.targetType && e.targetId === target.targetId))
+    // Only an exercise whose own target the brief knows (so its floor can be kept).
+    .filter(({ e }) => allGuidance.some((g) => g.targetType === e.targetType && g.targetId === e.targetId))
+    .sort((a, b) => a.e.sets - b.e.sets || a.e.exerciseId.localeCompare(b.e.exerciseId));
+  for (const { e: removed, i } of order) {
+    const sets = Math.min(candidate.ceiling, Math.max(missing, removed.sets));
+    const added: AIWorkoutExerciseProposal = {
+      exerciseId: candidate.exerciseId,
+      role: candidate.catalogueEntry.role,
+      targetType: target.targetType,
+      targetId: target.targetId,
+      sets,
+      repsMin: authored.repsMin,
+      repsMax: authored.repsMax,
+      rirMin: authored.rirMin,
+      rirMax: authored.rirMax,
+      rationale: [`Swapped in by deterministic completion for ${removed.exerciseId}: ${target.targetId} was below its adequacy threshold and the session was at its exercise cap.`],
+      source: 'blueprint',
+    };
+    const trial = exercises.map((e, j) => (j === i ? added : e));
+    const without = exercises.filter((_, j) => j !== i);
+    if (!canAddOneMoreExerciseFor(without, target.targetId, purpose)) continue;
+    const legCap = sessionRealismCapFor(purpose, [...new Set(trial.map((e) => e.targetId))]).legExerciseShareMax;
+    if (legCap !== null && trial.filter((e) => LEGS_PHYSIQUE_TARGETS.includes(e.targetId)).length > legCap) continue;
+    const after = creditedSetsByTarget(trial, allTargets);
+    if ((after.get(targetKey) ?? 0) <= (before.get(targetKey) ?? 0)) continue;
+    const safe = allGuidance.every((g) => {
+      const key = guidanceKey(g);
+      if (key === targetKey) return true;
+      const b = before.get(key) ?? 0;
+      const a = after.get(key) ?? 0;
+      if (b > 0 && a === 0) return false;
+      if (a < Math.min(b, floorOf(g))) return false;
+      if (g.directSetsPerExposureCap != null && a > Math.max(g.directSetsPerExposureCap, b)) return false;
+      return true;
+    });
+    if (!safe) continue;
+    const gained = (after.get(targetKey) ?? 0) - (before.get(targetKey) ?? 0);
+    exercises[i] = added;
+    notes.push(
+      `Deterministic completion: swapped ${removed.exerciseId} (${removed.targetId}, ${removed.sets} sets) for ${candidate.exerciseId} at ${sets} sets — ${target.targetId} was below its adequacy threshold (${guidance.feasibility!.adequacyThreshold}), the session was at its exercise cap, and every other target keeps its floor.`
+    );
+    return gained;
+  }
+  return 0;
+}
+
 /** Completes ONE deficient target's shortfall, in place on a working
  * copy of `exercises` — minimum-change: bumps an already-present
  * exercise for this exact target up to ITS OWN ceiling first (no new
@@ -206,7 +290,8 @@ function completeOneTarget(
   purpose: SessionPurpose | null,
   notes: string[],
   allTargets: readonly AIProgrammerTargetContext[],
-  planAllowed: ReadonlySet<string> | null
+  planAllowed: ReadonlySet<string> | null,
+  allGuidance: readonly AIProgrammerMuscleGuidance[] = []
 ): void {
   const threshold = guidance.feasibility!.adequacyThreshold;
   let missing = Math.ceil(threshold - currentTotal);
@@ -254,6 +339,13 @@ function completeOneTarget(
   for (const candidate of sortCandidates(newCandidates)) {
     if (missing <= 0) break;
     if (!canAddOneMoreExerciseFor(exercises, target.targetId, purpose)) {
+      // Step 3 (2026-11-13): the session is full. Swap one exercise the
+      // session can spare for this candidate (see trySwapIn).
+      const swapped = trySwapIn(exercises, target, guidance, newCandidates.find((c) => c.exerciseId === candidate.exerciseId)!, missing, purpose, allGuidance, allTargets, notes);
+      if (swapped > 0) {
+        missing -= swapped;
+        continue;
+      }
       notes.push(
         `Deterministic completion: could not fully close ${target.targetId}'s shortfall — adding another exercise would exceed a real session-wide cap (exercise count, target count, or abs exercise-share). Reporting the constraint rather than violating it; the resulting shortfall is left for adequacy validation.`
       );
@@ -367,7 +459,7 @@ export function completeProposalAdequacy(proposal: AIWorkoutSessionProposal, con
 
     if (!best) break; // nothing left needs attention this pass
 
-    completeOneTarget(exercises, best.target, best.guidance, best.currentTotal, purpose, notes, context.targets, planAllowedFor(guidanceKey(best.guidance)));
+    completeOneTarget(exercises, best.target, best.guidance, best.currentTotal, purpose, notes, context.targets, planAllowedFor(guidanceKey(best.guidance)), context.programmingBrief.muscles);
     pending.delete(guidanceKey(best.guidance)); // processed exactly once, regardless of outcome
   }
 

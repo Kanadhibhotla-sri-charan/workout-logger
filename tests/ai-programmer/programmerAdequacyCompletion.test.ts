@@ -566,4 +566,57 @@ describe('completeProposalAdequacy', () => {
     const adequacy = validateProposalAdequacy(completed, ctx);
     expect(adequacy.errors.some((e) => e.includes('brachialis-arm-thickness'))).toBe(false);
   });
+
+  // Fri 13 Nov 2026 (Upper) failed twice: the AI filled the 10-exercise
+  // session with a plain biceps curl, leaving brachialis 6 of 9, and
+  // completion could not add the third hammer curl. It now swaps out an
+  // exercise the session can spare, never one another target needs.
+  describe('18. a full session: swap in, only when every other target keeps its floor', () => {
+    const authored = (sets: number) => ({ sets, repsMin: 8, repsMax: 15, rirMin: 1, rirMax: 3 });
+    const build = (bicepsMin: number) => {
+      const brachialis = target(
+        'brachialis-arm-thickness',
+        [
+          validExercise({ exerciseId: 'hammer-curl', authoredPrescription: authored(3) }),
+          validExercise({ exerciseId: 'cable-hammer-curl-rope', authoredPrescription: authored(3) }),
+          validExercise({ exerciseId: 'cross-body-hammer-curl', authoredPrescription: authored(3) }),
+        ],
+        { isSpecialization: true, goalId: 'goal-arm-side-thickness' }
+      );
+      const biceps = target('biceps', [validExercise({ exerciseId: 'incline-dumbbell-curl', authoredPrescription: authored(2) })]);
+      const allTargets = [biceps, brachialis];
+      const muscles = [
+        guidance(brachialis, allTargets, 9, 10, { adequacyTolerance: 1, feasibility: computeTargetFeasibility(brachialis, allTargets, 9, 10, 1) }),
+        guidance(biceps, allTargets, bicepsMin, 5, { adequacyTolerance: 1, feasibility: computeTargetFeasibility(biceps, allTargets, bicepsMin, 5, 1) }),
+      ];
+      const fillers = Array.from({ length: 7 }, (_, i) => exercise({ exerciseId: `filler-${i}`, targetId: `filler-target-${i}`, sets: 1 }));
+      const p = proposal([
+        exercise({ exerciseId: 'hammer-curl', targetId: 'brachialis-arm-thickness', sets: 3 }),
+        exercise({ exerciseId: 'cable-hammer-curl-rope', targetId: 'brachialis-arm-thickness', sets: 3 }),
+        exercise({ exerciseId: 'incline-dumbbell-curl', targetId: 'biceps', sets: 2 }),
+        ...fillers,
+      ]);
+      return { ctx: contextWith(allTargets, muscles), p };
+    };
+
+    it('swaps the spare biceps curl for the third hammer curl; brachialis passes, biceps keeps its floor', () => {
+      const { ctx, p } = build(2);
+      const { proposal: completed, notes } = completeProposalAdequacy(p, ctx);
+      const ids = completed.exercises.map((e) => e.exerciseId);
+      expect(ids).toHaveLength(10);
+      expect(ids).toContain('cross-body-hammer-curl');
+      expect(ids).not.toContain('incline-dumbbell-curl');
+      expect(ids.filter((id) => id.startsWith('filler-'))).toHaveLength(7); // targets the brief does not know are never swapped out
+      expect(notes.some((n) => n.includes('swapped incline-dumbbell-curl'))).toBe(true);
+      expect(validateProposalAdequacy(completed, ctx).errors.filter((e) => /brachialis|biceps/.test(e))).toEqual([]);
+    });
+
+    it('no swap when the removed exercise is what keeps another target at its floor', () => {
+      const { ctx, p } = build(5);
+      const { proposal: completed, notes } = completeProposalAdequacy(p, ctx);
+      expect(completed.exercises.map((e) => e.exerciseId)).toContain('incline-dumbbell-curl');
+      expect(notes.some((n) => n.includes('swapped'))).toBe(false);
+      expect(notes.some((n) => n.includes('session-wide cap'))).toBe(true);
+    });
+  });
 });
