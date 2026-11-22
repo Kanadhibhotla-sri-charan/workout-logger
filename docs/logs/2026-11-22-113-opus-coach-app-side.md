@@ -1,6 +1,6 @@
 # 113 · Opus coach: app side (endpoints, day request, discard reason, coach view)
 
-Date: 2026-11-22 · Status: built, not deployed
+Date: 2026-11-22 · Status: deployed 2026-11-22 (4b4fc4d; backup pre-4b4fc4d-20261122T144123Z.sqlite; COACH_API_TOKEN in ~/.config/workout-logger/coach.env via drop-in coach.conf)
 
 ## Request
 Owner, 2026-11-22 (design agreed in a question round, see memory
