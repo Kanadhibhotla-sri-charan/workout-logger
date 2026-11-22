@@ -46,7 +46,7 @@ function db(req: import('express').Request): Database.Database {
  * content plus lifecycle/audit metadata only. Never the raw provider
  * response, never an API key/authorization header, never a raw SQL
  * error or stack trace (spec §6/§14). */
-function serializeProposal(record: AIProposalRecord) {
+export function serializeProposal(record: AIProposalRecord) {
   return {
     proposalId: record.id,
     status: record.status,
@@ -64,6 +64,7 @@ function serializeProposal(record: AIProposalRecord) {
     committedAt: record.committedAt,
     rejectedAt: record.rejectedAt,
     expiresAt: record.expiresAt,
+    rejectionReason: record.rejectionReason,
   };
 }
 
@@ -312,7 +313,13 @@ aiProgrammerRouter.post('/proposals/:proposalId/approve', (req, res, next) => {
 aiProgrammerRouter.post('/proposals/:proposalId/reject', (req, res, next) => {
   try {
     requireEnabled();
-    const record = rejectProposal(db(req), req.params.proposalId);
+    // Opus coach (2026-11-22): an optional reason the owner gives for
+    // discarding; the next coach run reads it.
+    const { reason } = req.body ?? {};
+    if (reason !== undefined && reason !== null && (typeof reason !== 'string' || reason.length > 500)) {
+      return res.status(400).json({ ok: false, error: 'reason must be a text of at most 500 characters when present' });
+    }
+    const record = rejectProposal(db(req), req.params.proposalId, typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : null);
     res.json({ ok: true, ...serializeProposal(record) });
   } catch (err) {
     if (err instanceof AIProgrammerError) {

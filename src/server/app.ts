@@ -14,6 +14,7 @@ import { programmingRouter } from './routes/programming.js';
 import { aiProgrammerRouter } from './routes/aiProgrammer.js';
 import { insightsRouter } from './routes/insights.js';
 import { coachingRouter } from './routes/coaching.js';
+import { coachRouter } from './routes/coach.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', '..', 'public');
@@ -22,7 +23,8 @@ export function createApp(db: Database.Database): Express {
   const app = express();
   app.locals.db = db;
 
-  app.use(express.json());
+  // The coach context is large (6 weeks of sessions); proposals stay small.
+  app.use(express.json({ limit: '1mb' }));
   app.use(express.static(PUBLIC_DIR));
 
   app.use('/api/blueprint', blueprintRouter);
@@ -37,6 +39,7 @@ export function createApp(db: Database.Database): Express {
   app.use('/api/ai-programmer', aiProgrammerRouter);
   app.use('/api/insights', insightsRouter);
   app.use('/api/coaching', coachingRouter);
+  app.use('/api/coach', coachRouter);
 
   // Deployment Phase §5: exists solely for deployment verification/uptime
   // checks — never database contents, user data, env vars, filesystem

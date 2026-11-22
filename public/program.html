@@ -693,6 +693,7 @@
       // one day with AI are both scoped to exactly this date — grouped
       // together, directly under this day's own information above.
       panel.appendChild(buildChangeActivitySection(day, weekReconciliation));
+      panel.appendChild(buildCoachSection(day, modalToken));
       panel.appendChild(buildAiProposalSection(day, modalToken));
 
       // Week-scoped action, visually and structurally separated from
@@ -1117,10 +1118,14 @@
       if (restText) metaParts.push(restText);
       card.appendChild(el('p', { class: 'faint', text: metaParts.join(' · '), style: 'margin:0.25rem 0 0' }));
 
-      if (item.rationale && item.rationale.length > 0) {
+      // Opus coach: target load and cue are shown on the card itself.
+      const visible = (item.rationale || []).filter((r) => r.startsWith('Target load:') || r.startsWith('Cue:'));
+      for (const line of visible) card.appendChild(el('p', { class: 'muted', text: line, style: 'margin:0.2rem 0 0' }));
+      const hidden = (item.rationale || []).filter((r) => !visible.includes(r));
+      if (hidden.length > 0) {
         const explain = el('details', { class: 'exercise-explanation' });
         explain.appendChild(el('summary', { text: 'Rationale' }));
-        for (const r of item.rationale) explain.appendChild(el('p', { text: r, style: 'margin:0.2rem 0' }));
+        for (const r of hidden) explain.appendChild(el('p', { text: r, style: 'margin:0.2rem 0' }));
         card.appendChild(explain);
       }
       return card;
@@ -1153,6 +1158,13 @@
       }
       if (proposal.sessionFocus && proposal.sessionFocus.length > 0) {
         wrap.appendChild(el('p', { class: 'muted', text: `Focus: ${proposal.sessionFocus.join(', ')}`, style: 'margin-top:0.5rem' }));
+      }
+      // Opus coach (2026-11-22): its note for you, before the exercises.
+      if (proposal.coach && proposal.coach.coachNote.length > 0) {
+        const note = el('div', { class: 'card', style: 'margin:0.5rem 0' });
+        note.appendChild(el('div', { class: 'card-subtitle', text: 'Coach note' }));
+        for (const line of proposal.coach.coachNote) note.appendChild(el('p', { text: line, style: 'margin:0.2rem 0' }));
+        wrap.appendChild(note);
       }
 
       const pendingReview = state.status === 'pending' || state.status === 'approved';
@@ -1193,7 +1205,8 @@
         for (const ex of flex.cooldown) wrap.appendChild(buildAiExerciseCard(ex, pendingReview));
       }
 
-      if (proposal.programmingRationale && proposal.programmingRationale.length > 0) {
+      if (proposal.coach && proposal.coach.weeklyTable.length > 0) wrap.appendChild(buildCoachWeeklyTable(proposal.coach.weeklyTable));
+      if (!proposal.coach && proposal.programmingRationale && proposal.programmingRationale.length > 0) {
         const details = el('details', { class: 'exercise-explanation' });
         details.appendChild(el('summary', { text: 'Programming rationale' }));
         for (const r of proposal.programmingRationale) details.appendChild(el('p', { text: r, style: 'margin:0.25rem 0' }));
@@ -1698,6 +1711,170 @@
       renderPurposePicker();
       renderActions(); // shows the "Checking…" placeholder immediately
       discover();
+      return section;
+    }
+
+    // ---------- Opus coach (2026-11-22) ----------
+    // The daily coach routine (Claude Opus) plans the day at 08:00 IST. This
+    // section sets what you want for the day before it runs, shows what it
+    // planned (or why it didn't), and approves / discards / adds it.
+    // The Qwen "Generate with AI" section below is unchanged.
+
+    const COACH_DAY_REQUEST_OPTIONS = [
+      { value: '', text: 'Weekly plan decides' },
+      { value: 'full', text: 'Full day' },
+      { value: 'add_ons', text: 'Add-ons only' },
+    ];
+
+    function buildCoachWeeklyTable(rows) {
+      const wrap = el('div', { style: 'margin-top:0.8rem; overflow-x:auto' });
+      wrap.appendChild(el('h3', { text: 'This week (sets)', style: 'margin:0 0 0.3rem' }));
+      const table = el('table', { class: 'coach-week-table', style: 'width:100%; border-collapse:collapse; font-size:0.85rem' });
+      const head = el('tr');
+      for (const h of ['Muscle', 'Target', 'Done', 'Today', 'Later']) head.appendChild(el('th', { text: h, style: 'text-align:left; padding:0.2rem 0.3rem' }));
+      table.appendChild(head);
+      for (const r of rows) {
+        const off = Math.abs(r.loggedSoFar + r.plannedToday + r.plannedRestOfWeek - r.weeklyTarget) > 2;
+        const tr = el('tr');
+        tr.appendChild(el('td', { text: blueprintTargetNamesById.get(r.targetId) || r.targetId, style: 'padding:0.2rem 0.3rem' }));
+        for (const v of [r.weeklyTarget, r.loggedSoFar, r.plannedToday, r.plannedRestOfWeek]) tr.appendChild(el('td', { text: String(v), style: `padding:0.2rem 0.3rem${off ? '; font-weight:600' : ''}` }));
+        table.appendChild(tr);
+        if (r.reason) {
+          const why = el('tr');
+          why.appendChild(el('td', { colspan: '5', class: 'faint', text: `Why: ${r.reason}`, style: 'padding:0 0.3rem 0.3rem' }));
+          table.appendChild(why);
+        }
+      }
+      wrap.appendChild(table);
+      return wrap;
+    }
+
+    function buildCoachSection(day, modalToken) {
+      const section = el('div', { class: 'ai-proposal-section' });
+      section.appendChild(el('h3', { text: `Coach plan for ${formatWeekday(day.weekday)}` }));
+      const locked = day.status === 'completed' || day.status === 'in_progress';
+      const coachDayIsGym = day.activity === 'gym' || day.activity === 'both';
+      const requestEl = el('div');
+      const runEl = el('div');
+      const reviewEl = el('div');
+      const actionsEl = el('div');
+      const statusEl = el('div');
+      section.append(requestEl, runEl, reviewEl, actionsEl, statusEl);
+      let info = null;
+      let inFlight = false;
+      const isCurrent = () => isModalTokenCurrent(modalToken);
+
+      async function load() {
+        try {
+          const fresh = await aiApi(`/api/coach/day?date=${encodeURIComponent(day.date)}`);
+          if (!isCurrent()) return;
+          info = fresh;
+        } catch (err) {
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'error', err.message);
+        }
+        render();
+      }
+
+      function render() {
+        requestEl.innerHTML = '';
+        runEl.innerHTML = '';
+        reviewEl.innerHTML = '';
+        actionsEl.innerHTML = '';
+        if (!info) {
+          runEl.appendChild(el('p', { class: 'faint', text: 'Checking…' }));
+          return;
+        }
+        if (!locked) {
+          const select = el('select', { 'aria-label': 'What the coach should plan for this day' },
+            COACH_DAY_REQUEST_OPTIONS.map((o) => el('option', { value: o.value, text: o.text, ...((info.request || '') === o.value ? { selected: 'selected' } : {}) })));
+          select.addEventListener('change', async () => {
+            try {
+              const saved = await aiApi('/api/coach/day-request', { method: 'PUT', body: { date: day.date, mode: select.value === '' ? null : select.value } });
+              if (!isCurrent()) return;
+              info.request = saved.request;
+              showInlineStatus(statusEl, 'success', 'Saved. The coach reads it at its next run.');
+            } catch (err) {
+              if (!isCurrent()) return;
+              showInlineStatus(statusEl, 'error', err.message);
+            }
+          });
+          requestEl.appendChild(el('div', { class: 'btn-row' }, [el('span', { class: 'muted', text: 'Today I want:' }), select]));
+        }
+        const run = info.run;
+        if (run && run.outcome === 'failed') runEl.appendChild(el('div', { class: 'card card-warning', role: 'status' }, [el('p', { text: `Coach failed: ${run.reason}`, style: 'margin:0' })]));
+        else if (run && run.outcome === 'no_run_needed') runEl.appendChild(el('p', { class: 'faint', text: `Coach: nothing planned — ${run.reason}` }));
+        else if (!info.proposal) runEl.appendChild(el('p', { class: 'faint', text: 'The coach has not planned this day yet. It runs at 08:00.' }));
+
+        const p = info.proposal;
+        const active = p && (p.status === 'pending' || p.status === 'approved' || p.status === 'committed');
+        if (active) reviewEl.appendChild(buildAiProposalReview(p));
+        if (p && p.status === 'rejected' && p.rejectionReason) reviewEl.appendChild(el('p', { class: 'faint', text: `Discarded: ${p.rejectionReason}` }));
+        if (locked || inFlight) return;
+
+        const buttons = [];
+        if (p && p.status === 'pending') buttons.push(createButton({ label: 'Approve', onClick: () => act('approve') }));
+        if (p && p.status === 'approved') buttons.push(createButton({ label: 'Add to my program', onClick: () => act('commit') }));
+        if (p && p.status === 'approved' && !coachDayIsGym) actionsEl.appendChild(el('p', { class: 'faint', text: `Adding it makes ${formatWeekday(day.weekday)} a gym day in place of its current activity.` }));
+        if (p && (p.status === 'pending' || p.status === 'approved')) {
+          const reason = el('input', { type: 'text', maxlength: '500', placeholder: 'Why discard? (optional, the coach reads it)', 'aria-label': 'Reason for discarding' });
+          buttons.push(createButton({ label: 'Discard', variant: 'secondary', onClick: () => act('reject', reason.value) }));
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, buttons));
+          actionsEl.appendChild(el('div', { style: 'margin-top:0.4rem' }, [reason]));
+        } else if (buttons.length > 0) {
+          actionsEl.appendChild(el('div', { class: 'btn-row' }, buttons));
+        }
+        if (info.rerunAvailable && !(p && p.status === 'committed')) {
+          actionsEl.appendChild(el('div', { class: 'btn-row', style: 'margin-top:0.4rem' }, [createButton({ label: 'Re-run coach', variant: 'secondary', onClick: rerun })]));
+        }
+      }
+
+      async function act(kind, reason) {
+        if (inFlight || !info || !info.proposal) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', kind === 'commit' ? 'Adding…' : kind === 'approve' ? 'Approving…' : 'Discarding…');
+        render();
+        try {
+          const id = info.proposal.proposalId;
+          const options = { method: 'POST' };
+          if (kind === 'commit') options.body = { intent: coachDayIsGym ? 'fill_existing_gym_day' : 'replace_day_activity' };
+          if (kind === 'reject' && reason && reason.trim() !== '') options.body = { reason: reason.trim() };
+          const updated = await aiApi(`/api/ai-programmer/proposals/${id}/${kind}`, options);
+          if (!isCurrent()) return;
+          info.proposal = updated;
+          showInlineStatus(statusEl, null, null);
+          if (kind === 'commit') loadWeek();
+        } catch (err) {
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'error', err.message);
+        } finally {
+          if (!isCurrent()) return;
+          inFlight = false;
+          render();
+        }
+      }
+
+      async function rerun() {
+        if (inFlight) return;
+        inFlight = true;
+        showInlineStatus(statusEl, 'saving', 'Starting the coach…');
+        render();
+        try {
+          await aiApi('/api/coach/rerun', { method: 'POST', body: { date: day.date } });
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'success', 'The coach is running. Reopen this day in a few minutes.');
+        } catch (err) {
+          if (!isCurrent()) return;
+          showInlineStatus(statusEl, 'error', err.message);
+        } finally {
+          if (!isCurrent()) return;
+          inFlight = false;
+          render();
+        }
+      }
+
+      render();
+      load();
       return section;
     }
 

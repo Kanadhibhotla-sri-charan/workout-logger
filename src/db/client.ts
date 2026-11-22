@@ -94,6 +94,9 @@ function migrate(db: Database.Database): void {
   // produced a proposal; null for every single-day generate_session
   // proposal and every pre-existing row.
   addColumnIfMissing(db, 'ai_program_proposals', 'week_run_id', 'TEXT');
+  // Opus coach (2026-11-22): the owner's optional reason for discarding a
+  // proposal; the next coach run reads it.
+  addColumnIfMissing(db, 'ai_program_proposals', 'rejection_reason', 'TEXT');
 
   // Coaching Depth Batch 3 (Periodization System): extends the existing
   // coaching_program_state row (never a second table) with reactive-deload

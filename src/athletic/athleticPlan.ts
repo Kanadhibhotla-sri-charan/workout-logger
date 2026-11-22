@@ -102,7 +102,7 @@ export function athleticDayHistory(db: Database.Database, date: string): Array<{
     db
       .prepare(
         `SELECT DISTINCT target_date AS date FROM ai_program_proposals
-          WHERE status = 'committed' AND json_extract(proposal_json, '$.sessionKind') = 'athletic' AND target_date >= ? AND target_date < ?
+          WHERE status = 'committed' AND (json_extract(proposal_json, '$.sessionKind') = 'athletic' OR json_extract(proposal_json, '$.coach.purpose') = 'athletic') AND target_date >= ? AND target_date < ?
           ORDER BY target_date`
       )
       .all(addDays(date, -ATHLETIC_PLAN_HISTORY_DAYS), date) as Array<{ date: string }>

@@ -37,7 +37,7 @@ export interface AIWorkoutExerciseProposal {
   source: 'blueprint';
   /** Athletic sessions only: what repsMin/repsMax count, and the block. */
   repUnit?: 'reps' | 'seconds';
-  block?: 'warmup' | 'quality' | 'strength' | 'conditioning' | 'cooldown' | 'addon';
+  block?: 'warmup' | 'main' | 'quality' | 'strength' | 'conditioning' | 'cooldown' | 'addon';
 }
 
 /** The complete AI output for `mode: "generate_session"`. A proposal
@@ -52,7 +52,14 @@ export interface AIWorkoutSessionProposal {
   sessionFocus: string[];
   /** 'athletic' (2026-10-18): an Athletic-day proposal (drills only,
    * src/athletic/). Absent = the normal physique session. */
-  sessionKind?: 'athletic';
+  sessionKind?: 'athletic' | 'coach';
+  /** Opus coach session (2026-11-22, src/coach/opusCoach.ts): the day type
+   * it planned, its note for the owner and its weekly table. */
+  coach?: {
+    purpose: string;
+    coachNote: string[];
+    weeklyTable: Array<{ targetId: string; weeklyTarget: number; loggedSoFar: number; plannedToday: number; plannedRestOfWeek: number; reason?: string }>;
+  };
   /** Athletic day (2026-10-31): the package components picked for it by
    * src/athletic/athleticPlan.ts, and why. */
   athleticPlan?: { components: Array<'strength' | 'resilience' | 'endurance' | 'mobility' | 'flexibility'>; light: boolean; reasons: string[] };

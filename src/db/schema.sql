@@ -690,3 +690,42 @@ CREATE TABLE IF NOT EXISTS coach_advice (
   decided_on TEXT,
   created_at TEXT NOT NULL
 );
+
+-- Opus coach (2026-11-22, docs/logs/2026-11-22-113-opus-coach-app-side.md):
+-- a daily cloud routine (Claude Opus) plans the day through
+-- /api/coach/*. The Qwen pipeline stays as the fallback.
+
+-- What the owner wants for a date, set before the 08:00 run.
+-- mode 'full' = a full session of the day's type, 'add_ons' = add-ons only.
+CREATE TABLE IF NOT EXISTS coach_day_requests (
+  date TEXT PRIMARY KEY,
+  mode TEXT NOT NULL CHECK (mode IN ('full', 'add_ons')),
+  updated_at TEXT NOT NULL
+);
+
+-- One row per routine run: saved a proposal, nothing to do, or failed.
+CREATE TABLE IF NOT EXISTS coach_runs (
+  id TEXT PRIMARY KEY,
+  target_date TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('saved', 'no_run_needed', 'failed')),
+  reason TEXT,
+  proposal_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_coach_runs_target_date ON coach_runs(target_date);
+
+-- The coach's own decisions, each with how and when to check it worked.
+CREATE TABLE IF NOT EXISTS coach_decisions (
+  id TEXT PRIMARY KEY,
+  decided_on TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  success_check TEXT NOT NULL,
+  check_on TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'kept', 'undone', 'extended')),
+  outcome TEXT,
+  proposal_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

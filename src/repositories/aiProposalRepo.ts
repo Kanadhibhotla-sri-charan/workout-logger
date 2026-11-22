@@ -60,6 +60,8 @@ export interface AIProposalRecord {
   expiresAt: string;
   /** The week-generation run that produced this proposal; null for a single-day generate_session proposal. */
   weekRunId: string | null;
+  /** The owner's optional reason for discarding it (2026-11-22); read by the next coach run. */
+  rejectionReason: string | null;
 }
 
 export interface CreateAIProposalInput {
@@ -104,6 +106,7 @@ interface AIProposalRow {
   rejected_at: string | null;
   expires_at: string;
   week_run_id: string | null;
+  rejection_reason?: string | null;
 }
 
 function rowToRecord(row: AIProposalRow): AIProposalRecord {
@@ -133,6 +136,7 @@ function rowToRecord(row: AIProposalRow): AIProposalRecord {
     rejectedAt: row.rejected_at,
     expiresAt: row.expires_at,
     weekRunId: row.week_run_id ?? null,
+    rejectionReason: row.rejection_reason ?? null,
   };
 }
 
@@ -205,10 +209,18 @@ export class AIProposalRepo {
    * caller (service layer) is what applies lazy expiry and decides which
    * statuses the UI treats as "active"; this method's only contract is
    * "the newest attempt for this date, whatever became of it". */
-  findLatestForTargetDate(targetDate: string): AIProposalRecord | undefined {
+  //
+  // Opus coach (2026-11-22): `source` keeps the two paths apart. 'qwen'
+  // (the default, every existing caller) never sees a coach proposal, so
+  // the Qwen pipeline behaves exactly as before; 'coach' sees only those.
+  findLatestForTargetDate(targetDate: string, source: 'qwen' | 'coach' = 'qwen'): AIProposalRecord | undefined {
     const row = this.db
-      .prepare('SELECT * FROM ai_program_proposals WHERE target_date = ? ORDER BY created_at DESC, id DESC LIMIT 1')
-      .get(targetDate) as AIProposalRow | undefined;
+      .prepare(
+        // A coach re-run can land in the same millisecond as the row it
+        // replaces; insertion order (rowid) breaks that tie.
+        `SELECT * FROM ai_program_proposals WHERE target_date = ? AND (model_provider = 'opus-coach') = ? ORDER BY created_at DESC, ${source === 'coach' ? 'rowid' : 'id'} DESC LIMIT 1`
+      )
+      .get(targetDate, source === 'coach' ? 1 : 0) as AIProposalRow | undefined;
     return row ? rowToRecord(row) : undefined;
   }
 
@@ -304,8 +316,11 @@ export class AIProposalRepo {
    * committed, discarding it means deleting the real session it created
    * (DELETE /api/workouts/:id), not rejecting the proposal record — the
    * two are deliberately separate operations on separate resources. */
-  reject(id: string): AIProposalRecord | undefined {
-    return this.transition(id, ['pending', 'approved'], 'rejected', ', rejected_at = @rejected_at', { rejected_at: nowIso() });
+  reject(id: string, reason: string | null = null): AIProposalRecord | undefined {
+    return this.transition(id, ['pending', 'approved'], 'rejected', ', rejected_at = @rejected_at, rejection_reason = @rejection_reason', {
+      rejected_at: nowIso(),
+      rejection_reason: reason,
+    });
   }
 
   /** Records why a commit attempt failed without changing `status` —

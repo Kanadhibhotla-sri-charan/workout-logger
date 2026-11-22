@@ -22,6 +22,7 @@ import { programmingWeekStart, weekdayOfDate } from '../../engine/workoutBuilder
 import { buildProgrammerContext } from '../context/programmerContextBuilder.js';
 import { athleticPaused, buildAthleticContext, revalidateAthleticProposal } from '../../athletic/athleticSession.js';
 import { isDrillId } from '../../blueprint/athletic.js';
+import { coachHardLimitProblems } from '../../coach/opusCoach.js';
 import {
   AICommitIntentMismatchError,
   AIProposalCommitFailedError,
@@ -104,9 +105,9 @@ export function getProposal(db: Database.Database, proposalId: string): AIPropos
  * date — never throws AIProposalNotFoundError, since "no proposal yet"
  * is the normal, expected case here (unlike `getProposal`, which is
  * always given an id the caller already believes exists). */
-export function getLatestProposalForDate(db: Database.Database, targetDate: string): AIProposalRecord | undefined {
+export function getLatestProposalForDate(db: Database.Database, targetDate: string, source: 'qwen' | 'coach' = 'qwen'): AIProposalRecord | undefined {
   const repo = new AIProposalRepo(db);
-  const record = repo.findLatestForTargetDate(targetDate);
+  const record = repo.findLatestForTargetDate(targetDate, source);
   if (!record) return undefined;
   const current = expireIfNeeded(repo, record);
   if (isCommittedSessionElsewhereNow(db, current, targetDate)) return undefined;
@@ -175,14 +176,14 @@ export function approveProposal(db: Database.Database, proposalId: string): AIPr
  * operation on a separate resource (see AIProposalRepo.reject's own doc
  * comment). An `expired` proposal likewise cannot be rejected (nothing
  * left to reject — it's already inert). */
-export function rejectProposal(db: Database.Database, proposalId: string): AIProposalRecord {
+export function rejectProposal(db: Database.Database, proposalId: string, reason: string | null = null): AIProposalRecord {
   const record = loadCurrent(db, proposalId);
   if (record.status === 'rejected') return record;
   if (record.status !== 'pending' && record.status !== 'approved') {
     throw new AIProposalInvalidStateError(proposalId, record.status, 'rejected');
   }
 
-  const rejected = new AIProposalRepo(db).reject(proposalId);
+  const rejected = new AIProposalRepo(db).reject(proposalId, reason);
   if (!rejected) {
     const current = new AIProposalRepo(db).getById(proposalId);
     throw new AIProposalInvalidStateError(proposalId, current?.status ?? record.status, 'rejected');
@@ -277,7 +278,15 @@ export function commitAIProposalToPlannedSession(
   // Athletic day (2026-10-18): checked by its own rules against a fresh
   // Athletic context (which also refuses while the Legs pause is on).
   const athletic = record.proposal.sessionKind === 'athletic';
-  const structural = athletic ? { ok: true as const, value: record.proposal, errors: [] as string[] } : validateProposalSchema(record.proposal);
+  // Opus coach (2026-11-22): its session is checked only against the two
+  // hard limits (library, injury pause), on current state; its coaching is
+  // never re-judged by the Qwen rules (src/coach/opusCoach.ts).
+  const coach = record.proposal.sessionKind === 'coach';
+  if (coach) {
+    const problems = coachHardLimitProblems(db, record.proposal.exercises);
+    if (problems.length > 0) throw new AIProposalStaleError(proposalId, problems.map((p) => `${p.exerciseId ?? ''} ${p.problem}`.trim()));
+  }
+  const structural = athletic || coach ? { ok: true as const, value: record.proposal, errors: [] as string[] } : validateProposalSchema(record.proposal);
   if (!structural.ok || !structural.value) {
     throw new AIProposalValidationFailedError(proposalId, structural.errors);
   }
@@ -308,7 +317,7 @@ export function commitAIProposalToPlannedSession(
   // purely so a specific historical proposal's exact generation-time
   // context can be identified for debugging, never as a validity check.
   const currentBlueprintCommit = BlueprintAdapter.getManifest().sourceCommit;
-  if (currentBlueprintCommit !== record.blueprintCommit) {
+  if (!coach && currentBlueprintCommit !== record.blueprintCommit) {
     throw new AIProposalStaleError(proposalId, [
       `Blueprint changed since this proposal was generated (was "${record.blueprintCommit}", now "${currentBlueprintCommit}")`,
     ]);
@@ -327,7 +336,7 @@ export function commitAIProposalToPlannedSession(
   // The weekly ledger applies here as at generation (2026-11-09): it can
   // allow a goal muscle's direct exercises GOAL_EXERCISE_MAX_SETS, and the
   // re-check must read the same ceilings the proposal was built against.
-  const context = athletic ? null : withWeeklyLedger(db, buildProgrammerContext(db, { targetDate: proposal.targetDate, applyRotationShortlist: false }));
+  const context = athletic || coach ? null : withWeeklyLedger(db, buildProgrammerContext(db, { targetDate: proposal.targetDate, applyRotationShortlist: false }));
 
   // Full domain revalidation against the FRESH context — this is what
   // catches a changed authored prescription, an exercise that is no
@@ -423,7 +432,7 @@ export function commitAIProposalToPlannedSession(
         // create() guarantees that by construction), but this note
         // should reference the persisted record, not the in-memory
         // proposal object, in case that ever changes.
-        notes: `AI-proposed session (proposal ${record.id})`,
+        notes: coach ? `Coach-planned session (proposal ${record.id})` : `AI-proposed session (proposal ${record.id})`,
       });
       // Correction: the proposal's prescription (repsMin/repsMax/
       // rirMin/rirMax/restSeconds/sets count) is planned data — it goes
@@ -435,7 +444,7 @@ export function commitAIProposalToPlannedSession(
       // that's why there are exactly `exercise.sets` set rows.
       // The athletic add-on goes after the session's own exercises; it is
       // left out while the Legs injury pause is on.
-      const addOn = !athletic && record.proposal.athleticAddOn && !athleticPaused(db) ? record.proposal.athleticAddOn.exercises.filter((e) => isDrillId(e.exerciseId)) : [];
+      const addOn = !athletic && !coach && record.proposal.athleticAddOn && !athleticPaused(db) ? record.proposal.athleticAddOn.exercises.filter((e) => isDrillId(e.exerciseId)) : [];
       // The flexibility block wraps the session: warm-up drills first,
       // cool-down drills last.
       const flexibility = athletic ? undefined : record.proposal.flexibilityBlock;
