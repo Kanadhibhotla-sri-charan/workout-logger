@@ -1,6 +1,6 @@
 # 112 · A decline is coached per muscle; Athletic strength block 1-4
 
-Date: 2026-11-13 · Status: built, not deployed
+Date: 2026-11-13 · Status: deployed 2026-11-22
 
 ## Request
 Owner, on the deload that started 10 Nov and on Thu 12 Nov (Athletic):
@@ -63,3 +63,9 @@ Athletic day (src/athletic/athleticSession.ts)
   deload; strength block [1, 4], max 12, instruction text.
 - Full suite: 2364 passed, 13 failed (the date-rot files of log 111), 10
   skipped.
+
+## Deployed 2026-11-22
+
+- Backup: deployment-backups/pre-55ab7ef-20261122T082210Z.sqlite (integrity ok). Health ok.
+- The reactive deload had already ended on 2026-11-16, so nothing was ended early. Its cooldown (to 2026-11-30) only holds back a whole-body deload, which now needs 4 declining muscles; per-muscle coaching is unaffected.
+- "jump rope" removed from the training profile's available_equipment (owner has none).
