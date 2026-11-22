@@ -142,8 +142,15 @@ coachRouter.post('/rerun', async (req, res, next) => {
     if (!rerunConfigured()) return res.status(501).json({ ok: false, error: 'rerun is not set up' });
     const response = await fetch(process.env.COACH_RERUN_URL!, {
       method: 'POST',
-      headers: { authorization: `Bearer ${process.env.COACH_RERUN_TOKEN}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ text: `Re-run the coach for ${date}.` }),
+      // Claude Code routine API trigger (POST .../routines/{trig_id}/fire):
+      // anthropic-version is required; the beta header marks the experimental endpoint.
+      headers: {
+        authorization: `Bearer ${process.env.COACH_RERUN_TOKEN}`,
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'experimental-cc-routine-2026-04-01',
+      },
+      body: JSON.stringify({ text: `Re-run the coach for ${date}. This is a Re-run pressed by the lifter.` }),
       signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) {

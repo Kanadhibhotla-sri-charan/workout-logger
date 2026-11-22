@@ -177,6 +177,27 @@ describe('discard reason and runs', () => {
   });
 });
 
+describe('re-run', () => {
+  it('fires the routine API trigger with the required headers', async () => {
+    process.env.COACH_RERUN_URL = 'https://api.anthropic.com/v1/claude_code/routines/trig_test/fire';
+    process.env.COACH_RERUN_TOKEN = 'sk-ant-oat01-test';
+    const fetchMock = vi.fn(async () => new Response('{"type":"routine_fire"}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      expect((await request(app).get(`/api/coach/day?date=${DATE}`).expect(200)).body.rerunAvailable).toBe(true);
+      await request(app).post('/api/coach/rerun').send({ date: DATE }).expect(202);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe(process.env.COACH_RERUN_URL);
+      expect(init.headers).toMatchObject({ authorization: 'Bearer sk-ant-oat01-test', 'anthropic-version': '2023-06-01' });
+      expect(JSON.parse(String(init.body)).text).toContain(DATE);
+    } finally {
+      vi.unstubAllGlobals();
+      delete process.env.COACH_RERUN_URL;
+      delete process.env.COACH_RERUN_TOKEN;
+    }
+  });
+});
+
 describe("the day request presets Qwen's leg add-on ticks (owner: always a full session; the choice is the add-ons)", () => {
   it('session only ticks none, session + add-ons ticks every part, no request keeps the suggestion', async () => {
     new LegTrainingRepo(db).set('athletic');
