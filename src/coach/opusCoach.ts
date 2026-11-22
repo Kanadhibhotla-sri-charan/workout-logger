@@ -34,6 +34,9 @@ export const OPUS_COACH_DEFAULT_MODEL = 'claude-opus-5-5';
 
 export const COACH_PURPOSES = ['push', 'pull', 'upper', 'athletic', 'legs', 'add_ons'] as const;
 export type CoachPurpose = (typeof COACH_PURPOSES)[number];
+/** The owner's request for a day (2026-11-22): 'full' = the session only,
+ * 'add_ons' = the session plus the leg add-ons. No request = the weekly
+ * plan and the coach decide. */
 export const COACH_DAY_MODES = ['full', 'add_ons'] as const;
 export type CoachDayMode = (typeof COACH_DAY_MODES)[number];
 

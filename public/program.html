@@ -1721,9 +1721,9 @@
     // The Qwen "Generate with AI" section below is unchanged.
 
     const COACH_DAY_REQUEST_OPTIONS = [
-      { value: '', text: 'Weekly plan decides' },
-      { value: 'full', text: 'Full day' },
-      { value: 'add_ons', text: 'Add-ons only' },
+      { value: '', text: 'Coach decides' },
+      { value: 'full', text: 'Session only' },
+      { value: 'add_ons', text: 'Session + leg add-ons' },
     ];
 
     function buildCoachWeeklyTable(rows) {
@@ -1793,7 +1793,7 @@
               const saved = await aiApi('/api/coach/day-request', { method: 'PUT', body: { date: day.date, mode: select.value === '' ? null : select.value } });
               if (!isCurrent()) return;
               info.request = saved.request;
-              showInlineStatus(statusEl, 'success', 'Saved. The coach reads it at its next run.');
+              showInlineStatus(statusEl, 'success', 'Saved. The coach reads it at its next run; Generate with AI below uses it too.');
             } catch (err) {
               if (!isCurrent()) return;
               showInlineStatus(statusEl, 'error', err.message);

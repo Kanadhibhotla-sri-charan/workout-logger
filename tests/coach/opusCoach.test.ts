@@ -10,6 +10,7 @@ import { UsersRepo } from '../../src/repositories/usersRepo.js';
 import { InjuryPausesRepo } from '../../src/repositories/injuryPausesRepo.js';
 import { WorkoutSessionsRepo } from '../../src/repositories/workoutSessionsRepo.js';
 import { AIProposalRepo } from '../../src/repositories/aiProposalRepo.js';
+import { LegTrainingRepo } from '../../src/repositories/legTrainingRepo.js';
 
 const TOKEN = 'test-coach-token-0123456789abcdef0123456789';
 const DATE = '2026-11-23'; // Monday
@@ -173,5 +174,23 @@ describe('discard reason and runs', () => {
     const day = await request(app).get(`/api/coach/day?date=${DATE}`).expect(200);
     expect(day.body.run).toMatchObject({ outcome: 'failed', reason: 'library check failed 3 times' });
     expect(day.body.rerunAvailable).toBe(false);
+  });
+});
+
+describe("the day request presets Qwen's leg add-on ticks (owner: always a full session; the choice is the add-ons)", () => {
+  it('session only ticks none, session + add-ons ticks every part, no request keeps the suggestion', async () => {
+    new LegTrainingRepo(db).set('athletic');
+    const ticks = async () => (await request(app).get(`/api/ai-programmer/add-on-options?targetDate=${DATE}&purpose=push`).expect(200)).body;
+    const none = await ticks();
+    expect(none.dayRequest).toBeNull();
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'full' }).expect(200);
+    const only = await ticks();
+    expect(only.parts.every((p: any) => p.suggested === false)).toBe(true);
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'add_ons' }).expect(200);
+    const all = await ticks();
+    expect(all.parts.length).toBeGreaterThan(0);
+    expect(all.parts.every((p: any) => p.suggested === true)).toBe(true);
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: null }).expect(200);
+    expect((await ticks()).parts).toEqual(none.parts);
   });
 });

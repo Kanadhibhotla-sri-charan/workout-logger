@@ -27,7 +27,7 @@ src/server/routes/coach.ts
     proposal. Stores coach note, weekly table and decision-log entries.
   - POST /api/coach/runs : "no_run_needed" or "failed" with a reason.
 - App side: GET /api/coach/day, PUT /api/coach/day-request
-  (full | add_ons | null), GET /api/coach/decisions, POST /api/coach/rerun
+  (full = session only | add_ons = session plus leg add-ons | null), GET /api/coach/decisions, POST /api/coach/rerun
   (calls COACH_RERUN_URL with COACH_RERUN_TOKEN; 501 and button hidden
   until set).
 - Tables: coach_day_requests, coach_runs, coach_decisions; column
@@ -50,9 +50,13 @@ UI (public/program.html)
   to my program, Discard with an optional reason, Re-run coach.
 - Qwen's discard accepts the same optional reason (API).
 
+Qwen reads the day request (owner, 2026-11-22: "Always a full session;
+the choice is only about the add-ons")
+- GET /add-on-options presets the ticks: session only = none, session +
+  add-ons = every part; no request = the day's own suggestion.
+- generate-session without addOnParts applies the same rule.
+
 ## Not done yet
-- Qwen reading the day request (waits on what "add-ons only" means for
-  Qwen).
 - The routine itself, its trigger URL, and the coaching brief (in
   review with the owner).
 - Target load and cue are shown on the proposal, not in the logger after

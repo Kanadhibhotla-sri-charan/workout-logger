@@ -696,7 +696,7 @@ CREATE TABLE IF NOT EXISTS coach_advice (
 -- /api/coach/*. The Qwen pipeline stays as the fallback.
 
 -- What the owner wants for a date, set before the 08:00 run.
--- mode 'full' = a full session of the day's type, 'add_ons' = add-ons only.
+-- mode 'full' = the session only, 'add_ons' = the session plus the leg add-ons.
 CREATE TABLE IF NOT EXISTS coach_day_requests (
   date TEXT PRIMARY KEY,
   mode TEXT NOT NULL CHECK (mode IN ('full', 'add_ons')),
