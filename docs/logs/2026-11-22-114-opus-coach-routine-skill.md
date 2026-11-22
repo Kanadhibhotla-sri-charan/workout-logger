@@ -23,3 +23,11 @@ Date: 2026-11-22 · Status: built, not deployed
   token never enters the run.
 - The Re-run trigger token is created by the owner in the routine's web
   settings and stored on the server as COACH_RERUN_URL / COACH_RERUN_TOKEN.
+
+## Follow-up (2026-11-22, after the first run)
+- Deployed 271c26a 15:36 UTC; first successful run planned Mon 23 Nov.
+- The run planned mid-chest 4 sets over target with no reason. Owner:
+  going over is fine, the missing reason is the problem. The skill now
+  says over counts too, and the Check step reviews the weekly table row
+  by row before saving. Effective at the next run (the routine reads the
+  skill from main); no app deploy needed.

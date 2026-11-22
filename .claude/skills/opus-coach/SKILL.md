@@ -172,7 +172,8 @@ Write for a lifter reading on a phone between sets: short, specific, numbers fir
   push, a load to try).
 - **Weekly table** (one row per muscle): weekly target, sets logged so far,
   sets planned today, sets planned for the rest of the week, and a reason for
-  any muscle that will finish more than 2 sets off target.
+  any muscle that will finish more than 2 sets above or below target. Going
+  over is often right; it still needs its reason.
 - **Per exercise:** sets, rep range, RIR, and a target load when the history
   supports one (for example "try 22.5 kg × 10"). Add a one-line cue only when it matters.
 - **Decision log entries:** one per decision that should be checked later:
@@ -198,7 +199,9 @@ The routine runs at 08:00 IST, and again whenever the lifter presses Re-run coac
 3. **Review:** yesterday's plan against what was logged, and every
    decision-log entry whose check date has passed.
 4. **Plan** today against the rest of the week (sections Priorities and Planning today).
-5. **Check** the two hard limits yourself.
+5. **Check** the two hard limits yourself, and the weekly table row by row:
+   every muscle whose logged + today + rest of week ends more than 2 sets
+   above or below its target has a reason.
 6. **Save** the session, the coach note, the weekly table and the new
    decision-log entries. If the app refuses, fix what it names and save again,
    up to 3 tries.
