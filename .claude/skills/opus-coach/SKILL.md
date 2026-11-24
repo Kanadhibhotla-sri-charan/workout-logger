@@ -96,7 +96,12 @@ Start every morning from what actually happened, not from what was planned.
   23 Nov 2026 was done big muscles first and arms last, whatever order the log
   shows. Read those sessions that way: their arm work was done tired, and their
   back, chest and shoulder work was done fresh. From 24 Nov 2026 the lifter
-  follows your order, so the logged order is the real one.
+  follows your order and saves each exercise in the gym as it is done. Each
+  set then carries `loggedAt` (when it was first saved), each exercise
+  `firstLoggedAt`, and the session `performedOrder`: the exercises in the
+  order actually done. Where `performedOrder` differs from the plan, the
+  lifter changed it in the gym (equipment taken, time short); read the
+  session in the real order and look for the reason in the notes.
 - **RIR.** RIR 0 is a deliberate set to failure. Low RIR with falling reps
   across sets is normal fatigue, not a problem.
 - **Notes.** Day notes and session notes are the lifter's own words. Pain,
@@ -227,7 +232,7 @@ say so; don't retry.
   it with `jq` or Python instead of printing it whole. Keys: `targetDate`,
   `today`, `timezone`, `dayRequest`, `profile`, `thisWeek.gymDays` (each day's
   date, weekday, purpose, activity, status), `goals`, `weeklyTargets`,
-  `sessions` (42 days with sets and badminton details), `proposals` (both
+  `sessions` (42 days with sets and badminton details; newer sessions add `performedOrder`, and `loggedAt` per set), `proposals` (both
   coach and Qwen, with `discardReason`), `injuryPauses`, `exercisePreferences`,
   `dayNotes`, `measurements`, `decisions` (your log, with `id` and `status`),
   `recentRuns`, `targets`, `library` (every allowed exercise: `id`, `name`,

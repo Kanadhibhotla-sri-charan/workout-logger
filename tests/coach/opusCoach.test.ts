@@ -161,6 +161,33 @@ describe('approve and commit a coach proposal', () => {
   });
 });
 
+describe('real exercise order from set times (2026-11-24)', () => {
+  it('keeps the first save time per set and gives the coach the order the lifter did', async () => {
+    const saved = await request(app).post('/api/coach/proposals').set(auth).send(body()).expect(201);
+    await request(app).post(`/api/ai-programmer/proposals/${saved.body.proposalId}/approve`).expect(200);
+    const committed = await request(app).post(`/api/ai-programmer/proposals/${saved.body.proposalId}/commit`).send({ intent: 'fill_existing_gym_day' }).expect(200);
+    const sid = committed.body.committedSessionId;
+    const [lateral, bench] = new WorkoutSessionsRepo(db).getExercisePerformances(sid);
+    // Planned: lateral raise first. Done: bench first (machine taken).
+    vi.setSystemTime(new Date('2026-11-23T04:00:00Z'));
+    await request(app).patch(`/api/workouts/${sid}/exercises/${bench!.id}`).send({ sets: [{ set_number: 1, weight: 60, reps: 8, completed: true }, { set_number: 2, weight: null, reps: null, completed: false }] }).expect(200);
+    vi.setSystemTime(new Date('2026-11-23T04:10:00Z'));
+    await request(app).patch(`/api/workouts/${sid}/exercises/${bench!.id}`).send({ sets: [{ set_number: 1, weight: 60, reps: 9, completed: true }, { set_number: 2, weight: 60, reps: 8, completed: true }] }).expect(200);
+    vi.setSystemTime(new Date('2026-11-23T04:20:00Z'));
+    await request(app).patch(`/api/workouts/${sid}/exercises/${lateral!.id}`).send({ sets: [{ set_number: 1, weight: 7.5, reps: 14, completed: true }] }).expect(200);
+
+    vi.setSystemTime(new Date('2026-11-24T02:30:00Z'));
+    const ctx = await request(app).get('/api/coach/context?date=2026-11-24').set(auth).expect(200);
+    const session = ctx.body.context.sessions.find((s: any) => s.date === DATE);
+    expect(session.exercises.map((e: any) => e.exerciseId)).toEqual(['cable-lateral-raise', 'flat-barbell-bench-press']);
+    expect(session.performedOrder).toEqual(['flat-barbell-bench-press', 'cable-lateral-raise']);
+    const benchSets = session.exercises[1].sets;
+    expect(benchSets[0].loggedAt).toBe('2026-11-23T04:00:00.000Z'); // edited later, first time kept
+    expect(benchSets[1].loggedAt).toBe('2026-11-23T04:10:00.000Z');
+    expect(session.exercises[1].firstLoggedAt).toBe('2026-11-23T04:00:00.000Z');
+  });
+});
+
 describe('discard reason and runs', () => {
   it('stores the owner\'s discard reason and shows it to the coach', async () => {
     const saved = await request(app).post('/api/coach/proposals').set(auth).send(body()).expect(201);

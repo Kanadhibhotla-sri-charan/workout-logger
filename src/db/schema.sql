@@ -324,7 +324,8 @@ CREATE TABLE IF NOT EXISTS workout_sets (
   rest_seconds INTEGER,
   technique TEXT,
   tempo TEXT,
-  notes TEXT
+  notes TEXT,
+  logged_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_workout_sessions_date ON workout_sessions(date);

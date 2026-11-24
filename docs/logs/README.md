@@ -120,3 +120,4 @@ story of how the app got to its current state.
 - [2026-11-13-112-decline-coached-per-muscle-athletic-strength.md](2026-11-13-112-decline-coached-per-muscle-athletic-strength.md) — Whole-body deload only for 4+ declining muscles; fewer are coached per muscle by the AI; Athletic strength block 1-4 by judgment
 - [2026-11-22-113-opus-coach-app-side.md](2026-11-22-113-opus-coach-app-side.md) — Opus coach app side: token-protected context/save endpoints, only library + injury pause enforced, day request, discard reason, coach view; Qwen path unchanged
 - [2026-11-22-114-opus-coach-routine-skill.md](2026-11-22-114-opus-coach-routine-skill.md) — Opus coach: approved brief as routine skill file; Re-run sends the routine API headers
+- [115 — Real exercise order from set times](2026-11-24-115-real-exercise-order.md)

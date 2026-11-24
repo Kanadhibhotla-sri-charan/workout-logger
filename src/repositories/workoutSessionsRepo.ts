@@ -320,9 +320,9 @@ export class WorkoutSessionsRepo {
     );
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
-         (id, workout_exercise_id, set_number, weight, reps, completed, rir, rpe, rest_seconds, technique, tempo, notes)
+         (id, workout_exercise_id, set_number, weight, reps, completed, rir, rpe, rest_seconds, technique, tempo, notes, logged_at)
        VALUES
-         (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes)`
+         (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes, @logged_at)`
     );
 
     const prescription = {
@@ -340,6 +340,7 @@ export class WorkoutSessionsRepo {
       rep_unit: input.rep_unit !== undefined ? input.rep_unit : (this.lastLogOptionFor(input.exercise_id, 'rep_unit') ?? modePrescriptionFor(input.exercise_id)?.unit ?? null),
     };
 
+    const now = new Date().toISOString();
     const tx = this.db.transaction(() => {
       insertExercise.run({
         id: performanceId,
@@ -363,6 +364,7 @@ export class WorkoutSessionsRepo {
           technique: set.technique,
           tempo: set.tempo,
           notes: set.notes,
+          logged_at: isLoggedSet(set) ? now : null,
         });
       }
     });
@@ -419,12 +421,18 @@ export class WorkoutSessionsRepo {
       .sort((a, b) => a.set_number - b.set_number)
       .map((s) => ({ ...DEFAULT_SET, ...s }));
 
+    // Each save replaces the sets wholesale, so keep the time a set was
+    // first logged; a set logged for the first time now gets now.
+    const firstLogged = new Map(
+      (this.db.prepare('SELECT set_number, logged_at FROM workout_sets WHERE workout_exercise_id = ? AND logged_at IS NOT NULL').all(workoutExerciseId) as Array<{ set_number: number; logged_at: string }>).map((r) => [r.set_number, r.logged_at])
+    );
+    const now = new Date().toISOString();
     const deleteSets = this.db.prepare('DELETE FROM workout_sets WHERE workout_exercise_id = ?');
     const insertSet = this.db.prepare(
       `INSERT INTO workout_sets
-         (id, workout_exercise_id, set_number, weight, reps, completed, rir, rpe, rest_seconds, technique, tempo, notes)
+         (id, workout_exercise_id, set_number, weight, reps, completed, rir, rpe, rest_seconds, technique, tempo, notes, logged_at)
        VALUES
-         (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes)`
+         (@id, @workout_exercise_id, @set_number, @weight, @reps, @completed, @rir, @rpe, @rest_seconds, @technique, @tempo, @notes, @logged_at)`
     );
 
     const tx = this.db.transaction(() => {
@@ -443,6 +451,7 @@ export class WorkoutSessionsRepo {
           technique: set.technique,
           tempo: set.tempo,
           notes: set.notes,
+          logged_at: isLoggedSet(set) ? (firstLogged.get(set.set_number) ?? now) : null,
         });
       }
     });
@@ -609,4 +618,9 @@ export class WorkoutSessionsRepo {
   setExerciseLogOption(workoutExerciseId: string, column: 'attachment' | 'rep_unit', value: string | null): void {
     this.db.prepare(`UPDATE workout_exercises SET ${column} = ? WHERE id = ?`).run(value, workoutExerciseId);
   }
+}
+
+/** A set carries a result once it has reps or is ticked done. */
+function isLoggedSet(set: { reps: number | null; completed: boolean }): boolean {
+  return set.completed || set.reps !== null;
 }

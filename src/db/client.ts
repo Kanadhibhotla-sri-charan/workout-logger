@@ -58,6 +58,10 @@ function migrate(db: Database.Database): void {
   // 2026-10-11: which equipment the exercise was done with (one Blueprint
   // exercise can be done with a barbell, dumbbells, a cable...). Null = not specified.
   addColumnIfMissing(db, 'workout_exercises', 'equipment', 'TEXT');
+  // 2026-11-24: when a set was first saved with a result (reps or done), so
+  // the real exercise order is known; the lifter saves while in the gym.
+  // Null = not logged yet, or logged before this column existed.
+  addColumnIfMissing(db, 'workout_sets', 'logged_at', 'TEXT');
   // 2026-10-11: attachment used (rope, V-bar, ...) and what the set count
   // measures (reps, steps, seconds, metres) — see src/contracts/loggingOptions.ts.
   // Null = not specified / reps.

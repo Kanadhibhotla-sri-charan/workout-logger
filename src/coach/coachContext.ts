@@ -71,7 +71,7 @@ export function buildCoachContext(db: Database.Database, targetDate: string): Re
       equipment: e.equipment,
       attachment: e.attachment,
       repUnit: e.rep_unit ?? 'reps',
-      sets: (db.prepare('SELECT set_number, weight, reps, completed, rir, technique, notes FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number').all(e.id) as Array<Record<string, unknown>>).map((t) => ({
+      sets: (db.prepare('SELECT set_number, weight, reps, completed, rir, technique, notes, logged_at FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number').all(e.id) as Array<Record<string, unknown>>).map((t) => ({
         set: t.set_number,
         kg: t.weight,
         reps: t.reps,
@@ -79,8 +79,16 @@ export function buildCoachContext(db: Database.Database, targetDate: string): Re
         done: t.completed === 1,
         ...(t.technique ? { technique: t.technique } : {}),
         ...(t.notes ? { notes: t.notes } : {}),
+        ...(t.logged_at ? { loggedAt: t.logged_at } : {}),
       })),
-    }));
+    })).map((e) => {
+      const times = e.sets.map((t) => (t as { loggedAt?: string }).loggedAt).filter((v): v is string => Boolean(v)).sort();
+      return times.length ? { ...e, firstLoggedAt: times[0] } : e;
+    });
+    // The order the lifter actually did the exercises, by first logged set
+    // (only for sessions logged since set times were recorded, 2026-11-24).
+    const timed = exercises.filter((e): e is typeof e & { firstLoggedAt: string } => 'firstLoggedAt' in e);
+    const performedOrder = timed.length ? [...timed].sort((a, b) => a.firstLoggedAt.localeCompare(b.firstLoggedAt)).map((e) => e.exerciseId) : null;
     const badminton = db.prepare('SELECT intensity, format, games_count, session_quality, post_session_fatigue, notes FROM badminton_session_details WHERE workout_session_id = ?').get(s.session_id);
     return {
       sessionId: s.session_id,
@@ -92,6 +100,7 @@ export function buildCoachContext(db: Database.Database, targetDate: string): Re
       durationMinutes: s.duration_minutes,
       notes: s.notes,
       ...(badminton ? { badminton } : {}),
+      ...(performedOrder ? { performedOrder } : {}),
       exercises,
     };
   });
