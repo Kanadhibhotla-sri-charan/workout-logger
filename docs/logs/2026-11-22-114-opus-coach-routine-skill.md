@@ -31,3 +31,12 @@ Date: 2026-11-22 · Status: built, not deployed
   says over counts too, and the Check step reviews the weekly table row
   by row before saving. Effective at the next run (the routine reads the
   skill from main); no app deploy needed.
+
+## Follow-up 2026-11-24: exercise order
+
+The app logs exercises in the planned order (sets have no timestamps). The owner
+says every session up to and including 23 Nov was done big muscles first and arms
+last, and that from 24 Nov they follow the coach's order. The skill's "Reading the
+data" section now says so, so the coach no longer treats the logged order of older
+sessions as the order performed (the 24 Nov plan's "arms-first worked on 17 Nov"
+rested on that mistake). Live from the next run; no deploy needed.

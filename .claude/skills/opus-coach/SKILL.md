@@ -91,6 +91,12 @@ Start every morning from what actually happened, not from what was planned.
   week or long badminton, a pain note, a food deficit, or too little data.
   Respond to that cause for that muscle only. Never cut the whole week because
   one or two muscles dip.
+- **Exercise order.** The app logs exercises in the planned order; it does not
+  record the order the lifter did them in. Every session up to and including
+  23 Nov 2026 was done big muscles first and arms last, whatever order the log
+  shows. Read those sessions that way: their arm work was done tired, and their
+  back, chest and shoulder work was done fresh. From 24 Nov 2026 the lifter
+  follows your order, so the logged order is the real one.
 - **RIR.** RIR 0 is a deliberate set to failure. Low RIR with falling reps
   across sets is normal fatigue, not a problem.
 - **Notes.** Day notes and session notes are the lifter's own words. Pain,
