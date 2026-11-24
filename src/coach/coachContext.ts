@@ -71,6 +71,7 @@ export function buildCoachContext(db: Database.Database, targetDate: string): Re
       equipment: e.equipment,
       attachment: e.attachment,
       repUnit: e.rep_unit ?? 'reps',
+      ...(e.note ? { note: e.note } : {}),
       sets: (db.prepare('SELECT set_number, weight, reps, completed, rir, technique, notes, logged_at FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number').all(e.id) as Array<Record<string, unknown>>).map((t) => ({
         set: t.set_number,
         kg: t.weight,

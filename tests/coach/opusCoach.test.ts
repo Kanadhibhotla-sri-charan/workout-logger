@@ -188,6 +188,33 @@ describe('real exercise order from set times (2026-11-24)', () => {
   });
 });
 
+describe('note per exercise (2026-11-24)', () => {
+  it('saves, shows, clears a note on one exercise and gives it to the coach', async () => {
+    const saved = await request(app).post('/api/coach/proposals').set(auth).send(body()).expect(201);
+    await request(app).post(`/api/ai-programmer/proposals/${saved.body.proposalId}/approve`).expect(200);
+    const committed = await request(app).post(`/api/ai-programmer/proposals/${saved.body.proposalId}/commit`).send({ intent: 'fill_existing_gym_day' }).expect(200);
+    const sid = committed.body.committedSessionId;
+    const [lateral, bench] = new WorkoutSessionsRepo(db).getExercisePerformances(sid);
+    const res = await request(app).patch(`/api/workouts/${sid}/exercises/${bench!.id}`).send({ note: '  Did this first, cable station taken  ' }).expect(200);
+    expect(res.body.note).toBe('Did this first, cable station taken');
+    await request(app).patch(`/api/workouts/${sid}/exercises/${bench!.id}`).send({ note: 42 }).expect(400);
+    const ctx = await request(app).get(`/api/coach/context?date=${DATE}`).set(auth).expect(200);
+    const ex = ctx.body.context.sessions.find((s: any) => s.date === DATE).exercises;
+    expect(ex[1].note).toBe('Did this first, cable station taken');
+    expect(ex[0].note).toBeUndefined();
+    const cleared = await request(app).patch(`/api/workouts/${sid}/exercises/${bench!.id}`).send({ note: '' }).expect(200);
+    expect(cleared.body.note).toBeNull();
+    expect(new WorkoutSessionsRepo(db).getExercisePerformances(sid).find((p) => p.id === lateral!.id)!.note).toBeNull();
+  });
+
+  it('the logger has a note button on each saved exercise card', async () => {
+    const { readFileSync } = await import('node:fs');
+    const html = readFileSync(new URL('../../public/logger.html', import.meta.url), 'utf8');
+    expect(html).toContain("card.appendChild(buildExerciseNote(perf));");
+    expect(html).toContain("body: { note: value }");
+  });
+});
+
 describe('discard reason and runs', () => {
   it('stores the owner\'s discard reason and shows it to the coach', async () => {
     const saved = await request(app).post('/api/coach/proposals').set(auth).send(body()).expect(201);

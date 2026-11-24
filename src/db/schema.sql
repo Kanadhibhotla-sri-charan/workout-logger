@@ -309,7 +309,8 @@ CREATE TABLE IF NOT EXISTS workout_exercises (
   target_rir_max REAL,
   target_rest_seconds INTEGER,
   target_type TEXT,
-  target_id TEXT
+  target_id TEXT,
+  note TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workout_sets (

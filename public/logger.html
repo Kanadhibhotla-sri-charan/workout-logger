@@ -118,6 +118,38 @@
       return el('label', { style: 'display:flex;align-items:center;gap:0.4rem;margin:0' }, [el('span', { class: 'faint', text: label }), select, statusEl]);
     }
 
+    // Per-exercise note (2026-11-24): "+ Note" on every saved exercise card,
+    // stored on workout_exercises.note and read by the coach next morning.
+    function buildExerciseNote(perf) {
+      const box = el('div', { class: 'exercise-note', style: 'margin:0.3rem 0 0.5rem' });
+      const render = () => {
+        box.innerHTML = '';
+        if (perf.note) {
+          box.appendChild(el('p', { class: 'faint', style: 'margin:0 0 0.25rem;white-space:pre-wrap', text: `Note: ${perf.note}` }));
+        }
+        box.appendChild(createButton({ label: perf.note ? 'Edit note' : '+ Note', variant: 'ghost', onClick: openEditor }));
+      };
+      const openEditor = () => {
+        box.innerHTML = '';
+        const textarea = el('textarea', { rows: '2', placeholder: 'e.g. Rows first, hammer station taken', 'aria-label': 'Exercise note', style: 'width:100%;resize:vertical;font:inherit' });
+        textarea.value = perf.note || '';
+        const statusEl = el('div');
+        const saveBtn = createButton({ label: 'Save note', variant: 'secondary', onClick: async () => {
+          const value = textarea.value.trim() || null;
+          try {
+            await withSaving(saveBtn, statusEl, () => api(`/api/workouts/${sessionId}/exercises/${perf.id}`, { method: 'PATCH', body: { note: value } }), value ? 'Note saved.' : 'Note cleared.');
+            perf.note = value;
+            render();
+          } catch (err) { /* text stays in the box, unsaved */ }
+        }});
+        const cancelBtn = createButton({ label: 'Cancel', variant: 'ghost', onClick: render });
+        box.append(textarea, el('div', { class: 'btn-row', style: 'margin-top:0.3rem' }, [saveBtn, cancelBtn]), statusEl);
+        textarea.focus();
+      };
+      render();
+      return box;
+    }
+
     function buildLogOptionsPicker(perf, onUnitChange) {
       const listed = (exerciseEquipmentById.get(perf.exercise_id) || []).filter((e) => EQUIPMENT_CHOICES.includes(e));
       const equipmentChoices = [...listed, ...EQUIPMENT_CHOICES.filter((e) => !listed.includes(e))];
@@ -429,6 +461,7 @@
       // Updated in place (a full render would drop unsaved set entries).
       let onUnitChanged = () => {};
       card.appendChild(buildLogOptionsPicker(perf, () => onUnitChanged()));
+      card.appendChild(buildExerciseNote(perf));
 
       // Fix: `perf.target_*` is this exercise's own planned prescription
       // when it was pre-created with one (e.g. an AI-committed session —

@@ -16,4 +16,15 @@ the gym as it is done, so the save time gives the real order with no extra input
 - Test: `tests/coach/opusCoach.test.ts` "real exercise order from set times".
   Full suite 2391 passed.
 
-Not deployed yet.
+## Note per exercise
+
+The owner asked for a note button on each exercise instead of one note per session.
+
+- `workout_exercises.note` (new column). `PATCH /api/workouts/:id/exercises/:exerciseId`
+  takes `note` alone (text up to 1000 characters; "" or null clears it).
+- Logger: "+ Note" / "Edit note" on every saved exercise card, also after it is
+  logged; the note shows on the card. The session note stays as it was.
+- Coach context: `note` per exercise; the skill's "Notes" line reads it.
+- Tests: "note per exercise" in `tests/coach/opusCoach.test.ts`. Full suite 2393 passed.
+
+Not deployed yet (the owner deploys after today's session).

@@ -360,9 +360,15 @@ workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
   const { sets } = req.body ?? {};
   const { options, error } = parseLogOptions(req.body);
   if (error) return res.status(400).json({ error });
-  const hasOptions = Object.keys(options).length > 0;
+  // `note` (2026-11-24): the lifter's note on this exercise; "" or null clears it.
+  const hasNote = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'note');
+  const rawNote = hasNote ? req.body.note : undefined;
+  if (hasNote && rawNote !== null && (typeof rawNote !== 'string' || rawNote.length > 1000)) {
+    return res.status(400).json({ error: 'note must be text (at most 1000 characters) or null' });
+  }
+  const hasOptions = Object.keys(options).length > 0 || hasNote;
   if (!Array.isArray(sets) && !hasOptions) {
-    return res.status(400).json({ error: 'sets (array), equipment, attachment or rep_unit is required' });
+    return res.status(400).json({ error: 'sets (array), equipment, attachment, rep_unit or note is required' });
   }
   const rirError = Array.isArray(sets) ? invalidSetRir(sets) : undefined;
   if (rirError) return res.status(400).json({ error: rirError });
@@ -381,6 +387,7 @@ workoutsRouter.patch('/:id/exercises/:exerciseId', (req, res) => {
   if (options.equipment !== undefined) repo.setExerciseEquipment(req.params.exerciseId, options.equipment);
   if (options.attachment !== undefined) repo.setExerciseLogOption(req.params.exerciseId, 'attachment', options.attachment);
   if (options.rep_unit !== undefined) repo.setExerciseLogOption(req.params.exerciseId, 'rep_unit', options.rep_unit);
+  if (hasNote) repo.setExerciseNote(req.params.exerciseId, typeof rawNote === 'string' && rawNote.trim() !== '' ? rawNote.trim() : null);
   if (!Array.isArray(sets)) {
     return res.json(repo.getExercisePerformances(req.params.id).find((p) => p.id === req.params.exerciseId));
   }

@@ -104,8 +104,11 @@ Start every morning from what actually happened, not from what was planned.
   session in the real order and look for the reason in the notes.
 - **RIR.** RIR 0 is a deliberate set to failure. Low RIR with falling reps
   across sets is normal fatigue, not a problem.
-- **Notes.** Day notes and session notes are the lifter's own words. Pain,
-  injury, sleep, soreness and "fatigued after badminton" change today's plan.
+- **Notes.** Day notes, session notes and exercise notes (`note` on an
+  exercise, from 24 Nov 2026) are the lifter's own words. Pain, injury, sleep,
+  soreness and "fatigued after badminton" change today's plan. An exercise note
+  often says why the order, load or equipment changed: read it with that
+  exercise.
 - **Badminton.** Long sessions (2 hours or more) or singles load the legs and
   shoulders. Plan Monday with Sunday in mind, and Friday with Saturday in mind.
 - **Food.** The last 7 days of calories and protein against the day's target.
@@ -232,7 +235,7 @@ say so; don't retry.
   it with `jq` or Python instead of printing it whole. Keys: `targetDate`,
   `today`, `timezone`, `dayRequest`, `profile`, `thisWeek.gymDays` (each day's
   date, weekday, purpose, activity, status), `goals`, `weeklyTargets`,
-  `sessions` (42 days with sets and badminton details; newer sessions add `performedOrder`, and `loggedAt` per set), `proposals` (both
+  `sessions` (42 days with sets and badminton details; newer sessions add `performedOrder`, `loggedAt` per set and `note` per exercise), `proposals` (both
   coach and Qwen, with `discardReason`), `injuryPauses`, `exercisePreferences`,
   `dayNotes`, `measurements`, `decisions` (your log, with `id` and `status`),
   `recentRuns`, `targets`, `library` (every allowed exercise: `id`, `name`,

@@ -62,6 +62,9 @@ function migrate(db: Database.Database): void {
   // the real exercise order is known; the lifter saves while in the gym.
   // Null = not logged yet, or logged before this column existed.
   addColumnIfMissing(db, 'workout_sets', 'logged_at', 'TEXT');
+  // 2026-11-24: the lifter's own note on one exercise ("rows first, hammer
+  // station taken", "elbow twinge on set 3"). Null = no note.
+  addColumnIfMissing(db, 'workout_exercises', 'note', 'TEXT');
   // 2026-10-11: attachment used (rope, V-bar, ...) and what the set count
   // measures (reps, steps, seconds, metres) — see src/contracts/loggingOptions.ts.
   // Null = not specified / reps.

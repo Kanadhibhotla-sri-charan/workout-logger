@@ -548,6 +548,7 @@ export class WorkoutSessionsRepo {
       equipment: string | null;
       attachment: string | null;
       rep_unit: string | null;
+      note: string | null;
     }>;
 
     const setsStmt = this.db.prepare('SELECT * FROM workout_sets WHERE workout_exercise_id = ? ORDER BY set_number ASC');
@@ -582,6 +583,7 @@ export class WorkoutSessionsRepo {
         equipment: row.equipment,
         attachment: row.attachment,
         rep_unit: row.rep_unit,
+        note: row.note ?? null,
         sets: setRows.map((s) => ({ ...s, completed: s.completed === 1 })),
       };
     });
@@ -615,6 +617,10 @@ export class WorkoutSessionsRepo {
   }
 
   /** Sets the attachment or count unit for one logged exercise (null = not specified / reps). */
+  setExerciseNote(workoutExerciseId: string, note: string | null): void {
+    this.db.prepare('UPDATE workout_exercises SET note = ? WHERE id = ?').run(note, workoutExerciseId);
+  }
+
   setExerciseLogOption(workoutExerciseId: string, column: 'attachment' | 'rep_unit', value: string | null): void {
     this.db.prepare(`UPDATE workout_exercises SET ${column} = ? WHERE id = ?`).run(value, workoutExerciseId);
   }

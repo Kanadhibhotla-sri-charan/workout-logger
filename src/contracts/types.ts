@@ -314,6 +314,8 @@ export interface ExercisePerformance {
   /** What each set's `reps` counts: 'reps' (default when null), 'steps',
    * 'seconds' or 'metres' (src/contracts/loggingOptions.ts). */
   rep_unit?: string | null;
+  /** The lifter's own note on this exercise; null when none. */
+  note?: string | null;
   sets: Set[];
 }
 
