@@ -27,4 +27,4 @@ The owner asked for a note button on each exercise instead of one note per sessi
 - Coach context: `note` per exercise; the skill's "Notes" line reads it.
 - Tests: "note per exercise" in `tests/coach/opusCoach.test.ts`. Full suite 2393 passed.
 
-Not deployed yet (the owner deploys after today's session).
+Deployed 2026-11-25 05:06 UTC with 79a01f3 (backup deployment-backups/pre-79a01f3-20261125T050556Z.sqlite, integrity ok). Sessions logged before this have no set times.

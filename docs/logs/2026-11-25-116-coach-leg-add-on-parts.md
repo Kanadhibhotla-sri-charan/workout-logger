@@ -1,6 +1,6 @@
 # 116 · Coach leg add-ons: the four parts, picked by the owner
 
-Date: 2026-11-25 · Status: brief live from the next run (skill on main); app side NOT deployed yet
+Date: 2026-11-25 · Status: deployed 2026-11-25 05:06 UTC (79a01f3, backup pre-79a01f3-20261125T050556Z.sqlite); brief also says leg work is for badminton-fit legs (79a01f3)
 
 ## Request
 Owner's 24 Nov session note: "No resilience, mobility workouts for

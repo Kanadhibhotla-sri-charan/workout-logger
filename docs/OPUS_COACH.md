@@ -91,6 +91,11 @@ curl -s localhost:3000/api/health
 The migrations in src/db/client.ts run on start. They only add columns,
 which is safe on the live database. Mark the deploy in the log's Status line.
 
+## Current state
+- Live on the VM: 79a01f3 (deployed 2026-11-25 05:06 UTC). It includes set times,
+  exercise notes and add-on part ticks (logs 115, 116).
+- To check what's live: `git log --oneline -1` in ~/workout-logger on the VM.
+
 ## Open items
 - Shadow week from 23 Nov 2026. Report on Fri 27 Nov: run reliability,
   planned vs logged, sets vs targets, reason quality. Recommended: judge
