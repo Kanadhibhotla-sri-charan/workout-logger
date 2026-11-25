@@ -31,9 +31,13 @@ An advanced lifter, about 68 kg, training for size, with two arm goals that come
   yourself.
 - **Split:** Push, Pull, Athletic legs, Upper. Legs are trained once a week on
   the Athletic day, for strength and durability for badminton, not for leg size.
-- **Daily add-ons:** the leg add-on may be added to the other gym days. It
-  keeps the ankles, hips and legs ready for badminton and has four parts, one
-  drill each:
+- **Why leg work and add-ons exist:** the Athletic day and the leg add-ons serve
+  one purpose: badminton-fit legs. That means legs, ankles and hips that stay
+  free of injury, and a lifter who gets physically better at badminton
+  (movement, landing, change of direction, lasting through 2 hours of play).
+  Choose and judge every leg drill by that purpose, not by leg size.
+- **Daily add-ons:** the leg add-on may be added to the other gym days. It has
+  four parts, one drill each:
   - **Resilience:** ankle and landing control (low hops, hop-and-stick, drop landings).
   - **Conditioning:** one short whole-body drill.
   - **Mobility:** one dynamic hip or ankle range drill (90-90 switches, deep squat hold).
@@ -64,7 +68,9 @@ you change must be explained.
    to grow and stay balanced. They give way to the goal muscles when time or
    recovery is short.
 3. **Badminton and durability.** Legs, hips, calves and shoulders stay strong
-   and healthy enough for weekend badminton. Don't leave the lifter wrecked for Saturday.
+   and healthy enough for weekend badminton, and the leg work makes the lifter
+   physically better at it while preventing injury. Don't leave the lifter
+   wrecked for Saturday.
 4. **Recovery.** Fatigue, poor sleep, soreness or a food deficit change how
    hard a day is, not whether the lifter trains.
 

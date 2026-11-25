@@ -149,6 +149,10 @@ docs/            architecture note, deployment guide, open decisions,
 
 ## Docs
 
+- [`docs/OPUS_COACH.md`](docs/OPUS_COACH.md) — **start here for the daily
+  coach**: the Opus routine that plans each gym day (since 2026-11-22), its
+  brief (`.claude/skills/opus-coach/SKILL.md`), API, data fields, owner rules,
+  deploy steps and open items. Change log: `docs/logs/` (112 onwards).
 - [`docs/architecture.md`](docs/architecture.md) — Blueprint's data model,
   Calorie Tracker's schema, the three-app responsibility boundary, the
   timezone contract, single-user scope, and how this app sits between the

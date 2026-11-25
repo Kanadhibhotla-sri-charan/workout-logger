@@ -1,6 +1,6 @@
 # 114 — Opus coach: routine skill file and Re-run trigger headers
 
-Date: 2026-11-22 · Status: built, not deployed
+Date: 2026-11-22 · Status: deployed 2026-11-22 15:36 UTC (271c26a)
 
 ## What
 - `.claude/skills/opus-coach/SKILL.md`: the coaching brief the lifter
