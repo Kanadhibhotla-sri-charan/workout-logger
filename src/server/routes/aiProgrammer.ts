@@ -34,7 +34,7 @@ import { AIWeekGenerationInProgressError } from '../../ai-programmer/errors.js';
 import { ADD_ON_PARTS, addOnOptions, isAddOnPart, type AddOnPart } from '../../athletic/athleticAddOn.js';
 import { weekGymDays } from '../../ai-programmer/service/weekGeneration.js';
 import { programmingWeekStart } from '../../engine/workoutBuilder.js';
-import { getDayRequest } from '../../coach/opusCoach.js';
+import { getDayAddOnParts, getDayRequest } from '../../coach/opusCoach.js';
 import type { SessionPurpose } from '../../engine/config.js';
 
 export const aiProgrammerRouter = Router();
@@ -120,10 +120,12 @@ aiProgrammerRouter.get('/add-on-options', (req, res) => {
   const purpose = (requested ?? weekGymDays(db(req), programmingWeekStart(targetDate)).find((d) => d.date === targetDate)?.purpose ?? null) as SessionPurpose | null;
   const options = addOnOptions(db(req), targetDate, purpose);
   // The day request set in the coach section (2026-11-22) presets the ticks:
-  // "Session only" ticks none, "Session + leg add-ons" ticks every part.
+  // "Session only" ticks none, "Session + leg add-ons" ticks the parts picked
+  // there (all four when none were picked).
   const request = getDayRequest(db(req), targetDate);
+  const picked = getDayAddOnParts(db(req), targetDate) ?? [];
   if (options.available && request !== null) {
-    options.parts = options.parts.map((p) => ({ ...p, suggested: request === 'add_ons' }));
+    options.parts = options.parts.map((p) => ({ ...p, suggested: picked.includes(p.id) }));
     options.suggestionReason = request === 'add_ons' ? 'You asked for the session plus leg add-ons.' : 'You asked for the session only.';
   }
   res.json({ ok: true, targetDate, purpose, dayRequest: request, ...options });
@@ -184,9 +186,9 @@ aiProgrammerRouter.post('/generate-session', async (req, res, next) => {
     }
     const service = createDefaultAIProgrammerService(db(req));
     // No ticks sent: the day request decides (session only = no add-on,
-    // session + add-ons = every part), else the day's own suggestion.
+    // session + add-ons = the parts picked there), else the day's own suggestion.
     const request = addOnParts === undefined ? getDayRequest(db(req), targetDate) : null;
-    const requestedParts: AddOnPart[] | undefined = request === 'full' ? [] : request === 'add_ons' ? [...ADD_ON_PARTS] : undefined;
+    const requestedParts: AddOnPart[] | undefined = request === 'full' ? [] : request === 'add_ons' ? (getDayAddOnParts(db(req), targetDate) ?? [...ADD_ON_PARTS]) : undefined;
     const result = await service.generateSession({
       targetDate,
       requestedSessionPurpose,

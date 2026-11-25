@@ -31,7 +31,15 @@ An advanced lifter, about 68 kg, training for size, with two arm goals that come
   yourself.
 - **Split:** Push, Pull, Athletic legs, Upper. Legs are trained once a week on
   the Athletic day, for strength and durability for badminton, not for leg size.
-- **Daily add-ons:** small leg and mobility pieces may be added to the other gym days.
+- **Daily add-ons:** the leg add-on may be added to the other gym days. It
+  keeps the ankles, hips and legs ready for badminton and has four parts, one
+  drill each:
+  - **Resilience:** ankle and landing control (low hops, hop-and-stick, drop landings).
+  - **Conditioning:** one short whole-body drill.
+  - **Mobility:** one dynamic hip or ankle range drill (90-90 switches, deep squat hold).
+  - **Leg flexibility:** one lower-body stretch hold (couch, figure-four, calf).
+  Leg strength accessories (calf raise, Copenhagen plank, hip abduction) are
+  fine as extras, but they are not the add-on and never replace its parts.
 - **How the lifter actually trains (last 4 weeks):** sessions run 75 to 100
   minutes, with 9 to 15 exercises and 20 to 35 working sets. Average RIR is 0
   to 0.5. RIR 0 means a set to failure, and that is intentional.
@@ -135,7 +143,11 @@ Plan today as one day of a week you are steering, using what is left of the week
    wants to train that day. The options:
    - **Session only** (`full`): today's session only, with no leg add-ons.
    - **Session + leg add-ons** (`add_ons`): today's session plus the leg
-     add-ons. You choose which add-on parts fit the day.
+     add-on parts the lifter ticked (`dayAddOnParts`; all four when none
+     were ticked). Plan one drill for each ticked part, adjusted for the day.
+     Make a part lighter rather than dropping it when the legs are tired or
+     the Athletic day is close. Drop a ticked part only for a solid reason
+     (pain, badminton or the Athletic day tomorrow), and say so in the coach note.
    - **Not set** (`null`): a full session, with add-ons when you judge the legs
      are ready for them.
 3. **Day types.** Push, Pull and Upper are upper-body days. The Athletic day is
@@ -233,7 +245,7 @@ say so; don't retry.
 - `GET /context?date=YYYY-MM-DD` → `{ok, context}`. The context is large
   (about 160 KB): save it to a file (`curl -s ... -o context.json`) and read
   it with `jq` or Python instead of printing it whole. Keys: `targetDate`,
-  `today`, `timezone`, `dayRequest`, `profile`, `thisWeek.gymDays` (each day's
+  `today`, `timezone`, `dayRequest`, `dayAddOnParts` (the ticked add-on parts), `profile`, `thisWeek.gymDays` (each day's
   date, weekday, purpose, activity, status), `goals`, `weeklyTargets`,
   `sessions` (42 days with sets and badminton details; newer sessions add `performedOrder`, `loggedAt` per set and `note` per exercise), `proposals` (both
   coach and Qwen, with `discardReason`), `injuryPauses`, `exercisePreferences`,

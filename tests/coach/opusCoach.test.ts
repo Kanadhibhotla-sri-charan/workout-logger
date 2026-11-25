@@ -269,3 +269,38 @@ describe("the day request presets Qwen's leg add-on ticks (owner: always a full 
     expect((await ticks()).parts).toEqual(none.parts);
   });
 });
+
+describe('leg add-on parts picked with the day request (2026-11-25)', () => {
+  it('saves the ticked parts, gives them to the coach and presets the Qwen ticks', async () => {
+    new LegTrainingRepo(db).set('athletic');
+    const saved = await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'add_ons', parts: ['mobility', 'resilience'] }).expect(200);
+    expect(saved.body.parts).toEqual(['resilience', 'mobility']);
+    const day = await request(app).get(`/api/coach/day?date=${DATE}`).expect(200);
+    expect(day.body.parts).toEqual(['resilience', 'mobility']);
+    const c = (await request(app).get(`/api/coach/context?date=${DATE}`).set(auth).expect(200)).body.context;
+    expect(c.dayAddOnParts.map((p: any) => p.id)).toEqual(['resilience', 'mobility']);
+    expect(c.dayAddOnParts[0].label).toBe('Resilience');
+    const ticks = (await request(app).get(`/api/ai-programmer/add-on-options?targetDate=${DATE}&purpose=push`).expect(200)).body;
+    expect(ticks.parts.filter((p: any) => p.suggested).map((p: any) => p.id)).toEqual(['resilience', 'mobility']);
+  });
+
+  it('add-ons without a pick means all four; parts are refused off add_ons, empty or unknown', async () => {
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'add_ons' }).expect(200);
+    expect((await request(app).get(`/api/coach/day?date=${DATE}`).expect(200)).body.parts).toEqual(['resilience', 'conditioning', 'mobility', 'flexibility']);
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'full', parts: ['mobility'] }).expect(400);
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'add_ons', parts: [] }).expect(400);
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'add_ons', parts: ['yoga'] }).expect(400);
+    await request(app).put('/api/coach/day-request').send({ date: DATE, mode: 'full' }).expect(200);
+    const c = (await request(app).get(`/api/coach/context?date=${DATE}`).set(auth).expect(200)).body.context;
+    expect(c.dayRequest).toBe('full');
+    expect(c.dayAddOnParts).toEqual([]);
+  });
+
+  it('the program page shows a checkbox per part and sends the picks', async () => {
+    const { readFileSync } = await import('node:fs');
+    const html = readFileSync(new URL('../../public/program.html', import.meta.url), 'utf8');
+    expect(html).toContain('COACH_ADD_ON_PARTS');
+    expect(html).toContain('Leg add-ons I want:');
+    expect(html).toContain('body.parts =');
+  });
+});

@@ -6,7 +6,7 @@
 //   POST /api/coach/runs                      record "no run needed" / "failed"
 // App side (same access as the rest of the app):
 //   GET  /api/coach/day?date=                 request, last run, latest coach proposal
-//   PUT  /api/coach/day-request               {date, mode: 'full'|'add_ons'|null}
+//   PUT  /api/coach/day-request               {date, mode: 'full'|'add_ons'|null, parts?: AddOnPart[] (add_ons only)}
 //   GET  /api/coach/decisions                 the coach's decision log
 //   POST /api/coach/rerun                     {date} start the routine now
 
@@ -20,7 +20,9 @@ import { buildCoachContext } from '../../coach/coachContext.js';
 import {
   COACH_DAY_MODES,
   CoachSaveRefused,
+  getDayAddOnParts,
   getDayRequest,
+  isAddOnPartList,
   latestCoachRun,
   listDecisions,
   parseCoachProposal,
@@ -99,6 +101,7 @@ coachRouter.get('/day', (req, res, next) => {
       ok: true,
       date,
       request: getDayRequest(db(req), date),
+      parts: getDayAddOnParts(db(req), date),
       run: latestCoachRun(db(req), date),
       proposal: record ? serializeProposal(record) : null,
       rerunAvailable: rerunConfigured(),
@@ -110,12 +113,17 @@ coachRouter.get('/day', (req, res, next) => {
 
 coachRouter.put('/day-request', (req, res, next) => {
   try {
-    const { date, mode } = req.body ?? {};
+    const { date, mode, parts } = req.body ?? {};
     if (!dateParam(date)) return res.status(400).json({ ok: false, error: 'date (YYYY-MM-DD) is required' });
     if (mode !== null && !(COACH_DAY_MODES as readonly unknown[]).includes(mode)) return res.status(400).json({ ok: false, error: `mode must be ${COACH_DAY_MODES.join('|')} or null` });
+    // The add-on parts the owner picked (2026-11-25): add_ons only, at least one.
+    if (parts !== undefined) {
+      if (mode !== 'add_ons') return res.status(400).json({ ok: false, error: 'parts is only accepted with mode add_ons' });
+      if (!isAddOnPartList(parts) || parts.length === 0) return res.status(400).json({ ok: false, error: 'parts must be a non-empty array of resilience|conditioning|mobility|flexibility (pick "Session only" for none)' });
+    }
     if (date < todayForUser(db(req))) return res.status(400).json({ ok: false, error: 'date is in the past' });
-    setDayRequest(db(req), date, mode as CoachDayMode | null);
-    res.json({ ok: true, date, request: getDayRequest(db(req), date) });
+    setDayRequest(db(req), date, mode as CoachDayMode | null, parts);
+    res.json({ ok: true, date, request: getDayRequest(db(req), date), parts: getDayAddOnParts(db(req), date) });
   } catch (err) {
     next(err);
   }

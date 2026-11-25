@@ -104,6 +104,9 @@ function migrate(db: Database.Database): void {
   // Opus coach (2026-11-22): the owner's optional reason for discarding a
   // proposal; the next coach run reads it.
   addColumnIfMissing(db, 'ai_program_proposals', 'rejection_reason', 'TEXT');
+  // 2026-11-25: which leg add-on parts the owner picked for a coach day
+  // (JSON array). Null = all four parts.
+  addColumnIfMissing(db, 'coach_day_requests', 'parts_json', 'TEXT');
 
   // Coaching Depth Batch 3 (Periodization System): extends the existing
   // coaching_program_state row (never a second table) with reactive-deload

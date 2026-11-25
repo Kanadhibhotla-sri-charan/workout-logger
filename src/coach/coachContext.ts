@@ -11,7 +11,8 @@ import { volumeOverview } from '../ai-programmer/planning/weeklyLedger.js';
 import { weekGymDays } from '../ai-programmer/service/weekGeneration.js';
 import { INJURY_AREAS, InjuryPausesRepo, targetIdsForArea } from '../repositories/injuryPausesRepo.js';
 import { resolveUserTimezone, todayForUser } from '../lib/userTimezone.js';
-import { getDayRequest, listDecisions, OPUS_COACH_PROVIDER } from './opusCoach.js';
+import { getDayAddOnParts, getDayRequest, listDecisions, OPUS_COACH_PROVIDER } from './opusCoach.js';
+import { ADD_ON_PART_LABELS } from '../athletic/athleticAddOn.js';
 
 export const COACH_CONTEXT_VERSION = 'opus-coach-context.v1';
 export const COACH_HISTORY_DAYS = 42;
@@ -144,6 +145,8 @@ export function buildCoachContext(db: Database.Database, targetDate: string): Re
     weekday: weekdayOfDate(targetDate),
     timezone: resolveUserTimezone(db),
     dayRequest: getDayRequest(db, targetDate),
+    // The leg add-on parts the lifter picked (add_ons days only, 2026-11-25).
+    dayAddOnParts: (getDayAddOnParts(db, targetDate) ?? []).map((id) => ({ id, ...ADD_ON_PART_LABELS[id] })),
     profile: profile
       ? {
           trainingDays: parseJson(profile.training_days as string),

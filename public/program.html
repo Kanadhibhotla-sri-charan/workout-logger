@@ -1720,6 +1720,15 @@
     // planned (or why it didn't), and approves / discards / adds it.
     // The Qwen "Generate with AI" section below is unchanged.
 
+    // The leg add-on parts the owner can pick for an add-ons day (2026-11-25),
+    // same four parts as src/athletic/athleticAddOn.ts.
+    const COACH_ADD_ON_PARTS = [
+      { id: 'resilience', label: 'Resilience', hint: 'ankle and landing control' },
+      { id: 'conditioning', label: 'Conditioning', hint: 'one short whole-body drill' },
+      { id: 'mobility', label: 'Mobility', hint: 'dynamic hip or ankle range' },
+      { id: 'flexibility', label: 'Leg flexibility', hint: 'lower-body stretch hold' },
+    ];
+
     const COACH_DAY_REQUEST_OPTIONS = [
       { value: '', text: 'Coach decides' },
       { value: 'full', text: 'Session only' },
@@ -1788,18 +1797,48 @@
         if (!locked) {
           const select = el('select', { 'aria-label': 'What the coach should plan for this day' },
             COACH_DAY_REQUEST_OPTIONS.map((o) => el('option', { value: o.value, text: o.text, ...((info.request || '') === o.value ? { selected: 'selected' } : {}) })));
-          select.addEventListener('change', async () => {
+          const partsEl = el('div', { class: 'coach-add-on-parts', style: 'margin:0.3rem 0 0 0.2rem' });
+          const chosen = new Set(info.parts || COACH_ADD_ON_PARTS.map((x) => x.id));
+          async function saveRequest() {
+            const mode = select.value === '' ? null : select.value;
+            const body = { date: day.date, mode };
+            if (mode === 'add_ons') body.parts = COACH_ADD_ON_PARTS.map((x) => x.id).filter((id) => chosen.has(id));
             try {
-              const saved = await aiApi('/api/coach/day-request', { method: 'PUT', body: { date: day.date, mode: select.value === '' ? null : select.value } });
+              const saved = await aiApi('/api/coach/day-request', { method: 'PUT', body });
               if (!isCurrent()) return;
               info.request = saved.request;
+              info.parts = saved.parts;
               showInlineStatus(statusEl, 'success', 'Saved. The coach reads it at its next run; Generate with AI below uses it too.');
             } catch (err) {
               if (!isCurrent()) return;
               showInlineStatus(statusEl, 'error', err.message);
             }
+          }
+          function renderParts() {
+            partsEl.innerHTML = '';
+            if (select.value !== 'add_ons') return;
+            partsEl.appendChild(el('p', { class: 'faint', text: 'Leg add-ons I want:', style: 'margin:0 0 0.2rem' }));
+            for (const part of COACH_ADD_ON_PARTS) {
+              const box = el('input', { type: 'checkbox', value: part.id, ...(chosen.has(part.id) ? { checked: 'checked' } : {}) });
+              box.addEventListener('change', async () => {
+                if (box.checked) chosen.add(part.id);
+                else if (chosen.size === 1) {
+                  box.checked = true;
+                  showInlineStatus(statusEl, 'error', 'Keep at least one part, or pick "Session only".');
+                  return;
+                } else chosen.delete(part.id);
+                await saveRequest();
+              });
+              partsEl.appendChild(el('label', { style: 'display:block; margin:0.15rem 0' }, [box, el('span', { text: ` ${part.label}` }), el('span', { class: 'faint', text: ` (${part.hint})` })]));
+            }
+          }
+          select.addEventListener('change', async () => {
+            renderParts();
+            await saveRequest();
           });
           requestEl.appendChild(el('div', { class: 'btn-row' }, [el('span', { class: 'muted', text: 'Today I want:' }), select]));
+          requestEl.appendChild(partsEl);
+          renderParts();
         }
         const run = info.run;
         if (run && run.outcome === 'failed') runEl.appendChild(el('div', { class: 'card card-warning', role: 'status' }, [el('p', { text: `Coach failed: ${run.reason}`, style: 'margin:0' })]));

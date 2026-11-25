@@ -699,9 +699,12 @@ CREATE TABLE IF NOT EXISTS coach_advice (
 
 -- What the owner wants for a date, set before the 08:00 run.
 -- mode 'full' = the session only, 'add_ons' = the session plus the leg add-ons.
+-- parts_json (2026-11-25): the add-on parts the owner picked, a JSON array of
+-- resilience|conditioning|mobility|flexibility; null with add_ons = all four.
 CREATE TABLE IF NOT EXISTS coach_day_requests (
   date TEXT PRIMARY KEY,
   mode TEXT NOT NULL CHECK (mode IN ('full', 'add_ons')),
+  parts_json TEXT,
   updated_at TEXT NOT NULL
 );
 

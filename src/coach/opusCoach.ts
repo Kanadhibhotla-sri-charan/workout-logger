@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { BlueprintAdapter } from '../blueprint/adapter.js';
 import { isDrillId } from '../blueprint/athletic.js';
+import { ADD_ON_PARTS, isAddOnPart, type AddOnPart } from '../athletic/athleticAddOn.js';
 import type { AIWorkoutExerciseProposal, AIWorkoutSessionProposal } from '../ai-programmer/contracts/programmerTypes.js';
 import { AI_WORKOUT_SESSION_PROPOSAL_SCHEMA_VERSION } from '../ai-programmer/contracts/programmerTypes.js';
 import { endOfLocalDateIso } from '../ai-programmer/service/weekGeneration.js';
@@ -345,11 +346,36 @@ export function getDayRequest(db: Database.Database, date: string): CoachDayMode
   return row?.mode ?? null;
 }
 
-/** null clears the request (the weekly plan decides). */
-export function setDayRequest(db: Database.Database, date: string, mode: CoachDayMode | null): void {
-  if (mode === null) db.prepare('DELETE FROM coach_day_requests WHERE date = ?').run(date);
-  else db.prepare('INSERT INTO coach_day_requests (date, mode, updated_at) VALUES (?, ?, ?) ON CONFLICT (date) DO UPDATE SET mode = excluded.mode, updated_at = excluded.updated_at').run(date, mode, nowIso());
+/** The leg add-on parts the owner picked for the day (2026-11-25), in
+ * ADD_ON_PARTS order. Null unless the day is 'add_ons'; an add-ons day saved
+ * without a pick means all four parts. */
+export function getDayAddOnParts(db: Database.Database, date: string): AddOnPart[] | null {
+  const row = db.prepare('SELECT mode, parts_json FROM coach_day_requests WHERE date = ?').get(date) as { mode: CoachDayMode; parts_json: string | null } | undefined;
+  if (row?.mode !== 'add_ons') return null;
+  let picked: unknown = null;
+  try {
+    picked = row.parts_json === null ? null : JSON.parse(row.parts_json);
+  } catch {
+    picked = null;
+  }
+  if (!Array.isArray(picked)) return [...ADD_ON_PARTS];
+  const list = picked as unknown[];
+  const parts = ADD_ON_PARTS.filter((p) => list.includes(p));
+  return parts.length ? parts : [...ADD_ON_PARTS];
 }
+
+/** null clears the request (the weekly plan decides). `parts` is kept only
+ * for 'add_ons'; omitted = all four parts. */
+export function setDayRequest(db: Database.Database, date: string, mode: CoachDayMode | null, parts?: readonly AddOnPart[]): void {
+  if (mode === null) {
+    db.prepare('DELETE FROM coach_day_requests WHERE date = ?').run(date);
+    return;
+  }
+  const partsJson = mode === 'add_ons' && parts !== undefined ? JSON.stringify(ADD_ON_PARTS.filter((p) => parts.includes(p))) : null;
+  db.prepare('INSERT INTO coach_day_requests (date, mode, parts_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (date) DO UPDATE SET mode = excluded.mode, parts_json = excluded.parts_json, updated_at = excluded.updated_at').run(date, mode, partsJson, nowIso());
+}
+
+export const isAddOnPartList = (v: unknown): v is AddOnPart[] => Array.isArray(v) && v.every(isAddOnPart);
 
 export function listDecisions(db: Database.Database, sinceDate: string): Array<Record<string, unknown>> {
   return db
